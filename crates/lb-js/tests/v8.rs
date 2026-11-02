@@ -1,0 +1,821 @@
+//! V8 backend tests (chrome feature). Everything runs in-process; no network.
+#![cfg(feature = "chrome")]
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::sync::Arc;
+
+use lb_js::{
+    Arg, Engine, EngineError, EngineOptions, HostError, HostRef, InterfaceId, InterfaceSpec,
+    JsEngine, JsErrorKind, JsValue, Member, ModuleSource, Realm, RealmId, RealmOptions,
+    ScriptOrigin, World, host_fn,
+};
+use lb_persona::Persona;
+
+fn engine() -> Engine {
+    Engine::new(
+        Arc::new(Persona::default_chrome()),
+        EngineOptions::default(),
+    )
+    .unwrap()
+}
+
+fn origin() -> ScriptOrigin<'static> {
+    ScriptOrigin::new("https://a.test/x.js")
+}
+
+fn eval(e: &mut Engine, realm: RealmId, src: &str) -> JsValue {
+    e.evaluate(realm, src, origin())
+        .unwrap_or_else(|err| panic!("{src}: {err}"))
+}
+
+fn plain_realm(e: &mut Engine) -> RealmId {
+    e.new_realm(RealmOptions::default()).unwrap()
+}
+
+const NODE_KIND: u32 = 1;
+
+/// Node (with a `nodeId` getter and `describe()` method), Element extends
+/// Node, Window as the global with `Node`, `Element` and `makeNode(id)`.
+struct Dom {
+    node: InterfaceId,
+    element: InterfaceId,
+    window: InterfaceId,
+}
+
+fn define_dom(e: &mut Engine) -> Dom {
+    let node = e.define_interface(
+        InterfaceSpec::new("Node")
+            .statics(vec![Member::constant("ELEMENT_NODE", JsValue::Number(1.0))])
+            .prototype(vec![
+                Member::constant("ELEMENT_NODE", JsValue::Number(1.0)),
+                Member::getter(
+                    "nodeId",
+                    host_fn(|cx| {
+                        let h = cx
+                            .this_host()
+                            .ok_or_else(|| HostError::type_error("Illegal invocation"))?;
+                        cx.ret(h.id)
+                    }),
+                ),
+                Member::method(
+                    "describe",
+                    1,
+                    host_fn(|cx| {
+                        let h = cx
+                            .this_host()
+                            .ok_or_else(|| HostError::type_error("Illegal invocation"))?;
+                        let suffix = cx.arg_string(0)?;
+                        cx.ret(format!("{}:{}:{suffix}", h.kind, h.id))
+                    }),
+                ),
+            ]),
+    );
+    let element = e.define_interface(InterfaceSpec::new("Element").parent(node));
+    let window = e.define_interface(InterfaceSpec::new("Window").instance(vec![
+        Member::interface("Node", node),
+        Member::interface("Element", element),
+        Member::method(
+            "makeNode",
+            1,
+            host_fn(move |cx| {
+                let id = cx.arg_u32(0)?;
+                cx.ret(Arg::Host(element, HostRef::new(NODE_KIND, id)))
+            }),
+        ),
+        Member::method(
+            "nodeIdOf",
+            1,
+            host_fn(|cx| {
+                let h = cx.arg_host(0);
+                cx.ret(h.map_or(-1.0, |h| f64::from(h.id)))
+            }),
+        ),
+    ]));
+    Dom {
+        node,
+        element,
+        window,
+    }
+}
+
+#[test]
+fn evaluates_arithmetic() {
+    let mut e = engine();
+    let r = plain_realm(&mut e);
+    assert_eq!(eval(&mut e, r, "1 + 2 * 3"), JsValue::Number(7.0));
+    assert_eq!(eval(&mut e, r, "'a' + 1"), JsValue::String("a1".into()));
+    assert_eq!(
+        eval(&mut e, r, "({a: [1, null]})"),
+        JsValue::Json(r#"{"a":[1,null]}"#.into())
+    );
+    assert_eq!(
+        eval(&mut e, r, "Symbol('s')"),
+        JsValue::Opaque("Symbol(s)".into())
+    );
+    assert_eq!(eval(&mut e, r, "undefined"), JsValue::Undefined);
+}
+
+#[test]
+fn trait_realm_evaluates() {
+    let mut e = engine();
+    let id = JsEngine::new_realm(&mut e, RealmOptions::default()).unwrap();
+    let mut realm = e.realm(id).unwrap();
+    assert_eq!(
+        realm.evaluate("6 * 7", origin()).unwrap(),
+        JsValue::Number(42.0)
+    );
+    assert_eq!(realm.id(), id);
+    e.drop_realm(id);
+    assert!(e.realm(id).is_none());
+}
+
+#[test]
+fn rejects_firefox_persona() {
+    let err = Engine::new(
+        Arc::new(Persona::default_firefox()),
+        EngineOptions::default(),
+    )
+    .err()
+    .unwrap();
+    assert!(matches!(err, EngineError::FamilyMismatch { .. }));
+}
+
+#[test]
+fn null_property_error_matches_v8() {
+    let mut e = engine();
+    let r = plain_realm(&mut e);
+    let err = e.evaluate(r, "null.x", origin()).unwrap_err();
+    assert_eq!(err.kind, JsErrorKind::Exception);
+    assert_eq!(err.message, "Cannot read properties of null (reading 'x')");
+    let stack = err.stack.unwrap();
+    let mut lines = stack.lines();
+    assert_eq!(
+        lines.next(),
+        Some("TypeError: Cannot read properties of null (reading 'x')")
+    );
+    assert_eq!(lines.next(), Some("    at https://a.test/x.js:1:6"));
+    assert_eq!(err.url.as_deref(), Some("https://a.test/x.js"));
+    assert_eq!(err.line, Some(1));
+}
+
+#[test]
+fn line_offset_shows_in_stack() {
+    let mut e = engine();
+    let r = plain_realm(&mut e);
+    let src = "function f() {\n  null.x;\n}\nf();";
+    let err = e
+        .evaluate(
+            r,
+            src,
+            ScriptOrigin::new("https://a.test/page.html").at(9, 0),
+        )
+        .unwrap_err();
+    let stack = err.stack.unwrap();
+    let frames: Vec<&str> = stack.lines().skip(1).collect();
+    assert_eq!(frames[0], "    at f (https://a.test/page.html:11:8)");
+    assert_eq!(frames[1], "    at https://a.test/page.html:13:1");
+    assert_eq!(err.line, Some(11));
+}
+
+#[test]
+fn syntax_error_and_thrown_values() {
+    let mut e = engine();
+    let r = plain_realm(&mut e);
+    let err = e.evaluate(r, "let = ;", origin()).unwrap_err();
+    assert_eq!(err.kind, JsErrorKind::Exception);
+    assert!(err.stack.unwrap().starts_with("SyntaxError: "));
+    let err = e.evaluate(r, "throw 42", origin()).unwrap_err();
+    assert_eq!(err.message, "42");
+    assert_eq!(err.stack, None);
+}
+
+#[test]
+fn rust_global_function_is_callable() {
+    let mut e = engine();
+    let calls = Rc::new(Cell::new(0));
+    let c = calls.clone();
+    let window = e.define_interface(InterfaceSpec::new("Window").instance(vec![Member::method(
+        "add",
+        2,
+        host_fn(move |cx| {
+            c.set(c.get() + 1);
+            let a = cx.arg_f64(0)?;
+            let b = cx.arg_f64(1)?;
+            cx.ret(a + b)
+        }),
+    )]));
+    let r = e.new_realm(RealmOptions::with_global(window)).unwrap();
+    assert_eq!(eval(&mut e, r, "add(2, 40)"), JsValue::Number(42.0));
+    assert_eq!(eval(&mut e, r, "add.length"), JsValue::Number(2.0));
+    assert_eq!(eval(&mut e, r, "add.name"), JsValue::String("add".into()));
+    assert_eq!(
+        eval(&mut e, r, "Function.prototype.toString.call(add)"),
+        JsValue::String("function add() { [native code] }".into())
+    );
+    assert_eq!(eval(&mut e, r, "'prototype' in add"), JsValue::Bool(false));
+    assert_eq!(calls.get(), 1);
+    let err = e.evaluate(r, "new add()", origin()).unwrap_err();
+    assert_eq!(err.message, "add is not a constructor");
+    // A throwing conversion propagates the exception unchanged.
+    let err = e
+        .evaluate(
+            r,
+            "add({valueOf() { throw new RangeError('boom') }}, 1)",
+            origin(),
+        )
+        .unwrap_err();
+    assert_eq!(err.message, "boom");
+    assert!(err.stack.unwrap().starts_with("RangeError: boom"));
+}
+
+#[test]
+fn host_errors_become_js_exceptions() {
+    let mut e = engine();
+    let window = e.define_interface(InterfaceSpec::new("Window").instance(vec![Member::method(
+        "fail",
+        0,
+        host_fn(|_| Err(HostError::type_error("nope"))),
+    )]));
+    let r = e.new_realm(RealmOptions::with_global(window)).unwrap();
+    assert_eq!(
+        eval(
+            &mut e,
+            r,
+            "try { fail() } catch (e) { e instanceof TypeError && e.message }"
+        ),
+        JsValue::String("nope".into())
+    );
+}
+
+#[test]
+fn wrapped_host_object_keeps_identity() {
+    let mut e = engine();
+    let dom = define_dom(&mut e);
+    let r = e.new_realm(RealmOptions::with_global(dom.window)).unwrap();
+    assert_eq!(
+        eval(&mut e, r, "makeNode(7) === makeNode(7)"),
+        JsValue::Bool(true)
+    );
+    assert_eq!(
+        eval(&mut e, r, "makeNode(7) === makeNode(8)"),
+        JsValue::Bool(false)
+    );
+    assert_eq!(
+        eval(&mut e, r, "makeNode(7).expando = 1; makeNode(7).expando"),
+        JsValue::Number(1.0)
+    );
+    assert_eq!(
+        eval(&mut e, r, "nodeIdOf(makeNode(9))"),
+        JsValue::Number(9.0)
+    );
+    assert_eq!(eval(&mut e, r, "nodeIdOf({})"), JsValue::Number(-1.0));
+
+    // From Rust: the same wrapper as JS sees.
+    let h = e.wrap(r, dom.element, HostRef::new(NODE_KIND, 7)).unwrap();
+    let f = e
+        .evaluate_handle(r, "(n) => n === makeNode(7) && n.expando", origin())
+        .unwrap();
+    let out = e.call(r, f, Arg::Undefined, &[Arg::Handle(h)]).unwrap();
+    assert_eq!(out, JsValue::Number(1.0));
+    assert_eq!(
+        e.unwrap_host(r, h).unwrap(),
+        Some(HostRef::new(NODE_KIND, 7))
+    );
+
+    // After the host object dies, a new wrapper is made.
+    e.forget_host(HostRef::new(NODE_KIND, 7));
+    assert_eq!(eval(&mut e, r, "makeNode(7).expando"), JsValue::Undefined);
+}
+
+#[test]
+fn interface_shape_matches_webidl() {
+    let mut e = engine();
+    let dom = define_dom(&mut e);
+    let r = e.new_realm(RealmOptions::with_global(dom.window)).unwrap();
+    eval(
+        &mut e,
+        r,
+        "var desc = (o, k) => { const d = Object.getOwnPropertyDescriptor(o, k); \
+         return [d.writable, d.enumerable, d.configurable, \
+         'value' in d ? typeof d.value : 'accessor'].join(); }",
+    );
+    let checks = [
+        ("Node.name", JsValue::String("Node".into())),
+        ("Node.length", JsValue::Number(0.0)),
+        ("typeof Node", JsValue::String("function".into())),
+        (
+            "Function.prototype.toString.call(Node)",
+            JsValue::String("function Node() { [native code] }".into()),
+        ),
+        (
+            "Object.getPrototypeOf(Element) === Node",
+            JsValue::Bool(true),
+        ),
+        (
+            "Object.getPrototypeOf(Element.prototype) === Node.prototype",
+            JsValue::Bool(true),
+        ),
+        (
+            "Element.prototype.constructor === Element",
+            JsValue::Bool(true),
+        ),
+        (
+            "Object.prototype.toString.call(makeNode(1))",
+            JsValue::String("[object Element]".into()),
+        ),
+        (
+            "Object.prototype.toString.call(Node.prototype)",
+            JsValue::String("[object Node]".into()),
+        ),
+        (
+            "desc(Node, 'prototype')",
+            JsValue::String("false,false,false,object".into()),
+        ),
+        (
+            "desc(Node.prototype, Symbol.toStringTag)",
+            JsValue::String("false,false,true,string".into()),
+        ),
+        (
+            "Node.prototype[Symbol.toStringTag]",
+            JsValue::String("Node".into()),
+        ),
+        (
+            "desc(Node, 'ELEMENT_NODE')",
+            JsValue::String("false,true,false,number".into()),
+        ),
+        (
+            "desc(Node.prototype, 'describe')",
+            JsValue::String("true,true,true,function".into()),
+        ),
+        (
+            "desc(Node.prototype, 'nodeId')",
+            JsValue::String(",true,true,accessor".into()),
+        ),
+        (
+            "desc(globalThis, 'Node')",
+            JsValue::String("true,false,true,function".into()),
+        ),
+        (
+            "desc(globalThis, 'makeNode')",
+            JsValue::String("true,true,true,function".into()),
+        ),
+        (
+            "var names = Object.getOwnPropertyNames(globalThis); \
+             ['Node', 'Element', 'makeNode', 'nodeIdOf'].map(k => names.indexOf(k)) \
+             .every((v, i, a) => v > names.indexOf('Object') && (i == 0 || v > a[i - 1]))",
+            JsValue::Bool(true),
+        ),
+        (
+            "Object.getOwnPropertyNames(Node.prototype).join()",
+            // Same as Chrome: template members first, `constructor` last.
+            JsValue::String("ELEMENT_NODE,nodeId,describe,constructor".into()),
+        ),
+        (
+            "Object.getOwnPropertyDescriptor(Node.prototype, 'nodeId').get.name",
+            JsValue::String("get nodeId".into()),
+        ),
+        (
+            "Node.prototype.describe.name",
+            JsValue::String("describe".into()),
+        ),
+        ("Node.prototype.describe.length", JsValue::Number(1.0)),
+        (
+            "try { Node() } catch (e) { e.message }",
+            JsValue::String("Illegal constructor".into()),
+        ),
+        (
+            "try { new Node() } catch (e) { e.message }",
+            JsValue::String("Illegal constructor".into()),
+        ),
+        (
+            "try { Node.prototype.describe.call({}) } catch (e) { e.message }",
+            JsValue::String("Illegal invocation".into()),
+        ),
+        (
+            "try { Object.getOwnPropertyDescriptor(Node.prototype, 'nodeId').get.call({}) } \
+             catch (e) { e.message }",
+            JsValue::String("Illegal invocation".into()),
+        ),
+    ];
+    for (src, want) in checks {
+        assert_eq!(eval(&mut e, r, src), want, "{src}");
+    }
+}
+
+#[test]
+fn prototype_method_sees_host_handle() {
+    let mut e = engine();
+    let dom = define_dom(&mut e);
+    let r = e.new_realm(RealmOptions::with_global(dom.window)).unwrap();
+    assert_eq!(
+        eval(&mut e, r, "makeNode(5).describe('x')"),
+        JsValue::String("1:5:x".into())
+    );
+    assert_eq!(eval(&mut e, r, "makeNode(5).nodeId"), JsValue::Number(5.0));
+    assert_eq!(
+        eval(&mut e, r, "makeNode(5) instanceof Node"),
+        JsValue::Bool(true)
+    );
+    // Wrapping as the base interface still returns the cached wrapper.
+    let h = e.wrap(r, dom.node, HostRef::new(NODE_KIND, 5)).unwrap();
+    let f = e
+        .evaluate_handle(r, "(n) => n === makeNode(5)", origin())
+        .unwrap();
+    assert_eq!(
+        e.call(r, f, Arg::Undefined, &[Arg::Handle(h)]).unwrap(),
+        JsValue::Bool(true)
+    );
+}
+
+#[test]
+fn constructor_binds_host_object() {
+    let mut e = engine();
+    let next = Rc::new(Cell::new(100u32));
+    let n = next.clone();
+    let event = e.define_interface(
+        InterfaceSpec::new("Event")
+            .constructor(
+                1,
+                host_fn(move |cx| {
+                    let _type = cx.arg_string(0)?;
+                    n.set(n.get() + 1);
+                    cx.init_this(HostRef::new(2, n.get()))
+                }),
+            )
+            .prototype(vec![Member::getter(
+                "id",
+                host_fn(|cx| {
+                    let h = cx.this_host().ok_or(HostError::Thrown)?;
+                    cx.ret(h.id)
+                }),
+            )]),
+    );
+    let window = e.define_interface(
+        InterfaceSpec::new("Window").instance(vec![Member::interface("Event", event)]),
+    );
+    let r = e.new_realm(RealmOptions::with_global(window)).unwrap();
+    assert_eq!(eval(&mut e, r, "new Event('x').id"), JsValue::Number(101.0));
+    assert_eq!(eval(&mut e, r, "Event.length"), JsValue::Number(1.0));
+    assert_eq!(
+        eval(&mut e, r, "try { Event('x') } catch (e) { e.message }"),
+        JsValue::String(
+            "Failed to construct 'Event': Please use the 'new' operator, this DOM object \
+             constructor cannot be called as a function."
+                .into()
+        )
+    );
+    // The constructed object is the cached wrapper of its host ref.
+    let h = e.wrap(r, event, HostRef::new(2, 101)).unwrap();
+    assert_eq!(e.get_value(r, h).unwrap(), JsValue::Json("{}".into()));
+    let f = e.evaluate_handle(r, "(a) => a.id", origin()).unwrap();
+    assert_eq!(
+        e.call(r, f, Arg::Undefined, &[Arg::Handle(h)]).unwrap(),
+        JsValue::Number(101.0)
+    );
+}
+
+#[test]
+fn global_host_and_named_getters() {
+    let mut e = engine();
+    let window = e.define_interface(
+        InterfaceSpec::new("Window")
+            .instance(vec![Member::method(
+                "whoami",
+                0,
+                host_fn(|cx| {
+                    let h = cx.this_host().ok_or(HostError::Thrown)?;
+                    cx.ret(h.id)
+                }),
+            )])
+            .named_getter(Rc::new(|_cx, name| {
+                Ok((name == "magic").then_some(Arg::Number(42.0)))
+            }))
+            .indexed_getter(Rc::new(|_cx, i| {
+                Ok((i < 2).then(|| Arg::from(format!("f{i}"))))
+            })),
+    );
+    let r = e
+        .new_realm(RealmOptions {
+            global_host: Some(HostRef::new(9, 1)),
+            ..RealmOptions::with_global(window)
+        })
+        .unwrap();
+    assert_eq!(eval(&mut e, r, "whoami()"), JsValue::Number(1.0));
+    assert_eq!(eval(&mut e, r, "globalThis.whoami()"), JsValue::Number(1.0));
+    assert_eq!(eval(&mut e, r, "magic"), JsValue::Number(42.0));
+    assert_eq!(
+        eval(&mut e, r, "typeof other"),
+        JsValue::String("undefined".into())
+    );
+    assert_eq!(
+        eval(&mut e, r, "globalThis[1]"),
+        JsValue::String("f1".into())
+    );
+    assert_eq!(eval(&mut e, r, "globalThis[2]"), JsValue::Undefined);
+    let g = e.wrap(r, window, HostRef::new(9, 1)).unwrap();
+    let f = e
+        .evaluate_handle(r, "(g) => g === globalThis", origin())
+        .unwrap();
+    assert_eq!(
+        e.call(r, f, Arg::Undefined, &[Arg::Handle(g)]).unwrap(),
+        JsValue::Bool(true)
+    );
+}
+
+#[test]
+fn calls_js_from_rust_with_exceptions() {
+    let mut e = engine();
+    let r = plain_realm(&mut e);
+    let f = e
+        .evaluate_handle(r, "(function (a, b) { return this.k + a + b.n })", origin())
+        .unwrap();
+    let out = e
+        .call(
+            r,
+            f,
+            Arg::Json(r#"{"k":1}"#.into()),
+            &[Arg::Number(2.0), Arg::Json(r#"{"n":3}"#.into())],
+        )
+        .unwrap();
+    assert_eq!(out, JsValue::Number(6.0));
+
+    let thrower = e
+        .evaluate_handle(
+            r,
+            "function listener() { undefinedFn(); }\nlistener",
+            origin(),
+        )
+        .unwrap();
+    let err = e.call(r, thrower, Arg::Undefined, &[]).unwrap_err();
+    assert_eq!(err.message, "undefinedFn is not defined");
+    let stack = err.stack.unwrap();
+    assert_eq!(
+        stack.lines().next(),
+        Some("ReferenceError: undefinedFn is not defined")
+    );
+    assert_eq!(
+        stack.lines().nth(1),
+        Some("    at listener (https://a.test/x.js:1:23)")
+    );
+
+    // Released handles are detected.
+    e.release(f);
+    let err = e.call(r, f, Arg::Undefined, &[]).unwrap_err();
+    assert_eq!(err.kind, JsErrorKind::Host);
+}
+
+#[test]
+fn microtasks_run_only_at_checkpoint() {
+    let mut e = engine();
+    let r = plain_realm(&mut e);
+    eval(
+        &mut e,
+        r,
+        "var log = []; Promise.resolve().then(() => log.push('a')); log.push('sync');",
+    );
+    assert_eq!(
+        eval(&mut e, r, "log.join()"),
+        JsValue::String("sync".into())
+    );
+    assert_eq!(
+        eval(&mut e, r, "log.join()"),
+        JsValue::String("sync".into())
+    );
+    e.perform_microtask_checkpoint();
+    assert_eq!(
+        eval(&mut e, r, "log.join()"),
+        JsValue::String("sync,a".into())
+    );
+}
+
+#[test]
+fn promises_from_rust() {
+    let mut e = engine();
+    let pending: Rc<RefCell<Vec<lb_js::Resolver>>> = Rc::default();
+    let p = pending.clone();
+    let window = e.define_interface(InterfaceSpec::new("Window").instance(vec![Member::method(
+        "later",
+        0,
+        host_fn(move |cx| {
+            let r = cx.ret_new_promise()?;
+            p.borrow_mut().push(r);
+            Ok(())
+        }),
+    )]));
+    let r = e.new_realm(RealmOptions::with_global(window)).unwrap();
+    eval(
+        &mut e,
+        r,
+        "var out = []; later().then(v => out.push(v)); later().catch(e => out.push(e.message));",
+    );
+    let rs = pending.borrow_mut().split_off(0);
+    assert_eq!(rs.len(), 2);
+    e.resolve_promise(rs[0], Arg::from("ok")).unwrap();
+    e.reject_promise(rs[1], HostError::type_error("Failed to fetch"))
+        .unwrap();
+    assert_eq!(eval(&mut e, r, "out.length"), JsValue::Number(0.0));
+    e.perform_microtask_checkpoint();
+    assert_eq!(
+        eval(&mut e, r, "out.join()"),
+        JsValue::String("ok,Failed to fetch".into())
+    );
+    // Settling twice is a host error, not a crash.
+    assert!(e.resolve_promise(rs[0], Arg::Undefined).is_err());
+
+    let (promise, resolver) = e.new_promise(r).unwrap();
+    let f = e
+        .evaluate_handle(r, "(p) => p.then(v => out.push(v * 2))", origin())
+        .unwrap();
+    e.call(r, f, Arg::Undefined, &[Arg::Handle(promise)])
+        .unwrap();
+    e.resolve_promise(resolver, Arg::Number(21.0)).unwrap();
+    e.perform_microtask_checkpoint();
+    assert_eq!(eval(&mut e, r, "out.at(-1)"), JsValue::Number(42.0));
+}
+
+const RUNAWAY: &str = "(() => { const a = []; while (true) a.push(new Array(1e5).fill(1.5)); })()";
+
+#[test]
+fn heap_limit_callback_fires_on_runaway_allocation() {
+    let mut e = Engine::new(
+        Arc::new(Persona::default_chrome()),
+        EngineOptions {
+            max_heap_bytes: Some(32 << 20),
+        },
+    )
+    .unwrap();
+    let r = plain_realm(&mut e);
+    let err = e.evaluate(r, RUNAWAY, origin()).unwrap_err();
+    assert_eq!(err.kind, JsErrorKind::OutOfMemory);
+    let hits = e.heap_stats().limit_hits;
+    assert!(hits >= 1);
+    // The engine stays usable after the garbage is collected.
+    e.low_memory_notification();
+    assert_eq!(eval(&mut e, r, "1 + 1"), JsValue::Number(2.0));
+    // The cap is re-armed: a second runaway is caught the same way.
+    let err = e.evaluate(r, RUNAWAY, origin()).unwrap_err();
+    assert_eq!(err.kind, JsErrorKind::OutOfMemory);
+    assert!(e.heap_stats().limit_hits > hits);
+    assert!(e.heap_stats().limit < 64 << 20);
+    e.low_memory_notification();
+    assert_eq!(eval(&mut e, r, "'ok'"), JsValue::String("ok".into()));
+}
+
+#[test]
+fn terminate_from_another_thread() {
+    let mut e = engine();
+    let r = plain_realm(&mut e);
+    let h = e.terminate_handle();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        h.terminate();
+    });
+    let err = e.evaluate(r, "while (true) {}", origin()).unwrap_err();
+    t.join().unwrap();
+    assert_eq!(err.kind, JsErrorKind::Terminated);
+    assert_eq!(eval(&mut e, r, "'alive'"), JsValue::String("alive".into()));
+}
+
+#[test]
+fn realms_are_isolated() {
+    let mut e = engine();
+    let dom = define_dom(&mut e);
+    let a = e.new_realm(RealmOptions::with_global(dom.window)).unwrap();
+    let b = e
+        .new_realm(RealmOptions {
+            world: World::Isolated("utility".into()),
+            ..RealmOptions::with_global(dom.window)
+        })
+        .unwrap();
+    assert_eq!(e.realm_world(b), Some(World::Isolated("utility".into())));
+    eval(
+        &mut e,
+        a,
+        "var secret = 1; Object.prototype.leak = 2; Node.prototype.patched = 3;",
+    );
+    assert_eq!(
+        eval(&mut e, b, "typeof secret"),
+        JsValue::String("undefined".into())
+    );
+    assert_eq!(eval(&mut e, b, "({}).leak"), JsValue::Undefined);
+    assert_eq!(eval(&mut e, b, "makeNode(1).patched"), JsValue::Undefined);
+    // Same host object, different wrappers per realm.
+    eval(&mut e, a, "makeNode(1).tag = 'a'");
+    assert_eq!(eval(&mut e, b, "makeNode(1).tag"), JsValue::Undefined);
+    assert_eq!(eval(&mut e, b, "makeNode(1).nodeId"), JsValue::Number(1.0));
+    assert_eq!(
+        eval(&mut e, a, "makeNode(1).tag"),
+        JsValue::String("a".into())
+    );
+
+    // Dropping a realm frees its handles.
+    let h = e.evaluate_handle(b, "({})", origin()).unwrap();
+    e.drop_realm(b);
+    assert!(e.evaluate(b, "1", origin()).is_err());
+    assert!(e.get_value(a, h).is_err());
+    assert_eq!(eval(&mut e, a, "secret"), JsValue::Number(1.0));
+}
+
+#[test]
+fn two_engines_on_one_thread() {
+    let mut a = engine();
+    let mut b = engine();
+    let ra = plain_realm(&mut a);
+    let rb = plain_realm(&mut b);
+    assert_eq!(
+        eval(&mut a, ra, "var x = 'a'; x"),
+        JsValue::String("a".into())
+    );
+    assert_eq!(
+        eval(&mut b, rb, "typeof x"),
+        JsValue::String("undefined".into())
+    );
+    // Drop in creation order (not LIFO).
+    drop(a);
+    assert_eq!(eval(&mut b, rb, "2"), JsValue::Number(2.0));
+}
+
+#[test]
+fn engines_on_worker_threads() {
+    let threads: Vec<_> = (0..3)
+        .map(|i| {
+            std::thread::spawn(move || {
+                let mut e = engine();
+                let r = plain_realm(&mut e);
+                eval(&mut e, r, &format!("{i} * 10"))
+            })
+        })
+        .collect();
+    for (i, t) in threads.into_iter().enumerate() {
+        assert_eq!(t.join().unwrap(), JsValue::Number(i as f64 * 10.0));
+    }
+}
+
+#[test]
+fn es_modules_with_loader() {
+    let mut e = engine();
+    let loads = Rc::new(RefCell::new(Vec::new()));
+    let l = loads.clone();
+    let loader: lb_js::ModuleLoader = Rc::new(move |spec: &str, referrer: &str| {
+        l.borrow_mut().push(format!("{spec} from {referrer}"));
+        match spec {
+            "./dep.js" => Ok(ModuleSource {
+                url: "https://a.test/dep.js".into(),
+                source: "export const v = 41; export function boom() { null.y }".into(),
+            }),
+            _ => Err(format!("Failed to resolve module specifier \"{spec}\"")),
+        }
+    });
+    let r = e
+        .new_realm(RealmOptions {
+            module_loader: Some(loader),
+            ..RealmOptions::default()
+        })
+        .unwrap();
+    let ns = e
+        .evaluate_module(
+            r,
+            "import { v } from './dep.js';\nexport const answer = v + 1;",
+            ScriptOrigin::new("https://a.test/main.js"),
+        )
+        .unwrap();
+    assert_eq!(
+        e.get_value(r, ns).unwrap(),
+        JsValue::Json(r#"{"answer":42}"#.into())
+    );
+    assert_eq!(
+        *loads.borrow(),
+        vec!["./dep.js from https://a.test/main.js".to_owned()]
+    );
+
+    // A second importer reuses the module map entry.
+    let ns2 = e
+        .evaluate_module(
+            r,
+            "import { boom } from './dep.js'; boom();",
+            ScriptOrigin::new("https://a.test/two.js"),
+        )
+        .unwrap_err();
+    assert_eq!(ns2.message, "Cannot read properties of null (reading 'y')");
+    assert!(
+        ns2.stack
+            .unwrap()
+            .contains("at boom (https://a.test/dep.js:1:")
+    );
+
+    let err = e
+        .evaluate_module(
+            r,
+            "import './missing.js';",
+            ScriptOrigin::new("https://a.test/m3.js"),
+        )
+        .unwrap_err();
+    assert_eq!(
+        err.message,
+        "Failed to resolve module specifier \"./missing.js\""
+    );
+
+    let p = e.get_property(r, ns, "answer").unwrap();
+    assert_eq!(e.get_value(r, p).unwrap(), JsValue::Number(42.0));
+}

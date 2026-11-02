@@ -1,0 +1,2093 @@
+//! V8 backend (feature `chrome`).
+//!
+//! All host state lives in one `Rc<RefCell<State>>` stored both in [`Engine`]
+//! and in an isolate slot, so V8 callbacks can reach it. Borrows of it are
+//! always short and never held while JS runs, so callbacks may re-enter JS.
+//!
+//! Every host callback goes through one trampoline per callback shape; the
+//! template's data is a small integer index into `State::callbacks`. That
+//! keeps closures out of V8 and keeps the external-reference list short for
+//! the M6 startup snapshot.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::num::NonZeroI32;
+use std::rc::Rc;
+use std::sync::{Arc, Once};
+
+use lb_persona::{BrowserFamily, Persona};
+
+pub use v8;
+
+use crate::{
+    EngineError, HeapStats, HostRef, InterfaceId, JsEngine, JsError, JsErrorKind, JsValue,
+    ModuleLoader, PropAttrs, Realm, RealmId, RealmOptions, ScriptOrigin, ValueKind, World,
+};
+
+// ---------------------------------------------------------------------------
+// Process-wide init
+// ---------------------------------------------------------------------------
+
+static V8_INIT: Once = Once::new();
+
+/// Initialise the V8 platform once per process. `flags` (e.g. `--jitless`)
+/// only apply if this is the first call; [`Engine::new`] calls it with no
+/// flags. Returns whether this call did the initialisation.
+pub fn init_v8(flags: &str) -> bool {
+    let mut did = false;
+    V8_INIT.call_once(|| {
+        if !flags.is_empty() {
+            v8::V8::set_flags_from_string(flags);
+        }
+        let platform = v8::new_default_platform(0, false).make_shared();
+        v8::V8::initialize_platform(platform);
+        v8::V8::initialize();
+        did = true;
+    });
+    did
+}
+
+// ---------------------------------------------------------------------------
+// Public host-facing types
+// ---------------------------------------------------------------------------
+
+/// A Rust function exposed to JS (operation, getter, setter, constructor).
+pub type HostFn = Rc<dyn Fn(&mut CallCtx<'_, '_, '_>) -> Result<(), HostError>>;
+/// Named property getter (`storage.foo`, `window.someId`). `Ok(None)` means
+/// "not handled": normal lookup continues.
+pub type NamedGetter = Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, &str) -> Result<Option<Arg>, HostError>>;
+/// Indexed property getter (`nodeList[0]`).
+pub type IndexedGetter =
+    Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, u32) -> Result<Option<Arg>, HostError>>;
+
+/// Box a closure as a [`HostFn`].
+pub fn host_fn(f: impl Fn(&mut CallCtx<'_, '_, '_>) -> Result<(), HostError> + 'static) -> HostFn {
+    Rc::new(f)
+}
+
+/// A persistent reference to a JS value, owned by the host. Copyable; a
+/// released or dropped-realm handle is detected and reported as an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Handle {
+    idx: u32,
+    generation: u32,
+}
+
+/// Resolve/reject capability of a promise created from Rust.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Resolver {
+    idx: u32,
+    generation: u32,
+}
+
+/// A value passed from Rust into JS.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Arg {
+    Undefined,
+    Null,
+    Bool(bool),
+    Number(f64),
+    String(String),
+    /// Parsed with `JSON.parse` in the target realm.
+    Json(String),
+    /// A value held by the host.
+    Handle(Handle),
+    /// The wrapper of a host object as an instance of the interface.
+    Host(InterfaceId, HostRef),
+}
+
+impl From<JsValue> for Arg {
+    fn from(v: JsValue) -> Self {
+        match v {
+            JsValue::Undefined => Arg::Undefined,
+            JsValue::Null => Arg::Null,
+            JsValue::Bool(b) => Arg::Bool(b),
+            JsValue::Number(n) => Arg::Number(n),
+            JsValue::String(s) | JsValue::Opaque(s) => Arg::String(s),
+            JsValue::Json(s) => Arg::Json(s),
+        }
+    }
+}
+impl From<bool> for Arg {
+    fn from(v: bool) -> Self {
+        Arg::Bool(v)
+    }
+}
+impl From<f64> for Arg {
+    fn from(v: f64) -> Self {
+        Arg::Number(v)
+    }
+}
+impl From<i32> for Arg {
+    fn from(v: i32) -> Self {
+        Arg::Number(v.into())
+    }
+}
+impl From<u32> for Arg {
+    fn from(v: u32) -> Self {
+        Arg::Number(v.into())
+    }
+}
+impl From<&str> for Arg {
+    fn from(v: &str) -> Self {
+        Arg::String(v.to_owned())
+    }
+}
+impl From<String> for Arg {
+    fn from(v: String) -> Self {
+        Arg::String(v)
+    }
+}
+impl From<Handle> for Arg {
+    fn from(v: Handle) -> Self {
+        Arg::Handle(v)
+    }
+}
+impl From<()> for Arg {
+    fn from(_: ()) -> Self {
+        Arg::Undefined
+    }
+}
+
+/// An exception thrown by a host callback.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostError {
+    TypeError(String),
+    RangeError(String),
+    SyntaxError(String),
+    ReferenceError(String),
+    Error(String),
+    /// Throw this value as is (e.g. a `DOMException` wrapper).
+    Throw(Arg),
+    /// A JS exception is already pending (from a conversion or a nested
+    /// call); let it propagate.
+    Thrown,
+}
+
+impl HostError {
+    pub fn type_error(msg: impl Into<String>) -> Self {
+        HostError::TypeError(msg.into())
+    }
+    pub fn range_error(msg: impl Into<String>) -> Self {
+        HostError::RangeError(msg.into())
+    }
+}
+
+/// Well-known symbols usable as property keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WellKnownSymbol {
+    Iterator,
+    AsyncIterator,
+    ToStringTag,
+    ToPrimitive,
+    Unscopables,
+}
+
+/// A property key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PropKey {
+    Name(String),
+    Symbol(WellKnownSymbol),
+}
+
+impl From<&str> for PropKey {
+    fn from(v: &str) -> Self {
+        PropKey::Name(v.to_owned())
+    }
+}
+impl From<String> for PropKey {
+    fn from(v: String) -> Self {
+        PropKey::Name(v)
+    }
+}
+impl From<WellKnownSymbol> for PropKey {
+    fn from(v: WellKnownSymbol) -> Self {
+        PropKey::Symbol(v)
+    }
+}
+
+/// Built-ins that WebIDL reuses by identity, e.g. iterable `values` is
+/// `Array.prototype.values` of the same realm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Intrinsic {
+    ArrayProtoEntries,
+    ArrayProtoForEach,
+    ArrayProtoKeys,
+    ArrayProtoValues,
+}
+
+/// What a member is.
+#[derive(Clone)]
+pub enum MemberKind {
+    /// A function backed by Rust. `length` is the WebIDL required-argument
+    /// count.
+    Method { length: u32, f: HostFn },
+    /// Accessor property with optional getter/setter functions.
+    Accessor {
+        get: Option<HostFn>,
+        set: Option<HostFn>,
+    },
+    /// A primitive data property (constants). `Json`/`Opaque` are stored as
+    /// strings.
+    Value(JsValue),
+    /// The interface object of another interface (global members).
+    Interface(InterfaceId),
+    /// A built-in of the realm.
+    Intrinsic(Intrinsic),
+}
+
+/// One property of an interface object, prototype or instance.
+#[derive(Clone)]
+pub struct Member {
+    pub key: PropKey,
+    pub kind: MemberKind,
+    pub attrs: PropAttrs,
+}
+
+impl Member {
+    pub fn method(key: impl Into<PropKey>, length: u32, f: HostFn) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Method { length, f },
+            attrs: PropAttrs::DEFAULT,
+        }
+    }
+    pub fn getter(key: impl Into<PropKey>, get: HostFn) -> Self {
+        Self::accessor(key, Some(get), None)
+    }
+    pub fn accessor(key: impl Into<PropKey>, get: Option<HostFn>, set: Option<HostFn>) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Accessor { get, set },
+            attrs: PropAttrs::DEFAULT,
+        }
+    }
+    /// A WebIDL constant (read-only, enumerable, non-configurable).
+    pub fn constant(key: impl Into<PropKey>, value: JsValue) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Value(value),
+            attrs: PropAttrs::CONSTANT,
+        }
+    }
+    /// A plain data property with default attributes.
+    pub fn value(key: impl Into<PropKey>, value: JsValue) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Value(value),
+            attrs: PropAttrs::DEFAULT,
+        }
+    }
+    /// An interface object as a global property (not enumerable).
+    pub fn interface(key: impl Into<PropKey>, id: InterfaceId) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Interface(id),
+            attrs: PropAttrs::HIDDEN,
+        }
+    }
+    pub fn intrinsic(key: impl Into<PropKey>, which: Intrinsic) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Intrinsic(which),
+            attrs: PropAttrs::DEFAULT,
+        }
+    }
+    /// Replace the attributes.
+    pub fn with_attrs(mut self, attrs: PropAttrs) -> Self {
+        self.attrs = attrs;
+        self
+    }
+}
+
+/// A WebIDL interface. Members are installed in list order, which becomes
+/// the property order JS sees.
+#[derive(Clone)]
+pub struct InterfaceSpec {
+    pub name: String,
+    /// Must be defined on the same engine before this interface.
+    pub parent: Option<InterfaceId>,
+    /// `new X()` handler. `None` throws `TypeError: Illegal constructor`.
+    pub constructor: Option<HostFn>,
+    /// `X.length`.
+    pub length: u32,
+    /// Own properties of the interface object (constants, static ops).
+    pub statics: Vec<Member>,
+    /// Properties of `X.prototype`.
+    pub prototype: Vec<Member>,
+    /// Own properties of every instance; for the global interface, the
+    /// global's own properties.
+    pub instance: Vec<Member>,
+    /// Add `X.prototype[Symbol.toStringTag] = "X"` (default true).
+    pub to_string_tag: bool,
+    /// Make instances immutable-prototype exotic objects (the global).
+    pub immutable_proto: bool,
+    pub named_getter: Option<NamedGetter>,
+    pub indexed_getter: Option<IndexedGetter>,
+}
+
+impl InterfaceSpec {
+    pub fn new(name: impl Into<String>) -> Self {
+        InterfaceSpec {
+            name: name.into(),
+            parent: None,
+            constructor: None,
+            length: 0,
+            statics: Vec::new(),
+            prototype: Vec::new(),
+            instance: Vec::new(),
+            to_string_tag: true,
+            immutable_proto: false,
+            named_getter: None,
+            indexed_getter: None,
+        }
+    }
+    pub fn parent(mut self, parent: InterfaceId) -> Self {
+        self.parent = Some(parent);
+        self
+    }
+    pub fn constructor(mut self, length: u32, f: HostFn) -> Self {
+        self.length = length;
+        self.constructor = Some(f);
+        self
+    }
+    pub fn statics(mut self, members: Vec<Member>) -> Self {
+        self.statics = members;
+        self
+    }
+    pub fn prototype(mut self, members: Vec<Member>) -> Self {
+        self.prototype = members;
+        self
+    }
+    pub fn instance(mut self, members: Vec<Member>) -> Self {
+        self.instance = members;
+        self
+    }
+    pub fn named_getter(mut self, f: NamedGetter) -> Self {
+        self.named_getter = Some(f);
+        self
+    }
+    pub fn indexed_getter(mut self, f: IndexedGetter) -> Self {
+        self.indexed_getter = Some(f);
+        self
+    }
+}
+
+/// Options for [`Engine::new`].
+#[derive(Debug, Clone, Default)]
+pub struct EngineOptions {
+    /// Hard cap for the JS heap. Near it, the running script is terminated
+    /// with [`JsErrorKind::OutOfMemory`]. `None` uses V8's default.
+    pub max_heap_bytes: Option<usize>,
+}
+
+/// Stops running JS on an engine from any thread (script timeouts).
+#[derive(Debug, Clone)]
+pub struct TerminateHandle(v8::IsolateHandle);
+
+impl TerminateHandle {
+    /// Terminate the script running now (or the next one). Returns false if
+    /// the engine is gone.
+    pub fn terminate(&self) -> bool {
+        self.0.terminate_execution()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Internal state
+// ---------------------------------------------------------------------------
+
+/// Generational slab: stale ids are detected instead of aliasing new
+/// entries.
+struct Slab<T> {
+    entries: Vec<(u32, Option<T>)>,
+    free: Vec<u32>,
+}
+
+impl<T> Slab<T> {
+    fn new() -> Self {
+        Slab {
+            entries: Vec::new(),
+            free: Vec::new(),
+        }
+    }
+    fn insert(&mut self, value: T) -> (u32, u32) {
+        if let Some(idx) = self.free.pop() {
+            let entry = &mut self.entries[idx as usize];
+            entry.0 = entry.0.wrapping_add(1);
+            entry.1 = Some(value);
+            (idx, entry.0)
+        } else {
+            self.entries.push((0, Some(value)));
+            ((self.entries.len() - 1) as u32, 0)
+        }
+    }
+    fn get(&self, idx: u32, generation: u32) -> Option<&T> {
+        match self.entries.get(idx as usize) {
+            Some((g, Some(v))) if *g == generation => Some(v),
+            _ => None,
+        }
+    }
+    fn remove(&mut self, idx: u32, generation: u32) -> Option<T> {
+        match self.entries.get_mut(idx as usize) {
+            Some((g, slot @ Some(_))) if *g == generation => {
+                self.free.push(idx);
+                slot.take()
+            }
+            _ => None,
+        }
+    }
+    fn retain(&mut self, mut keep: impl FnMut(&T) -> bool) {
+        for (idx, (_, slot)) in self.entries.iter_mut().enumerate() {
+            if slot.as_ref().is_some_and(|v| !keep(v)) {
+                *slot = None;
+                self.free.push(idx as u32);
+            }
+        }
+    }
+    fn clear(&mut self) {
+        self.retain(|_| false);
+    }
+}
+
+enum Callback {
+    Fn(HostFn),
+    Ctor { iface: Rc<str>, f: Option<HostFn> },
+    Named(NamedGetter),
+    Indexed(IndexedGetter),
+}
+
+struct IfaceEntry {
+    template: v8::Global<v8::FunctionTemplate>,
+    parent: Option<InterfaceId>,
+}
+
+struct ModuleEntry {
+    url: String,
+    hash: NonZeroI32,
+    module: v8::Global<v8::Module>,
+}
+
+struct RealmEntry {
+    context: v8::Global<v8::Context>,
+    world: World,
+    loader: Option<ModuleLoader>,
+    modules: Vec<ModuleEntry>,
+}
+
+/// Stored in each context's slot so callbacks know their realm.
+struct RealmTag(RealmId);
+
+/// Shared with the near-heap-limit callback through a raw pointer.
+struct HeapGuard {
+    handle: v8::IsolateHandle,
+    max: usize,
+    hits: Cell<u32>,
+    /// Set by the callback, cleared when the termination is reported.
+    tripped: Cell<bool>,
+    /// Set by the callback, cleared when the limit is restored.
+    raised: Cell<bool>,
+}
+
+struct State {
+    callbacks: Vec<Callback>,
+    interfaces: Vec<IfaceEntry>,
+    realms: HashMap<RealmId, RealmEntry>,
+    next_realm: u32,
+    handles: Slab<(RealmId, v8::Global<v8::Value>)>,
+    resolvers: Slab<(RealmId, v8::Global<v8::PromiseResolver>)>,
+    wrappers: HashMap<(RealmId, HostRef), v8::Global<v8::Object>>,
+    heap: Option<Rc<HeapGuard>>,
+}
+
+type SharedState = Rc<RefCell<State>>;
+
+impl State {
+    fn push_callback(&mut self, cb: Callback) -> u32 {
+        self.callbacks.push(cb);
+        (self.callbacks.len() - 1) as u32
+    }
+
+    fn take_oom(&self) -> bool {
+        self.heap.as_ref().is_some_and(|h| h.tripped.replace(false))
+    }
+}
+
+/// Internal fields of every wrapper: kind, id.
+const HOST_FIELDS: usize = 2;
+
+// ---------------------------------------------------------------------------
+// Engine
+// ---------------------------------------------------------------------------
+
+/// One V8 isolate with its realms. `!Send`: stays on its thread.
+pub struct Engine {
+    isolate: v8::OwnedIsolate,
+    state: SharedState,
+    persona: Arc<Persona>,
+}
+
+/// Enters the isolate for one operation, so several engines can share a
+/// thread. Exits on drop.
+struct Entered<'a>(&'a mut v8::OwnedIsolate);
+
+impl<'a> Entered<'a> {
+    fn new(isolate: &'a mut v8::OwnedIsolate) -> Self {
+        // SAFETY: V8 requires the isolate to be entered on this thread while
+        // it is used. Enter/exit nest, and `Drop` pairs this enter with one
+        // exit on the same thread (the isolate is `!Send`).
+        unsafe { isolate.enter() };
+        Entered(isolate)
+    }
+}
+
+impl Drop for Entered<'_> {
+    fn drop(&mut self) {
+        // SAFETY: pairs the enter in `Entered::new` on the same thread.
+        unsafe { self.0.exit() };
+    }
+}
+
+impl std::ops::Deref for Entered<'_> {
+    type Target = v8::OwnedIsolate;
+    fn deref(&self) -> &v8::OwnedIsolate {
+        self.0
+    }
+}
+
+impl std::ops::DerefMut for Entered<'_> {
+    fn deref_mut(&mut self) -> &mut v8::OwnedIsolate {
+        self.0
+    }
+}
+
+extern "C" fn near_heap_limit(data: *mut c_void, current: usize, _initial: usize) -> usize {
+    // SAFETY: `data` is `Rc::as_ptr` of the engine's `HeapGuard`, which is
+    // kept alive in `State::heap` until the callback is removed in
+    // `Engine::drop`. V8 calls this on the isolate's own thread.
+    let guard = unsafe { &*(data as *const HeapGuard) };
+    guard.hits.set(guard.hits.get() + 1);
+    guard.tripped.set(true);
+    guard.raised.set(true);
+    guard.handle.terminate_execution();
+    // Headroom so the termination can unwind instead of crashing.
+    current + current / 2
+}
+
+impl Engine {
+    /// Create an engine (isolate) for `persona`. Refuses personas of another
+    /// browser family.
+    pub fn new(persona: Arc<Persona>, options: EngineOptions) -> Result<Engine, EngineError> {
+        if persona.family != BrowserFamily::Chrome {
+            return Err(EngineError::FamilyMismatch {
+                persona: persona.family,
+                compiled: Some(BrowserFamily::Chrome),
+            });
+        }
+        init_v8("");
+        let mut params = v8::CreateParams::default();
+        if let Some(max) = options.max_heap_bytes {
+            params = params.heap_limits(0, max);
+        }
+        let mut isolate = v8::Isolate::new(params);
+        // `Isolate::new` enters the isolate; undo that so engines can be
+        // created and dropped in any order. Every operation enters again.
+        // SAFETY: pairs the enter done by `Isolate::new` on this thread.
+        unsafe { isolate.exit() };
+
+        let heap = options.max_heap_bytes.map(|max| {
+            Rc::new(HeapGuard {
+                handle: isolate.thread_safe_handle(),
+                max,
+                hits: Cell::new(0),
+                tripped: Cell::new(false),
+                raised: Cell::new(false),
+            })
+        });
+        let state = Rc::new(RefCell::new(State {
+            callbacks: Vec::new(),
+            interfaces: Vec::new(),
+            realms: HashMap::new(),
+            next_realm: 1,
+            handles: Slab::new(),
+            resolvers: Slab::new(),
+            wrappers: HashMap::new(),
+            heap: heap.clone(),
+        }));
+        {
+            let mut iso = Entered::new(&mut isolate);
+            iso.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
+            iso.set_slot(state.clone());
+            if let Some(heap) = &heap {
+                iso.add_near_heap_limit_callback(near_heap_limit, Rc::as_ptr(heap) as *mut c_void);
+            }
+        }
+        Ok(Engine {
+            isolate,
+            state,
+            persona,
+        })
+    }
+
+    /// The persona this engine was created for.
+    pub fn persona(&self) -> &Arc<Persona> {
+        &self.persona
+    }
+
+    /// Handle to terminate running JS from another thread.
+    pub fn terminate_handle(&self) -> TerminateHandle {
+        TerminateHandle(self.isolate.thread_safe_handle())
+    }
+
+    /// Define an interface as V8 templates. Templates are per engine; each
+    /// realm instantiates them lazily.
+    pub fn define_interface(&mut self, spec: InterfaceSpec) -> InterfaceId {
+        let mut iso = Entered::new(&mut self.isolate);
+        v8::scope!(let scope, &mut **iso);
+        let mut st = self.state.borrow_mut();
+
+        let name: Rc<str> = spec.name.as_str().into();
+        let ctor_idx = st.push_callback(Callback::Ctor {
+            iface: name.clone(),
+            f: spec.constructor.clone(),
+        });
+        let data = v8::Integer::new_from_unsigned(scope, ctor_idx);
+        let ft = v8::FunctionTemplate::builder(ctor_trampoline)
+            .data(data.into())
+            .length(spec.length as i32)
+            .build(scope);
+        ft.set_class_name(v8_str(scope, &name));
+        ft.read_only_prototype();
+        if let Some(parent) = spec.parent {
+            let parent_ft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
+            ft.inherit(parent_ft);
+        }
+        let signature = v8::Signature::new(scope, ft);
+        let inst = ft.instance_template(scope);
+        inst.set_internal_field_count(HOST_FIELDS);
+        let proto = ft.prototype_template(scope);
+
+        for m in &spec.statics {
+            install_member(scope, &mut st, Target::Function(ft), None, m);
+        }
+        for m in &spec.prototype {
+            install_member(scope, &mut st, Target::Object(proto), Some(signature), m);
+        }
+        if spec.to_string_tag {
+            let tag = v8::Symbol::get_to_string_tag(scope);
+            let value = v8_str(scope, &name);
+            proto.set_with_attr(
+                tag.into(),
+                value.into(),
+                v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
+            );
+        }
+        for m in &spec.instance {
+            install_member(scope, &mut st, Target::Object(inst), Some(signature), m);
+        }
+        if spec.immutable_proto {
+            inst.set_immutable_proto();
+        }
+        if let Some(getter) = spec.named_getter {
+            let idx = st.push_callback(Callback::Named(getter));
+            let data = v8::Integer::new_from_unsigned(scope, idx);
+            inst.set_named_property_handler(
+                v8::NamedPropertyHandlerConfiguration::new()
+                    .getter(named_trampoline)
+                    .data(data.into())
+                    .flags(v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS),
+            );
+        }
+        if let Some(getter) = spec.indexed_getter {
+            let idx = st.push_callback(Callback::Indexed(getter));
+            let data = v8::Integer::new_from_unsigned(scope, idx);
+            inst.set_indexed_property_handler(
+                v8::IndexedPropertyHandlerConfiguration::new()
+                    .getter(indexed_trampoline)
+                    .data(data.into()),
+            );
+        }
+
+        let template = v8::Global::new(scope, ft);
+        st.interfaces.push(IfaceEntry {
+            template,
+            parent: spec.parent,
+        });
+        InterfaceId((st.interfaces.len() - 1) as u32)
+    }
+
+    /// Create a realm (V8 context).
+    pub fn new_realm(&mut self, options: RealmOptions) -> Result<RealmId, JsError> {
+        let mut iso = Entered::new(&mut self.isolate);
+        v8::scope!(let scope, &mut **iso);
+        let global_template = match options.global {
+            Some(id) => {
+                let st = self.state.borrow();
+                let entry = st
+                    .interfaces
+                    .get(id.0 as usize)
+                    .ok_or_else(|| JsError::host(format!("unknown interface {id:?}")))?;
+                let ft = v8::Local::new(scope, &entry.template);
+                Some(ft.instance_template(scope))
+            }
+            None => None,
+        };
+        let context = v8::Context::new(
+            scope,
+            v8::ContextOptions {
+                global_template,
+                ..Default::default()
+            },
+        );
+        let id = {
+            let mut st = self.state.borrow_mut();
+            let id = RealmId(st.next_realm);
+            st.next_realm += 1;
+            id
+        };
+        context.set_slot(Rc::new(RealmTag(id)));
+        let scope = &mut v8::ContextScope::new(scope, context);
+
+        // WebIDL: an interface object's [[Prototype]] is its parent's
+        // interface object. V8 templates only link the prototype objects, so
+        // this instantiates every interface object now. The M6 startup
+        // snapshot removes that cost.
+        {
+            let st = self.state.borrow();
+            for entry in &st.interfaces {
+                let Some(parent) = entry.parent else { continue };
+                let ft = v8::Local::new(scope, &entry.template);
+                let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
+                if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
+                    f.set_prototype(scope, pf.into());
+                }
+            }
+        }
+
+        let global = context.global(scope);
+        let mut st = self.state.borrow_mut();
+        if let Some(host) = options.global_host {
+            if global.internal_field_count() >= HOST_FIELDS {
+                set_host(scope, global, host);
+            }
+            st.wrappers
+                .insert((id, host), v8::Global::new(scope, global));
+        }
+        st.realms.insert(
+            id,
+            RealmEntry {
+                context: v8::Global::new(scope, context),
+                world: options.world,
+                loader: options.module_loader,
+                modules: Vec::new(),
+            },
+        );
+        Ok(id)
+    }
+
+    /// The world a realm belongs to.
+    pub fn realm_world(&self, realm: RealmId) -> Option<World> {
+        self.state
+            .borrow()
+            .realms
+            .get(&realm)
+            .map(|r| r.world.clone())
+    }
+
+    /// Drop a realm, its wrappers, handles and resolvers.
+    pub fn drop_realm(&mut self, realm: RealmId) {
+        let mut st = self.state.borrow_mut();
+        st.realms.remove(&realm);
+        st.wrappers.retain(|(r, _), _| *r != realm);
+        st.handles.retain(|(r, _)| *r != realm);
+        st.resolvers.retain(|(r, _)| *r != realm);
+    }
+
+    /// Run `f` inside `realm`'s context, then clean up termination state.
+    fn run<R>(
+        &mut self,
+        realm: RealmId,
+        f: impl for<'s, 'i> FnOnce(&mut v8::PinScope<'s, 'i>, &SharedState) -> Result<R, JsError>,
+    ) -> Result<R, JsError> {
+        let mut iso = Entered::new(&mut self.isolate);
+        let result = {
+            v8::scope!(let scope, &mut **iso);
+            let context = {
+                let st = self.state.borrow();
+                let entry = st
+                    .realms
+                    .get(&realm)
+                    .ok_or_else(|| JsError::host(format!("unknown realm {realm:?}")))?;
+                v8::Local::new(scope, &entry.context)
+            };
+            let scope = &mut v8::ContextScope::new(scope, context);
+            f(scope, &self.state)
+        };
+        after_run(&mut iso, &self.state);
+        result
+    }
+
+    /// Compile and run a classic script; the completion value is copied out.
+    pub fn evaluate(
+        &mut self,
+        realm: RealmId,
+        source: &str,
+        origin: ScriptOrigin<'_>,
+    ) -> Result<JsValue, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            match run_script(tc, source, origin) {
+                Some(v) => Ok(to_js_value(tc, v)),
+                None => Err(caught(tc, state)),
+            }
+        })
+    }
+
+    /// Like [`Engine::evaluate`], but keeps the completion value as a handle.
+    pub fn evaluate_handle(
+        &mut self,
+        realm: RealmId,
+        source: &str,
+        origin: ScriptOrigin<'_>,
+    ) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            match run_script(tc, source, origin) {
+                Some(v) => Ok(store_handle(tc, state, realm, v)),
+                None => Err(caught(tc, state)),
+            }
+        })
+    }
+
+    /// Compile, link and evaluate an ES module graph. Imports are loaded
+    /// through the realm's [`ModuleLoader`]. Returns the module namespace.
+    /// A module with top-level await may still be pending afterwards; it
+    /// continues in microtask checkpoints.
+    pub fn evaluate_module(
+        &mut self,
+        realm: RealmId,
+        source: &str,
+        origin: ScriptOrigin<'_>,
+    ) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            let Some(module) = compile_module(tc, state, realm, source, origin) else {
+                return Err(caught(tc, state));
+            };
+            if module.get_status() == v8::ModuleStatus::Uninstantiated
+                && module.instantiate_module(tc, resolve_module).is_none()
+            {
+                return Err(caught(tc, state));
+            }
+            let Some(result) = module.evaluate(tc) else {
+                return Err(caught(tc, state));
+            };
+            if let Ok(promise) = v8::Local::<v8::Promise>::try_from(result)
+                && promise.state() == v8::PromiseState::Rejected
+            {
+                promise.mark_as_handled();
+                let exc = promise.result(tc);
+                return Err(exception_to_error(tc, exc, None));
+            }
+            if module.get_status() == v8::ModuleStatus::Errored {
+                let exc = module.get_exception();
+                return Err(exception_to_error(tc, exc, None));
+            }
+            let ns = module.get_module_namespace();
+            Ok(store_handle(tc, state, realm, ns))
+        })
+    }
+
+    /// Call a function held by the host (event listener, timer callback).
+    pub fn call(
+        &mut self,
+        realm: RealmId,
+        func: Handle,
+        this: Arg,
+        args: &[Arg],
+    ) -> Result<JsValue, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            let v = call_inner(tc, state, realm, func, &this, args)?;
+            match v {
+                Some(v) => Ok(to_js_value(tc, v)),
+                None => Err(caught(tc, state)),
+            }
+        })
+    }
+
+    /// Like [`Engine::call`], but keeps the return value as a handle.
+    pub fn call_handle(
+        &mut self,
+        realm: RealmId,
+        func: Handle,
+        this: Arg,
+        args: &[Arg],
+    ) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            let v = call_inner(tc, state, realm, func, &this, args)?;
+            match v {
+                Some(v) => Ok(store_handle(tc, state, realm, v)),
+                None => Err(caught(tc, state)),
+            }
+        })
+    }
+
+    /// Copy a held value out (objects as JSON).
+    pub fn get_value(&mut self, realm: RealmId, handle: Handle) -> Result<JsValue, JsError> {
+        self.run(realm, |scope, state| {
+            let v = load_handle(scope, state, handle)?;
+            Ok(to_js_value(scope, v))
+        })
+    }
+
+    /// Read a property of a held object (`obj[key]`) as a new handle.
+    pub fn get_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+    ) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            let v = load_handle(tc, state, object)?;
+            let obj = v.to_object(tc).ok_or_else(|| caught(tc, state))?;
+            let k = v8_str(tc, key);
+            match obj.get(tc, k.into()) {
+                Some(v) => Ok(store_handle(tc, state, realm, v)),
+                None => Err(caught(tc, state)),
+            }
+        })
+    }
+
+    /// Forget a handle. Releasing twice is harmless.
+    pub fn release(&mut self, handle: Handle) {
+        self.state
+            .borrow_mut()
+            .handles
+            .remove(handle.idx, handle.generation);
+    }
+
+    /// The wrapper of a host object in `realm`, created on first use.
+    pub fn wrap(
+        &mut self,
+        realm: RealmId,
+        iface: InterfaceId,
+        host: HostRef,
+    ) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            let obj = wrap_host(scope, state, realm, iface, host)?;
+            Ok(store_handle(scope, state, realm, obj.into()))
+        })
+    }
+
+    /// The host object behind a held JS value, if it is a wrapper.
+    pub fn unwrap_host(
+        &mut self,
+        realm: RealmId,
+        handle: Handle,
+    ) -> Result<Option<HostRef>, JsError> {
+        self.run(realm, |scope, state| {
+            let v = load_handle(scope, state, handle)?;
+            Ok(v8::Local::<v8::Object>::try_from(v)
+                .ok()
+                .and_then(|o| read_host(scope, o)))
+        })
+    }
+
+    /// Drop the cached wrappers of a host object in every realm (the host
+    /// object died). A later wrap creates a fresh wrapper.
+    pub fn forget_host(&mut self, host: HostRef) {
+        self.state
+            .borrow_mut()
+            .wrappers
+            .retain(|(_, h), _| *h != host);
+    }
+
+    /// A new pending promise in `realm` and its resolver.
+    pub fn new_promise(&mut self, realm: RealmId) -> Result<(Handle, Resolver), JsError> {
+        self.run(realm, |scope, state| {
+            let (promise, resolver) = new_promise(scope, state, realm)
+                .ok_or_else(|| JsError::host("promise creation failed"))?;
+            Ok((store_handle(scope, state, realm, promise.into()), resolver))
+        })
+    }
+
+    /// Resolve a promise created by [`Engine::new_promise`] or
+    /// [`CallCtx::ret_new_promise`]. Reactions run at the next checkpoint.
+    pub fn resolve_promise(&mut self, resolver: Resolver, value: Arg) -> Result<(), JsError> {
+        self.settle(resolver, Ok(value))
+    }
+
+    /// Reject a promise with an exception value.
+    pub fn reject_promise(&mut self, resolver: Resolver, error: HostError) -> Result<(), JsError> {
+        self.settle(resolver, Err(error))
+    }
+
+    fn settle(
+        &mut self,
+        resolver: Resolver,
+        outcome: Result<Arg, HostError>,
+    ) -> Result<(), JsError> {
+        let realm = self
+            .state
+            .borrow()
+            .resolvers
+            .get(resolver.idx, resolver.generation)
+            .map(|(r, _)| *r)
+            .ok_or_else(|| JsError::host("stale resolver"))?;
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            match settle_promise(tc, state, realm, resolver, outcome) {
+                Ok(()) => Ok(()),
+                Err(HostError::Thrown) => Err(caught(tc, state)),
+                Err(e) => Err(JsError::host(format!("{e:?}"))),
+            }
+        })
+    }
+
+    /// Run all queued promise jobs (explicit microtask policy).
+    pub fn perform_microtask_checkpoint(&mut self) {
+        let mut iso = Entered::new(&mut self.isolate);
+        iso.perform_microtask_checkpoint();
+        after_run(&mut iso, &self.state);
+    }
+
+    /// Tell V8 the page is idle: collect garbage aggressively.
+    pub fn low_memory_notification(&mut self) {
+        let mut iso = Entered::new(&mut self.isolate);
+        iso.low_memory_notification();
+    }
+
+    pub fn heap_stats(&mut self) -> HeapStats {
+        let limit_hits = self
+            .state
+            .borrow()
+            .heap
+            .as_ref()
+            .map_or(0, |h| h.hits.get());
+        let mut iso = Entered::new(&mut self.isolate);
+        let s = iso.get_heap_statistics();
+        HeapStats {
+            used: s.used_heap_size(),
+            total: s.total_heap_size(),
+            limit: s.heap_size_limit(),
+            limit_hits,
+        }
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let heap = {
+            let mut st = self.state.borrow_mut();
+            st.wrappers.clear();
+            st.handles.clear();
+            st.resolvers.clear();
+            st.realms.clear();
+            st.interfaces.clear();
+            st.callbacks.clear();
+            st.heap.take()
+        };
+        // SAFETY: `OwnedIsolate::drop` asserts the isolate is the current one
+        // and exits it once; this enter balances that exit.
+        unsafe { self.isolate.enter() };
+        if let Some(heap) = heap {
+            self.isolate
+                .remove_near_heap_limit_callback(near_heap_limit, heap.max);
+        }
+        self.isolate.remove_slot::<SharedState>();
+    }
+}
+
+/// After JS ran: clear a pending termination and restore the heap limit if
+/// the near-heap-limit callback raised it.
+fn after_run(iso: &mut v8::OwnedIsolate, state: &SharedState) {
+    if iso.is_execution_terminating() {
+        iso.cancel_terminate_execution();
+    }
+    let Some(heap) = state.borrow().heap.clone() else {
+        return;
+    };
+    // A trip not reported through `caught` (e.g. inside a microtask) must
+    // not be blamed on the next script.
+    heap.tripped.set(false);
+    if heap.raised.replace(false) {
+        // Re-adding with the original cap lowers the raised limit again.
+        iso.remove_near_heap_limit_callback(near_heap_limit, heap.max);
+        iso.add_near_heap_limit_callback(near_heap_limit, Rc::as_ptr(&heap) as *mut c_void);
+    }
+}
+
+/// Realm handle for the [`Realm`] trait.
+pub struct RealmRef<'e> {
+    engine: &'e mut Engine,
+    id: RealmId,
+}
+
+impl Realm for RealmRef<'_> {
+    fn id(&self) -> RealmId {
+        self.id
+    }
+    fn evaluate(&mut self, source: &str, origin: ScriptOrigin<'_>) -> Result<JsValue, JsError> {
+        self.engine.evaluate(self.id, source, origin)
+    }
+    fn perform_microtask_checkpoint(&mut self) {
+        self.engine.perform_microtask_checkpoint();
+    }
+}
+
+impl JsEngine for Engine {
+    type Realm<'e> = RealmRef<'e>;
+
+    fn family(&self) -> BrowserFamily {
+        BrowserFamily::Chrome
+    }
+    fn new_realm(&mut self, options: RealmOptions) -> Result<RealmId, JsError> {
+        Engine::new_realm(self, options)
+    }
+    fn realm(&mut self, id: RealmId) -> Option<RealmRef<'_>> {
+        if self.state.borrow().realms.contains_key(&id) {
+            Some(RealmRef { engine: self, id })
+        } else {
+            None
+        }
+    }
+    fn drop_realm(&mut self, id: RealmId) {
+        Engine::drop_realm(self, id);
+    }
+    fn perform_microtask_checkpoint(&mut self) {
+        Engine::perform_microtask_checkpoint(self);
+    }
+    fn low_memory_notification(&mut self) {
+        Engine::low_memory_notification(self);
+    }
+    fn heap_stats(&mut self) -> HeapStats {
+        Engine::heap_stats(self)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Callback contexts
+// ---------------------------------------------------------------------------
+
+/// What a [`HostFn`] sees: arguments, `this`, the return slot.
+pub struct CallCtx<'a, 's, 'i> {
+    scope: &'a mut v8::PinScope<'s, 'i>,
+    args: v8::FunctionCallbackArguments<'s>,
+    rv: v8::ReturnValue<'s, v8::Value>,
+    state: SharedState,
+    realm: RealmId,
+}
+
+impl<'s, 'i> CallCtx<'_, 's, 'i> {
+    /// Number of arguments passed.
+    pub fn len(&self) -> usize {
+        self.args.length().max(0) as usize
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// The realm the call happens in.
+    pub fn realm(&self) -> RealmId {
+        self.realm
+    }
+    /// Called with `new`.
+    pub fn is_construct_call(&self) -> bool {
+        self.args.is_construct_call()
+    }
+
+    fn arg(&self, i: usize) -> v8::Local<'s, v8::Value> {
+        self.args.get(i.min(i32::MAX as usize) as i32)
+    }
+
+    pub fn arg_kind(&self, i: usize) -> ValueKind {
+        value_kind(self.arg(i))
+    }
+    /// ToBoolean.
+    pub fn arg_bool(&mut self, i: usize) -> bool {
+        self.arg(i).boolean_value(self.scope)
+    }
+    /// ToNumber (may run `valueOf` and throw).
+    pub fn arg_f64(&mut self, i: usize) -> Result<f64, HostError> {
+        self.arg(i)
+            .number_value(self.scope)
+            .ok_or(HostError::Thrown)
+    }
+    /// ToInt32 (WebIDL `long` without `[EnforceRange]`).
+    pub fn arg_i32(&mut self, i: usize) -> Result<i32, HostError> {
+        self.arg(i).int32_value(self.scope).ok_or(HostError::Thrown)
+    }
+    /// ToUint32 (WebIDL `unsigned long`).
+    pub fn arg_u32(&mut self, i: usize) -> Result<u32, HostError> {
+        self.arg(i)
+            .uint32_value(self.scope)
+            .ok_or(HostError::Thrown)
+    }
+    /// ToString (`DOMString`); symbols throw like in Chrome.
+    pub fn arg_string(&mut self, i: usize) -> Result<String, HostError> {
+        let v = self.arg(i);
+        let s = v.to_string(self.scope).ok_or(HostError::Thrown)?;
+        Ok(s.to_rust_string_lossy(self.scope))
+    }
+    /// The host object behind an argument, if it is a wrapper.
+    pub fn arg_host(&mut self, i: usize) -> Option<HostRef> {
+        let v = self.arg(i);
+        v8::Local::<v8::Object>::try_from(v)
+            .ok()
+            .and_then(|o| read_host(self.scope, o))
+    }
+    /// Keep an argument (e.g. a listener) as a handle.
+    pub fn arg_handle(&mut self, i: usize) -> Handle {
+        let v = self.arg(i);
+        store_handle(self.scope, &self.state, self.realm, v)
+    }
+    /// Copy an argument out (objects as JSON; may run `toJSON`).
+    pub fn arg_value(&mut self, i: usize) -> JsValue {
+        let v = self.arg(i);
+        to_js_value(self.scope, v)
+    }
+
+    /// The host object behind `this`, if it is a wrapper (or the global).
+    pub fn this_host(&mut self) -> Option<HostRef> {
+        let this = self.args.this();
+        read_host(self.scope, this)
+    }
+
+    /// In a constructor: bind the new object to `host` and cache it as
+    /// the wrapper, so later wraps of `host` return this object.
+    pub fn init_this(&mut self, host: HostRef) -> Result<(), HostError> {
+        let this = self.args.this();
+        if this.internal_field_count() < HOST_FIELDS {
+            return Err(HostError::type_error("Illegal invocation"));
+        }
+        set_host(self.scope, this, host);
+        let global = v8::Global::new(self.scope, this);
+        self.state
+            .borrow_mut()
+            .wrappers
+            .insert((self.realm, host), global);
+        Ok(())
+    }
+
+    /// Set the return value.
+    pub fn ret(&mut self, value: impl Into<Arg>) -> Result<(), HostError> {
+        let v = arg_to_v8(self.scope, &self.state, self.realm, &value.into())?;
+        self.rv.set(v);
+        Ok(())
+    }
+
+    /// Return a new pending promise; settle it later through the resolver.
+    pub fn ret_new_promise(&mut self) -> Result<Resolver, HostError> {
+        let (promise, resolver) =
+            new_promise(self.scope, &self.state, self.realm).ok_or(HostError::Thrown)?;
+        self.rv.set(promise.into());
+        Ok(resolver)
+    }
+
+    /// Settle a promise from inside a callback.
+    pub fn resolve_promise(&mut self, resolver: Resolver, value: Arg) -> Result<(), HostError> {
+        settle_promise(self.scope, &self.state, self.realm, resolver, Ok(value))
+    }
+
+    /// Reject a promise from inside a callback.
+    pub fn reject_promise(
+        &mut self,
+        resolver: Resolver,
+        error: HostError,
+    ) -> Result<(), HostError> {
+        settle_promise(self.scope, &self.state, self.realm, resolver, Err(error))
+    }
+
+    /// Call a held function (e.g. a `forEach` callback). An exception
+    /// propagates as [`HostError::Thrown`].
+    pub fn call(&mut self, func: Handle, this: Arg, args: &[Arg]) -> Result<JsValue, HostError> {
+        let realm = self.realm;
+        match call_inner(self.scope, &self.state, realm, func, &this, args) {
+            Ok(Some(v)) => Ok(to_js_value(self.scope, v)),
+            Ok(None) => Err(HostError::Thrown),
+            Err(e) => Err(HostError::Error(e.message)),
+        }
+    }
+
+    /// Wrap a host object without returning it (e.g. to store a handle).
+    pub fn wrap(&mut self, iface: InterfaceId, host: HostRef) -> Result<Handle, HostError> {
+        let obj = wrap_host(self.scope, &self.state, self.realm, iface, host)
+            .map_err(|e| HostError::Error(e.message))?;
+        Ok(store_handle(
+            self.scope,
+            &self.state,
+            self.realm,
+            obj.into(),
+        ))
+    }
+
+    /// Escape hatch: the raw V8 scope.
+    pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
+        self.scope
+    }
+    /// Escape hatch: the raw V8 arguments.
+    pub fn v8_args(&self) -> &v8::FunctionCallbackArguments<'s> {
+        &self.args
+    }
+    /// Escape hatch: set a raw V8 return value.
+    pub fn ret_v8(&mut self, value: v8::Local<'s, v8::Value>) {
+        self.rv.set(value);
+    }
+}
+
+/// What a [`NamedGetter`] / [`IndexedGetter`] sees.
+pub struct PropCtx<'a, 's, 'i> {
+    scope: &'a mut v8::PinScope<'s, 'i>,
+    args: v8::PropertyCallbackArguments<'s>,
+    realm: RealmId,
+}
+
+impl<'s, 'i> PropCtx<'_, 's, 'i> {
+    pub fn realm(&self) -> RealmId {
+        self.realm
+    }
+    /// The host object that owns the property.
+    pub fn holder_host(&mut self) -> Option<HostRef> {
+        let holder = self.args.holder();
+        read_host(self.scope, holder)
+    }
+    /// Escape hatch: the raw V8 scope.
+    pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
+        self.scope
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trampolines
+// ---------------------------------------------------------------------------
+
+fn callback_index(scope: &mut v8::PinScope<'_, '_>, data: v8::Local<'_, v8::Value>) -> usize {
+    data.uint32_value(scope).unwrap_or(u32::MAX) as usize
+}
+
+fn shared_state(scope: &v8::PinScope<'_, '_>) -> SharedState {
+    scope
+        .get_slot::<SharedState>()
+        .expect("lb-js state slot missing")
+        .clone()
+}
+
+fn current_realm(scope: &v8::PinScope<'_, '_>) -> RealmId {
+    scope
+        .get_current_context()
+        .get_slot::<RealmTag>()
+        .map_or(RealmId(0), |t| t.0)
+}
+
+fn host_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    let state = shared_state(scope);
+    let idx = callback_index(scope, args.data());
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::Fn(f)) => f.clone(),
+        _ => return,
+    };
+    invoke(scope, args, rv, state, &f);
+}
+
+fn ctor_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    let state = shared_state(scope);
+    let idx = callback_index(scope, args.data());
+    let (iface, f) = match state.borrow().callbacks.get(idx) {
+        Some(Callback::Ctor { iface, f }) => (iface.clone(), f.clone()),
+        _ => return,
+    };
+    let realm = current_realm(scope);
+    let Some(f) = f else {
+        throw(
+            scope,
+            &state,
+            realm,
+            HostError::type_error("Illegal constructor"),
+        );
+        return;
+    };
+    if !args.is_construct_call() {
+        let msg = format!(
+            "Failed to construct '{iface}': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+        );
+        throw(scope, &state, realm, HostError::TypeError(msg));
+        return;
+    }
+    invoke(scope, args, rv, state, &f);
+}
+
+fn invoke<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    rv: v8::ReturnValue<'s, v8::Value>,
+    state: SharedState,
+    f: &HostFn,
+) {
+    let realm = current_realm(scope);
+    let mut cx = CallCtx {
+        scope,
+        args,
+        rv,
+        state,
+        realm,
+    };
+    if let Err(e) = f(&mut cx) {
+        let CallCtx { scope, state, .. } = cx;
+        throw(scope, &state, realm, e);
+    }
+}
+
+fn named_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let idx = callback_index(scope, args.data());
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::Named(f)) => f.clone(),
+        _ => return v8::Intercepted::kNo,
+    };
+    let name = key.to_rust_string_lossy(scope);
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    let result = f(&mut cx, &name);
+    finish_interceptor(cx.scope, &state, realm, result, &mut rv)
+}
+
+fn indexed_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let idx = callback_index(scope, args.data());
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::Indexed(f)) => f.clone(),
+        _ => return v8::Intercepted::kNo,
+    };
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    let result = f(&mut cx, index);
+    finish_interceptor(cx.scope, &state, realm, result, &mut rv)
+}
+
+fn finish_interceptor(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    result: Result<Option<Arg>, HostError>,
+    rv: &mut v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
+    match result {
+        Ok(None) => v8::Intercepted::kNo,
+        Ok(Some(arg)) => match arg_to_v8(scope, state, realm, &arg) {
+            Ok(v) => {
+                rv.set(v);
+                v8::Intercepted::kYes
+            }
+            Err(e) => {
+                throw(scope, state, realm, e);
+                v8::Intercepted::kYes
+            }
+        },
+        Err(e) => {
+            throw(scope, state, realm, e);
+            v8::Intercepted::kYes
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Templates
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+enum Target<'s> {
+    Function(v8::Local<'s, v8::FunctionTemplate>),
+    Object(v8::Local<'s, v8::ObjectTemplate>),
+}
+
+fn v8_attrs(attrs: PropAttrs, accessor: bool) -> v8::PropertyAttribute {
+    let mut a = v8::PropertyAttribute::NONE;
+    if !attrs.writable && !accessor {
+        a = a | v8::PropertyAttribute::READ_ONLY;
+    }
+    if !attrs.enumerable {
+        a = a | v8::PropertyAttribute::DONT_ENUM;
+    }
+    if !attrs.configurable {
+        a = a | v8::PropertyAttribute::DONT_DELETE;
+    }
+    a
+}
+
+fn v8_key<'s>(scope: &v8::PinScope<'s, '_, ()>, key: &PropKey) -> v8::Local<'s, v8::Name> {
+    match key {
+        PropKey::Name(n) => v8_str(scope, n).into(),
+        PropKey::Symbol(s) => match s {
+            WellKnownSymbol::Iterator => v8::Symbol::get_iterator(scope),
+            WellKnownSymbol::AsyncIterator => v8::Symbol::get_async_iterator(scope),
+            WellKnownSymbol::ToStringTag => v8::Symbol::get_to_string_tag(scope),
+            WellKnownSymbol::ToPrimitive => v8::Symbol::get_to_primitive(scope),
+            WellKnownSymbol::Unscopables => v8::Symbol::get_unscopables(scope),
+        }
+        .into(),
+    }
+}
+
+/// Function name V8 should show: the key, or `[Symbol.x]` for symbols.
+fn function_name(key: &PropKey, prefix: &str) -> String {
+    let base = match key {
+        PropKey::Name(n) => n.clone(),
+        PropKey::Symbol(s) => match s {
+            WellKnownSymbol::Iterator => "[Symbol.iterator]",
+            WellKnownSymbol::AsyncIterator => "[Symbol.asyncIterator]",
+            WellKnownSymbol::ToStringTag => "[Symbol.toStringTag]",
+            WellKnownSymbol::ToPrimitive => "[Symbol.toPrimitive]",
+            WellKnownSymbol::Unscopables => "[Symbol.unscopables]",
+        }
+        .to_owned(),
+    };
+    format!("{prefix}{base}")
+}
+
+fn function_template<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    st: &mut State,
+    f: &HostFn,
+    length: u32,
+    name: &str,
+    signature: Option<v8::Local<'s, v8::Signature>>,
+) -> v8::Local<'s, v8::FunctionTemplate> {
+    let idx = st.push_callback(Callback::Fn(f.clone()));
+    let data = v8::Integer::new_from_unsigned(scope, idx);
+    let mut b = v8::FunctionTemplate::builder(host_trampoline)
+        .data(data.into())
+        .length(length as i32)
+        .constructor_behavior(v8::ConstructorBehavior::Throw);
+    if let Some(sig) = signature {
+        b = b.signature(sig);
+    }
+    let ft = b.build(scope);
+    ft.set_class_name(v8_str(scope, name));
+    ft
+}
+
+fn install_member<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    st: &mut State,
+    target: Target<'s>,
+    signature: Option<v8::Local<'s, v8::Signature>>,
+    m: &Member,
+) {
+    let key = v8_key(scope, &m.key);
+    let template: &v8::Template = match &target {
+        Target::Function(ft) => ft,
+        Target::Object(ot) => ot,
+    };
+    match &m.kind {
+        MemberKind::Method { length, f } => {
+            let name = function_name(&m.key, "");
+            let ft = function_template(scope, st, f, *length, &name, signature);
+            template.set_with_attr(key, ft.into(), v8_attrs(m.attrs, false));
+        }
+        MemberKind::Accessor { get, set } => {
+            let getter = get.as_ref().map(|f| {
+                let name = function_name(&m.key, "get ");
+                function_template(scope, st, f, 0, &name, signature)
+            });
+            let setter = set.as_ref().map(|f| {
+                let name = function_name(&m.key, "set ");
+                function_template(scope, st, f, 1, &name, signature)
+            });
+            if getter.is_none() && setter.is_none() {
+                return;
+            }
+            let attrs = v8_attrs(m.attrs, true);
+            match target {
+                Target::Function(ft) => ft.set_accessor_property(key, getter, setter, attrs),
+                Target::Object(ot) => ot.set_accessor_property(key, getter, setter, attrs),
+            }
+        }
+        MemberKind::Value(v) => {
+            let value: v8::Local<v8::Data> = match v {
+                JsValue::Undefined => v8::undefined(scope).into(),
+                JsValue::Null => v8::null(scope).into(),
+                JsValue::Bool(b) => v8::Boolean::new(scope, *b).into(),
+                JsValue::Number(n) => v8::Number::new(scope, *n).into(),
+                JsValue::String(s) | JsValue::Json(s) | JsValue::Opaque(s) => {
+                    v8_str(scope, s).into()
+                }
+            };
+            template.set_with_attr(key, value, v8_attrs(m.attrs, false));
+        }
+        MemberKind::Interface(id) => {
+            if let Some(entry) = st.interfaces.get(id.0 as usize) {
+                let ft = v8::Local::new(scope, &entry.template);
+                template.set_with_attr(key, ft.into(), v8_attrs(m.attrs, false));
+            }
+        }
+        MemberKind::Intrinsic(which) => {
+            let intrinsic = match which {
+                Intrinsic::ArrayProtoEntries => v8::Intrinsic::ArrayProtoEntries,
+                Intrinsic::ArrayProtoForEach => v8::Intrinsic::ArrayProtoForEach,
+                Intrinsic::ArrayProtoKeys => v8::Intrinsic::ArrayProtoKeys,
+                Intrinsic::ArrayProtoValues => v8::Intrinsic::ArrayProtoValues,
+            };
+            template.set_intrinsic_data_property(key, intrinsic, v8_attrs(m.attrs, false));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Values, handles, wrappers
+// ---------------------------------------------------------------------------
+
+fn v8_str<'s>(scope: &v8::PinScope<'s, '_, ()>, s: &str) -> v8::Local<'s, v8::String> {
+    // Only fails above V8's max string length (~512 MB).
+    v8::String::new(scope, s).unwrap_or_else(|| v8::String::empty(scope))
+}
+
+fn value_kind(v: v8::Local<'_, v8::Value>) -> ValueKind {
+    if v.is_undefined() {
+        ValueKind::Undefined
+    } else if v.is_null() {
+        ValueKind::Null
+    } else if v.is_boolean() {
+        ValueKind::Bool
+    } else if v.is_number() {
+        ValueKind::Number
+    } else if v.is_big_int() {
+        ValueKind::BigInt
+    } else if v.is_string() {
+        ValueKind::String
+    } else if v.is_symbol() {
+        ValueKind::Symbol
+    } else if v.is_function() {
+        ValueKind::Function
+    } else {
+        ValueKind::Object
+    }
+}
+
+fn detail_string(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> String {
+    v8::tc_scope!(let tc, scope);
+    v.to_detail_string(tc)
+        .map(|s| s.to_rust_string_lossy(tc))
+        .unwrap_or_default()
+}
+
+fn to_js_value(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> JsValue {
+    match value_kind(v) {
+        ValueKind::Undefined => JsValue::Undefined,
+        ValueKind::Null => JsValue::Null,
+        ValueKind::Bool => JsValue::Bool(v.is_true()),
+        ValueKind::Number => JsValue::Number(v.number_value(scope).unwrap_or(f64::NAN)),
+        ValueKind::String => JsValue::String(v.to_rust_string_lossy(scope)),
+        ValueKind::BigInt | ValueKind::Symbol | ValueKind::Function => {
+            JsValue::Opaque(detail_string(scope, v))
+        }
+        ValueKind::Object => {
+            let json = {
+                v8::tc_scope!(let tc, scope);
+                v8::json::stringify(tc, v).map(|s| s.to_rust_string_lossy(tc))
+            };
+            match json {
+                Some(s) if s != "undefined" => JsValue::Json(s),
+                _ => JsValue::Opaque(detail_string(scope, v)),
+            }
+        }
+    }
+}
+
+fn store_handle(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    v: v8::Local<'_, v8::Value>,
+) -> Handle {
+    let global = v8::Global::new(scope, v);
+    let (idx, generation) = state.borrow_mut().handles.insert((realm, global));
+    Handle { idx, generation }
+}
+
+fn load_handle<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    handle: Handle,
+) -> Result<v8::Local<'s, v8::Value>, JsError> {
+    let st = state.borrow();
+    let (_, global) = st
+        .handles
+        .get(handle.idx, handle.generation)
+        .ok_or_else(|| JsError::host("stale handle"))?;
+    Ok(v8::Local::new(scope, global))
+}
+
+fn set_host(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, host: HostRef) {
+    let kind = v8::Integer::new_from_unsigned(scope, host.kind);
+    let id = v8::Integer::new_from_unsigned(scope, host.id);
+    obj.set_internal_field(0, kind.into());
+    obj.set_internal_field(1, id.into());
+}
+
+fn read_host(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>) -> Option<HostRef> {
+    if obj.internal_field_count() < HOST_FIELDS {
+        return None;
+    }
+    let field = |i| -> Option<u32> {
+        let data = obj.get_internal_field(scope, i)?;
+        let int = v8::Local::<v8::Integer>::try_from(data).ok()?;
+        u32::try_from(int.value()).ok()
+    };
+    Some(HostRef {
+        kind: field(0)?,
+        id: field(1)?,
+    })
+}
+
+fn wrap_host<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    iface: InterfaceId,
+    host: HostRef,
+) -> Result<v8::Local<'s, v8::Object>, JsError> {
+    let ft = {
+        let st = state.borrow();
+        if let Some(g) = st.wrappers.get(&(realm, host)) {
+            return Ok(v8::Local::new(scope, g));
+        }
+        let entry = st
+            .interfaces
+            .get(iface.0 as usize)
+            .ok_or_else(|| JsError::host(format!("unknown interface {iface:?}")))?;
+        v8::Local::new(scope, &entry.template)
+    };
+    let obj = ft
+        .instance_template(scope)
+        .new_instance(scope)
+        .ok_or_else(|| JsError::host("wrapper creation failed"))?;
+    set_host(scope, obj, host);
+    let global = v8::Global::new(scope, obj);
+    state.borrow_mut().wrappers.insert((realm, host), global);
+    Ok(obj)
+}
+
+fn arg_to_v8<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    arg: &Arg,
+) -> Result<v8::Local<'s, v8::Value>, HostError> {
+    Ok(match arg {
+        Arg::Undefined => v8::undefined(scope).into(),
+        Arg::Null => v8::null(scope).into(),
+        Arg::Bool(b) => v8::Boolean::new(scope, *b).into(),
+        Arg::Number(n) => v8::Number::new(scope, *n).into(),
+        Arg::String(s) => v8_str(scope, s).into(),
+        Arg::Json(s) => {
+            let s = v8_str(scope, s);
+            v8::json::parse(scope, s).ok_or(HostError::Thrown)?
+        }
+        Arg::Handle(h) => load_handle(scope, state, *h).map_err(|e| HostError::Error(e.message))?,
+        Arg::Host(iface, host) => wrap_host(scope, state, realm, *iface, *host)
+            .map_err(|e| HostError::Error(e.message))?
+            .into(),
+    })
+}
+
+fn throw(scope: &mut v8::PinScope<'_, '_>, state: &SharedState, realm: RealmId, err: HostError) {
+    let exception = match err {
+        HostError::Thrown => return,
+        HostError::TypeError(m) => {
+            let m = v8_str(scope, &m);
+            v8::Exception::type_error(scope, m)
+        }
+        HostError::RangeError(m) => {
+            let m = v8_str(scope, &m);
+            v8::Exception::range_error(scope, m)
+        }
+        HostError::SyntaxError(m) => {
+            let m = v8_str(scope, &m);
+            v8::Exception::syntax_error(scope, m)
+        }
+        HostError::ReferenceError(m) => {
+            let m = v8_str(scope, &m);
+            v8::Exception::reference_error(scope, m)
+        }
+        HostError::Error(m) => {
+            let m = v8_str(scope, &m);
+            v8::Exception::error(scope, m)
+        }
+        HostError::Throw(arg) => match arg_to_v8(scope, state, realm, &arg) {
+            Ok(v) => v,
+            Err(_) => return,
+        },
+    };
+    scope.throw_exception(exception);
+}
+
+fn new_promise<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    realm: RealmId,
+) -> Option<(v8::Local<'s, v8::Promise>, Resolver)> {
+    let resolver = v8::PromiseResolver::new(scope)?;
+    let promise = resolver.get_promise(scope);
+    let global = v8::Global::new(scope, resolver);
+    let (idx, generation) = state.borrow_mut().resolvers.insert((realm, global));
+    Some((promise, Resolver { idx, generation }))
+}
+
+fn settle_promise(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    resolver: Resolver,
+    outcome: Result<Arg, HostError>,
+) -> Result<(), HostError> {
+    let global = state
+        .borrow_mut()
+        .resolvers
+        .remove(resolver.idx, resolver.generation)
+        .map(|(_, g)| g)
+        .ok_or_else(|| HostError::Error("stale resolver".into()))?;
+    let resolver = v8::Local::new(scope, &global);
+    match outcome {
+        Ok(arg) => {
+            let v = arg_to_v8(scope, state, realm, &arg)?;
+            resolver.resolve(scope, v);
+        }
+        Err(err) => {
+            // Build the exception value without leaving it pending.
+            let v = {
+                v8::tc_scope!(let tc, scope);
+                throw(tc, state, realm, err);
+                tc.exception()
+            };
+            let v = v.unwrap_or_else(|| v8::undefined(scope).into());
+            resolver.reject(scope, v);
+        }
+    }
+    Ok(())
+}
+
+fn call_inner<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    func: Handle,
+    this: &Arg,
+    args: &[Arg],
+) -> Result<Option<v8::Local<'s, v8::Value>>, JsError> {
+    let f = load_handle(scope, state, func)?;
+    let f = v8::Local::<v8::Function>::try_from(f)
+        .map_err(|_| JsError::new(JsErrorKind::Host, "handle is not a function"))?;
+    let conv = |scope: &mut v8::PinScope<'s, '_>, a: &Arg| arg_to_v8(scope, state, realm, a);
+    let Ok(recv) = conv(scope, this) else {
+        return Ok(None);
+    };
+    let mut argv = Vec::with_capacity(args.len());
+    for a in args {
+        match conv(scope, a) {
+            Ok(v) => argv.push(v),
+            Err(_) => return Ok(None),
+        }
+    }
+    Ok(f.call(scope, recv, &argv))
+}
+
+// ---------------------------------------------------------------------------
+// Scripts, modules, errors
+// ---------------------------------------------------------------------------
+
+fn script_origin<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    origin: ScriptOrigin<'_>,
+    is_module: bool,
+) -> v8::ScriptOrigin<'s> {
+    let name = v8_str(scope, origin.url);
+    v8::ScriptOrigin::new(
+        scope,
+        name.into(),
+        origin.line as i32,
+        origin.column as i32,
+        false,
+        -1,
+        None,
+        false,
+        false,
+        is_module,
+        None,
+    )
+}
+
+fn run_script<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    source: &str,
+    origin: ScriptOrigin<'_>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let code = v8::String::new(scope, source)?;
+    let origin = script_origin(scope, origin, false);
+    let script = v8::Script::compile(scope, code, Some(&origin))?;
+    script.run(scope)
+}
+
+fn compile_module<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    source: &str,
+    origin: ScriptOrigin<'_>,
+) -> Option<v8::Local<'s, v8::Module>> {
+    let code = v8::String::new(scope, source)?;
+    let v8_origin = script_origin(scope, origin, true);
+    let mut src = v8::script_compiler::Source::new(code, Some(&v8_origin));
+    let module = v8::script_compiler::compile_module(scope, &mut src)?;
+    let global = v8::Global::new(scope, module);
+    if let Some(r) = state.borrow_mut().realms.get_mut(&realm) {
+        r.modules.push(ModuleEntry {
+            url: origin.url.to_owned(),
+            hash: module.get_identity_hash(),
+            module: global,
+        });
+    }
+    Some(module)
+}
+
+fn resolve_module<'s>(
+    context: v8::Local<'s, v8::Context>,
+    specifier: v8::Local<'s, v8::String>,
+    _import_attributes: v8::Local<'s, v8::FixedArray>,
+    referrer: v8::Local<'s, v8::Module>,
+) -> Option<v8::Local<'s, v8::Module>> {
+    // SAFETY: V8 calls this synchronously from `instantiate_module` on the
+    // isolate's thread; the context belongs to that isolate.
+    v8::callback_scope!(unsafe scope, context);
+    let state = shared_state(scope);
+    let realm = current_realm(scope);
+    let specifier = specifier.to_rust_string_lossy(scope);
+
+    let (loader, referrer_url) = {
+        let st = state.borrow();
+        let r = st.realms.get(&realm)?;
+        let hash = referrer.get_identity_hash();
+        let referrer_url = r
+            .modules
+            .iter()
+            .find(|m| m.hash == hash && v8::Local::new(scope, &m.module) == referrer)
+            .map(|m| m.url.clone())
+            .unwrap_or_default();
+        (r.loader.clone(), referrer_url)
+    };
+    let Some(loader) = loader else {
+        let msg = format!("Failed to resolve module specifier \"{specifier}\"");
+        throw(scope, &state, realm, HostError::TypeError(msg));
+        return None;
+    };
+    let loaded = match loader(&specifier, &referrer_url) {
+        Ok(l) => l,
+        Err(msg) => {
+            throw(scope, &state, realm, HostError::TypeError(msg));
+            return None;
+        }
+    };
+    let cached = {
+        let st = state.borrow();
+        st.realms
+            .get(&realm)?
+            .modules
+            .iter()
+            .find(|m| m.url == loaded.url)
+            .map(|m| v8::Local::new(scope, &m.module))
+    };
+    if let Some(m) = cached {
+        return Some(m);
+    }
+    compile_module(
+        scope,
+        &state,
+        realm,
+        &loaded.source,
+        ScriptOrigin::new(&loaded.url),
+    )
+}
+
+/// Turn the pending exception of `tc` into a [`JsError`].
+fn caught(
+    tc: &mut v8::PinnedRef<'_, v8::TryCatch<'_, '_, v8::HandleScope<'_>>>,
+    state: &SharedState,
+) -> JsError {
+    if tc.has_terminated() || tc.is_execution_terminating() {
+        tc.cancel_terminate_execution();
+        return if state.borrow().take_oom() {
+            JsError::new(JsErrorKind::OutOfMemory, "JS heap limit reached")
+        } else {
+            JsError::new(JsErrorKind::Terminated, "Execution terminated")
+        };
+    }
+    match tc.exception() {
+        Some(exc) => {
+            let message = tc.message();
+            exception_to_error(tc, exc, message)
+        }
+        None => JsError::new(JsErrorKind::Exception, "unknown error"),
+    }
+}
+
+fn exception_to_error(
+    scope: &mut v8::PinScope<'_, '_>,
+    exc: v8::Local<'_, v8::Value>,
+    message: Option<v8::Local<'_, v8::Message>>,
+) -> JsError {
+    let mut err = JsError::new(JsErrorKind::Exception, String::new());
+    // Reading `message`/`stack` may run user getters; never let that throw
+    // out of here.
+    {
+        v8::tc_scope!(let tc, scope);
+        let as_object = v8::Local::<v8::Object>::try_from(exc).ok();
+        let read = |tc: &mut v8::PinScope<'_, '_>, key: &str| -> Option<String> {
+            let obj = as_object?;
+            let k = v8_str(tc, key);
+            let v = obj.get(tc, k.into())?;
+            v.is_string().then(|| v.to_rust_string_lossy(tc))
+        };
+        if as_object.is_some() {
+            err.stack = read(tc, "stack");
+            if let Some(m) = read(tc, "message") {
+                err.message = m;
+            } else if exc.is_native_error() {
+                err.message = String::new();
+            }
+        }
+    }
+    if err.message.is_empty() && !exc.is_native_error() {
+        err.message = detail_string(scope, exc);
+    }
+    let message = message.or_else(|| Some(v8::Exception::create_message(scope, exc)));
+    if let Some(msg) = message {
+        if let Some(name) = msg.get_script_resource_name(scope)
+            && name.is_string()
+        {
+            err.url = Some(name.to_rust_string_lossy(scope));
+        }
+        err.line = msg.get_line_number(scope).map(|l| l as u32);
+        err.column = Some(msg.get_start_column() as u32);
+    }
+    err
+}
