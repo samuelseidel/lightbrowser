@@ -6,3 +6,44 @@ license.workspace = true
 publish = false
 
 [dependencies]
+lb-persona = { path = "../lb-persona" }
+
+# TLS: BoringSSL, the stack Chrome uses (ADR 0003).
+boring = "5"
+tokio-boring = "5"
+
+# HTTP
+http = "1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+# h2 is replaced by the vendored fork via [patch.crates-io] in the workspace
+# Cargo.toml once that fork exists (M1, task 3).
+h2 = "0.4"
+bytes = "1"
+
+# Async
+tokio = { version = "1", features = ["rt", "net", "io-util", "time", "macros", "sync"] }
+futures-util = { version = "0.3", default-features = false }
+
+# DNS
+hickory-resolver = "0.25"
+
+# Cookies
+cookie = "0.18"
+cookie_store = "0.22"
+url = "2"
+
+# Body decoding
+flate2 = "1"
+brotli = "8"
+zstd = "0.13"
+
+# Profiles
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

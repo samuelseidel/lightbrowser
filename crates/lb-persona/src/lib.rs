@@ -6,6 +6,61 @@
 
 pub mod sfc32;
 
+/// The persona a browsing context presents. M1 carries only what the network
+/// layer needs; the full schema (`profiles/schemas/persona_v2.schema.json`)
+/// arrives in M4 and is validated by the vendored consistency rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Persona {
+    pub family: BrowserFamily,
+    /// Full `User-Agent` string.
+    pub user_agent: String,
+    /// `Accept-Language` value, e.g. `en-US,en;q=0.9`.
+    pub accept_language: String,
+    /// Chrome only: `sec-ch-ua` value, e.g. `"Chromium";v="131", ...`.
+    pub sec_ch_ua: Option<String>,
+    /// Chrome only: `sec-ch-ua-platform` value without quotes, e.g. `Windows`.
+    pub sec_ch_ua_platform: Option<String>,
+    /// Chrome only: `sec-ch-ua-mobile` (`?0` / `?1`).
+    pub sec_ch_ua_mobile: Option<String>,
+    /// `profile_id` of the TLS/H2 profile in `profiles/tls/`.
+    pub tls_profile_id: String,
+}
+
+impl Persona {
+    /// Built-in Chrome 131 on Windows 10 persona, used when none is given.
+    pub fn default_chrome() -> Self {
+        Self {
+            family: BrowserFamily::Chrome,
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                .into(),
+            accept_language: "en-US,en;q=0.9".into(),
+            sec_ch_ua: Some(
+                r#""Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24""#.into(),
+            ),
+            sec_ch_ua_platform: Some("Windows".into()),
+            sec_ch_ua_mobile: Some("?0".into()),
+            tls_profile_id: "chrome_131_win10".into(),
+        }
+    }
+
+    /// Built-in Firefox 128 on Windows 10 persona (matches the captured
+    /// `firefox_128_win10` TLS profile from stealth-browser).
+    pub fn default_firefox() -> Self {
+        Self {
+            family: BrowserFamily::Firefox,
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 \
+Firefox/128.0"
+                .into(),
+            accept_language: "en-US,en;q=0.5".into(),
+            sec_ch_ua: None,
+            sec_ch_ua_platform: None,
+            sec_ch_ua_mobile: None,
+            tls_profile_id: "firefox_128_win10".into(),
+        }
+    }
+}
+
 use std::fmt;
 use std::str::FromStr;
 
