@@ -114,6 +114,8 @@ pub struct Interface {
     pub unscopables: Vec<String>,
     pub callback_interface: bool,
     pub from_fixture: bool,
+    /// The prototype's parent is a JS built-in (`Error` for DOMException).
+    pub builtin_parent: Option<String>,
 }
 
 impl Interface {

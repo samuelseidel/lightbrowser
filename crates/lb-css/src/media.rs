@@ -1,7 +1,7 @@
 //! Media queries: parsing, evaluation against a [`MediaEnv`] built from the
 //! persona, and serialization for `MediaQueryList.media`.
 
-use cssparser::{Parser, ParserInput, Token};
+use cssparser::{Parser, Token};
 use lb_persona::PersonaProfile;
 
 use crate::values::{PResult, bad, fmt_num};
@@ -223,12 +223,11 @@ impl MediaQueryList {
     /// Parses a media query list (e.g. a `media` attribute or the text
     /// passed to `matchMedia`). Never fails: bad queries become `not all`.
     pub fn parse(text: &str) -> MediaQueryList {
-        let mut input = ParserInput::new(text);
-        let mut p = Parser::new(&mut input);
+        let mut p = Parser::new(text);
         Self::parse_from(&mut p)
     }
 
-    pub(crate) fn parse_from(p: &mut Parser<'_, '_>) -> MediaQueryList {
+    pub(crate) fn parse_from(p: &mut Parser<'_>) -> MediaQueryList {
         let mut queries = Vec::new();
         if p.is_exhausted() {
             return MediaQueryList { queries };
@@ -238,7 +237,7 @@ impl MediaQueryList {
                 .parse_until_before(cssparser::Delimiter::Comma, |p| {
                     let q = parse_query(p)?;
                     p.expect_exhausted()?;
-                    Ok::<_, cssparser::ParseError<'_, ()>>(q)
+                    Ok::<_, cssparser::ParseError<()>>(q)
                 })
                 .unwrap_or(MediaQuery {
                     not: false,
@@ -495,16 +494,26 @@ impl Feature {
     }
 }
 
-fn parse_query<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, MediaQuery> {
+fn parse_query<'i>(p: &mut Parser<'i>) -> PResult<MediaQuery> {
     // A query is either `[not|only]? type [and condition]?` or a condition.
     let start = p.state();
     if let Ok(ident) = p.expect_ident_cloned() {
         let lower = ident.to_ascii_lowercase();
         let (not, only, media_type) = match lower.as_str() {
-            "not" | "only" => {
-                let t = p.expect_ident()?.to_ascii_lowercase();
-                (lower == "not", lower == "only", t)
-            }
+            "not" | "only" => match p.try_parse(|p| p.expect_ident_cloned()) {
+                Ok(t) => (lower == "not", lower == "only", t.to_ascii_lowercase()),
+                Err(_) if lower == "not" => {
+                    p.reset(&start);
+                    return Ok(MediaQuery {
+                        not: false,
+                        only: false,
+                        media_type: None,
+                        cond: Some(parse_condition(p, true)?),
+                        invalid: false,
+                    });
+                }
+                Err(e) => return Err(e.into()),
+            },
             _ => (false, false, lower),
         };
         if matches!(media_type.as_str(), "and" | "or" | "not" | "only" | "layer") {
@@ -535,7 +544,7 @@ fn parse_query<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, MediaQuery> {
 }
 
 /// `<media-condition>`; `allow_or` is false after `type and`.
-fn parse_condition<'i>(p: &mut Parser<'i, '_>, allow_or: bool) -> PResult<'i, Cond> {
+fn parse_condition<'i>(p: &mut Parser<'i>, allow_or: bool) -> PResult<Cond> {
     if p.try_parse(|p| p.expect_ident_matching("not")).is_ok() {
         return Ok(Cond::Not(Box::new(parse_in_parens(p)?)));
     }
@@ -568,14 +577,14 @@ fn parse_condition<'i>(p: &mut Parser<'i, '_>, allow_or: bool) -> PResult<'i, Co
     })
 }
 
-fn parse_in_parens<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Cond> {
+fn parse_in_parens<'i>(p: &mut Parser<'i>) -> PResult<Cond> {
     let start = p.position();
     match p.next()? {
         Token::ParenthesisBlock => {}
         Token::Function(_) => {
             p.parse_nested_block(|p| {
                 while p.next().is_ok() {}
-                Ok::<_, cssparser::ParseError<'_, ()>>(())
+                Ok::<_, cssparser::ParseError<()>>(())
             })?;
             return Ok(Cond::Unknown(p.slice_from(start).to_owned()));
         }
@@ -585,14 +594,14 @@ fn parse_in_parens<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Cond> {
         if let Ok(c) = p.try_parse(|p| {
             let c = parse_condition(p, true)?;
             p.expect_exhausted()?;
-            Ok::<_, cssparser::ParseError<'_, ()>>(c)
+            Ok::<_, cssparser::ParseError<()>>(c)
         }) {
             return Ok(c);
         }
         if let Ok(f) = p.try_parse(|p| {
             let f = parse_feature(p)?;
             p.expect_exhausted()?;
-            Ok::<_, cssparser::ParseError<'_, ()>>(f)
+            Ok::<_, cssparser::ParseError<()>>(f)
         }) {
             return Ok(Cond::Feature(f));
         }
@@ -605,7 +614,7 @@ fn parse_in_parens<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Cond> {
     Ok(r)
 }
 
-fn parse_cmp<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Cmp> {
+fn parse_cmp<'i>(p: &mut Parser<'i>) -> PResult<Cmp> {
     let first = match p.next()? {
         Token::Delim('<') => Cmp::Lt,
         Token::Delim('>') => Cmp::Gt,
@@ -624,7 +633,7 @@ fn parse_cmp<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Cmp> {
     })
 }
 
-fn parse_value<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, MfValue> {
+fn parse_value<'i>(p: &mut Parser<'i>) -> PResult<MfValue> {
     let v = match p.next()?.clone() {
         Token::Number { value, .. } => {
             // `a / b` ratio.
@@ -655,7 +664,7 @@ fn parse_value<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, MfValue> {
     Ok(v)
 }
 
-fn parse_feature<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Feature> {
+fn parse_feature<'i>(p: &mut Parser<'i>) -> PResult<Feature> {
     // `name`, `name: value`, `name op value`, `value op name [op value]`.
     if let Ok(name) = p.try_parse(|p| p.expect_ident().map(|s| s.to_ascii_lowercase())) {
         if p.is_exhausted() {

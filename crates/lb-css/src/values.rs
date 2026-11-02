@@ -6,10 +6,10 @@ use std::rc::Rc;
 use cssparser::{ParseError, Parser, Token, match_ignore_ascii_case};
 
 /// Parse result with no custom error type.
-pub(crate) type PResult<'i, T> = Result<T, ParseError<'i, ()>>;
+pub(crate) type PResult<T> = Result<T, ParseError<()>>;
 
-pub(crate) fn bad<'i, T>(input: &Parser<'i, '_>) -> PResult<'i, T> {
-    Err(input.new_custom_error(()))
+pub(crate) fn bad<T>(_input: &Parser<'_>) -> PResult<T> {
+    Err(ParseError::custom(()))
 }
 
 // ----- numbers -----
@@ -137,13 +137,12 @@ fn clamp_u8(v: f32) -> u8 {
 }
 
 /// Parses `<color>`.
-pub(crate) fn parse_color<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, ColorValue> {
-    let location = input.current_source_location();
+pub(crate) fn parse_color<'i>(input: &mut Parser<'i>) -> PResult<ColorValue> {
     let token = input.next()?.clone();
     match &token {
         Token::Hash(h) | Token::IDHash(h) => cssparser::color::parse_hash_color(h.as_bytes())
             .map(|(r, g, b, a)| ColorValue::Rgba(Color { r, g, b, a }))
-            .map_err(|_| location.new_custom_error(())),
+            .map_err(|_| ParseError::custom(())),
         Token::Ident(name) => {
             if name.eq_ignore_ascii_case("currentcolor") {
                 return Ok(ColorValue::CurrentColor);
@@ -156,7 +155,7 @@ pub(crate) fn parse_color<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, ColorVa
             }
             system_color(name)
                 .map(ColorValue::Rgba)
-                .ok_or_else(|| location.new_custom_error(()))
+                .ok_or_else(|| ParseError::custom(()))
         }
         Token::Function(name) => {
             let name = name.to_ascii_lowercase();
@@ -166,12 +165,12 @@ pub(crate) fn parse_color<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, ColorVa
                 _ => bad(p),
             })
         }
-        _ => Err(location.new_custom_error(())),
+        _ => Err(ParseError::custom(())),
     }
 }
 
 /// One color component: number or percentage (`pct_scale` maps 100%).
-fn component<'i>(p: &mut Parser<'i, '_>, pct_scale: f32) -> PResult<'i, f32> {
+fn component<'i>(p: &mut Parser<'i>, pct_scale: f32) -> PResult<f32> {
     match p.next()?.clone() {
         Token::Number { value, .. } => Ok(value),
         Token::Percentage { unit_value, .. } => Ok(unit_value * pct_scale),
@@ -180,7 +179,7 @@ fn component<'i>(p: &mut Parser<'i, '_>, pct_scale: f32) -> PResult<'i, f32> {
     }
 }
 
-fn alpha_sep<'i>(p: &mut Parser<'i, '_>, legacy: bool) -> PResult<'i, f32> {
+fn alpha_sep<'i>(p: &mut Parser<'i>, legacy: bool) -> PResult<f32> {
     if p.is_exhausted() {
         return Ok(1.0);
     }
@@ -193,7 +192,7 @@ fn alpha_sep<'i>(p: &mut Parser<'i, '_>, legacy: bool) -> PResult<'i, f32> {
     Ok(a.clamp(0.0, 1.0))
 }
 
-fn parse_rgb_args<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, ColorValue> {
+fn parse_rgb_args<'i>(p: &mut Parser<'i>) -> PResult<ColorValue> {
     let r = component(p, 255.0)?;
     let legacy = p.try_parse(|p| p.expect_comma()).is_ok();
     let g = component(p, 255.0)?;
@@ -210,7 +209,7 @@ fn parse_rgb_args<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, ColorValue> {
     }))
 }
 
-fn parse_hsl_args<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, ColorValue> {
+fn parse_hsl_args<'i>(p: &mut Parser<'i>) -> PResult<ColorValue> {
     let h = match p.next()?.clone() {
         Token::Number { value, .. } => value,
         Token::Dimension { value, unit, .. } => match_ignore_ascii_case! { &unit,
@@ -458,10 +457,10 @@ impl LpAuto {
 
 /// Parses `<length-percentage>` (or `<length>` when `allow_pct` is false).
 pub(crate) fn parse_length<'i>(
-    input: &mut Parser<'i, '_>,
+    input: &mut Parser<'i>,
     allow_pct: bool,
     allow_negative: bool,
-) -> PResult<'i, Calc> {
+) -> PResult<Calc> {
     let c = parse_calc_leaf(input)?;
     if c.is_number() {
         // Only a literal 0 is a valid length.
@@ -504,14 +503,13 @@ fn dim_unit(value: f32, unit: &str) -> Option<Calc> {
 }
 
 /// One calc operand: number, dimension, percentage, or a math function.
-fn parse_calc_leaf<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, Calc> {
-    let location = input.current_source_location();
+fn parse_calc_leaf<'i>(input: &mut Parser<'i>) -> PResult<Calc> {
     let token = input.next()?.clone();
     match token {
         Token::Number { value, .. } => Ok(Calc::Num(value)),
         Token::Percentage { unit_value, .. } => Ok(Calc::Dim(unit_value * 100.0, Unit::Pct)),
         Token::Dimension { value, unit, .. } => {
-            dim_unit(value, &unit).ok_or_else(|| location.new_custom_error(()))
+            dim_unit(value, &unit).ok_or_else(|| ParseError::custom(()))
         }
         Token::Function(name) => {
             let name = name.to_ascii_lowercase();
@@ -537,17 +535,17 @@ fn parse_calc_leaf<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, Calc> {
             })
         }
         Token::ParenthesisBlock => input.parse_nested_block(parse_sum),
-        _ => Err(location.new_custom_error(())),
+        _ => Err(ParseError::custom(())),
     }
 }
 
-fn parse_sum<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Calc> {
+fn parse_sum<'i>(p: &mut Parser<'i>) -> PResult<Calc> {
     let mut terms = vec![parse_product(p)?];
     loop {
         let sign = p.try_parse(|p| match p.next()? {
             Token::Delim('+') => Ok(1.0),
             Token::Delim('-') => Ok(-1.0),
-            _ => Err(p.new_custom_error::<_, ()>(())),
+            _ => Err(ParseError::<()>::custom(())),
         });
         let Ok(sign) = sign else { break };
         let t = parse_product(p)?;
@@ -571,13 +569,13 @@ fn parse_sum<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Calc> {
     Ok(Calc::Sum(terms))
 }
 
-fn parse_product<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Calc> {
+fn parse_product<'i>(p: &mut Parser<'i>) -> PResult<Calc> {
     let mut acc = parse_calc_leaf(p)?;
     loop {
         let op = p.try_parse(|p| match p.next()? {
             Token::Delim('*') => Ok('*'),
             Token::Delim('/') => Ok('/'),
-            _ => Err(p.new_custom_error::<_, ()>(())),
+            _ => Err(ParseError::<()>::custom(())),
         });
         let Ok(op) = op else { break };
         let rhs = parse_calc_leaf(p)?;
@@ -603,7 +601,7 @@ fn parse_product<'i>(p: &mut Parser<'i, '_>) -> PResult<'i, Calc> {
 }
 
 /// Parses a plain `<number>` (also inside `calc()`).
-pub(crate) fn parse_number<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, f32> {
+pub(crate) fn parse_number<'i>(input: &mut Parser<'i>) -> PResult<f32> {
     let c = parse_calc_leaf(input)?;
     if c.is_number() {
         Ok(c.eval(0.0))
@@ -613,7 +611,7 @@ pub(crate) fn parse_number<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, f32> {
 }
 
 /// Parses an `<integer>`.
-pub(crate) fn parse_integer<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, i32> {
+pub(crate) fn parse_integer<'i>(input: &mut Parser<'i>) -> PResult<i32> {
     match input.next()?.clone() {
         Token::Number {
             int_value: Some(v), ..
@@ -644,7 +642,6 @@ macro_rules! keyword_enum {
         }
     };
 }
-pub(crate) use keyword_enum;
 
 keyword_enum!(
     /// `display`. Two-keyword forms map onto these.
@@ -723,7 +720,7 @@ impl Display {
 }
 
 /// Parses `display`, including two-keyword forms.
-pub(crate) fn parse_display<'i>(input: &mut Parser<'i, '_>) -> PResult<'i, Display> {
+pub(crate) fn parse_display<'i>(input: &mut Parser<'i>) -> PResult<Display> {
     let first = input.expect_ident()?.to_ascii_lowercase();
     let second = input
         .try_parse(|p| p.expect_ident().map(|s| s.to_ascii_lowercase()))
@@ -931,25 +928,84 @@ pub enum LineHeight {
     Px(f32),
 }
 
-/// One grid track size (a simple subset of `<track-size>`).
+/// One grid track size (a simple subset of `<track-size>`). `L` is the
+/// length type: [`Calc`] when specified, [`Lp`] when computed.
 #[derive(Clone, Debug, PartialEq)]
-pub enum TrackSize {
-    Lp(Lp),
+pub enum TrackSize<L = Lp> {
+    Lp(L),
     Fr(f32),
     Auto,
     MinContent,
     MaxContent,
-    MinMax(Box<TrackSize>, Box<TrackSize>),
-    FitContent(Lp),
+    MinMax(Box<TrackSize<L>>, Box<TrackSize<L>>),
+    FitContent(L),
+}
+
+impl<L> TrackSize<L> {
+    /// Maps the length type.
+    pub fn map<M>(&self, f: &impl Fn(&L) -> M) -> TrackSize<M> {
+        match self {
+            TrackSize::Lp(l) => TrackSize::Lp(f(l)),
+            TrackSize::Fr(v) => TrackSize::Fr(*v),
+            TrackSize::Auto => TrackSize::Auto,
+            TrackSize::MinContent => TrackSize::MinContent,
+            TrackSize::MaxContent => TrackSize::MaxContent,
+            TrackSize::MinMax(a, b) => TrackSize::MinMax(Box::new(a.map(f)), Box::new(b.map(f))),
+            TrackSize::FitContent(l) => TrackSize::FitContent(f(l)),
+        }
+    }
+}
+
+impl TrackSize<Lp> {
+    pub fn to_css(&self) -> String {
+        match self {
+            TrackSize::Lp(l) => l.to_css(),
+            TrackSize::Fr(v) => format!("{}fr", fmt_num(*v)),
+            TrackSize::Auto => "auto".into(),
+            TrackSize::MinContent => "min-content".into(),
+            TrackSize::MaxContent => "max-content".into(),
+            TrackSize::MinMax(a, b) => format!("minmax({}, {})", a.to_css(), b.to_css()),
+            TrackSize::FitContent(l) => format!("fit-content({})", l.to_css()),
+        }
+    }
 }
 
 /// One entry of `grid-template-rows/columns`.
 #[derive(Clone, Debug, PartialEq)]
-pub enum TrackListEntry {
-    Track(TrackSize),
+pub enum TrackListEntry<L = Lp> {
+    Track(TrackSize<L>),
     /// `repeat(n | auto-fill | auto-fit, tracks)`; `count` 0 = auto-fill,
     /// -1 = auto-fit.
-    Repeat(i32, Vec<TrackSize>),
+    Repeat(i32, Vec<TrackSize<L>>),
+}
+
+impl<L> TrackListEntry<L> {
+    /// Maps the length type.
+    pub fn map<M>(&self, f: &impl Fn(&L) -> M) -> TrackListEntry<M> {
+        match self {
+            TrackListEntry::Track(t) => TrackListEntry::Track(t.map(f)),
+            TrackListEntry::Repeat(n, ts) => {
+                TrackListEntry::Repeat(*n, ts.iter().map(|t| t.map(f)).collect())
+            }
+        }
+    }
+}
+
+impl TrackListEntry<Lp> {
+    pub fn to_css(&self) -> String {
+        match self {
+            TrackListEntry::Track(t) => t.to_css(),
+            TrackListEntry::Repeat(n, ts) => {
+                let count = match n {
+                    0 => "auto-fill".to_owned(),
+                    -1 => "auto-fit".to_owned(),
+                    n => n.to_string(),
+                };
+                let inner = ts.iter().map(TrackSize::to_css).collect::<Vec<_>>().join(" ");
+                format!("repeat({count}, {inner})")
+            }
+        }
+    }
 }
 
 /// `grid-row-start` and friends.
@@ -981,8 +1037,7 @@ mod tests {
     use super::*;
 
     fn color(s: &str) -> Option<ColorValue> {
-        let mut input = cssparser::ParserInput::new(s);
-        let mut p = Parser::new(&mut input);
+        let mut p = Parser::new(s);
         parse_color(&mut p).ok()
     }
 
@@ -1011,8 +1066,7 @@ mod tests {
     #[test]
     fn calc_parses_and_simplifies() {
         let parse = |s: &str| {
-            let mut input = cssparser::ParserInput::new(s);
-            let mut p = Parser::new(&mut input);
+            let mut p = Parser::new(s);
             parse_length(&mut p, true, true).unwrap()
         };
         let px = |c: Calc| {

@@ -5,4 +5,13 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Same family features as lb-js. The firefox build has only the descriptor
+# tables (no installer) until SpiderMonkey lands in M4b.
+default = ["chrome"]
+chrome = ["lb-js/chrome"]
+firefox = ["lb-js/firefox"]
+
 [dependencies]
+lb-js = { path = "../lb-js", default-features = false }
+lb-persona = { path = "../lb-persona" }

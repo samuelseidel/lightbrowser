@@ -227,9 +227,57 @@ pub struct InterfaceDesc {
     pub unscopables: &'static [&'static str],
     /// A `callback interface` with constants (`NodeFilter`).
     pub callback_interface: bool,
+    /// The prototype inherits from a JS built-in's prototype instead
+    /// (`Error` for `DOMException`).
+    pub builtin_parent: Option<&'static str>,
     /// Member order and descriptors were checked against the captured
     /// Chrome surface (otherwise IDL order with features guessed).
     pub from_fixture: bool,
+}
+
+impl InterfaceDesc {
+    /// Base for `..InterfaceDesc::DEFAULT` in the generated tables.
+    pub const DEFAULT: InterfaceDesc = InterfaceDesc {
+        name: "",
+        parent: None,
+        exposed: Exposed::WINDOW,
+        is_global: false,
+        legacy_window_alias: &[],
+        has_constructor: false,
+        constructor_length: 0,
+        legacy_factory: None,
+        legacy_factory_length: 0,
+        constants: &[],
+        attributes: &[],
+        operations: &[],
+        stringifier: false,
+        stringifier_attr: None,
+        iterable: Iterable::None,
+        indexed_getter: false,
+        named_getter: false,
+        indexed_setter: false,
+        named_setter: false,
+        named_deleter: false,
+        legacy_unforgeable: false,
+        to_string_tag: "",
+        proto_order: &[],
+        static_order: &[],
+        instance_order: &[],
+        iterator: SymbolIterator::None,
+        async_iterator: None,
+        unscopables: &[],
+        callback_interface: false,
+        builtin_parent: None,
+        from_fixture: false,
+    };
+
+    pub fn slot_name(&self, s: Slot) -> &'static str {
+        match s {
+            Slot::Const(i) => self.constants[i as usize].0,
+            Slot::Attr(i) => self.attributes[i as usize].name,
+            Slot::Op(i) => self.operations[i as usize].name,
+        }
+    }
 }
 
 /// A WebIDL namespace (`CSS`), a plain object on the global.

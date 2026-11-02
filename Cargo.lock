@@ -1276,6 +1276,10 @@ dependencies = [
 [[package]]
 name = "lb-webapi"
 version = "0.0.1"
+dependencies = [
+ "lb-js",
+ "lb-persona",
+]
 
 [[package]]
 name = "lb-webidl-gen"

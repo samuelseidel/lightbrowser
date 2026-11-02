@@ -95,6 +95,9 @@ pub enum Arg {
     Handle(Handle),
     /// The wrapper of a host object as an instance of the interface.
     Host(InterfaceId, HostRef),
+    /// A new object made by `new X(...args)`, where `X` is the interface
+    /// object of the current realm (e.g. a `DOMException` to throw).
+    Construct(InterfaceId, Vec<Arg>),
 }
 
 impl From<JsValue> for Arg {
@@ -235,6 +238,15 @@ pub enum MemberKind {
     Interface(InterfaceId),
     /// A built-in of the realm.
     Intrinsic(Intrinsic),
+    /// The same function object as an earlier [`MemberKind::Method`] of the
+    /// same member list (WebIDL `[Symbol.iterator]` is `entries`).
+    Alias(PropKey),
+    /// A plain object (instantiated per realm) with these members and a
+    /// `Symbol.toStringTag` (WebIDL namespaces such as `CSS`).
+    Namespace {
+        to_string_tag: String,
+        members: Vec<Member>,
+    },
 }
 
 /// One property of an interface object, prototype or instance.
@@ -292,6 +304,30 @@ impl Member {
             key: key.into(),
             kind: MemberKind::Intrinsic(which),
             attrs: PropAttrs::DEFAULT,
+        }
+    }
+    /// Same function object as the earlier method `of` in the same list.
+    pub fn alias(key: impl Into<PropKey>, of: impl Into<PropKey>) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Alias(of.into()),
+            attrs: PropAttrs::DEFAULT,
+        }
+    }
+    /// A namespace object (`CSS`) as a global property: writable,
+    /// configurable, not enumerable.
+    pub fn namespace(
+        key: impl Into<PropKey>,
+        to_string_tag: impl Into<String>,
+        members: Vec<Member>,
+    ) -> Self {
+        Member {
+            key: key.into(),
+            kind: MemberKind::Namespace {
+                to_string_tag: to_string_tag.into(),
+                members,
+            },
+            attrs: PropAttrs::HIDDEN,
         }
     }
     /// Replace the attributes.
@@ -670,11 +706,20 @@ impl Engine {
         inst.set_internal_field_count(HOST_FIELDS);
         let proto = ft.prototype_template(scope);
 
+        let mut methods = Vec::new();
         for m in &spec.statics {
-            install_member(scope, &mut st, Target::Function(ft), None, m);
+            install_member(scope, &mut st, Target::Function(ft), None, m, &mut methods);
         }
+        methods.clear();
         for m in &spec.prototype {
-            install_member(scope, &mut st, Target::Object(proto), Some(signature), m);
+            install_member(
+                scope,
+                &mut st,
+                Target::Object(proto),
+                Some(signature),
+                m,
+                &mut methods,
+            );
         }
         if spec.to_string_tag {
             let tag = v8::Symbol::get_to_string_tag(scope);
@@ -685,8 +730,16 @@ impl Engine {
                 v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
             );
         }
+        methods.clear();
         for m in &spec.instance {
-            install_member(scope, &mut st, Target::Object(inst), Some(signature), m);
+            install_member(
+                scope,
+                &mut st,
+                Target::Object(inst),
+                Some(signature),
+                m,
+                &mut methods,
+            );
         }
         if spec.immutable_proto {
             inst.set_immutable_proto();
@@ -1326,6 +1379,28 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         ))
     }
 
+    /// Store a value on `this` under a private key that JS cannot see
+    /// (per-object host state such as a `DOMException`'s name). Use
+    /// qualified keys (`"DOMException#name"`); keys are never collected.
+    pub fn set_this_private(&mut self, key: &str, value: impl Into<Arg>) -> Result<(), HostError> {
+        let v = arg_to_v8(self.scope, &self.state, self.realm, &value.into())?;
+        let k = v8_str(self.scope, key);
+        let p = v8::Private::for_api(self.scope, Some(k));
+        self.args.this().set_private(self.scope, p, v);
+        Ok(())
+    }
+
+    /// Read a value stored with [`CallCtx::set_this_private`]; `Undefined`
+    /// if unset.
+    pub fn this_private(&mut self, key: &str) -> JsValue {
+        let k = v8_str(self.scope, key);
+        let p = v8::Private::for_api(self.scope, Some(k));
+        match self.args.this().get_private(self.scope, p) {
+            Some(v) => to_js_value(self.scope, v),
+            None => JsValue::Undefined,
+        }
+    }
+
     /// Escape hatch: the raw V8 scope.
     pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
         self.scope
@@ -1589,12 +1664,15 @@ fn function_template<'s>(
     ft
 }
 
+/// Install one member. `methods` collects the method templates of this
+/// member list so later [`MemberKind::Alias`] members can reuse them.
 fn install_member<'s>(
     scope: &mut v8::PinScope<'s, '_, ()>,
     st: &mut State,
     target: Target<'s>,
     signature: Option<v8::Local<'s, v8::Signature>>,
     m: &Member,
+    methods: &mut Vec<(PropKey, v8::Local<'s, v8::FunctionTemplate>)>,
 ) {
     let key = v8_key(scope, &m.key);
     let template: &v8::Template = match &target {
@@ -1606,6 +1684,32 @@ fn install_member<'s>(
             let name = function_name(&m.key, "");
             let ft = function_template(scope, st, f, *length, &name, signature);
             template.set_with_attr(key, ft.into(), v8_attrs(m.attrs, false));
+            methods.push((m.key.clone(), ft));
+        }
+        MemberKind::Alias(of) => {
+            // A function template is instantiated once per context, so the
+            // same template under two keys gives the same function object.
+            if let Some((_, ft)) = methods.iter().find(|(k, _)| k == of) {
+                template.set_with_attr(key, (*ft).into(), v8_attrs(m.attrs, false));
+            }
+        }
+        MemberKind::Namespace {
+            to_string_tag,
+            members,
+        } => {
+            let ot = v8::ObjectTemplate::new(scope);
+            let mut inner = Vec::new();
+            for member in members {
+                install_member(scope, st, Target::Object(ot), None, member, &mut inner);
+            }
+            let tag = v8::Symbol::get_to_string_tag(scope);
+            let value = v8_str(scope, to_string_tag);
+            ot.set_with_attr(
+                tag.into(),
+                value.into(),
+                v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
+            );
+            template.set_with_attr(key, ot.into(), v8_attrs(m.attrs, false));
         }
         MemberKind::Accessor { get, set } => {
             let getter = get.as_ref().map(|f| {
@@ -1810,6 +1914,22 @@ fn arg_to_v8<'s>(
         Arg::Host(iface, host) => wrap_host(scope, state, realm, *iface, *host)
             .map_err(|e| HostError::Error(e.message))?
             .into(),
+        Arg::Construct(iface, args) => {
+            let ft = {
+                let st = state.borrow();
+                let entry = st
+                    .interfaces
+                    .get(iface.0 as usize)
+                    .ok_or_else(|| HostError::Error(format!("unknown interface {iface:?}")))?;
+                v8::Local::new(scope, &entry.template)
+            };
+            let f = ft.get_function(scope).ok_or(HostError::Thrown)?;
+            let mut argv = Vec::with_capacity(args.len());
+            for a in args {
+                argv.push(arg_to_v8(scope, state, realm, a)?);
+            }
+            f.new_instance(scope, &argv).ok_or(HostError::Thrown)?.into()
+        }
     })
 }
 
