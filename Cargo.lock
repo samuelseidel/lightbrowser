@@ -1181,6 +1181,11 @@ version = "0.0.1"
 [[package]]
 name = "lb-css"
 version = "0.0.1"
+dependencies = [
+ "cssparser",
+ "lb-dom",
+ "lb-persona",
+]
 
 [[package]]
 name = "lb-dom"
@@ -1275,6 +1280,9 @@ version = "0.0.1"
 [[package]]
 name = "lb-webidl-gen"
 version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "libc"

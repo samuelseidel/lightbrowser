@@ -369,6 +369,25 @@ impl SelectorList {
     }
 }
 
+impl SelectorList {
+    /// Number of selectors in the list.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// True if the list has no selectors (never true for a parsed list).
+    pub fn is_empty(&self) -> bool {
+        self.0.len() == 0
+    }
+
+    /// Specificity of each selector in order, packed as `selectors` packs
+    /// it (`ids << 20 | classes << 10 | types`), so plain `u32` order is
+    /// cascade order.
+    pub fn specificities(&self) -> impl Iterator<Item = u32> + '_ {
+        self.0.slice().iter().map(|s| s.specificity())
+    }
+}
+
 impl ToCss for SelectorList {
     fn to_css<W: fmt::Write>(&self, dest: &mut W) -> fmt::Result {
         self.0.to_css(dest)
@@ -833,6 +852,25 @@ impl Document {
         }
         self.with_context(scope, |ctx| {
             matches_selector_list(&list.0, ElementRef::new(self, id), ctx)
+        })
+    }
+
+    /// Highest specificity among the selectors of `list` that match element
+    /// `id`, or `None` if none match. Selectors with a pseudo-element are
+    /// skipped. Used by the style cascade.
+    pub fn match_specificity(&self, id: NodeId, list: &SelectorList) -> Option<u32> {
+        if !self.is_element(id) {
+            return None;
+        }
+        self.with_context(None, |ctx| {
+            let el = ElementRef::new(self, id);
+            list.0
+                .slice()
+                .iter()
+                .filter(|s| !s.has_pseudo_element())
+                .filter(|s| selectors::matching::matches_selector(s, 0, None, el, ctx))
+                .map(|s| s.specificity())
+                .max()
         })
     }
 

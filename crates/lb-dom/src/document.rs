@@ -65,6 +65,9 @@ pub struct Document {
     quirks_mode: QuirksMode,
     is_html: bool,
     generation: u64,
+    /// Changes that affect rendering but not live collections: character
+    /// data and element state flags. See [`Document::render_generation`].
+    render_extra: u64,
     hook: Option<Box<dyn MutationHook>>,
 }
 
@@ -114,6 +117,7 @@ impl Document {
             quirks_mode: QuirksMode::NoQuirks,
             is_html,
             generation: 0,
+            render_extra: 0,
             hook: None,
         };
         doc.nodes.push(Node::new(NodeData::Document));
@@ -129,6 +133,7 @@ impl Document {
             quirks_mode: QuirksMode::NoQuirks,
             is_html: true,
             generation: 0,
+            render_extra: 0,
             hook: None,
         }
     }
@@ -163,6 +168,14 @@ impl Document {
     /// document. Live collections cache results keyed by this value.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Bumped on every change that can affect style or layout: child-list,
+    /// attribute and character-data changes, and element state flags
+    /// (`:hover`, `:focus`, checkedness, ...). Style and layout caches key
+    /// on this value. Never decreases.
+    pub fn render_generation(&self) -> u64 {
+        self.generation + self.render_extra
     }
 
     /// Number of arena slots, including detached nodes.
@@ -387,7 +400,12 @@ impl Document {
     }
 
     pub fn set_flags(&mut self, id: NodeId, flags: NodeFlags, on: bool) {
-        self.node_mut(id).flags.set(flags, on);
+        let node = self.node_mut(id);
+        let before = node.flags;
+        node.flags.set(flags, on);
+        if (before ^ node.flags).intersects(NodeFlags::STATE_MASK) {
+            self.render_extra += 1;
+        }
     }
 
     /// `ownerDocument`: `None` for the document itself.
@@ -882,6 +900,7 @@ impl Document {
             NodeData::ProcessingInstruction(p) => std::mem::replace(&mut p.data, new),
             _ => return false,
         };
+        self.render_extra += 1;
         self.emit(|| Mutation::CharacterData {
             node: id,
             old_value: old,

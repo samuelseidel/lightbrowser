@@ -67,6 +67,9 @@ bitflags! {
         const CHECKED = 1 << 14;
         /// See `CHECKED`.
         const CHECKED_DIRTY = 1 << 15;
+        /// All selector-visible state bits (`HOVER` ..= `CHECKED_DIRTY`).
+        /// Changing any of them bumps [`crate::Document::render_generation`].
+        const STATE_MASK = 0xff << 8;
         /// Free for the binding/page layers.
         const USER_0 = 1 << 24;
         /// Free for the binding/page layers.
