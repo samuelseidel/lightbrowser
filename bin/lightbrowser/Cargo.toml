@@ -1,0 +1,15 @@
+[package]
+name = "lightbrowser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["chrome"]
+chrome = ["lb-js/chrome"]
+firefox = ["lb-js/firefox"]
+
+[dependencies]
+lb-js = { path = "../../crates/lb-js", default-features = false }
+lb-persona = { path = "../../crates/lb-persona" }

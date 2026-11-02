@@ -1,0 +1,14 @@
+[package]
+name = "lb-js"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# Exactly one engine per binary. The real `v8` / `mozjs` deps arrive in M2 / M4b.
+chrome = []
+firefox = []
+
+[dependencies]
+lb-persona = { path = "../lb-persona" }
