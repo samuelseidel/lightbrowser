@@ -40,6 +40,14 @@ pub struct JsError {
     pub stack: Option<String>,
 }
 
+impl std::fmt::Display for JsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for JsError {}
+
 /// One isolated JS world (a V8 context / SpiderMonkey realm) per frame,
 /// plus isolated worlds for CDP utility scripts.
 pub trait Realm {

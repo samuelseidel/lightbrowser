@@ -41,8 +41,10 @@ impl Sfc32 {
         if amplitude <= 0 {
             return 0;
         }
-        let range = (2 * amplitude + 1) as u32;
-        (self.next_u32() % range) as i32 - amplitude
+        // Wrapping math so large amplitudes behave like the C version
+        // instead of panicking on overflow in debug builds.
+        let range = (amplitude as u32).wrapping_mul(2).wrapping_add(1);
+        ((self.next_u32() % range) as i32).wrapping_sub(amplitude)
     }
 
     /// Float in `[-amplitude, amplitude)` (matches `gp_noise_double`).
@@ -77,6 +79,14 @@ mod tests {
         for _ in 0..10_000 {
             assert!((-3..=3).contains(&r.noise(3)));
             assert!(r.noise_f64(0.0001).abs() <= 0.0001);
+        }
+    }
+
+    #[test]
+    fn large_amplitude_does_not_panic() {
+        let mut r = Sfc32::new([1; 16]);
+        for _ in 0..1_000 {
+            r.noise(i32::MAX);
         }
     }
 }

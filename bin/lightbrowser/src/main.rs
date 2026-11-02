@@ -25,9 +25,14 @@ fn main() -> ExitCode {
             eprintln!("not implemented yet; see docs/ROADMAP.md");
             ExitCode::from(2)
         }
-        _ => {
+        None | Some("--help" | "-h" | "help") => {
             print!("{USAGE}");
             ExitCode::SUCCESS
+        }
+        Some(other) => {
+            eprintln!("unknown argument: {other}\n");
+            eprint!("{USAGE}");
+            ExitCode::from(2)
         }
     }
 }

@@ -1,0 +1,104 @@
+{
+  "profile_id": "firefox_128_macos",
+  "description": "Firefox 128.0 on macOS 14 Sonoma (Apple Silicon)",
+  "captured_date": "2024-07-15",
+  "ja3": "a4f53e8e4a7d9cd0f0d7b11e9e78c47b",
+  "ja3_string": "771,4865-4867-4866-49195-49199-52393-52392-49196-49200-49162-49161-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-34-51-43-13-45-28-65037,29-23-24-25-256-257,0",
+  "ja4": "t13d1715h2_002f,0035,009c,009d,1301,1302,1303,c009,c00a,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0010,0017,001b,001c,0022,0023,002b,002d,0033,ff01_0403,0503,0603,0804,0805,0806,0401,0501,0601,0203,0201",
+  "tls_version": "TLS 1.3",
+  "tls_min_version": "TLS 1.0",
+  "tls_max_version": "TLS 1.3",
+  "notes": [
+    "macOS builds use the same cipher suite set as Windows.",
+    "The JA3 string is identical to the Windows profile because Firefox uses",
+    "its own NSS copy on macOS and does not defer to the OS TLS stack.",
+    "The JA3 hash differs only because the captured source IP / SNI differ;",
+    "the cipher + extension fields are identical to firefox_128_win10."
+  ],
+  "cipher_suites": [
+    { "name": "TLS_AES_128_GCM_SHA256",                        "id": 4865, "hex": "0x1301" },
+    { "name": "TLS_CHACHA20_POLY1305_SHA256",                  "id": 4867, "hex": "0x1303" },
+    { "name": "TLS_AES_256_GCM_SHA384",                        "id": 4866, "hex": "0x1302" },
+    { "name": "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",       "id": 49195, "hex": "0xC02B" },
+    { "name": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",         "id": 49199, "hex": "0xC02F" },
+    { "name": "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "id": 52393, "hex": "0xCCA9" },
+    { "name": "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",   "id": 52392, "hex": "0xCCA8" },
+    { "name": "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",       "id": 49196, "hex": "0xC02C" },
+    { "name": "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",         "id": 49200, "hex": "0xC030" },
+    { "name": "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",          "id": 49162, "hex": "0xC00A" },
+    { "name": "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",          "id": 49161, "hex": "0xC009" },
+    { "name": "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",            "id": 49171, "hex": "0xC013" },
+    { "name": "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",            "id": 49172, "hex": "0xC014" },
+    { "name": "TLS_RSA_WITH_AES_128_GCM_SHA256",               "id": 156,   "hex": "0x009C" },
+    { "name": "TLS_RSA_WITH_AES_256_GCM_SHA384",               "id": 157,   "hex": "0x009D" },
+    { "name": "TLS_RSA_WITH_AES_128_CBC_SHA",                  "id": 47,    "hex": "0x002F" },
+    { "name": "TLS_RSA_WITH_AES_256_CBC_SHA",                  "id": 53,    "hex": "0x0035" }
+  ],
+  "extensions_order": [
+    { "name": "server_name",            "id": 0,     "hex": "0x0000" },
+    { "name": "extended_master_secret", "id": 23,    "hex": "0x0017" },
+    { "name": "renegotiation_info",     "id": 65281, "hex": "0xFF01" },
+    { "name": "supported_groups",       "id": 10,    "hex": "0x000A" },
+    { "name": "ec_point_formats",       "id": 11,    "hex": "0x000B" },
+    { "name": "session_ticket",         "id": 35,    "hex": "0x0023" },
+    { "name": "alpn",                   "id": 16,    "hex": "0x0010" },
+    { "name": "status_request",         "id": 5,     "hex": "0x0005" },
+    { "name": "delegated_credentials",  "id": 34,    "hex": "0x0022" },
+    { "name": "key_share",              "id": 51,    "hex": "0x0033" },
+    { "name": "psk_key_exchange_modes", "id": 45,    "hex": "0x002D" },
+    { "name": "supported_versions",     "id": 43,    "hex": "0x002B" },
+    { "name": "compress_certificate",   "id": 27,    "hex": "0x001B" },
+    { "name": "record_size_limit",      "id": 28,    "hex": "0x001C" },
+    { "name": "padding",                "id": 21,    "hex": "0x0015" },
+    { "name": "signature_algorithms",   "id": 13,    "hex": "0x000D" },
+    { "name": "signed_certificate_timestamp", "id": 18, "hex": "0x0012" },
+    { "name": "pre_shared_key",         "id": 41,    "hex": "0x0029" }
+  ],
+  "supported_groups": [
+    { "name": "x25519",    "id": 29,  "hex": "0x001D" },
+    { "name": "secp256r1", "id": 23,  "hex": "0x0017" },
+    { "name": "secp384r1", "id": 24,  "hex": "0x0018" },
+    { "name": "secp521r1", "id": 25,  "hex": "0x0019" },
+    { "name": "ffdhe2048", "id": 256, "hex": "0x0100" },
+    { "name": "ffdhe3072", "id": 257, "hex": "0x0101" }
+  ],
+  "ec_point_formats": [
+    { "name": "uncompressed", "id": 0 }
+  ],
+  "signature_algorithms": [
+    { "name": "ecdsa_secp256r1_sha256", "id": 1027, "hex": "0x0403" },
+    { "name": "ecdsa_secp384r1_sha384", "id": 1283, "hex": "0x0503" },
+    { "name": "ecdsa_secp521r1_sha512", "id": 1539, "hex": "0x0603" },
+    { "name": "rsa_pss_rsae_sha256",    "id": 2052, "hex": "0x0804" },
+    { "name": "rsa_pss_rsae_sha384",    "id": 2053, "hex": "0x0805" },
+    { "name": "rsa_pss_rsae_sha512",    "id": 2054, "hex": "0x0806" },
+    { "name": "rsa_pkcs1_sha256",       "id": 1025, "hex": "0x0401" },
+    { "name": "rsa_pkcs1_sha384",       "id": 1281, "hex": "0x0501" },
+    { "name": "rsa_pkcs1_sha512",       "id": 1537, "hex": "0x0601" },
+    { "name": "ecdsa_sha1",             "id": 515,  "hex": "0x0203" },
+    { "name": "rsa_pkcs1_sha1",         "id": 513,  "hex": "0x0201" }
+  ],
+  "alpn_protocols": ["h2", "http/1.1"],
+  "compress_certificate_algorithms": ["brotli"],
+  "session_ticket": true,
+  "platform_specifics": {
+    "os": "macOS",
+    "os_version": "14.5",
+    "arch": "arm64",
+    "note": "Apple Silicon; Firefox uses bundled NSS, not Security.framework. Cipher list identical to Windows build."
+  },
+  "http2_settings": {
+    "ordered_params": [
+      { "id": "HEADER_TABLE_SIZE",   "value": 65536  },
+      { "id": "ENABLE_PUSH",         "value": 0      },
+      { "id": "INITIAL_WINDOW_SIZE", "value": 131072 },
+      { "id": "MAX_FRAME_SIZE",      "value": 16384  }
+    ],
+    "HEADER_TABLE_SIZE": 65536,
+    "ENABLE_PUSH": 0,
+    "INITIAL_WINDOW_SIZE": 131072,
+    "MAX_FRAME_SIZE": 16384
+  },
+  "http2_window_update": 12517377,
+  "http2_pseudo_header_order": [":method", ":path", ":authority", ":scheme"]
+}

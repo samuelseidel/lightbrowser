@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: ${{ matrix.family }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: chrome
+            features: ""
+          - family: firefox
+            features: "--no-default-features --features firefox"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.family }}
+      - name: Format
+        run: cargo fmt --all --check
+      # --features on a workspace command applies to every member that
+      # declares the feature (verified locally: lightbrowser, lb-js).
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets ${{ matrix.features }} -- -D warnings
+      - name: Test
+        run: cargo test --workspace ${{ matrix.features }}
+      - name: Build release
+        run: cargo build --release -p lightbrowser ${{ matrix.features }}
+      - name: Version
+        run: ./target/release/lightbrowser --version
