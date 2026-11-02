@@ -95,6 +95,12 @@ impl<T, B> Codec<T, B> {
         self.framed_write().set_header_table_size(val)
     }
 
+    /// Set the order of request pseudo headers in sent HEADERS frames
+    /// (LIGHTBROWSER patch).
+    pub fn set_send_pseudo_order(&mut self, order: [crate::frame::PseudoHeader; 4]) {
+        self.framed_write().set_pseudo_order(order)
+    }
+
     /// Set the decoder header table size size.
     pub fn set_recv_header_table_size(&mut self, val: usize) {
         self.inner.set_header_table_size(val)

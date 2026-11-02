@@ -52,6 +52,9 @@ struct Encoder<B> {
 
     /// Min buffer required to attempt to write a frame
     min_buffer_capacity: usize,
+
+    /// Order of request pseudo headers in HEADERS frames (LIGHTBROWSER patch)
+    pseudo_order: [frame::PseudoHeader; 4],
 }
 
 #[derive(Debug)]
@@ -98,6 +101,7 @@ where
                 last_data_frame: None,
                 max_frame_size: frame::DEFAULT_MAX_FRAME_SIZE,
                 chain_threshold,
+                pseudo_order: frame::DEFAULT_PSEUDO_ORDER,
                 min_buffer_capacity: chain_threshold + frame::HEADER_LEN,
             },
         }
@@ -263,7 +267,9 @@ where
             }
             Frame::Headers(v) => {
                 let mut buf = limited_write_buf!(self);
-                if let Some(continuation) = v.encode(&mut self.hpack, &mut buf) {
+                if let Some(continuation) =
+                    v.encode_with_order(&mut self.hpack, &mut buf, &self.pseudo_order)
+                {
                     self.next = Some(Next::Continuation(continuation));
                 }
             }
@@ -341,6 +347,11 @@ impl<T, B> FramedWrite<T, B> {
     /// Set the peer's header table size.
     pub fn set_header_table_size(&mut self, val: usize) {
         self.encoder.hpack.update_max_size(val);
+    }
+
+    /// Set the order of request pseudo headers (LIGHTBROWSER patch).
+    pub fn set_pseudo_order(&mut self, order: [frame::PseudoHeader; 4]) {
+        self.encoder.pseudo_order = order;
     }
 
     /// Retrieve the last data frame that has been sent

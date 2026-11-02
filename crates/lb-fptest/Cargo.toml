@@ -1,0 +1,27 @@
+[package]
+name = "lb-fptest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test-support only: TLS ClientHello / H2 capture server, JA3/JA4. Never shipped."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "lb-fptest"
+path = "src/bin/lb-fptest.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "sync"] }
+# Server side only. ring keeps the C build small (no aws-lc).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring"] }
+sha2 = "0.10"
+md-5 = "0.10"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }

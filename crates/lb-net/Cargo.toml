@@ -11,6 +11,9 @@ lb-persona = { path = "../lb-persona" }
 # TLS: BoringSSL, the stack Chrome uses (ADR 0003).
 boring = "5"
 tokio-boring = "5"
+# Raw FFI for BoringSSL knobs `boring` does not wrap (ALPS, TLS 1.3 cipher order).
+boring-sys = "5"
+foreign-types = "0.5"
 
 # HTTP
 http = "1"

@@ -14,6 +14,9 @@ pub struct Settings {
     max_frame_size: Option<u32>,
     max_header_list_size: Option<u32>,
     enable_connect_protocol: Option<u32>,
+    /// Wire order of the parameters, as RFC 9113 ids (LIGHTBROWSER patch).
+    /// `None` keeps upstream order.
+    order: Option<Vec<u16>>,
 }
 
 /// An enum that lists all valid settings that can be sent in a SETTINGS
@@ -119,6 +122,28 @@ impl Settings {
 
     pub fn header_table_size(&self) -> Option<u32> {
         self.header_table_size
+    }
+
+    /// Sets the wire order of the parameters by RFC 9113 id (LIGHTBROWSER
+    /// patch). Unknown ids are ignored, listed ids with no value are skipped
+    /// and set values that are not listed follow in upstream order.
+    pub fn set_order(&mut self, order: Option<Vec<u16>>) {
+        self.order = order;
+    }
+
+    fn get(&self, id: u16) -> Option<Setting> {
+        use self::Setting::*;
+
+        match id {
+            1 => self.header_table_size.map(HeaderTableSize),
+            2 => self.enable_push.map(EnablePush),
+            3 => self.max_concurrent_streams.map(MaxConcurrentStreams),
+            4 => self.initial_window_size.map(InitialWindowSize),
+            5 => self.max_frame_size.map(MaxFrameSize),
+            6 => self.max_header_list_size.map(MaxHeaderListSize),
+            8 => self.enable_connect_protocol.map(EnableConnectProtocol),
+            _ => None,
+        }
     }
 
     pub fn set_header_table_size(&mut self, size: Option<u32>) {
@@ -227,6 +252,29 @@ impl Settings {
     }
 
     fn for_each<F: FnMut(Setting)>(&self, mut f: F) {
+        let order = match self.order {
+            Some(ref order) => order,
+            None => return self.for_each_upstream(f),
+        };
+
+        // Bit `id` is set once setting `id` has been emitted. Known ids are < 16.
+        let mut done: u16 = 0;
+        for &id in order {
+            if id < 16 && done & (1 << id) == 0 {
+                if let Some(setting) = self.get(id) {
+                    done |= 1 << id;
+                    f(setting);
+                }
+            }
+        }
+        self.for_each_upstream(|setting| {
+            if done & (1 << setting.id()) == 0 {
+                f(setting);
+            }
+        });
+    }
+
+    fn for_each_upstream<F: FnMut(Setting)>(&self, mut f: F) {
         use self::Setting::*;
 
         if let Some(v) = self.header_table_size {
@@ -301,6 +349,21 @@ impl fmt::Debug for Settings {
 // ===== impl Setting =====
 
 impl Setting {
+    /// The RFC 9113 id of this setting (LIGHTBROWSER patch).
+    fn id(&self) -> u16 {
+        use self::Setting::*;
+
+        match *self {
+            HeaderTableSize(_) => 1,
+            EnablePush(_) => 2,
+            MaxConcurrentStreams(_) => 3,
+            InitialWindowSize(_) => 4,
+            MaxFrameSize(_) => 5,
+            MaxHeaderListSize(_) => 6,
+            EnableConnectProtocol(_) => 8,
+        }
+    }
+
     /// Creates a new `Setting` with the correct variant corresponding to the
     /// given setting id, based on the settings IDs defined in section
     /// 6.5.2.

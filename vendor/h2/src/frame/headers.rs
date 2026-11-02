@@ -77,10 +77,35 @@ pub struct Pseudo {
     pub status: Option<StatusCode>,
 }
 
+/// A request pseudo-header, used to choose the order in which a client
+/// encodes them (LIGHTBROWSER patch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PseudoHeader {
+    /// `:method`
+    Method,
+    /// `:scheme`
+    Scheme,
+    /// `:authority`
+    Authority,
+    /// `:path`
+    Path,
+}
+
+/// Upstream h2 order: `:method`, `:scheme`, `:authority`, `:path`.
+pub(crate) const DEFAULT_PSEUDO_ORDER: [PseudoHeader; 4] = [
+    PseudoHeader::Method,
+    PseudoHeader::Scheme,
+    PseudoHeader::Authority,
+    PseudoHeader::Path,
+];
+
 #[derive(Debug)]
 pub struct Iter {
     /// Pseudo headers
     pseudo: Option<Pseudo>,
+
+    /// Order of the request pseudo headers (LIGHTBROWSER patch)
+    order: [PseudoHeader; 4],
 
     /// Header fields
     fields: header::IntoIter<HeaderValue>,
@@ -274,10 +299,23 @@ impl Headers {
         self.header_block.fields
     }
 
+    // Only the tests call this since the LIGHTBROWSER patch.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn encode(
         self,
         encoder: &mut hpack::Encoder,
         dst: &mut EncodeBuf<'_>,
+    ) -> Option<Continuation> {
+        self.encode_with_order(encoder, dst, &DEFAULT_PSEUDO_ORDER)
+    }
+
+    /// Like `encode`, with the request pseudo headers in `order`
+    /// (LIGHTBROWSER patch).
+    pub(crate) fn encode_with_order(
+        self,
+        encoder: &mut hpack::Encoder,
+        dst: &mut EncodeBuf<'_>,
+        order: &[PseudoHeader; 4],
     ) -> Option<Continuation> {
         // At this point, the `is_end_headers` flag should always be set
         debug_assert!(self.flags.is_end_headers());
@@ -286,7 +324,7 @@ impl Headers {
         let head = self.head();
 
         self.header_block
-            .into_encoding(encoder)
+            .into_encoding(encoder, order)
             .encode(&head, dst, Some(encoder), |_| {})
     }
 
@@ -507,7 +545,7 @@ impl PushPromise {
         let promised_id = self.promised_id;
 
         self.header_block
-            .into_encoding(encoder)
+            .into_encoding(encoder, &DEFAULT_PSEUDO_ORDER)
             .encode(&head, dst, Some(encoder), |dst| {
                 dst.put_u32(promised_id.into());
             })
@@ -717,6 +755,20 @@ impl Iterator for Iter {
         use crate::hpack::Header::*;
 
         if let Some(ref mut pseudo) = self.pseudo {
+            for which in self.order {
+                let next = match which {
+                    PseudoHeader::Method => pseudo.method.take().map(Method),
+                    PseudoHeader::Scheme => pseudo.scheme.take().map(Scheme),
+                    PseudoHeader::Authority => pseudo.authority.take().map(Authority),
+                    PseudoHeader::Path => pseudo.path.take().map(Path),
+                };
+                if next.is_some() {
+                    return next;
+                }
+            }
+
+            // An order that omits a pseudo header still sends it, in
+            // upstream order.
             if let Some(method) = pseudo.method.take() {
                 return Some(Method(method));
             }
@@ -989,11 +1041,16 @@ impl HeaderBlock {
         Ok(())
     }
 
-    fn into_encoding(self, encoder: &mut hpack::Encoder) -> EncodingHeaderBlock {
+    fn into_encoding(
+        self,
+        encoder: &mut hpack::Encoder,
+        order: &[PseudoHeader; 4],
+    ) -> EncodingHeaderBlock {
         let mut hpack = encoder.take_scratch();
         hpack.clear();
         let headers = Iter {
             pseudo: Some(self.pseudo),
+            order: *order,
             fields: self.fields.into_iter(),
         };
 

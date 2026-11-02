@@ -138,6 +138,7 @@
 use crate::codec::{Codec, SendError, UserError};
 use crate::ext::Protocol;
 use crate::frame::{Headers, Pseudo, Reason, Settings, StreamId};
+pub use crate::frame::PseudoHeader;
 use crate::proto::{self, Error};
 use crate::{FlowControl, PingPong, RecvStream, SendStream};
 
@@ -348,6 +349,10 @@ pub struct Builder {
     ///
     /// When this gets exhausted, we issue a GOAWAY with `ENHANCE_YOUR_CALM`.
     data_frame_budget: proto::DataFrameBudget,
+
+    /// Order of request pseudo headers (LIGHTBROWSER patch). `None` keeps
+    /// upstream order.
+    pseudo_order: Option<[PseudoHeader; 4]>,
 }
 
 #[derive(Debug)]
@@ -669,7 +674,29 @@ impl Builder {
             stream_id: 1.into(),
             local_max_error_reset_streams: Some(proto::DEFAULT_LOCAL_RESET_COUNT_MAX),
             data_frame_budget: proto::DataFrameBudget::Auto,
+            pseudo_order: None,
         }
+    }
+
+    /// Sets the order in which request pseudo headers are encoded
+    /// (LIGHTBROWSER patch).
+    ///
+    /// Upstream order is `:method`, `:scheme`, `:authority`, `:path`. A
+    /// pseudo header missing from `order` is still sent, after the listed ones.
+    pub fn pseudo_header_order(&mut self, order: [PseudoHeader; 4]) -> &mut Self {
+        self.pseudo_order = Some(order);
+        self
+    }
+
+    /// Sets the order of the parameters in the initial SETTINGS frame, as
+    /// RFC 9113 setting ids (LIGHTBROWSER patch).
+    ///
+    /// Unknown ids are ignored. Listed settings that have no value are
+    /// skipped. Settings that have a value but are not listed follow the
+    /// listed ones, in upstream order.
+    pub fn settings_order(&mut self, order: Vec<u16>) -> &mut Self {
+        self.settings.set_order(Some(order));
+        self
     }
 
     /// Indicates the initial window size (in octets) for stream-level
@@ -1347,6 +1374,10 @@ where
 
         if let Some(max) = builder.settings.max_header_list_size() {
             codec.set_max_recv_header_list_size(max as usize);
+        }
+
+        if let Some(order) = builder.pseudo_order {
+            codec.set_send_pseudo_order(order);
         }
 
         // Send initial settings frame

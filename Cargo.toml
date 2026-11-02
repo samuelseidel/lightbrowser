@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "bin/lightbrowser"]
+# vendor/ holds patched upstream crates; they are dependencies, not members.
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.0.1"
@@ -19,3 +21,9 @@ strip = true
 [profile.release-small]
 inherits = "release"
 opt-level = "s"
+
+# Forked h2: profile-driven SETTINGS order and pseudo-header order (ADR 0003).
+# Same version as upstream so hyper's h2 dependency resolves to it too.
+# See vendor/h2/LIGHTBROWSER.md.
+[patch.crates-io]
+h2 = { path = "vendor/h2" }
