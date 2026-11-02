@@ -76,8 +76,8 @@ browser context. Nothing reads a global.
 | JS (Chrome) | `v8` crate (rusty_v8): startup snapshot of all bindings, pointer compression, per-isolate heap cap, optional `--jitless` | Same engine as Chrome, so engine quirks match (error text, stack format, `Function.prototype.toString`, Math precision, timing). |
 | JS (Firefox) | Servo's `mozjs` (SpiderMonkey), per-realm heap cap | Same engine as Firefox, with a maintained Rust embedding. |
 | Bindings | Own WebIDL → Rust codegen (`weedle2`), using the Chromium IDL set for Chrome and the Gecko IDL set for Firefox | Interface list, prototype chains, property order and descriptors all match the claimed browser. This is a large fingerprint surface. |
-| TLS | BoringSSL (`boring`, `tokio-boring`) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ECH GREASE. BoringSSL can also be set up to emit Firefox's ClientHello: cipher/extension order, delegated_credentials, record_size_limit. rustls can do neither. |
-| HTTP | hyper 1.x for h1. A fork of `h2` exposes SETTINGS order/values, the initial WINDOW_UPDATE, PRIORITY frames and pseudo-header order. h3 via quiche later. | Akamai H2 fingerprint. Pseudo-header order: Chrome `m,a,s,p`, Firefox `m,p,a,s`. |
+| TLS | BoringSSL (`boring`, `tokio-boring`, `boring-sys` FFI for unwrapped knobs) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ML-KEM, ML-DSA, trust_anchors, server_padding. Firefox's ciphers, sigalgs, groups and ALPN match by configuration. delegated_credentials, record_size_limit, ffdhe and Firefox's extension order need small BoringSSL patches (M4b, ADR 0003). rustls can do neither. |
+| HTTP | hyper 1.x for h1. A fork of `h2` (`vendor/h2`) exposes SETTINGS order/values, the initial WINDOW_UPDATE, pseudo-header order and the HEADERS priority block, and writes the preface before reading. h3 via quiche later. | Akamai H2 fingerprint. Pseudo-header order: Chrome `m,a,s,p`, Firefox `m,p,a,s`. |
 | Net misc | hickory-resolver, per-context cookie jar, in-memory LRU cache, gzip/br/zstd, HTTP and SOCKS5 proxies | No disk use. |
 | HTML | `html5ever` tokenizer/tree builder → our own tree sink | Parses exactly like a browser. |
 | DOM | Arena of compact nodes (u32 ids), interned atoms (`string_cache`). Each document is one arena, freed in one step on navigation. | Low RAM, cache-friendly, cheap teardown. |
@@ -159,6 +159,38 @@ to skip idle waiting. It is off when the persona needs realistic timing.
 | Automation tells (`webdriver`, CDP leaks) | lb-cdp, lb-page | never exposed to the page world |
 | Mouse/keyboard dynamics | lb-behavior | persona behavior profile |
 
+## Network fingerprint testing (`lb-fptest`)
+
+`crates/lb-fptest` is test support only and is never shipped. It holds:
+
+- a ClientHello parser;
+- JA3, JA4 and JA4_r, plus the Akamai H2 text;
+- a minimal H2 frame and HPACK reader;
+- a capture server: TLS with an in-memory self-signed cert (rustls), loopback
+  only, one `Capture` per connection.
+
+It is used in two ways:
+
+```
+capture:  local Chromium ──TLS/H2──▶ lb-fptest capture ──▶ profiles/tls/chrome_<N>_linux.json
+check:    lb_net::fetch  ──TLS/H2──▶ CaptureServer (in-process) ──▶ compare with the profile
+```
+
+- **Capture.** `lb-fptest capture` records two or more full handshakes from a
+  local Chromium. It then writes the profile:
+  - the ClientHello lists;
+  - the canonical extension order, if the browser permutes;
+  - the `trust_anchors` and `server_padding` payloads;
+  - the H2 SETTINGS, WINDOW_UPDATE, pseudo-header order and HEADERS priority;
+  - the expected JA3, JA4 and Akamai values.
+- **Check.** `crates/lb-net/tests/fingerprint.rs` runs `lb_net::fetch` for
+  each family against an in-process `CaptureServer` and asserts the values
+  against the profile (ADR 0003 lists the Firefox gaps).
+- **Spot checks.** `lb-fptest serve` prints one JSON line per connection,
+  e.g. to compare header order with `--alpn http/1.1`.
+
+Steps are in `tests/README.md`. Both modes use our own local server only.
+
 ## CDP surface (what Playwright needs)
 
 - **Browser:** getVersion, close, setDownloadBehavior
@@ -179,7 +211,7 @@ to skip idle waiting. It is off when the persona needs realistic timing.
 | `consistency/` (`PersonaProfile`, rules R01–R10) | `lb-persona` | Vendored in M4. Chrome rules added: UA-CH brands, userAgentData, Chrome TLS/H2. |
 | `behavior/` (`human_click_events`, …) | `lb-behavior` | Vendored in M5. Events replayed through the Input pipeline. |
 | `profiles/schemas/persona_v1.schema.json` | `profiles/schemas/persona_v2.schema.json` | Adds `browser.family` and `client_hints`. v1 is read as Firefox. |
-| `profiles/tls/firefox_128_*.json` | `profiles/tls/` | Same format; Chrome profiles added. |
+| `profiles/tls/firefox_128_*.json` | `profiles/tls/` | Same format. Chrome profiles are captured with `lb-fptest` and add optional fields (`grease`, `permute_extensions`, `alps_protocols`, `ech_grease`, `server_padding_request`, `trust_anchor_ids`, `http2_priority.headers`). |
 | SFC32 in `geckophantom_config.h` | `lb-persona::sfc32` | **Done.** Bit-identical, with a test against C output. |
 | SDK `human_*`, `verify_fingerprint` | `sdk/python/lightbrowser` | Thin layer over Playwright `connect_over_cdp`. |
 

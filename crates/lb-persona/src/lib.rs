@@ -27,20 +27,26 @@ pub struct Persona {
 }
 
 impl Persona {
-    /// Built-in Chrome 131 on Windows 10 persona, used when none is given.
+    /// Built-in Chrome 153 on Windows 10 persona, used when none is given.
+    ///
+    /// TLS/H2 come from `chrome_153_linux`, captured from Chromium
+    /// 153.0.8010.12 with lb-fptest; Chrome's ClientHello and H2 preface do
+    /// not depend on the OS. The `sec-ch-ua` GREASE brand and brand order
+    /// follow Chromium's per-major-version rule (for 153: `Not_A Brand`, v=8,
+    /// order brand, GREASE, Chromium).
     pub fn default_chrome() -> Self {
         Self {
             family: BrowserFamily::Chrome,
             user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
                 .into(),
             accept_language: "en-US,en;q=0.9".into(),
             sec_ch_ua: Some(
-                r#""Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24""#.into(),
+                r#""Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153""#.into(),
             ),
             sec_ch_ua_platform: Some("Windows".into()),
             sec_ch_ua_mobile: Some("?0".into()),
-            tls_profile_id: "chrome_131_win10".into(),
+            tls_profile_id: "chrome_153_linux".into(),
         }
     }
 

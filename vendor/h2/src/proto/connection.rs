@@ -24,6 +24,12 @@ where
     codec: Codec<T, Prioritized<B>>,
 
     inner: ConnectionInner<P, B>,
+
+    /// Whether the first `poll` has written our queued frames (LIGHTBROWSER
+    /// patch). Until then nothing is read, so the preface goes out as
+    /// browsers send it: SETTINGS, WINDOW_UPDATE, HEADERS, with no SETTINGS
+    /// ACK in between, however early the peer's SETTINGS arrive.
+    preface_flushed: bool,
 }
 
 // Extracted part of `Connection` which does not depend on `T`. Reduces the amount of duplicated
@@ -159,6 +165,7 @@ where
         span.follows_from(tracing::Span::current());
         Connection {
             codec,
+            preface_flushed: false,
             inner: ConnectionInner {
                 state: State::Open,
                 error: None,
@@ -308,6 +315,13 @@ where
         let _e = span.enter();
         let span = tracing::trace_span!("poll");
         let _e = span.enter();
+
+        // LIGHTBROWSER patch: write the connection WINDOW_UPDATE and any
+        // queued request before the first read (see `preface_flushed`).
+        if !self.preface_flushed && matches!(self.inner.state, State::Open) {
+            ready!(self.inner.streams.poll_complete(cx, &mut self.codec))?;
+            self.preface_flushed = true;
+        }
 
         loop {
             tracing::trace!(connection.state = ?self.inner.state);

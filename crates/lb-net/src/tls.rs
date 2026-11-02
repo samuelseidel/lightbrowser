@@ -19,6 +19,8 @@
 //! | session_ticket (35) | `session_ticket` | `SslOptions::NO_TICKET` when false |
 //! | ALPS (17513 / 17613) | `alps_protocols`, codepoint from `extensions_order` | `SSL_add_application_settings` (FFI, per connection) |
 //! | ECH GREASE (65037) | `ech_grease` | `set_enable_ech_grease` (per connection) |
+//! | trust_anchors (51764) | `extensions_order` has 51764, IDs from `trust_anchor_ids` | `SSL_CTX_set1_requested_trust_anchors` (FFI) |
+//! | server_padding (4832) | `extensions_order` has 4832, size from `server_padding_request` | `SSL_set_server_padding_request` (FFI, per connection) |
 //! | server_name | the `host` passed to [`TlsConnector::connect`] | SNI, skipped for IP literals |
 //!
 //! Cipher suites: BoringSSL always writes the TLS 1.3 suites before the
@@ -72,6 +74,8 @@ const EXT_ALPS_OLD: u16 = 17513;
 const EXT_ALPS_NEW: u16 = 17613;
 const EXT_STATUS_REQUEST: u16 = 5;
 const EXT_SCT: u16 = 18;
+const EXT_SERVER_PADDING: u16 = 4832;
+const EXT_TRUST_ANCHORS: u16 = 51764;
 
 /// A reusable TLS configuration derived from one profile.
 pub struct TlsConnector {
@@ -80,6 +84,8 @@ pub struct TlsConnector {
     /// ALPS protocols, validated to be in the ALPN list.
     alps: Vec<Vec<u8>>,
     alps_new_codepoint: bool,
+    /// `server_padding` request size, when the profile lists extension 4832.
+    server_padding: Option<u16>,
     gaps: Vec<String>,
     /// Skip certificate chain and hostname checks. Only for our local test
     /// servers with self-signed certificates. Default `false`.
@@ -102,6 +108,8 @@ impl TlsConnector {
         }
         let has_ext = |id: u16| profile.extensions_order.iter().any(|e| e.id == id);
         let alps_new_codepoint = !(has_ext(EXT_ALPS_OLD) && !has_ext(EXT_ALPS_NEW));
+        let server_padding =
+            has_ext(EXT_SERVER_PADDING).then(|| profile.server_padding_request.unwrap_or(0));
 
         for g in &gaps {
             tracing::debug!(profile = %profile.profile_id, "tls gap: {g}");
@@ -112,6 +120,7 @@ impl TlsConnector {
             connector,
             alps,
             alps_new_codepoint,
+            server_padding,
             gaps,
             danger_accept_invalid_certs: false,
         })
@@ -166,6 +175,12 @@ impl TlsConnector {
             config.set_verify_hostname(false);
         }
         config.set_enable_ech_grease(self.profile.ech_grease);
+        if let Some(n) = self.server_padding {
+            let ssl = ForeignTypeRef::as_ptr(&*config);
+            // SAFETY: `ssl` is a valid, live SSL owned by `config`. The call
+            // only stores the integer. `boring` 5.x does not wrap it.
+            unsafe { boring_sys::SSL_set_server_padding_request(ssl, n) };
+        }
         if !self.alps.is_empty() {
             let ssl = ForeignTypeRef::as_ptr(&*config);
             // SAFETY: `ssl` is a valid, live SSL owned by `config` for the
@@ -295,6 +310,18 @@ fn build_connector(
     if !p.session_ticket {
         b.set_options(SslOptions::NO_TICKET);
     }
+    if has_ext(EXT_TRUST_ANCHORS) {
+        let ids = p.trust_anchor_ids_bytes()?;
+        // SAFETY: `b.as_ptr()` is the live SSL_CTX owned by `b`. BoringSSL
+        // copies `ids` (a null pointer is fine when the length is 0). `boring`
+        // 5.x does not wrap trust anchor IDs.
+        let ok = unsafe {
+            boring_sys::SSL_CTX_set1_requested_trust_anchors(b.as_ptr(), ids.as_ptr(), ids.len())
+        };
+        if ok != 1 {
+            return Err(boring::error::ErrorStack::get().into());
+        }
+    }
 
     // Wire order of compress_certificate follows registration order.
     for alg in &p.compress_certificate_algorithms {
@@ -400,6 +427,9 @@ fn sigalg_name(id: u16) -> Option<&'static str> {
         0x0805 => "rsa_pss_rsae_sha384",
         0x0806 => "rsa_pss_rsae_sha512",
         0x0807 => "ed25519",
+        0x0904 => "mldsa44",
+        0x0905 => "mldsa65",
+        0x0906 => "mldsa87",
         _ => return None,
     })
 }

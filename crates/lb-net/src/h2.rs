@@ -26,6 +26,9 @@ pub const DEFAULT_MAX_BODY: usize = 32 << 20;
 /// HTTP/2 default connection window (RFC 9113 §6.9.2).
 const DEFAULT_CONN_WINDOW: u32 = 65_535;
 
+/// Largest flow-control window (RFC 9113 §6.9.1).
+const MAX_WINDOW: u32 = (1 << 31) - 1;
+
 /// Headers HTTP/2 forbids (RFC 9113 §8.2.2). `host` is replaced by
 /// `:authority`. `te` is dropped unless it is `trailers`.
 const CONNECTION_SPECIFIC: &[&str] = &[
@@ -66,6 +69,15 @@ where
     let request = build_request(req)?;
 
     let (client, conn) = builder.handshake::<_, Bytes>(io).await?;
+
+    // Queue the request before the driver first runs. `ready` resolves
+    // without the driver (no peer SETTINGS limit yet), and the fork's first
+    // poll writes SETTINGS, WINDOW_UPDATE and HEADERS before reading, as
+    // browsers do, so the server's SETTINGS ACK never lands in between.
+    let mut client = client.ready().await?;
+    let end_of_stream = req.body.is_empty();
+    let (response, mut stream) = client.send_request(request, end_of_stream)?;
+
     // The driver writes the preface and frames. It ends when `client` and all
     // streams are dropped (h2 then sends GOAWAY) or the peer closes.
     tokio::spawn(async move {
@@ -74,9 +86,6 @@ where
         }
     });
 
-    let mut client = client.ready().await?;
-    let end_of_stream = req.body.is_empty();
-    let (response, mut stream) = client.send_request(request, end_of_stream)?;
     if !end_of_stream {
         send_body(&mut stream, req.body.clone()).await?;
     }
@@ -137,7 +146,7 @@ pub fn builder_for(profile: &ClientHelloProfile) -> Result<Builder, NetError> {
                 b.max_concurrent_streams(v);
             }
             "INITIAL_WINDOW_SIZE" => {
-                if v > (1 << 31) - 1 {
+                if v > MAX_WINDOW {
                     return Err(NetError::Profile(format!(
                         "INITIAL_WINDOW_SIZE {v} too large"
                     )));
@@ -172,7 +181,7 @@ pub fn builder_for(profile: &ClientHelloProfile) -> Result<Builder, NetError> {
     if profile.http2_window_update > 0 {
         let target = DEFAULT_CONN_WINDOW
             .checked_add(profile.http2_window_update)
-            .filter(|t| *t <= (1 << 31) - 1)
+            .filter(|t| *t <= MAX_WINDOW)
             .ok_or_else(|| {
                 NetError::Profile(format!(
                     "http2_window_update {} too large",
@@ -183,6 +192,10 @@ pub fn builder_for(profile: &ClientHelloProfile) -> Result<Builder, NetError> {
     }
 
     b.pseudo_header_order(pseudo_order(&profile.http2_pseudo_header_order)?);
+
+    if let Some(p) = &profile.http2_priority.headers {
+        b.headers_priority(p.depends_on, p.weight, p.exclusive);
+    }
 
     if !profile.http2_priority.frames.is_empty() {
         tracing::warn!("h2 PRIORITY frames in profile are not sent yet");
@@ -353,27 +366,34 @@ mod tests {
             let (tcp, _) = listener.accept().await.unwrap();
             let mut conn = h2::server::handshake(tcp).await.unwrap();
             let (req, mut respond) = conn.accept().await.unwrap().unwrap();
-            let (parts, mut body) = req.into_parts();
-            let mut got = Vec::new();
-            while let Some(chunk) = body.data().await {
-                got.extend_from_slice(&chunk.unwrap());
-            }
-            let resp = http::Response::builder()
-                .status(201)
-                .header("x-b", "1")
-                .header("x-a", "2")
-                .body(())
-                .unwrap();
-            let mut send = respond.send_response(resp, false).unwrap();
-            send.send_data(Bytes::from_static(b"hello h2"), true)
-                .unwrap();
+            // The request body only arrives while the connection is driven,
+            // so handle the stream in its own task.
+            let handler = tokio::spawn(async move {
+                let (parts, mut body) = req.into_parts();
+                let mut got = Vec::new();
+                while let Some(chunk) = body.data().await {
+                    let chunk = chunk.unwrap();
+                    let _ = body.flow_control().release_capacity(chunk.len());
+                    got.extend_from_slice(&chunk);
+                }
+                let resp = http::Response::builder()
+                    .status(201)
+                    .header("x-b", "1")
+                    .header("x-a", "2")
+                    .body(())
+                    .unwrap();
+                let mut send = respond.send_response(resp, false).unwrap();
+                send.send_data(Bytes::from_static(b"hello h2"), true)
+                    .unwrap();
+                (parts, got)
+            });
             // Drive the connection until the client goes away.
             while let Some(r) = conn.accept().await {
                 if r.is_err() {
                     break;
                 }
             }
-            (parts, got)
+            handler.await.unwrap()
         });
 
         let mut req = get(port, "/echo?q=1");

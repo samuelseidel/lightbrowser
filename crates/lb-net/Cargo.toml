@@ -49,4 +49,6 @@ thiserror = "2"
 tracing = "0.1"
 
 [dev-dependencies]
+# Test support only: local capture server, JA3/JA4 (tests/fingerprint.rs).
+lb-fptest = { path = "../lb-fptest" }
 tokio = { version = "1", features = ["full"] }

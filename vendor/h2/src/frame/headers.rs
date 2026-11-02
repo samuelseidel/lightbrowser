@@ -306,26 +306,42 @@ impl Headers {
         encoder: &mut hpack::Encoder,
         dst: &mut EncodeBuf<'_>,
     ) -> Option<Continuation> {
-        self.encode_with_order(encoder, dst, &DEFAULT_PSEUDO_ORDER)
+        self.encode_with_order(encoder, dst, &DEFAULT_PSEUDO_ORDER, None)
     }
 
     /// Like `encode`, with the request pseudo headers in `order`
-    /// (LIGHTBROWSER patch).
+    /// (LIGHTBROWSER patch). If `priority` is set and this is a request
+    /// (`:method` present), the frame gets the PRIORITY flag and that
+    /// priority block, as Chrome sends on its request HEADERS.
     pub(crate) fn encode_with_order(
         self,
         encoder: &mut hpack::Encoder,
         dst: &mut EncodeBuf<'_>,
         order: &[PseudoHeader; 4],
+        priority: Option<StreamDependency>,
     ) -> Option<Continuation> {
         // At this point, the `is_end_headers` flag should always be set
         debug_assert!(self.flags.is_end_headers());
 
+        let priority = priority.filter(|_| self.header_block.pseudo.method.is_some());
+
         // Get the HEADERS frame head
-        let head = self.head();
+        let mut head = self.head();
+        if priority.is_some() {
+            head = Head::new(
+                Kind::Headers,
+                u8::from(self.flags) | PRIORITY,
+                self.stream_id,
+            );
+        }
 
         self.header_block
             .into_encoding(encoder, order)
-            .encode(&head, dst, Some(encoder), |_| {})
+            .encode(&head, dst, Some(encoder), |dst| {
+                if let Some(dep) = priority {
+                    dep.encode(dst);
+                }
+            })
     }
 
     fn head(&self) -> Head {

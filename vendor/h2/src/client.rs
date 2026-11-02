@@ -353,6 +353,10 @@ pub struct Builder {
     /// Order of request pseudo headers (LIGHTBROWSER patch). `None` keeps
     /// upstream order.
     pseudo_order: Option<[PseudoHeader; 4]>,
+
+    /// Priority block on request HEADERS frames (LIGHTBROWSER patch). `None`
+    /// keeps upstream behaviour (no PRIORITY flag).
+    headers_priority: Option<crate::frame::StreamDependency>,
 }
 
 #[derive(Debug)]
@@ -675,6 +679,7 @@ impl Builder {
             local_max_error_reset_streams: Some(proto::DEFAULT_LOCAL_RESET_COUNT_MAX),
             data_frame_budget: proto::DataFrameBudget::Auto,
             pseudo_order: None,
+            headers_priority: None,
         }
     }
 
@@ -696,6 +701,22 @@ impl Builder {
     /// listed ones, in upstream order.
     pub fn settings_order(&mut self, order: Vec<u16>) -> &mut Self {
         self.settings.set_order(Some(order));
+        self
+    }
+
+    /// Sends every request HEADERS frame with the PRIORITY flag and this
+    /// RFC 7540 priority block (LIGHTBROWSER patch). Chrome sends
+    /// `exclusive = true, depends_on = 0, weight = 256` on a navigation.
+    ///
+    /// `weight` is the RFC weight, 1 to 256 (values outside are clamped).
+    /// `depends_on` must not have the high bit set.
+    pub fn headers_priority(&mut self, depends_on: u32, weight: u16, exclusive: bool) -> &mut Self {
+        let wire = (weight.clamp(1, 256) - 1) as u8;
+        self.headers_priority = Some(crate::frame::StreamDependency::new(
+            StreamId::from(depends_on & !(1 << 31)),
+            wire,
+            exclusive,
+        ));
         self
     }
 
@@ -1379,6 +1400,7 @@ where
         if let Some(order) = builder.pseudo_order {
             codec.set_send_pseudo_order(order);
         }
+        codec.set_send_headers_priority(builder.headers_priority);
 
         // Send initial settings frame
         codec

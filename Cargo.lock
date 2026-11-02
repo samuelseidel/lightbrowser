@@ -1006,6 +1006,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "lb-fptest",
  "lb-persona",
  "serde",
  "serde_json",
@@ -1058,7 +1059,10 @@ name = "lightbrowser"
 version = "0.0.1"
 dependencies = [
  "lb-js",
+ "lb-net",
  "lb-persona",
+ "tokio",
+ "url",
 ]
 
 [[package]]

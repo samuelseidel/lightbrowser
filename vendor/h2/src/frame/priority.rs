@@ -6,7 +6,7 @@ pub struct Priority {
     dependency: StreamDependency,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct StreamDependency {
     /// The ID of the stream dependency target
     dependency_id: StreamId,
@@ -68,5 +68,17 @@ impl StreamDependency {
 
     pub fn dependency_id(&self) -> StreamId {
         self.dependency_id
+    }
+
+    /// Writes the 5-byte priority block: exclusive bit + stream id, then the
+    /// wire weight (LIGHTBROWSER patch).
+    pub fn encode<B: bytes::BufMut>(&self, dst: &mut B) {
+        const EXCLUSIVE: u32 = 1 << 31;
+        let mut id = u32::from(self.dependency_id) & !EXCLUSIVE;
+        if self.is_exclusive {
+            id |= EXCLUSIVE;
+        }
+        dst.put_u32(id);
+        dst.put_u8(self.weight);
     }
 }

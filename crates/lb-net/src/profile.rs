@@ -63,6 +63,21 @@ pub struct H2Priority {
     pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frames: Vec<H2PriorityFrame>,
+    /// Priority block on request HEADERS frames (PRIORITY flag set). Chrome
+    /// sends `exclusive: true, depends_on: 0, weight: 256`; Firefox 128 none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<H2HeadersPriority>,
+}
+
+/// RFC 7540 priority block carried on a HEADERS frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct H2HeadersPriority {
+    #[serde(default)]
+    pub exclusive: bool,
+    #[serde(default)]
+    pub depends_on: u32,
+    /// RFC weight, 1 to 256 (the wire byte plus one).
+    pub weight: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +133,15 @@ pub struct ClientHelloProfile {
     pub alps_protocols: Vec<String>,
     #[serde(default)]
     pub ech_grease: bool,
+    /// `server_padding` (4832) request size in bytes. Sent only when
+    /// `extensions_order` lists 4832; absent means 0 (what Chrome 153 sends).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_padding_request: Option<u16>,
+    /// `trust_anchors` (0xCA34): the trust anchor ID list as hex, in wire form
+    /// (8-bit length-prefixed IDs, without the outer 16-bit length). Sent only
+    /// when `extensions_order` lists 51764; absent means an empty list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_anchor_ids: Option<String>,
 
     pub http2_settings: H2Settings,
     pub http2_window_update: u32,
@@ -162,12 +186,51 @@ impl ClientHelloProfile {
                 "http2_pseudo_header_order must list :method :authority :scheme :path".into(),
             ));
         }
+        self.trust_anchor_ids_bytes()?;
+        if let Some(h) = &self.http2_priority.headers
+            && (!(1..=256).contains(&h.weight) || h.depends_on >= 1 << 31)
+        {
+            return Err(NetError::Profile(format!(
+                "http2_priority.headers out of range: {h:?}"
+            )));
+        }
         for s in &self.http2_settings.ordered_params {
             if s.code().is_none() {
                 return Err(NetError::Profile(format!("unknown H2 setting {}", s.id)));
             }
         }
         Ok(())
+    }
+
+    /// [`Self::trust_anchor_ids`] decoded and checked: each ID is a non-empty,
+    /// 8-bit length-prefixed string. Absent gives an empty list.
+    pub fn trust_anchor_ids_bytes(&self) -> Result<Vec<u8>, NetError> {
+        let Some(hex) = &self.trust_anchor_ids else {
+            return Ok(Vec::new());
+        };
+        let bad = || NetError::Profile(format!("trust_anchor_ids is not valid hex: {hex:?}"));
+        if hex.len() % 2 != 0 {
+            return Err(bad());
+        }
+        let bytes = (0..hex.len())
+            .step_by(2)
+            .map(|i| {
+                hex.get(i..i + 2)
+                    .and_then(|b| u8::from_str_radix(b, 16).ok())
+                    .ok_or_else(bad)
+            })
+            .collect::<Result<Vec<u8>, _>>()?;
+        let mut i = 0;
+        while i < bytes.len() {
+            let len = usize::from(bytes[i]);
+            if len == 0 || i + 1 + len > bytes.len() {
+                return Err(NetError::Profile(
+                    "trust_anchor_ids: IDs must be non-empty and length-prefixed".into(),
+                ));
+            }
+            i += 1 + len;
+        }
+        Ok(bytes)
     }
 
     /// Hex ids of the cipher suites in wire order, e.g. `["1301", "1302", ...]`.
@@ -193,6 +256,21 @@ mod tests {
         assert_eq!(p.http2_settings.ordered_params[0].id, "HEADER_TABLE_SIZE");
         assert_eq!(p.http2_window_update, 12_517_377);
         assert!(!p.permutes_extensions());
+    }
+
+    #[test]
+    fn trust_anchor_ids_are_checked() {
+        let mut p = ClientHelloProfile::from_json(FIREFOX_WIN10).unwrap();
+        assert_eq!(p.trust_anchor_ids_bytes().unwrap(), Vec::<u8>::new());
+        p.trust_anchor_ids = Some("0201ff01AA".into());
+        assert_eq!(
+            p.trust_anchor_ids_bytes().unwrap(),
+            vec![2, 1, 0xff, 1, 0xaa]
+        );
+        for bad in ["0", "zz", "00", "0301ff"] {
+            p.trust_anchor_ids = Some(bad.into());
+            assert!(p.trust_anchor_ids_bytes().is_err(), "{bad}");
+        }
     }
 
     #[test]

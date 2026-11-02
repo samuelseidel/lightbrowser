@@ -7,7 +7,8 @@ driven over CDP, so stock Playwright `connectOverCDP` works. Presents a Chrome
 or Firefox persona.
 
 `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` are the source of truth. Read them
-first and do not contradict them. Current state: M0 done; most crates are
+first and do not contradict them. Current state: M1 (network) done for
+Chrome; Firefox TLS gaps are listed in ADR 0003. Crates from M2 on are still
 empty skeletons.
 
 ## Internal use and legal
@@ -20,7 +21,8 @@ empty skeletons.
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | sfc32 done |
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | trait + `COMPILED_FAMILY` |
-| `lb-net` | BoringSSL, hyper h1, forked h2, cookies, cache, proxies | M1 |
+| `lb-net` | BoringSSL, hyper h1, forked h2 (`vendor/h2`), cookies, decoding, `fetch` | M1 done; cache, proxies M2 |
+| `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | M2 |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | M2 |
 | `lb-webapi` | fetch, XHR, timers, storage, canvas/WebGL/audio APIs | M2+ |
@@ -30,7 +32,7 @@ empty skeletons.
 | `lb-page` | Event loop, navigation, frames, workers | M2/M3 |
 | `lb-cdp` | CDP server | M3 |
 | `lb-behavior` | Human input simulation (vendored from stealth-browser) | M5 |
-| `bin/lightbrowser` | CLI; picks family by feature | stub |
+| `bin/lightbrowser` | CLI; picks family by feature; `fetch` | `fetch` done, `serve` stub |
 
 ## Commands
 ```bash
@@ -44,11 +46,31 @@ cargo fmt --all --check
 cargo test -p lightbrowser -p lb-js --no-default-features --features firefox
 cargo clippy -p lightbrowser -p lb-js --no-default-features --features firefox -- -D warnings
 ./target/release/lightbrowser --version       # prints the compiled family
+# Network fingerprint check vs profiles/tls (loopback only, prints JA3/JA4/H2)
+cargo test -p lb-net --test fingerprint -- --nocapture
+# Fetch from a local test server (self-signed cert)
+./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
 ```
 Both families output to `target/release/lightbrowser`; the last build wins.
 Run the chrome and firefox checks before finishing any change that touches
 `lb-js`, `lb-persona` or the binary. Do not run
 `cargo build --all-features`: it enables both engines.
+
+### Re-capturing a TLS profile
+For a new Chrome version, capture from the local Chromium. Full steps are in
+`tests/README.md`.
+```bash
+cargo build -p lb-fptest
+./target/debug/lb-fptest capture --out profiles/tls/chrome_<MAJOR>_linux.json \
+    --listen 127.0.0.1:18445 --count 2 --browser-version <FULL_VERSION>
+# other shell, twice, fresh --user-data-dir each time:
+/opt/pw-browsers/chromium --headless=new --no-sandbox --ignore-certificate-errors \
+    --user-data-dir="$(mktemp -d)" --no-proxy-server \
+    --host-resolver-rules="MAP fptest.localhost 127.0.0.1" \
+    --dump-dom https://fptest.localhost:18445/
+```
+Then update `Persona::default_chrome()` (UA, `sec-ch-ua`, `tls_profile_id`)
+and run the fingerprint test. Only capture on loopback with a local browser.
 
 ## Conventions
 - **One engine per binary.** Exactly one of `chrome` / `firefox` is enabled.

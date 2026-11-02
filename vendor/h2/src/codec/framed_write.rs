@@ -55,6 +55,9 @@ struct Encoder<B> {
 
     /// Order of request pseudo headers in HEADERS frames (LIGHTBROWSER patch)
     pseudo_order: [frame::PseudoHeader; 4],
+
+    /// Priority block for request HEADERS frames (LIGHTBROWSER patch).
+    headers_priority: Option<frame::StreamDependency>,
 }
 
 #[derive(Debug)]
@@ -102,6 +105,7 @@ where
                 max_frame_size: frame::DEFAULT_MAX_FRAME_SIZE,
                 chain_threshold,
                 pseudo_order: frame::DEFAULT_PSEUDO_ORDER,
+                headers_priority: None,
                 min_buffer_capacity: chain_threshold + frame::HEADER_LEN,
             },
         }
@@ -268,7 +272,12 @@ where
             Frame::Headers(v) => {
                 let mut buf = limited_write_buf!(self);
                 if let Some(continuation) =
-                    v.encode_with_order(&mut self.hpack, &mut buf, &self.pseudo_order)
+                    v.encode_with_order(
+                        &mut self.hpack,
+                        &mut buf,
+                        &self.pseudo_order,
+                        self.headers_priority,
+                    )
                 {
                     self.next = Some(Next::Continuation(continuation));
                 }
@@ -352,6 +361,11 @@ impl<T, B> FramedWrite<T, B> {
     /// Set the order of request pseudo headers (LIGHTBROWSER patch).
     pub fn set_pseudo_order(&mut self, order: [frame::PseudoHeader; 4]) {
         self.encoder.pseudo_order = order;
+    }
+
+    /// Set the priority block of request HEADERS frames (LIGHTBROWSER patch).
+    pub fn set_headers_priority(&mut self, priority: Option<frame::StreamDependency>) {
+        self.encoder.headers_priority = priority;
     }
 
     /// Retrieve the last data frame that has been sent

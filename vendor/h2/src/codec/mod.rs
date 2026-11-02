@@ -101,6 +101,12 @@ impl<T, B> Codec<T, B> {
         self.framed_write().set_pseudo_order(order)
     }
 
+    /// Set the priority block of sent request HEADERS frames (LIGHTBROWSER
+    /// patch).
+    pub fn set_send_headers_priority(&mut self, priority: Option<crate::frame::StreamDependency>) {
+        self.framed_write().set_headers_priority(priority)
+    }
+
     /// Set the decoder header table size size.
     pub fn set_recv_header_table_size(&mut self, val: usize) {
         self.inner.set_header_table_size(val)

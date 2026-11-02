@@ -13,3 +13,6 @@ firefox = ["lb-js/firefox"]
 [dependencies]
 lb-js = { path = "../../crates/lb-js", default-features = false }
 lb-persona = { path = "../../crates/lb-persona" }
+lb-net = { path = "../../crates/lb-net" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+url = "2"

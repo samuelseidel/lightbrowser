@@ -8,7 +8,8 @@
 //! case map is crate-private. We use `title_case_headers`, which writes
 //! `User-Agent`, `Accept-Language` and so on like both browsers do, but also
 //! `Sec-Ch-Ua` where Chrome writes `sec-ch-ua`, `Te` where Firefox writes
-//! `TE` and `Dnt` for `DNT`. See the open issue in the module report.
+//! `TE` and `Dnt` for `DNT`. Exact per-name case needs our own h1 head
+//! writer or a hyper patch; tracked as an M1 open issue.
 
 use bytes::{Bytes, BytesMut};
 use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
