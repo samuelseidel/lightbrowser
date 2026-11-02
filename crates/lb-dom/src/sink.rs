@@ -4,12 +4,12 @@
 //! swaps the caller's document in before feeding and back out afterwards.
 
 use std::borrow::Cow;
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashMap;
 
 use html5ever::tendril::StrTendril;
-use html5ever::tree_builder::{ElemName, ElementFlags, NodeOrText, QuirksMode, TreeSink};
-use html5ever::{Attribute, LocalName, Namespace, QualName, local_name, ns};
+use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
+use html5ever::{Attribute, QualName, local_name, ns};
 
 use crate::document::Document;
 use crate::node::{Doctype, NodeFlags, NodeId};
@@ -39,26 +39,13 @@ impl Sink {
     }
 }
 
-/// Owned element name handed to html5ever (cloning atoms is cheap and
-/// avoids holding a `RefCell` borrow across tree-builder calls).
-#[derive(Debug)]
-pub(crate) struct ElemNameBuf(QualName);
-
-impl ElemName for ElemNameBuf {
-    fn ns(&self) -> &Namespace {
-        &self.0.ns
-    }
-
-    fn local_name(&self) -> &LocalName {
-        &self.0.local
-    }
-}
-
 impl TreeSink for Sink {
     type Handle = NodeId;
     type Output = ();
+    // A shared borrow of the arena: html5ever only holds it within one
+    // expression, never across another sink call.
     type ElemName<'a>
-        = ElemNameBuf
+        = Ref<'a, QualName>
     where
         Self: 'a;
 
@@ -72,9 +59,10 @@ impl TreeSink for Sink {
         self.root
     }
 
-    fn elem_name<'a>(&'a self, target: &'a NodeId) -> ElemNameBuf {
-        let doc = self.doc.borrow();
-        ElemNameBuf(doc.element(*target).expect("not an element").name.clone())
+    fn elem_name<'a>(&'a self, target: &'a NodeId) -> Ref<'a, QualName> {
+        Ref::map(self.doc.borrow(), |doc| {
+            &doc.element(*target).expect("not an element").name
+        })
     }
 
     fn create_element(&self, name: QualName, attrs: Vec<Attribute>, flags: ElementFlags) -> NodeId {

@@ -641,7 +641,9 @@ impl Engine {
     }
 
     /// Define an interface as V8 templates. Templates are per engine; each
-    /// realm instantiates them lazily.
+    /// realm instantiates them lazily. Define interfaces before the realms
+    /// that use them. Panics if `spec.parent` is not an interface of this
+    /// engine.
     pub fn define_interface(&mut self, spec: InterfaceSpec) -> InterfaceId {
         let mut iso = Entered::new(&mut self.isolate);
         v8::scope!(let scope, &mut **iso);

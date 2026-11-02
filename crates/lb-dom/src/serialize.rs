@@ -51,10 +51,7 @@ impl Serialize for SerializeNode<'_> {
                 Op::Open(id) => match &self.doc.node(id).data {
                     NodeData::Element(i) => {
                         let e = &self.doc.elements[*i as usize];
-                        s.start_elem(
-                            e.name.clone(),
-                            e.attrs.iter().map(|a| (&a.name, &*a.value)),
-                        )?;
+                        s.start_elem(e.name.clone(), e.attrs.iter().map(|a| (&a.name, &*a.value)))?;
                         stack.push(Op::Close(id));
                         self.push_children(&mut stack, id);
                     }

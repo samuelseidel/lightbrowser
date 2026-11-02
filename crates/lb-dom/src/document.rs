@@ -658,6 +658,15 @@ impl Document {
         });
     }
 
+    /// Unlink and return all children of a scratch node without events.
+    pub(crate) fn take_children_silently(&mut self, parent: NodeId) -> Vec<NodeId> {
+        let kids: Vec<NodeId> = self.children(parent).collect();
+        for &k in &kids {
+            self.unlink_raw(k);
+        }
+        kids
+    }
+
     /// Move all children of `from` to the end of `to`.
     pub(crate) fn reparent_children(&mut self, from: NodeId, to: NodeId) {
         while let Some(c) = self.first_child(from) {
@@ -968,7 +977,12 @@ impl Document {
     }
 
     /// `setAttribute(qualifiedName, value)`.
-    pub fn set_attribute(&mut self, id: NodeId, qualified: &str, value: &str) -> Result<(), DomError> {
+    pub fn set_attribute(
+        &mut self,
+        id: NodeId,
+        qualified: &str,
+        value: &str,
+    ) -> Result<(), DomError> {
         if !is_valid_attribute_name(qualified) {
             return Err(DomError::InvalidCharacter);
         }
@@ -1292,8 +1306,11 @@ fn validate_and_extract(
         Some((p, l)) => (Some(p), l),
         None => (None, qualified),
     };
-    if prefix.is_some_and(|p| p.is_empty() || p.bytes().any(|b| b.is_ascii_whitespace() || matches!(b, 0 | b'/' | b'>')))
-        || !valid_local(local)
+    if prefix.is_some_and(|p| {
+        p.is_empty()
+            || p.bytes()
+                .any(|b| b.is_ascii_whitespace() || matches!(b, 0 | b'/' | b'>'))
+    }) || !valid_local(local)
     {
         return Err(DomError::InvalidCharacter);
     }
@@ -1305,5 +1322,9 @@ fn validate_and_extract(
     if bad {
         return Err(DomError::Namespace);
     }
-    Ok(QualName::new(prefix.map(Prefix::from), namespace, LocalName::from(local)))
+    Ok(QualName::new(
+        prefix.map(Prefix::from),
+        namespace,
+        LocalName::from(local),
+    ))
 }

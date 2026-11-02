@@ -10,9 +10,12 @@ them, names what blocks what, and lists the gaps found in the current tree.
 |---|---|
 | M0 docs, workspace, CI, SFC32 | Done |
 | M1 `lb-net`: BoringSSL profiles, h1, forked h2, cookies, decoding, redirects; `fetch` CLI; `lb-fptest`; Chrome 153 profile | Done. Chrome JA3/JA4/Akamai match on loopback. Firefox JA3/JA4 gaps pinned in ADR 0003. |
-| `lb-js` | Trait only (70 lines). No V8, no SpiderMonkey. |
-| `lb-persona` | Network-only struct + sfc32 (224 lines). No schema, no consistency rules. |
-| `lb-dom`, `lb-css`, `lb-layout`, `lb-paint`, `lb-page`, `lb-webapi`, `lb-webidl-gen`, `lb-cdp`, `lb-behavior` | Empty (3 lines each). |
+| `lb-js` | V8 backend done (M2 task 1), no snapshot. No SpiderMonkey. |
+| `lb-persona` | Persona v2 schema, v1/v2 loader, rules R01–R16 (M4 task 1, done early). |
+| `lb-dom` | Arena DOM, html5ever sink, selectors done (M2 task 2). |
+| `lb-behavior` | Vendored, plus CDP event conversion (M5 task 1 vendoring, done early; replay not done). |
+| `lb-css`, `lb-layout`, `lb-paint`, `lb-page`, `lb-webapi`, `lb-webidl-gen`, `lb-cdp` | Empty. |
+| `tests/detect-bench` | Local loopback detection bench. |
 | `sdk/python`, `bench/` | README placeholders. |
 | Deferred from M1 | Proxies, exact h1 header-name case, connection reuse, TLS session cache, Firefox TLS gaps and re-capture. |
 

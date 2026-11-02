@@ -208,8 +208,8 @@ Steps are in `tests/README.md`. Both modes use our own local server only.
 
 | From | To | How |
 |---|---|---|
-| `consistency/` (`PersonaProfile`, rules R01–R10) | `lb-persona` | Vendored in M4. Chrome rules added: UA-CH brands, userAgentData, Chrome TLS/H2. |
-| `behavior/` (`human_click_events`, …) | `lb-behavior` | Vendored in M5. Events replayed through the Input pipeline. |
+| `consistency/` (`PersonaProfile`, rules R01–R10) | `lb-persona` | Vendored in M2 (ahead of M4). Chrome rules R11–R16 added: UA-CH brands and GREASE, UA-CH platform, TLS profile ↔ UA major, client-hints presence, navigator constants. |
+| `behavior/` (`human_click_events`, …) | `lb-behavior` | Vendored in M2 (ahead of M5), on rand 0.9. `lb_behavior::cdp` turns events into `Input.dispatch*` params; replay through the Input pipeline is M5. |
 | `profiles/schemas/persona_v1.schema.json` | `profiles/schemas/persona_v2.schema.json` | Adds `browser.family` and `client_hints`. v1 is read as Firefox. |
 | `profiles/tls/firefox_128_*.json` | `profiles/tls/` | Same format. Chrome profiles are captured with `lb-fptest` and add optional fields (`grease`, `permute_extensions`, `alps_protocols`, `ech_grease`, `server_padding_request`, `trust_anchor_ids`, `http2_priority.headers`). |
 | SFC32 in `geckophantom_config.h` | `lb-persona::sfc32` | **Done.** Bit-identical, with a test against C output. |

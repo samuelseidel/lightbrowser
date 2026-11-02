@@ -359,7 +359,9 @@ impl SelectorList {
     pub fn parse(text: &str) -> Result<Self, DomError> {
         let mut parser = cssparser::Parser::new(text);
         let list = selectors::SelectorList::parse(&SelectorParser, &mut parser, ParseRelative::No)
-            .map_err(|e| DomError::Syntax(format!("'{text}' is not a valid selector: {:?}", e.kind)))?;
+            .map_err(|e| {
+                DomError::Syntax(format!("'{text}' is not a valid selector: {:?}", e.kind))
+            })?;
         parser
             .expect_exhausted()
             .map_err(|_| DomError::Syntax(format!("'{text}' is not a valid selector")))?;
@@ -382,7 +384,12 @@ pub struct ElementRef<'a> {
 
 impl fmt::Debug for ElementRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ElementRef({:?} {:?})", self.id, self.doc.local_name(self.id))
+        write!(
+            f,
+            "ElementRef({:?} {:?})",
+            self.id,
+            self.doc.local_name(self.id)
+        )
     }
 }
 
@@ -433,11 +440,10 @@ impl<'a> ElementRef<'a> {
         let own = d.attr("disabled").is_some();
         match *local {
             local_name!("option") => {
-                own || self
-                    .doc
-                    .parent_element(self.id)
-                    .is_some_and(|p| ElementRef::new(self.doc, p).is_html_named(&local_name!("optgroup"))
-                        && ElementRef::new(self.doc, p).attr("disabled").is_some())
+                own || self.doc.parent_element(self.id).is_some_and(|p| {
+                    ElementRef::new(self.doc, p).is_html_named(&local_name!("optgroup"))
+                        && ElementRef::new(self.doc, p).attr("disabled").is_some()
+                })
             }
             local_name!("optgroup") => own,
             local_name!("button")
@@ -689,8 +695,8 @@ impl<'a> Element for ElementRef<'a> {
                     && self.value_is_empty()
             }
             P::Valid | P::Invalid => {
-                let candidate = self.input_type().is_some()
-                    || self.is_html_named(&local_name!("textarea"));
+                let candidate =
+                    self.input_type().is_some() || self.is_html_named(&local_name!("textarea"));
                 if !candidate {
                     return false;
                 }
@@ -707,7 +713,8 @@ impl<'a> Element for ElementRef<'a> {
                     && self.attr("open").is_some()
             }
             P::Paused => {
-                self.is_html_named(&local_name!("audio")) || self.is_html_named(&local_name!("video"))
+                self.is_html_named(&local_name!("audio"))
+                    || self.is_html_named(&local_name!("video"))
             }
             P::Autofill
             | P::WebkitAutofill
@@ -769,11 +776,13 @@ impl<'a> Element for ElementRef<'a> {
     }
 
     fn is_empty(&self) -> bool {
-        self.doc.children(self.id).all(|c| match self.doc.node_type(c) {
-            NodeType::Element => false,
-            NodeType::Text => self.doc.character_data(c).is_some_and(str::is_empty),
-            _ => true,
-        })
+        self.doc
+            .children(self.id)
+            .all(|c| match self.doc.node_type(c) {
+                NodeType::Element => false,
+                NodeType::Text => self.doc.character_data(c).is_some_and(str::is_empty),
+                _ => true,
+            })
     }
 
     fn is_root(&self) -> bool {
@@ -849,12 +858,20 @@ impl Document {
     }
 
     /// `querySelector`.
-    pub fn query_selector(&self, scope: NodeId, selectors: &str) -> Result<Option<NodeId>, DomError> {
+    pub fn query_selector(
+        &self,
+        scope: NodeId,
+        selectors: &str,
+    ) -> Result<Option<NodeId>, DomError> {
         Ok(self.select_first(scope, &SelectorList::parse(selectors)?))
     }
 
     /// `querySelectorAll` (a static list).
-    pub fn query_selector_all(&self, scope: NodeId, selectors: &str) -> Result<Vec<NodeId>, DomError> {
+    pub fn query_selector_all(
+        &self,
+        scope: NodeId,
+        selectors: &str,
+    ) -> Result<Vec<NodeId>, DomError> {
         Ok(self.select_all(scope, &SelectorList::parse(selectors)?))
     }
 

@@ -1,14 +1,28 @@
 //! Persona model shared by every layer: browser family, validation and
 //! deterministic fingerprint noise.
 //!
-//! The persona schema and consistency rules come from stealth-browser
-//! (`consistency/`) and are vendored here in M4.
+//! - [`Persona`]: the small network-facing summary (headers, TLS profile id).
+//! - [`PersonaProfile`]: the full persona (`persona_v2.schema.json`; v1 files
+//!   load as Firefox). [`PersonaProfile::to_network`] derives a [`Persona`].
+//! - [`consistency`]: rules R01-R16, vendored from stealth-browser
+//!   (`consistency/`, R01-R10) plus the Chrome rules. [`validate_file`]
+//!   backs `lightbrowser validate`.
+//! - [`sfc32`]: deterministic noise.
 
+pub mod consistency;
+pub mod profile;
 pub mod sfc32;
+pub mod uach;
 
-/// The persona a browsing context presents. M1 carries only what the network
-/// layer needs; the full schema (`profiles/schemas/persona_v2.schema.json`)
-/// arrives in M4 and is validated by the vendored consistency rules.
+pub use consistency::{
+    ValidateOutcome, ValidationResult, Violation, Warning, validate, validate_file,
+};
+pub use profile::{BrandVersion, ClientHints, PersonaError, PersonaProfile, format_brand_list};
+
+/// The network-facing summary of a persona: what `lb-net` needs. The full
+/// schema (`profiles/schemas/persona_v2.schema.json`) is [`PersonaProfile`];
+/// get this from it with [`PersonaProfile::to_network`], or load it directly
+/// with [`Persona::load_json`] / [`Persona::from_path`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Persona {
     pub family: BrowserFamily,
@@ -72,7 +86,8 @@ use std::str::FromStr;
 
 /// The real browser a persona claims to be. Each family builds its own
 /// binary with the matching JS engine, IDL set and network fingerprint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BrowserFamily {
     /// V8, Chromium IDL, BoringSSL Chrome ClientHello, Chrome H2 settings.
     Chrome,

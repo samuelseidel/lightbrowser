@@ -324,8 +324,7 @@ impl Document {
         let frag = self.parse_fragment(element, html);
         let target = self.template_contents(element).unwrap_or(element);
         self.remove_all_children(target);
-        let kids: Vec<NodeId> = self.children(frag).collect();
-        for k in kids {
+        for k in self.take_children_silently(frag) {
             self.insert_unchecked(target, k, None);
         }
     }
@@ -344,8 +343,7 @@ impl Document {
             _ => parent,
         };
         let frag = self.parse_fragment(context, html);
-        let kids: Vec<NodeId> = self.children(frag).collect();
-        for k in kids {
+        for k in self.take_children_silently(frag) {
             self.insert_unchecked(parent, k, Some(element));
         }
         self.detach(element);

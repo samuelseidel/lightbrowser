@@ -1,0 +1,335 @@
+{
+  "schema_version": "2.0",
+  "profile_id": "c1530a10-7b3e-4c52-9d0a-153c0de00002",
+  "profile_name": "Chrome 153 on macOS 15 - Apple M2 - 1470x956 Retina",
+  "created_at": "2026-11-02T00:00:00Z",
+  "tags": [
+    "chrome",
+    "chrome153",
+    "macos",
+    "macos15",
+    "apple",
+    "m2",
+    "retina",
+    "reference"
+  ],
+  "adversarial": false,
+  "os": {
+    "name": "macOS",
+    "version": "15.0",
+    "build": "24A335",
+    "platform": "MacIntel",
+    "architecture": "arm64"
+  },
+  "browser": {
+    "family": "chrome",
+    "name": "Chrome",
+    "version": "153.0.8010.12",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept_language": "en-US,en;q=0.9",
+    "do_not_track": null,
+    "cookie_enabled": true,
+    "java_enabled": false,
+    "pdf_viewer_enabled": true,
+    "product": "Gecko",
+    "product_sub": "20030107",
+    "vendor": "Google Inc.",
+    "vendor_sub": "",
+    "app_name": "Netscape",
+    "app_code_name": "Mozilla",
+    "app_version": "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+  },
+  "client_hints": {
+    "brands": [
+      {
+        "brand": "Google Chrome",
+        "version": "153"
+      },
+      {
+        "brand": "Not_A Brand",
+        "version": "8"
+      },
+      {
+        "brand": "Chromium",
+        "version": "153"
+      }
+    ],
+    "full_version_list": [
+      {
+        "brand": "Google Chrome",
+        "version": "153.0.8010.12"
+      },
+      {
+        "brand": "Not_A Brand",
+        "version": "8.0.0.0"
+      },
+      {
+        "brand": "Chromium",
+        "version": "153.0.8010.12"
+      }
+    ],
+    "platform": "macOS",
+    "platform_version": "15.0.0",
+    "architecture": "arm",
+    "bitness": "64",
+    "model": "",
+    "mobile": false,
+    "wow64": false,
+    "full_version": "153.0.8010.12"
+  },
+  "hardware": {
+    "hardware_concurrency": 8,
+    "device_memory": 8,
+    "max_touch_points": 0,
+    "gpu": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "vendor_unmasked": "Google Inc. (Apple)",
+      "renderer_unmasked": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)"
+    }
+  },
+  "screen": {
+    "width": 1470,
+    "height": 956,
+    "avail_width": 1470,
+    "avail_height": 919,
+    "color_depth": 30,
+    "pixel_depth": 30,
+    "device_pixel_ratio": 2.0,
+    "inner_width": 1470,
+    "inner_height": 812,
+    "outer_width": 1470,
+    "outer_height": 919,
+    "avail_top": 37,
+    "avail_left": 0
+  },
+  "locale": {
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "timezone": "America/Los_Angeles",
+    "timezone_offset": 480
+  },
+  "network": {
+    "connection_type": "4g",
+    "downlink": 10,
+    "rtt": 50,
+    "save_data": false
+  },
+  "fingerprint_seeds": {
+    "canvas_seed": "b3f27d0a6c915e48a07d3b1fe6c2948d",
+    "webgl_noise_seed": "19e8c5a4073bd6f2c48e1a95d7b30f6a",
+    "audio_seed": "e4a90d27b5c13f86d2e7a0b94c58f1d3"
+  },
+  "webgl": {
+    "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+    "extensions": [
+      "EXT_color_buffer_float",
+      "EXT_color_buffer_half_float",
+      "EXT_disjoint_timer_query_webgl2",
+      "EXT_float_blend",
+      "EXT_texture_compression_bptc",
+      "EXT_texture_compression_rgtc",
+      "EXT_texture_filter_anisotropic",
+      "EXT_texture_mirror_clamp_to_edge",
+      "EXT_texture_norm16",
+      "KHR_parallel_shader_compile",
+      "OES_draw_buffers_indexed",
+      "OES_sample_variables",
+      "OES_shader_multisample_interpolation",
+      "OES_texture_float_linear",
+      "WEBGL_clip_cull_distance",
+      "WEBGL_compressed_texture_astc",
+      "WEBGL_compressed_texture_etc",
+      "WEBGL_compressed_texture_etc1",
+      "WEBGL_compressed_texture_s3tc",
+      "WEBGL_compressed_texture_s3tc_srgb",
+      "WEBGL_debug_renderer_info",
+      "WEBGL_debug_shaders",
+      "WEBGL_lose_context",
+      "WEBGL_multi_draw"
+    ],
+    "parameters": {
+      "MAX_TEXTURE_SIZE": 16384,
+      "MAX_VIEWPORT_DIMS": [
+        16384,
+        16384
+      ],
+      "MAX_VERTEX_ATTRIBS": 16,
+      "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+      "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+      "MAX_VARYING_VECTORS": 31,
+      "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 32,
+      "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+      "MAX_RENDERBUFFER_SIZE": 16384,
+      "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+      "MAX_FRAGMENT_UNIFORM_COMPONENTS": 4096,
+      "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+      "MAX_3D_TEXTURE_SIZE": 2048,
+      "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 128,
+      "MAX_UNIFORM_BUFFER_BINDINGS": 72,
+      "MAX_UNIFORM_BLOCK_SIZE": 65536,
+      "MAX_COMBINED_UNIFORM_BLOCKS": 60,
+      "MAX_SAMPLES": 4,
+      "ALIASED_LINE_WIDTH_RANGE": [
+        1,
+        1
+      ],
+      "ALIASED_POINT_SIZE_RANGE": [
+        1,
+        511
+      ]
+    },
+    "shader_precision": {
+      "VERTEX_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      }
+    }
+  },
+  "fonts": {
+    "available": [
+      "Andale Mono",
+      "Apple Chancery",
+      "Apple Color Emoji",
+      "Apple SD Gothic Neo",
+      "Apple Symbols",
+      "AppleGothic",
+      "Arial",
+      "Arial Black",
+      "Arial Narrow",
+      "Arial Rounded MT Bold",
+      "Avenir",
+      "Avenir Next",
+      "Baskerville",
+      "Big Caslon",
+      "Bradley Hand",
+      "Brush Script MT",
+      "Chalkboard",
+      "Chalkduster",
+      "Charter",
+      "Cochin",
+      "Comic Sans MS",
+      "Copperplate",
+      "Courier",
+      "Courier New",
+      "Didot",
+      "Futura",
+      "Geneva",
+      "Georgia",
+      "Gill Sans",
+      "Helvetica",
+      "Helvetica Neue",
+      "Hoefler Text",
+      "Impact",
+      "Lucida Grande",
+      "Marker Felt",
+      "Menlo",
+      "Monaco",
+      "Noteworthy",
+      "Optima",
+      "Palatino",
+      "Papyrus",
+      "Phosphate",
+      "Rockwell",
+      "Savoye LET",
+      "SignPainter",
+      "Skia",
+      "Snell Roundhand",
+      "Tahoma",
+      "Times",
+      "Times New Roman",
+      "Trebuchet MS",
+      "Verdana",
+      "Zapfino"
+    ]
+  },
+  "tls": {
+    "profile_id": "chrome_153_linux",
+    "ja3": "9bddd6d71939cb1fcf03871f2cc2adcf",
+    "ja3s_note": "Chrome 153 ClientHello and H2 preface are OS-independent; captured on Linux (profiles/tls/chrome_153_linux.json)."
+  },
+  "timing": {
+    "performance_now_resolution_us": 100
+  },
+  "behavior": {
+    "profile": "casual_user"
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "base_latency": 0.01,
+    "max_channel_count": 2
+  },
+  "media_devices": {
+    "webcam_label": "",
+    "mic_label": "",
+    "speaker_label": ""
+  },
+  "permissions": {
+    "geolocation": "prompt",
+    "notifications": "prompt",
+    "camera": "prompt",
+    "microphone": "prompt"
+  }
+}

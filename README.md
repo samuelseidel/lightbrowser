@@ -8,8 +8,10 @@ fingerprint (TLS, HTTP/2, header order), JavaScript surface, and device
 fingerprints (canvas, WebGL, audio, fonts, screen). It aims to use less CPU,
 RAM and disk than Lightpanda.
 
-**Status:** M0 (foundations). The workspace builds and `lb-persona::sfc32` is
-done. Everything else is a skeleton. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status:** M1 (network) done for Chrome; M2 in progress. The V8 backend,
+arena DOM, persona v2 with consistency rules and the vendored behavior crate
+have landed. There is no event loop or CDP server yet. See
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only
 

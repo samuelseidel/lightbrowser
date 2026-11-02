@@ -1,0 +1,1199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lightbrowser/schemas/persona_v2.schema.json",
+  "title": "LightBrowser Persona Profile (v2)",
+  "description": "Persona profile for LightBrowser. v2 = GeckoPhantom persona_v1 plus browser.family, client_hints, timing, behavior and optional device surfaces. v1 files (Firefox 128) still load: they are read as family=firefox with no client_hints. Rule-level consistency (R01-R16) is checked by lb-persona, not by this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "profile_name",
+    "created_at",
+    "os",
+    "browser",
+    "hardware",
+    "screen",
+    "locale",
+    "network",
+    "fingerprint_seeds",
+    "webgl",
+    "fonts",
+    "tls"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version. v2 files use '2.0'; '1.0' files are accepted by the loader (not by this schema).",
+      "enum": [
+        "2.0"
+      ]
+    },
+    "profile_id": {
+      "type": "string",
+      "description": "Unique id for this persona. UUID v4 (the pattern is relaxed for hand-made adversarial files by lb-persona, not here).",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "profile_name": {
+      "type": "string",
+      "description": "Human-readable name for this profile.",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp of when this profile was created.",
+      "format": "date-time"
+    },
+    "tags": {
+      "type": "array",
+      "description": "Optional metadata tags for categorization and filtering.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "uniqueItems": true,
+      "maxItems": 32
+    },
+    "adversarial": {
+      "type": "boolean",
+      "description": "If true, this profile is intentionally invalid and used for adversarial/negative testing.",
+      "default": false
+    },
+    "os": {
+      "type": "object",
+      "description": "Operating system identity attributes.",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "build",
+        "platform",
+        "architecture"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Operating system family name.",
+          "enum": [
+            "Windows",
+            "macOS",
+            "Linux"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "description": "Human-readable OS version (e.g. '10 22H2', '15.0', 'Ubuntu 22.04 LTS'). Used with client_hints.platform_version.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "build": {
+          "type": "string",
+          "description": "OS build identifier as it appears in the user agent (e.g., '10.0.19045', '14.5', 'Linux x86_64').",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "platform": {
+          "type": "string",
+          "description": "Value returned by navigator.platform.",
+          "enum": [
+            "Win32",
+            "MacIntel",
+            "Linux x86_64",
+            "Linux aarch64"
+          ]
+        },
+        "architecture": {
+          "type": "string",
+          "description": "CPU architecture.",
+          "enum": [
+            "x86_64",
+            "arm64",
+            "x86"
+          ]
+        }
+      }
+    },
+    "browser": {
+      "type": "object",
+      "description": "Browser identity and navigator.* constants. Firefox-only and Chrome-only fields are marked.",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "name",
+        "version",
+        "user_agent",
+        "accept_language",
+        "cookie_enabled",
+        "java_enabled",
+        "pdf_viewer_enabled",
+        "product",
+        "product_sub",
+        "vendor",
+        "vendor_sub",
+        "app_name",
+        "app_code_name",
+        "app_version"
+      ],
+      "properties": {
+        "family": {
+          "type": "string",
+          "enum": [
+            "chrome",
+            "firefox"
+          ],
+          "description": "Which browser the persona claims to be. Selects the JS engine, IDL set, TLS/H2 profile and header order. A binary refuses a persona whose family is not the one it was built for. Absent in v1 (read as 'firefox')."
+        },
+        "name": {
+          "type": "string",
+          "description": "Browser name. Must agree with family (rule R15).",
+          "enum": [
+            "Firefox",
+            "Chrome"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "description": "Full browser version. Firefox: '128.0'. Chrome: four-part full version such as '153.0.8010.12' (the UA string itself is frozen to '153.0.0.0'). Its major must equal the User-Agent major (R13).",
+          "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+){0,2}(esr)?$"
+        },
+        "build_id": {
+          "type": "string",
+          "description": "Firefox only: navigator.buildID ('20181001000000'). Omit for Chrome (no such property).",
+          "pattern": "^[0-9]{14}$"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Full User-Agent string sent in HTTP headers and navigator.userAgent.",
+          "minLength": 20,
+          "maxLength": 512
+        },
+        "accept_language": {
+          "type": "string",
+          "description": "Accept-Language header value (e.g., 'en-US,en;q=0.5').",
+          "minLength": 2,
+          "maxLength": 128
+        },
+        "do_not_track": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "navigator.doNotTrack: '1', '0' or null.",
+          "enum": [
+            "1",
+            "0",
+            null
+          ]
+        },
+        "cookie_enabled": {
+          "type": "boolean",
+          "description": "navigator.cookieEnabled value."
+        },
+        "java_enabled": {
+          "type": "boolean",
+          "description": "navigator.javaEnabled() return value. Always false in modern Firefox."
+        },
+        "pdf_viewer_enabled": {
+          "type": "boolean",
+          "description": "navigator.pdfViewerEnabled value. True in modern Firefox."
+        },
+        "product": {
+          "type": "string",
+          "description": "navigator.product. 'Gecko' in both Firefox and Chrome.",
+          "enum": [
+            "Gecko"
+          ]
+        },
+        "product_sub": {
+          "type": "string",
+          "description": "navigator.productSub. Firefox '20100101', Chrome '20030107' (R15).",
+          "enum": [
+            "20100101",
+            "20030107"
+          ]
+        },
+        "vendor": {
+          "type": "string",
+          "description": "navigator.vendor. Firefox '', Chrome 'Google Inc.' (R15).",
+          "enum": [
+            "",
+            "Google Inc."
+          ]
+        },
+        "vendor_sub": {
+          "type": "string",
+          "description": "navigator.vendorSub. Always empty string in Firefox.",
+          "enum": [
+            ""
+          ]
+        },
+        "oscpu": {
+          "type": "string",
+          "description": "Firefox only: navigator.oscpu. Omit for Chrome (no such property).",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "app_name": {
+          "type": "string",
+          "description": "navigator.appName. Always 'Netscape' in modern browsers.",
+          "enum": [
+            "Netscape"
+          ]
+        },
+        "app_code_name": {
+          "type": "string",
+          "description": "navigator.appCodeName. Always 'Mozilla'.",
+          "enum": [
+            "Mozilla"
+          ]
+        },
+        "app_version": {
+          "type": "string",
+          "description": "navigator.appVersion. Firefox '5.0 (Windows)'; Chrome is the UA string without the leading 'Mozilla/'.",
+          "minLength": 10,
+          "maxLength": 512
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "chrome"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "then": {
+            "properties": {
+              "name": {
+                "const": "Chrome"
+              },
+              "vendor": {
+                "const": "Google Inc."
+              },
+              "product_sub": {
+                "const": "20030107"
+              },
+              "oscpu": false,
+              "build_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "firefox"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "then": {
+            "properties": {
+              "name": {
+                "const": "Firefox"
+              },
+              "vendor": {
+                "const": ""
+              },
+              "product_sub": {
+                "const": "20100101"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "hardware": {
+      "type": "object",
+      "description": "Hardware capability attributes reported to JavaScript.",
+      "additionalProperties": false,
+      "required": [
+        "hardware_concurrency",
+        "device_memory",
+        "max_touch_points",
+        "gpu"
+      ],
+      "properties": {
+        "hardware_concurrency": {
+          "type": "integer",
+          "description": "navigator.hardwareConcurrency (logical CPUs). Must be a realistic count (R08).",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "device_memory": {
+          "type": "number",
+          "description": "navigator.deviceMemory in GB (Chrome only; Chrome caps it at 8). Kept for Firefox v1 files, where it is not exposed.",
+          "enum": [
+            0.25,
+            0.5,
+            1,
+            2,
+            4,
+            8,
+            16
+          ]
+        },
+        "max_touch_points": {
+          "type": "integer",
+          "description": "navigator.maxTouchPoints. 0 for desktop non-touch devices.",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "gpu": {
+          "type": "object",
+          "description": "GPU identity as reported through WebGL RENDERER/VENDOR strings.",
+          "additionalProperties": false,
+          "required": [
+            "vendor",
+            "renderer",
+            "vendor_unmasked",
+            "renderer_unmasked"
+          ],
+          "properties": {
+            "vendor": {
+              "type": "string",
+              "description": "WebGL VENDOR (masked). Chrome 'WebKit', Firefox 'Mozilla'.",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "renderer": {
+              "type": "string",
+              "description": "WebGL RENDERER (masked). Chrome 'WebKit WebGL', Firefox 'Mozilla'.",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "vendor_unmasked": {
+              "type": "string",
+              "description": "UNMASKED_VENDOR_WEBGL. Chrome 'Google Inc. (NVIDIA)'; Firefox 'NVIDIA Corporation'.",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "renderer_unmasked": {
+              "type": "string",
+              "description": "UNMASKED_RENDERER_WEBGL. Chrome 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002504) Direct3D11 vs_5_0 ps_5_0, D3D11)'.",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        }
+      }
+    },
+    "screen": {
+      "type": "object",
+      "description": "Display and screen geometry attributes.",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "avail_width",
+        "avail_height",
+        "color_depth",
+        "pixel_depth",
+        "device_pixel_ratio",
+        "inner_width",
+        "inner_height",
+        "outer_width",
+        "outer_height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "description": "screen.width in CSS pixels. Together with avail_*, color_depth, pixel_depth and DPR this is the whole `screen` surface.",
+          "minimum": 800,
+          "maximum": 7680
+        },
+        "height": {
+          "type": "integer",
+          "description": "screen.height in CSS pixels.",
+          "minimum": 600,
+          "maximum": 4320
+        },
+        "avail_width": {
+          "type": "integer",
+          "description": "screen.availWidth in CSS pixels (screen.width minus taskbar/dock width).",
+          "minimum": 800,
+          "maximum": 7680
+        },
+        "avail_height": {
+          "type": "integer",
+          "description": "screen.availHeight in CSS pixels (screen.height minus taskbar/dock height).",
+          "minimum": 600,
+          "maximum": 4320
+        },
+        "color_depth": {
+          "type": "integer",
+          "description": "screen.colorDepth (24 on most displays; 30 on some Retina Macs).",
+          "enum": [
+            16,
+            24,
+            30,
+            32,
+            48
+          ]
+        },
+        "pixel_depth": {
+          "type": "integer",
+          "description": "screen.pixelDepth. Typically matches colorDepth.",
+          "enum": [
+            16,
+            24,
+            30,
+            32,
+            48
+          ]
+        },
+        "device_pixel_ratio": {
+          "type": "number",
+          "description": "window.devicePixelRatio. Must be a known value (R07).",
+          "minimum": 0.5,
+          "maximum": 5.0
+        },
+        "inner_width": {
+          "type": "integer",
+          "description": "window.innerWidth in CSS pixels (viewport width, inside scrollbars).",
+          "minimum": 200,
+          "maximum": 7680
+        },
+        "inner_height": {
+          "type": "integer",
+          "description": "window.innerHeight in CSS pixels (viewport height, inside scrollbars).",
+          "minimum": 100,
+          "maximum": 4320
+        },
+        "outer_width": {
+          "type": "integer",
+          "description": "window.outerWidth in CSS pixels (browser window outer width).",
+          "minimum": 200,
+          "maximum": 7680
+        },
+        "outer_height": {
+          "type": "integer",
+          "description": "window.outerHeight in CSS pixels (browser window outer height including chrome).",
+          "minimum": 100,
+          "maximum": 4320
+        },
+        "avail_top": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "screen.availTop. macOS menu bar height; 0 on Windows with a bottom taskbar."
+        },
+        "avail_left": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "screen.availLeft."
+        }
+      }
+    },
+    "locale": {
+      "type": "object",
+      "description": "Locale and timezone identity attributes.",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "languages",
+        "timezone"
+      ],
+      "properties": {
+        "language": {
+          "type": "string",
+          "description": "navigator.language (primary language tag, e.g., 'en-US').",
+          "pattern": "^[a-z]{2,3}(-[A-Z]{2,3})?$",
+          "minLength": 2,
+          "maxLength": 12
+        },
+        "languages": {
+          "type": "array",
+          "description": "navigator.languages array (ordered list of accepted language tags).",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2,3}(-[A-Z]{2,3})?(;q=[0-9]\\.[0-9])?$",
+            "minLength": 2,
+            "maxLength": 20
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA timezone identifier (e.g., 'America/New_York', 'Europe/London', 'UTC').",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "timezone_offset": {
+          "type": "integer",
+          "description": "new Date().getTimezoneOffset() in minutes at the persona's current date. Negative = east of UTC.",
+          "minimum": -840,
+          "maximum": 720
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "description": "Network and connection attributes.",
+      "additionalProperties": false,
+      "required": [
+        "connection_type",
+        "downlink",
+        "rtt",
+        "save_data"
+      ],
+      "properties": {
+        "connection_type": {
+          "type": "string",
+          "description": "NetworkInformation.effectiveType value.",
+          "enum": [
+            "slow-2g",
+            "2g",
+            "3g",
+            "4g"
+          ]
+        },
+        "downlink": {
+          "type": "number",
+          "description": "NetworkInformation.downlink in Mbps (rounded to nearest 0.025 Mbps by spec).",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "rtt": {
+          "type": "integer",
+          "description": "NetworkInformation.rtt in milliseconds (rounded to nearest 25ms by spec).",
+          "minimum": 0,
+          "maximum": 3000
+        },
+        "save_data": {
+          "type": "boolean",
+          "description": "NetworkInformation.saveData value."
+        }
+      }
+    },
+    "fingerprint_seeds": {
+      "type": "object",
+      "description": "Deterministic seeds (32 lowercase hex chars = 16 bytes = one sfc32 seed). All three must differ (R10).",
+      "additionalProperties": false,
+      "required": [
+        "canvas_seed",
+        "webgl_noise_seed",
+        "audio_seed"
+      ],
+      "properties": {
+        "canvas_seed": {
+          "type": "string",
+          "description": "32-character lowercase hexadecimal seed for Canvas 2D fingerprint noise.",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "webgl_noise_seed": {
+          "type": "string",
+          "description": "32-character lowercase hexadecimal seed for WebGL readback noise.",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "audio_seed": {
+          "type": "string",
+          "description": "32-character lowercase hexadecimal seed for AudioContext fingerprint noise.",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      }
+    },
+    "webgl": {
+      "type": "object",
+      "description": "WebGL capability and parameter attributes.",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "shading_language_version",
+        "extensions",
+        "parameters"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "gl.getParameter(gl.VERSION). Chrome 'WebGL 2.0 (OpenGL ES 3.0 Chromium)'.",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "shading_language_version": {
+          "type": "string",
+          "description": "gl.getParameter(gl.SHADING_LANGUAGE_VERSION). Chrome 'WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)'.",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "extensions": {
+          "type": "array",
+          "description": "gl.getSupportedExtensions(), in the engine's reported order.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "parameters": {
+          "type": "object",
+          "description": "gl.getParameter results by constant name. All keys below are required.",
+          "additionalProperties": false,
+          "required": [
+            "MAX_TEXTURE_SIZE",
+            "MAX_VIEWPORT_DIMS",
+            "MAX_VERTEX_ATTRIBS",
+            "MAX_VERTEX_UNIFORM_VECTORS",
+            "MAX_FRAGMENT_UNIFORM_VECTORS",
+            "MAX_VARYING_VECTORS",
+            "MAX_COMBINED_TEXTURE_IMAGE_UNITS",
+            "MAX_VERTEX_TEXTURE_IMAGE_UNITS",
+            "MAX_TEXTURE_IMAGE_UNITS",
+            "MAX_CUBE_MAP_TEXTURE_SIZE",
+            "MAX_RENDERBUFFER_SIZE",
+            "MAX_VERTEX_UNIFORM_COMPONENTS",
+            "MAX_FRAGMENT_UNIFORM_COMPONENTS",
+            "MAX_ARRAY_TEXTURE_LAYERS",
+            "MAX_3D_TEXTURE_SIZE",
+            "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS",
+            "MAX_UNIFORM_BUFFER_BINDINGS",
+            "MAX_UNIFORM_BLOCK_SIZE",
+            "MAX_COMBINED_UNIFORM_BLOCKS",
+            "MAX_SAMPLES",
+            "ALIASED_LINE_WIDTH_RANGE",
+            "ALIASED_POINT_SIZE_RANGE"
+          ],
+          "properties": {
+            "MAX_TEXTURE_SIZE": {
+              "type": "integer",
+              "description": "Maximum 2D texture dimension.",
+              "minimum": 1024,
+              "maximum": 65536
+            },
+            "MAX_VIEWPORT_DIMS": {
+              "type": "array",
+              "description": "[maxWidth, maxHeight] of viewport dimensions.",
+              "items": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 65536
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "MAX_VERTEX_ATTRIBS": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 32
+            },
+            "MAX_VERTEX_UNIFORM_VECTORS": {
+              "type": "integer",
+              "minimum": 128,
+              "maximum": 4096
+            },
+            "MAX_FRAGMENT_UNIFORM_VECTORS": {
+              "type": "integer",
+              "minimum": 16,
+              "maximum": 4096
+            },
+            "MAX_VARYING_VECTORS": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 32
+            },
+            "MAX_COMBINED_TEXTURE_IMAGE_UNITS": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 256
+            },
+            "MAX_VERTEX_TEXTURE_IMAGE_UNITS": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "MAX_TEXTURE_IMAGE_UNITS": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 64
+            },
+            "MAX_CUBE_MAP_TEXTURE_SIZE": {
+              "type": "integer",
+              "minimum": 512,
+              "maximum": 32768
+            },
+            "MAX_RENDERBUFFER_SIZE": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65536
+            },
+            "MAX_VERTEX_UNIFORM_COMPONENTS": {
+              "type": "integer",
+              "minimum": 512,
+              "maximum": 16384
+            },
+            "MAX_FRAGMENT_UNIFORM_COMPONENTS": {
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 16384
+            },
+            "MAX_ARRAY_TEXTURE_LAYERS": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 8192
+            },
+            "MAX_3D_TEXTURE_SIZE": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 16384
+            },
+            "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": {
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 256
+            },
+            "MAX_UNIFORM_BUFFER_BINDINGS": {
+              "type": "integer",
+              "minimum": 24,
+              "maximum": 96
+            },
+            "MAX_UNIFORM_BLOCK_SIZE": {
+              "type": "integer",
+              "minimum": 16384,
+              "maximum": 65536
+            },
+            "MAX_COMBINED_UNIFORM_BLOCKS": {
+              "type": "integer",
+              "minimum": 24,
+              "maximum": 96
+            },
+            "MAX_SAMPLES": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 32
+            },
+            "ALIASED_LINE_WIDTH_RANGE": {
+              "type": "array",
+              "description": "[min, max] aliased line width.",
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 256
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "ALIASED_POINT_SIZE_RANGE": {
+              "type": "array",
+              "description": "[min, max] aliased point size.",
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2048
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "max_texture_size": {
+          "type": "integer",
+          "description": "Legacy v1 field, ignored. Use parameters.MAX_TEXTURE_SIZE."
+        },
+        "max_viewport_dim": {
+          "type": "integer",
+          "description": "Legacy v1 field, ignored. Use parameters.MAX_VIEWPORT_DIMS."
+        },
+        "shader_precision": {
+          "type": "object",
+          "description": "getShaderPrecisionFormat results keyed '<VERTEX_SHADER|FRAGMENT_SHADER>.<LOW|MEDIUM|HIGH>_<FLOAT|INT>'. Optional; the WebGL stub falls back to the ANGLE defaults.",
+          "propertyNames": {
+            "enum": [
+              "VERTEX_SHADER.LOW_FLOAT",
+              "VERTEX_SHADER.MEDIUM_FLOAT",
+              "VERTEX_SHADER.HIGH_FLOAT",
+              "VERTEX_SHADER.LOW_INT",
+              "VERTEX_SHADER.MEDIUM_INT",
+              "VERTEX_SHADER.HIGH_INT",
+              "FRAGMENT_SHADER.LOW_FLOAT",
+              "FRAGMENT_SHADER.MEDIUM_FLOAT",
+              "FRAGMENT_SHADER.HIGH_FLOAT",
+              "FRAGMENT_SHADER.LOW_INT",
+              "FRAGMENT_SHADER.MEDIUM_INT",
+              "FRAGMENT_SHADER.HIGH_INT"
+            ]
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "range_min",
+              "range_max",
+              "precision"
+            ],
+            "properties": {
+              "range_min": {
+                "type": "integer"
+              },
+              "range_max": {
+                "type": "integer"
+              },
+              "precision": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      }
+    },
+    "fonts": {
+      "type": "object",
+      "description": "Font availability fingerprint.",
+      "additionalProperties": false,
+      "required": [
+        "available"
+      ],
+      "properties": {
+        "available": {
+          "type": "array",
+          "description": "Font families that probing reports as installed. lb-layout maps these onto bundled metric tables. Must suit the OS (R05).",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 512,
+          "uniqueItems": true
+        }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "description": "Network fingerprint profile selection.",
+      "additionalProperties": false,
+      "required": [
+        "profile_id"
+      ],
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "description": "Id of a profile in profiles/tls/ (e.g. 'chrome_153_linux', 'firefox_128_win10'). Prefix must be the family and the UA major (R13). Chrome's ClientHello does not depend on the OS, so a Chrome persona may use any OS suffix.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "ja3": {
+          "type": "string",
+          "description": "Optional documentation only: expected JA3 hash. The profile file is the source of truth.",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "ja3s_note": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Optional note. Legacy name kept for v1 compatibility."
+        }
+      }
+    },
+    "client_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "User-Agent Client Hints (Chrome only). Required when browser.family='chrome', forbidden for 'firefox' (R14). Drives the sec-ch-ua* request headers and navigator.userAgentData.",
+      "required": [
+        "brands",
+        "full_version_list",
+        "platform",
+        "platform_version",
+        "architecture",
+        "bitness",
+        "model",
+        "mobile"
+      ],
+      "properties": {
+        "brands": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "brand",
+              "version"
+            ],
+            "properties": {
+              "brand": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              }
+            }
+          },
+          "description": "navigator.userAgentData.brands / sec-ch-ua, in header order, with significant (major) versions. Chrome: ['Google Chrome', GREASE, 'Chromium'] permuted by Chromium's rule for the major (R11)."
+        },
+        "full_version_list": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "brand",
+              "version"
+            ],
+            "properties": {
+              "brand": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              }
+            }
+          },
+          "description": "Same brands in the same order with full versions (sec-ch-ua-full-version-list / getHighEntropyValues). GREASE entry uses '<n>.0.0.0'."
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "Windows",
+            "macOS",
+            "Linux",
+            "Chrome OS",
+            "Android"
+          ],
+          "description": "sec-ch-ua-platform / userAgentData.platform (no quotes). Must match the UA OS (R12)."
+        },
+        "platform_version": {
+          "type": "string",
+          "description": "sec-ch-ua-platform-version. Windows 10 '10.0.0', Windows 11 '15.0.0'; macOS '15.0.0'; Linux ''."
+        },
+        "architecture": {
+          "type": "string",
+          "enum": [
+            "x86",
+            "arm",
+            ""
+          ],
+          "description": "sec-ch-ua-arch. 'arm' on Apple Silicon even though the UA says Intel."
+        },
+        "bitness": {
+          "type": "string",
+          "enum": [
+            "32",
+            "64",
+            ""
+          ],
+          "description": "sec-ch-ua-bitness."
+        },
+        "model": {
+          "type": "string",
+          "description": "sec-ch-ua-model. Empty on desktop."
+        },
+        "mobile": {
+          "type": "boolean",
+          "description": "sec-ch-ua-mobile / userAgentData.mobile."
+        },
+        "wow64": {
+          "type": "boolean",
+          "default": false,
+          "description": "sec-ch-ua-wow64."
+        },
+        "full_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Deprecated uaFullVersion. Optional."
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Timer surface.",
+      "properties": {
+        "performance_now_resolution_us": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Granularity of performance.now() in microseconds. Defaults: Chrome 100, Firefox 1000 (20 with RFP off). Mismatch is a warning (R16)."
+        }
+      }
+    },
+    "behavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Human-input simulation (lb-behavior).",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "default": "casual_user",
+          "description": "Name of the lb-behavior preset: casual_user, power_user, slow_reader or mobile_like. Default casual_user."
+        }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "AudioContext surface. Optional; defaults are 48000 Hz on Windows and Linux, 44100 Hz on macOS.",
+      "properties": {
+        "sample_rate": {
+          "type": "integer",
+          "enum": [
+            22050,
+            44100,
+            48000,
+            96000
+          ],
+          "description": "AudioContext.sampleRate."
+        },
+        "base_latency": {
+          "type": "number",
+          "minimum": 0,
+          "description": "AudioContext.baseLatency in seconds."
+        },
+        "max_channel_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "description": "AudioDestinationNode.maxChannelCount."
+        }
+      }
+    },
+    "speech_voices": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "speechSynthesis.getVoices(). Optional; empty list means none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "lang"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "lang": {
+            "type": "string"
+          },
+          "local_service": {
+            "type": "boolean",
+            "default": true
+          },
+          "default": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "description": "navigator.permissions.query results by permission name. Optional.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "granted",
+          "denied",
+          "prompt"
+        ]
+      }
+    },
+    "media_devices": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "navigator.mediaDevices.enumerateDevices() labels (empty until permission is granted in real browsers). Optional.",
+      "properties": {
+        "webcam_label": {
+          "type": "string"
+        },
+        "mic_label": {
+          "type": "string"
+        },
+        "speaker_label": {
+          "type": "string"
+        }
+      }
+    },
+    "battery": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "navigator.getBattery() values. Optional; absent on desktops without a battery.",
+      "properties": {
+        "level": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "charging": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "browser": {
+            "properties": {
+              "family": {
+                "const": "chrome"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          }
+        },
+        "required": [
+          "browser"
+        ]
+      },
+      "then": {
+        "required": [
+          "client_hints"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "browser": {
+            "properties": {
+              "family": {
+                "const": "firefox"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          }
+        },
+        "required": [
+          "browser"
+        ]
+      },
+      "then": {
+        "properties": {
+          "client_hints": false
+        }
+      }
+    }
+  ]
+}

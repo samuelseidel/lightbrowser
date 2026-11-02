@@ -1168,6 +1168,11 @@ dependencies = [
 [[package]]
 name = "lb-behavior"
 version = "0.0.1"
+dependencies = [
+ "rand",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "lb-cdp"
@@ -1258,6 +1263,10 @@ version = "0.0.1"
 [[package]]
 name = "lb-persona"
 version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "lb-webapi"

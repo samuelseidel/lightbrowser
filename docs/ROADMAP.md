@@ -42,6 +42,54 @@ Not done, moved:
 - Connection reuse and a TLS session cache → M2. Today every fetch is a new
   connection, so there is no `pre_shared_key`.
 
+## M2 status (2026-11-02)
+
+In progress. Landed:
+
+- `lb-js`: V8 backend (`v8` =152.2.0) behind `chrome`. One isolate per
+  `Engine`, one realm per frame or isolated world, host objects bound from
+  `InterfaceSpec`, promises, static ES modules through a loader, heap cap,
+  terminate from another thread. Tests pin Chrome's error text and stack
+  format, `Illegal invocation`, native `toString` and descriptors. The
+  firefox build compiles only the engine-neutral types.
+- `lb-dom`: arena DOM (48-byte nodes, u32 ids), html5ever 0.40.1 sink,
+  streaming parse that yields at every `</script>` and handles
+  `document.write`, fragment parsing, serialization, Servo `selectors` 0.42.
+- `lb-persona` (pulled forward from M4): persona v2 schema, v1/v2 loader
+  (v1 reads as Firefox), vendored rules R01–R10 plus Chrome rules R11–R16,
+  two hand-built Chrome 153 reference personas, adversarial files.
+  `lightbrowser validate <persona.json>`.
+- `lb-behavior` (vendoring pulled forward from M5): stealth-browser
+  `behavior/` at 2cb3ba0, on rand 0.9, plus `cdp` to turn event streams into
+  `Input.dispatch*` params. A seed gives different events than upstream.
+- `tests/detect-bench`: a local, loopback-only detection bench (server,
+  collector, scoring rules, Playwright runner). Not yet run against
+  LightBrowser, which has no CDP server.
+
+Verified: `cargo fmt --all --check`, `cargo build --workspace`, `cargo clippy
+--workspace --all-targets -- -D warnings`, `cargo test --workspace`, the
+firefox clippy and test commands, `cargo test -p lb-net --test fingerprint`
+(network fingerprint unchanged) and the bench's Python unit tests all pass.
+The workspace now needs Rust 1.88 (let-chains).
+
+Still open for M2:
+
+- WebIDL codegen and bindings (`lb-webidl-gen`, `lb-webapi`).
+- Event loop, script execution, timers, fetch/XHR (`lb-page`, `lb-webapi`).
+  So `fetch --dump html` still prints the raw body, and the WPT DOM subset
+  is not set up.
+- M1 leftovers: proxies, exact h1 header-name case, connection reuse, TLS
+  session cache.
+- `lb-js`: dynamic `import()`, `import.meta`, unhandled-rejection hook,
+  named/indexed setters, weak wrappers. Startup snapshot stays in M6.
+- `lb-dom`: no shadow DOM, form owner or custom-element registry; no
+  Blink-style 512 depth cap; no encoding sniffing.
+- `lb-persona`: rule R04 rejects the upstream Apple Silicon profiles (rule or
+  profiles wrong, undecided); the UA-CH GREASE logic is from memory and not
+  checked against Chromium source.
+- Not measured: release binary size with V8 (budget < 40 MB), idle RSS,
+  realm creation time.
+
 ## Risks
 
 - **WebIDL breadth.** Chrome exposes 1,000+ interfaces. We generate all of them

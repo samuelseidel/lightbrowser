@@ -31,7 +31,9 @@ pub use serialize::SerializeNode;
 /// the same atom types.
 pub use html5ever::tendril::StrTendril;
 pub use html5ever::tree_builder::QuirksMode;
-pub use html5ever::{Attribute, LocalName, Namespace, Prefix, QualName, local_name, namespace_url, ns};
+pub use html5ever::{
+    Attribute, LocalName, Namespace, Prefix, QualName, local_name, namespace_url, ns,
+};
 
 #[doc(hidden)]
 pub fn node_struct_size() -> usize {

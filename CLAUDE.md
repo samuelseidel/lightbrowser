@@ -8,8 +8,9 @@ or Firefox persona.
 
 `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` are the source of truth. Read them
 first and do not contradict them. Current state: M1 (network) done for
-Chrome; Firefox TLS gaps are listed in ADR 0003. Crates from M2 on are still
-empty skeletons.
+Chrome; Firefox TLS gaps are listed in ADR 0003. M2 is in progress: `lb-js`
+(V8), `lb-dom`, `lb-persona` v2 and `lb-behavior` have landed; the rest are
+still empty skeletons. See "M2 status" in `docs/ROADMAP.md`.
 
 ## Internal use and legal
 - Internal only. Never push binaries to public repos or registries.
@@ -19,11 +20,11 @@ empty skeletons.
 ## Crate map
 | Crate | Role | State |
 |---|---|---|
-| `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | sfc32 done |
-| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | trait + `COMPILED_FAMILY` |
+| `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R16, sfc32 done |
+| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (no snapshot); SpiderMonkey M4b |
 | `lb-net` | BoringSSL, hyper h1, forked h2 (`vendor/h2`), cookies, decoding, `fetch` | M1 done; cache, proxies M2 |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
-| `lb-dom` | Arena DOM, html5ever sink, selectors | M2 |
+| `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | M2 |
 | `lb-webapi` | fetch, XHR, timers, storage, canvas/WebGL/audio APIs | M2+ |
 | `lb-css` | Lazy cascade | M3 |
@@ -31,8 +32,8 @@ empty skeletons.
 | `lb-paint` | tiny-skia canvas | M4 |
 | `lb-page` | Event loop, navigation, frames, workers | M2/M3 |
 | `lb-cdp` | CDP server | M3 |
-| `lb-behavior` | Human input simulation (vendored from stealth-browser) | M5 |
-| `bin/lightbrowser` | CLI; picks family by feature; `fetch` | `fetch` done, `serve` stub |
+| `lb-behavior` | Human input simulation (vendored from stealth-browser) | Vendored + `cdp` event conversion; replay M5 |
+| `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate` | `fetch`, `validate` done, `serve` stub |
 
 ## Commands
 ```bash
@@ -46,6 +47,7 @@ cargo fmt --all --check
 cargo test -p lightbrowser -p lb-js --no-default-features --features firefox
 cargo clippy -p lightbrowser -p lb-js --no-default-features --features firefox -- -D warnings
 ./target/release/lightbrowser --version       # prints the compiled family
+./target/debug/lightbrowser validate profiles/reference/chrome/*.json   # persona rules
 # Network fingerprint check vs profiles/tls (loopback only, prints JA3/JA4/H2)
 cargo test -p lb-net --test fingerprint -- --nocapture
 # Fetch from a local test server (self-signed cert)

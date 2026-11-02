@@ -8,7 +8,7 @@ exclude = ["vendor"]
 version = "0.0.1"
 edition = "2024"
 license = "LicenseRef-Proprietary"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [profile.release]
 opt-level = 3

@@ -18,6 +18,9 @@ USAGE:
   lightbrowser --version
   lightbrowser serve --port 9222 [--persona FILE]   (M3)
   lightbrowser fetch <url> [OPTIONS]
+  lightbrowser validate <persona.json>...   check v1/v2 personas against the
+                                            consistency rules (exit 1 on any
+                                            violation or load error)
 
 FETCH OPTIONS:
   --dump html|text       print the body (text = tags stripped); default: none
@@ -326,6 +329,22 @@ fn decode_entities(text: &str) -> String {
     out
 }
 
+/// Validate each persona file, print its report, and fail if any is invalid.
+/// Works on personas of either family, whatever engine this build has.
+fn run_validate(paths: &[String]) -> ExitCode {
+    let mut all_ok = true;
+    for path in paths {
+        let outcome = lb_persona::validate_file(path);
+        print!("{}", outcome.report);
+        all_ok &= outcome.ok;
+    }
+    if all_ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -354,6 +373,19 @@ fn main() -> ExitCode {
                     ExitCode::from(1)
                 }
             }
+        }
+        Some("validate") => {
+            let paths = &args[1..];
+            if paths.iter().any(|a| a == "--help" || a == "-h") {
+                print!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            if paths.is_empty() || paths.iter().any(|a| a.starts_with('-')) {
+                eprintln!("error: validate takes one or more persona files\n");
+                eprint!("{USAGE}");
+                return ExitCode::from(2);
+            }
+            run_validate(paths)
         }
         Some("serve") => {
             eprintln!("not implemented yet; see docs/ROADMAP.md");
