@@ -34,3 +34,5 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
+# Test support only: the page server that records connection use.
+lb-fptest = { path = "../lb-fptest" }

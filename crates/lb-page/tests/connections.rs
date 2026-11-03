@@ -1,5 +1,8 @@
-//! Connection limits: like Chrome, at most 6 simultaneous connections per
-//! host; further requests queue instead of opening more sockets.
+//! Connection limits and reuse (ADR 0018): like Chrome, at most 6
+//! simultaneous connections per host, further requests queue; HTTP/1.1
+//! connections are kept alive and HTTP/2 carries a page on one connection.
+//! The expected counts are local Chrome 153's on the same `lb-fptest site`
+//! pages (see `lb-net`'s `tests/pool.rs`).
 #![cfg(feature = "chrome")]
 
 mod common;
@@ -85,4 +88,74 @@ async fn at_most_six_connections_per_host() {
     let peak = peak.load(Ordering::SeqCst);
     assert!(peak <= 6, "{peak} simultaneous connections");
     assert!(peak >= 2, "requests did not overlap ({peak})");
+}
+
+/// A page with 20 images, 2 stylesheets and 2 scripts over HTTP/1.1
+/// keep-alive: Chrome 153 opened 6 connections, carried the favicon and a
+/// later navigation on them. So do we.
+#[tokio::test]
+async fn page_load_keeps_connections_alive() {
+    use lb_fptest::site::{SiteConfig, SiteServer};
+    let srv = SiteServer::bind(
+        "127.0.0.1:0",
+        SiteConfig::subresource_page(false, 20, 2, 2, Duration::from_millis(50)),
+    )
+    .await
+    .unwrap();
+    let port = srv.local_addr().port();
+    let (b, ctx) = (browser(), context(false));
+    let page = b.new_page(&ctx).await.unwrap();
+    page.goto(
+        &format!("http://127.0.0.1:{port}/"),
+        WaitUntil::Load,
+        Duration::from_secs(20),
+    )
+    .await
+    .unwrap();
+    page.goto(
+        &format!("http://127.0.0.1:{port}/next"),
+        WaitUntil::Load,
+        Duration::from_secs(20),
+    )
+    .await
+    .unwrap();
+    let recs = srv.records();
+    let total: usize = recs.iter().map(|r| r.requests.len()).sum();
+    assert!(total >= 26, "{total} requests");
+    assert_eq!(recs.len(), 6, "{recs:#?}");
+    assert!(recs.iter().all(|r| r.requests.len() >= 2 && !r.closed));
+    assert_eq!(ctx.connections().opened(), 6);
+}
+
+/// The same page over HTTP/2: one connection for everything (Chrome 153:
+/// one connection, 26 streams).
+#[tokio::test]
+async fn page_load_over_one_h2_connection() {
+    use lb_fptest::site::{SiteConfig, SiteServer};
+    let srv = SiteServer::bind(
+        "127.0.0.1:0",
+        SiteConfig::subresource_page(true, 20, 2, 2, Duration::from_millis(50)),
+    )
+    .await
+    .unwrap();
+    let port = srv.local_addr().port();
+    let b = browser();
+    let ctx = {
+        let c = context(false);
+        let mut opts = c.options().clone();
+        opts.accept_invalid_certs = true;
+        lb_page::BrowserContext::new(opts).unwrap()
+    };
+    let page = b.new_page(&ctx).await.unwrap();
+    page.goto(
+        &format!("https://localhost:{port}/"),
+        WaitUntil::Load,
+        Duration::from_secs(20),
+    )
+    .await
+    .unwrap();
+    let recs = srv.records();
+    assert_eq!(recs.len(), 1, "{recs:#?}");
+    assert_eq!(recs[0].alpn.as_deref(), Some("h2"));
+    assert!(recs[0].requests.len() >= 25, "{}", recs[0].requests.len());
 }

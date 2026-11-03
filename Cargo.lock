@@ -1357,6 +1357,7 @@ dependencies = [
  "lb-cdp",
  "lb-css",
  "lb-dom",
+ "lb-fptest",
  "lb-js",
  "lb-layout",
  "lb-net",
