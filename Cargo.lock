@@ -1279,8 +1279,11 @@ dependencies = [
 name = "lb-fptest"
 version = "0.0.1"
 dependencies = [
+ "bytes",
  "clap",
+ "h2",
  "hex",
+ "http",
  "md-5",
  "rcgen",
  "rustls",
