@@ -3,15 +3,12 @@
 //!
 //! Owner: M1 task 5.
 
-use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Method, StatusCode};
 use lb_persona::{BrowserFamily, Persona};
-use tokio::net::TcpStream;
 use url::Url;
 
 use crate::HttpVersion;
@@ -20,14 +17,13 @@ use crate::cookies::CookieJar;
 use crate::error::NetError;
 use crate::header_profile::{BuildInput, HeaderProfile, RequestKind, RequestMeta, Site};
 use crate::headers::{self, OrderedHeaders};
+use crate::pool::{ConnectParams, ConnectionPool, Dialer, GroupKey, Lease};
 use crate::profile::ClientHelloProfile;
 use crate::tls::TlsConnector;
 use crate::{decompress, h1, h2};
 
 /// Redirects followed before giving up.
 const MAX_REDIRECTS: usize = 10;
-/// Time allowed for one TCP connect attempt (per resolved address).
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An outgoing request. Headers are ordered.
 #[derive(Debug, Clone)]
@@ -99,6 +95,10 @@ pub struct Response {
     pub headers: OrderedHeaders,
     pub body: Bytes,
     pub version: HttpVersion,
+    /// The connection the final hop used (pool-wide id; `None` without a
+    /// [`ConnectionPool`]) and whether it had carried a request before.
+    pub connection_id: Option<u64>,
+    pub connection_reused: bool,
     pub final_url: Url,
     /// Method of the final request (a redirect can turn `POST` into `GET`).
     pub method: Method,
@@ -135,11 +135,15 @@ pub struct NetContext {
     /// servers with self-signed certificates. Default `false`. Changing it
     /// between requests rebuilds the cached connector.
     pub danger_accept_invalid_certs: bool,
+    /// Connection reuse (ADR 0018), shared by the contexts of one browser
+    /// context. `None`: every hop opens and closes its own connection, and
+    /// no TLS session is resumed.
+    pub pool: Option<ConnectionPool>,
     /// Lazily built, then reused for every https request of this context. The
     /// flag records the `danger_accept_invalid_certs` it was built with.
     connector: Option<(bool, Arc<TlsConnector>)>,
-    /// Lazily built DNS resolver (system configuration).
-    resolver: Option<hickory_resolver::TokioResolver>,
+    /// DNS resolver (system configuration) and TCP connect.
+    dialer: Arc<Dialer>,
 }
 
 impl NetContext {
@@ -171,9 +175,26 @@ impl NetContext {
             client_hints: ClientHintsStore::new(),
             max_body: 32 << 20,
             danger_accept_invalid_certs: false,
+            pool: None,
             connector: None,
-            resolver: None,
+            dialer: Arc::new(Dialer::default()),
         })
+    }
+
+    /// A copy for a task on the network thread (same jar, hints, pool).
+    fn detached(&self) -> NetContext {
+        NetContext {
+            persona: Arc::clone(&self.persona),
+            profile: Arc::clone(&self.profile),
+            header_profile: self.header_profile.clone(),
+            cookies: self.cookies.clone(),
+            client_hints: self.client_hints.clone(),
+            max_body: self.max_body,
+            danger_accept_invalid_certs: self.danger_accept_invalid_certs,
+            pool: self.pool.clone(),
+            connector: self.connector.clone(),
+            dialer: Arc::clone(&self.dialer),
+        }
     }
 
     /// The cached TLS connector for this context, built on first use.
@@ -189,65 +210,6 @@ impl NetContext {
         );
         self.connector = Some((self.danger_accept_invalid_certs, Arc::clone(&c)));
         Ok(c)
-    }
-
-    /// Resolve `host` (no brackets) to socket addresses. IP literals skip DNS.
-    /// Uses hickory with the system configuration and falls back to the
-    /// platform resolver (`getaddrinfo`) if hickory cannot be set up or fails.
-    async fn resolve(&mut self, host: &str, port: u16) -> Result<Vec<SocketAddr>, NetError> {
-        if let Ok(ip) = host.parse::<IpAddr>() {
-            return Ok(vec![SocketAddr::new(ip, port)]);
-        }
-        if self.resolver.is_none() {
-            match hickory_resolver::TokioResolver::builder_tokio() {
-                Ok(b) => self.resolver = Some(b.build()),
-                Err(e) => tracing::debug!("hickory resolver unavailable: {e}"),
-            }
-        }
-        if let Some(r) = &self.resolver {
-            match r.lookup_ip(host).await {
-                Ok(ips) => {
-                    let addrs: Vec<_> = ips.iter().map(|ip| SocketAddr::new(ip, port)).collect();
-                    if !addrs.is_empty() {
-                        return Ok(addrs);
-                    }
-                }
-                Err(e) => tracing::debug!("hickory lookup of {host} failed: {e}"),
-            }
-        }
-        let addrs: Vec<_> = tokio::net::lookup_host((host, port))
-            .await
-            .map_err(|e| NetError::Dns(format!("{host}: {e}")))?
-            .collect();
-        if addrs.is_empty() {
-            return Err(NetError::Dns(format!("{host}: no addresses")));
-        }
-        Ok(addrs)
-    }
-
-    /// Resolve and connect, trying each address in turn.
-    async fn connect_tcp(&mut self, host: &str, port: u16) -> Result<TcpStream, NetError> {
-        let addrs = self.resolve(host, port).await?;
-        let mut last = None;
-        for addr in addrs {
-            match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
-                Ok(Ok(tcp)) => {
-                    // Small writes (h2 preface, request headers) should not wait.
-                    let _ = tcp.set_nodelay(true);
-                    return Ok(tcp);
-                }
-                Ok(Err(e)) => last = Some(e),
-                Err(_) => {
-                    last = Some(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        format!("connect to {addr} timed out"),
-                    ));
-                }
-            }
-        }
-        Err(NetError::Connect(last.unwrap_or_else(|| {
-            std::io::Error::other("no address to connect to")
-        })))
     }
 }
 
@@ -287,10 +249,24 @@ impl NetContext {
 /// The future is boxed here so that its state machine (and everything it
 /// polls: TLS, h1/h2, DNS) is compiled once, in this crate, instead of once
 /// per crate that awaits it (M6 binary size, ADR 0013).
+///
+/// With a [`ConnectionPool`] (`ctx.pool`), the request runs on the network
+/// thread ([`crate::pool::net_runtime`]) and reuses the pool's connections:
+/// HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS resumption
+/// (ADR 0018). It then completes even if the returned future is dropped.
 pub fn fetch(
     ctx: &mut NetContext,
     req: Request,
 ) -> Pin<Box<dyn Future<Output = Result<Response, NetError>> + Send + '_>> {
+    if ctx.pool.is_some() {
+        let mut owned = ctx.detached();
+        let task =
+            crate::pool::net_runtime().spawn(async move { fetch_chain(&mut owned, req).await });
+        return Box::pin(async move {
+            task.await
+                .unwrap_or_else(|e| Err(NetError::Http(format!("network task: {e}"))))
+        });
+    }
     Box::pin(fetch_chain(ctx, req))
 }
 
@@ -359,6 +335,8 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             headers: hop.headers,
             body: hop.body,
             version: hop.version,
+            connection_id: hop.connection_id,
+            connection_reused: hop.connection_reused,
             final_url: req.url,
             method: req.method,
             request_headers: hop.sent,
@@ -375,6 +353,8 @@ struct Hop {
     version: HttpVersion,
     /// Request headers as sent.
     sent: OrderedHeaders,
+    connection_id: Option<u64>,
+    connection_reused: bool,
 }
 
 /// `Critical-CH`: the response names a hint its origin asked for (stored
@@ -450,30 +430,49 @@ async fn fetch_once(
         }
     };
 
-    let connector = if https {
-        Some(ctx.tls_connector()?)
+    let (raw, sent, connection_id, connection_reused) = if let Some(pool) = ctx.pool.clone() {
+        let key = GroupKey::for_request(&req.url, &meta)
+            .ok_or_else(|| NetError::Http(format!("url has no host: {}", req.url)))?;
+        // The urgency the request's `priority` value carries orders the
+        // waiting requests (HTTP/1.1 drops the header, the value stays).
+        let urgency = crate::pool::urgency(
+            wire(HttpVersion::Http2)
+                .headers
+                .iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case("priority"))
+                .map(|(_, v)| v.as_str()),
+        );
+        let params = ConnectParams {
+            profile: Arc::clone(&ctx.profile),
+            insecure: ctx.danger_accept_invalid_certs,
+        };
+        pooled_exchange(&pool, &key, urgency, &params, &wire, ctx.max_body).await?
     } else {
-        None
-    };
-    let tcp = ctx.connect_tcp(bare_host, port).await?;
-
-    let (raw, sent) = match connector {
-        None => {
-            let wire = wire(HttpVersion::Http1);
-            let raw = h1::send_with_limit(tcp, &wire, ctx.max_body).await?;
-            (raw, wire.headers)
-        }
-        Some(connector) => {
-            let (stream, version) = connector.connect(bare_host, tcp).await?;
-            let wire = wire(version);
-            let raw = match version {
-                HttpVersion::Http2 => {
-                    h2::send_with_limit(stream, &wire, &ctx.profile, ctx.max_body).await?
-                }
-                HttpVersion::Http1 => h1::send_with_limit(stream, &wire, ctx.max_body).await?,
-            };
-            (raw, wire.headers)
-        }
+        let connector = if https {
+            Some(ctx.tls_connector()?)
+        } else {
+            None
+        };
+        let tcp = ctx.dialer.connect(bare_host, port).await?;
+        let (raw, sent) = match connector {
+            None => {
+                let wire = wire(HttpVersion::Http1);
+                let raw = h1::send_with_limit(tcp, &wire, ctx.max_body).await?;
+                (raw, wire.headers)
+            }
+            Some(connector) => {
+                let (stream, version) = connector.connect(bare_host, tcp).await?;
+                let wire = wire(version);
+                let raw = match version {
+                    HttpVersion::Http2 => {
+                        h2::send_with_limit(stream, &wire, &ctx.profile, ctx.max_body).await?
+                    }
+                    HttpVersion::Http1 => h1::send_with_limit(stream, &wire, ctx.max_body).await?,
+                };
+                (raw, wire.headers)
+            }
+        };
+        (raw, sent, None, false)
     };
 
     let set_cookies = header_values(&raw.headers, "set-cookie");
@@ -498,7 +497,112 @@ async fn fetch_once(
         body,
         version: raw.version,
         sent,
+        connection_id,
+        connection_reused,
     })
+}
+
+/// One request over the pool: take a connection or session of `key`, send,
+/// give the connection back. A request that fails on a reused connection
+/// before any response arrived is sent once more on a new connection, as
+/// Chrome does.
+async fn pooled_exchange(
+    pool: &ConnectionPool,
+    key: &GroupKey,
+    urgency: u8,
+    params: &ConnectParams,
+    wire: &(dyn Fn(HttpVersion) -> Request + Sync),
+    max_body: usize,
+) -> Result<(RawResponse, OrderedHeaders, Option<u64>, bool), NetError> {
+    let mut retried = false;
+    loop {
+        match pool.acquire(key, urgency, params).await? {
+            Lease::H1 { mut conn, reused } => {
+                let req = wire(HttpVersion::Http1);
+                let mut guard = SocketGuard::new(pool, key, params, false);
+                match h1::send_on(&mut conn.stream, &req, max_body).await {
+                    Ok((raw, reusable)) => {
+                        guard.defuse();
+                        let id = conn.id;
+                        pool.release(key, conn, reusable, params);
+                        return Ok((raw, req.headers, Some(id), reused));
+                    }
+                    Err(e) if reused && e.nothing_received && !retried => {
+                        tracing::debug!("resending on a new connection: {}", e.error);
+                        retried = true;
+                    }
+                    Err(e) => return Err(e.error),
+                }
+            }
+            Lease::NewH2(conn) => {
+                let req = wire(HttpVersion::Http2);
+                let mut guard = SocketGuard::new(pool, key, params, true);
+                let id = conn.id;
+                let started = h2::start(conn.stream, &req, &params.profile).await?;
+                let (send, driver, first) = started.split();
+                guard.defuse();
+                pool.publish(key, id, send, async move {
+                    if let Err(e) = driver.await {
+                        tracing::debug!("h2 connection ended: {e}");
+                    }
+                });
+                let raw = h2::finish_started(first, &req, max_body).await?;
+                return Ok((raw, req.headers, Some(id), false));
+            }
+            Lease::H2(session) => {
+                let req = wire(HttpVersion::Http2);
+                let id = session.id;
+                match h2::request_on(session.send.clone(), &req, max_body).await {
+                    Ok(raw) => return Ok((raw, req.headers, Some(id), true)),
+                    Err(e) if e.retryable && !retried => {
+                        tracing::debug!("session {id} refused the request: {}", e.error);
+                        pool.session_closed(key, id);
+                        retried = true;
+                    }
+                    Err(e) => return Err(e.error),
+                }
+            }
+        }
+    }
+}
+
+/// Gives a busy socket's slot back to the pool if the request ends without
+/// [`ConnectionPool::release`] (error, panic).
+struct SocketGuard<'a> {
+    pool: &'a ConnectionPool,
+    key: &'a GroupKey,
+    params: &'a ConnectParams,
+    session_start: bool,
+    armed: bool,
+}
+
+impl<'a> SocketGuard<'a> {
+    fn new(
+        pool: &'a ConnectionPool,
+        key: &'a GroupKey,
+        params: &'a ConnectParams,
+        session_start: bool,
+    ) -> Self {
+        SocketGuard {
+            pool,
+            key,
+            params,
+            session_start,
+            armed: true,
+        }
+    }
+
+    fn defuse(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SocketGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.pool.discard(self.key, self.session_start, self.params);
+        }
+    }
 }
 
 /// All values of header `name` (case-insensitive), in arrival order.

@@ -139,6 +139,13 @@ use crate::codec::{Codec, SendError, UserError};
 use crate::ext::Protocol;
 use crate::frame::{Headers, Pseudo, Reason, Settings, StreamId};
 pub use crate::frame::PseudoHeader;
+
+/// Request extension (LIGHTBROWSER patch): the request's urgency, 0
+/// (highest) to 7, as in the `priority` header (`u=N`). With
+/// [`Builder::chrome_stream_dependencies`] on, it decides the request's
+/// HEADERS priority block the way Chrome does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Urgency(pub u8);
 use crate::proto::{self, Error};
 use crate::{FlowControl, PingPong, RecvStream, SendStream};
 
@@ -357,6 +364,10 @@ pub struct Builder {
     /// Priority block on request HEADERS frames (LIGHTBROWSER patch). `None`
     /// keeps upstream behaviour (no PRIORITY flag).
     headers_priority: Option<crate::frame::StreamDependency>,
+
+    /// Chrome's stream dependencies for requests with an [`Urgency`]
+    /// (LIGHTBROWSER patch).
+    chrome_priorities: bool,
 }
 
 #[derive(Debug)]
@@ -680,6 +691,7 @@ impl Builder {
             data_frame_budget: proto::DataFrameBudget::Auto,
             pseudo_order: None,
             headers_priority: None,
+            chrome_priorities: false,
         }
     }
 
@@ -717,6 +729,17 @@ impl Builder {
             wire,
             exclusive,
         ));
+        self
+    }
+
+    /// Gives each request that carries an [`Urgency`] extension Chrome's
+    /// priority block (LIGHTBROWSER patch): exclusive, depending on the
+    /// most recently opened still-open stream of the same or a more urgent
+    /// urgency (0 if none), weight 256, 220, 183, 147, 110, 74, 37 or 1 for
+    /// urgency 0 to 7. Requests without the extension keep the
+    /// [`headers_priority`](Self::headers_priority) block.
+    pub fn chrome_stream_dependencies(&mut self, on: bool) -> &mut Self {
+        self.chrome_priorities = on;
         self
     }
 
@@ -1421,6 +1444,9 @@ where
                 data_frame_budget: builder.data_frame_budget,
             },
         );
+        if builder.chrome_priorities {
+            inner.streams().enable_chrome_priorities();
+        }
         let send_request = SendRequest {
             inner: inner.streams().clone(),
             pending: None,

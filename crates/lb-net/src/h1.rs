@@ -7,8 +7,15 @@
 //! given (name case and order included). The caller has already applied the
 //! family's case (see [`crate::header_profile`]).
 //!
-//! One request per connection (`Connection: keep-alive` is sent because the
-//! browser sends it, but the connection is dropped after the response).
+//! Persistent connections: [`send_on`] reports whether the connection can
+//! carry another request, with Chrome's rules (`HttpStreamParser::
+//! CanReuseConnection`): the response is HTTP/1.1 without `Connection:
+//! close` (or HTTP/1.0 with `Connection: keep-alive`), its body was
+//! delimited by `Content-Length` or chunked encoding and fully read
+//! (trailers included), and no byte beyond it arrived. The connection pool
+//! (`crate::pool`) keeps such connections idle; [`send`] and
+//! [`send_with_limit`] still use a connection once.
+//!
 //! Response headers come back lowercase, in arrival order. Bodies: 1xx
 //! responses are skipped, then `Content-Length`, `Transfer-Encoding: chunked`
 //! or read-to-close.
@@ -46,11 +53,51 @@ pub async fn send_with_limit<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    send_on(&mut io, req, max_body)
+        .await
+        .map(|(r, _)| r)
+        .map_err(|e| e.error)
+}
+
+/// Why [`send_on`] failed.
+#[derive(Debug)]
+pub struct SendError {
+    pub error: NetError,
+    /// No byte of a response arrived: the write failed, or the peer closed
+    /// or reset the connection first. On a reused connection the request
+    /// can be sent again on a new one (Chrome's `ShouldResendRequest`).
+    pub nothing_received: bool,
+}
+
+impl From<NetError> for SendError {
+    fn from(error: NetError) -> Self {
+        SendError {
+            error,
+            nothing_received: false,
+        }
+    }
+}
+
+/// Send `req` over `io` (which stays open) and read the response. Returns
+/// the response and whether `io` can carry another request (see the module
+/// docs).
+pub async fn send_on<S>(
+    io: &mut S,
+    req: &Request,
+    max_body: usize,
+) -> Result<(RawResponse, bool), SendError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let mut out = request_head(req)?;
     out.extend_from_slice(&req.body);
-    io.write_all(&out).await.map_err(NetError::Connect)?;
-    io.flush().await.map_err(NetError::Connect)?;
-    read_response(&mut io, &req.method, max_body).await
+    let stale = |e: std::io::Error| SendError {
+        error: NetError::Connect(e),
+        nothing_received: true,
+    };
+    io.write_all(&out).await.map_err(stale)?;
+    io.flush().await.map_err(stale)?;
+    read_response(io, &req.method, max_body).await
 }
 
 /// Request line and headers, ending with the blank line.
@@ -113,19 +160,21 @@ fn has(headers: &OrderedHeaders, name: &str) -> bool {
     headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(name))
 }
 
-/// Read one final response (skipping 1xx) and its body.
+/// Read one final response (skipping 1xx) and its body; also whether the
+/// connection can be reused.
 async fn read_response<S>(
     io: &mut S,
     method: &Method,
     max_body: usize,
-) -> Result<RawResponse, NetError>
+) -> Result<(RawResponse, bool), SendError>
 where
     S: AsyncRead + Unpin,
 {
     let mut buf = BytesMut::with_capacity(8192);
+    let mut received = false;
     loop {
         // Head.
-        let (status, headers, head_len) = loop {
+        let (status, headers, head_len, http11) = loop {
             let mut raw = [httparse::EMPTY_HEADER; 128];
             let mut resp = httparse::Response::new(&mut raw);
             match resp.parse(&buf) {
@@ -142,19 +191,40 @@ where
                             )
                         })
                         .collect();
-                    break (status, headers, n);
+                    break (status, headers, n, resp.version == Some(1));
                 }
                 Ok(httparse::Status::Partial) => {
                     if buf.len() > MAX_HEAD {
-                        return Err(NetError::Http("response head too large".into()));
+                        return Err(NetError::Http("response head too large".into()).into());
                     }
-                    if io.read_buf(&mut buf).await.map_err(NetError::Connect)? == 0 {
-                        return Err(NetError::Http(
-                            "connection closed before the response head".into(),
-                        ));
+                    let n = match io.read_buf(&mut buf).await {
+                        Ok(n) => n,
+                        Err(e) => {
+                            return Err(SendError {
+                                nothing_received: !received
+                                    && matches!(
+                                        e.kind(),
+                                        std::io::ErrorKind::ConnectionReset
+                                            | std::io::ErrorKind::ConnectionAborted
+                                            | std::io::ErrorKind::BrokenPipe
+                                            | std::io::ErrorKind::NotConnected
+                                            | std::io::ErrorKind::UnexpectedEof
+                                    ),
+                                error: NetError::Connect(e),
+                            });
+                        }
+                    };
+                    if n == 0 {
+                        return Err(SendError {
+                            error: NetError::Http(
+                                "connection closed before the response head".into(),
+                            ),
+                            nothing_received: !received,
+                        });
                     }
+                    received = true;
                 }
-                Err(e) => return Err(NetError::Http(format!("response head: {e}"))),
+                Err(e) => return Err(NetError::Http(format!("response head: {e}")).into()),
             }
         };
         let _ = buf.split_to(head_len);
@@ -167,53 +237,84 @@ where
             || status.is_informational()
             || status == StatusCode::NO_CONTENT
             || status == StatusCode::NOT_MODIFIED;
+        // Body delimited (not read until close) and nothing read past it.
+        let mut delimited = true;
+        let mut extra = false;
         let body = if no_body {
+            extra = !buf.is_empty();
             Bytes::new()
         } else if header(&headers, "transfer-encoding")
             .is_some_and(|v| v.to_ascii_lowercase().contains("chunked"))
         {
-            read_chunked(io, buf, max_body).await?
+            let (body, rest) = read_chunked(io, buf, max_body).await?;
+            extra = rest;
+            body
         } else if let Some(len) = header(&headers, "content-length") {
             let len: usize = len
                 .trim()
                 .parse()
                 .map_err(|_| NetError::Http(format!("bad content-length {len:?}")))?;
             if len > max_body {
-                return Err(NetError::BodyTooLarge { limit: max_body });
+                return Err(NetError::BodyTooLarge { limit: max_body }.into());
             }
             // One allocation of the body's size, not doubling growth: the
             // frozen buffer is the body pages keep (images, scripts).
             buf.reserve(len.saturating_sub(buf.len()));
             while buf.len() < len {
                 if io.read_buf(&mut buf).await.map_err(NetError::Connect)? == 0 {
-                    return Err(NetError::Http("connection closed inside the body".into()));
+                    return Err(NetError::Http("connection closed inside the body".into()).into());
                 }
             }
+            extra = buf.len() > len;
             buf.truncate(len);
             buf.freeze()
         } else {
             // Until close.
+            delimited = false;
             loop {
                 if buf.len() > max_body {
-                    return Err(NetError::BodyTooLarge { limit: max_body });
+                    return Err(NetError::BodyTooLarge { limit: max_body }.into());
                 }
                 match io.read_buf(&mut buf).await {
                     Ok(0) => break,
                     Ok(_) => {}
                     // Servers that reset after the last byte are common.
                     Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
-                    Err(e) => return Err(NetError::Connect(e)),
+                    Err(e) => return Err(NetError::Connect(e).into()),
                 }
             }
             buf.freeze()
         };
 
-        return Ok(RawResponse {
-            status,
-            headers,
-            body,
-            version: HttpVersion::Http1,
-        });
+        let reusable = delimited
+            && !extra
+            && status != StatusCode::SWITCHING_PROTOCOLS
+            && is_keep_alive(&headers, http11);
+        return Ok((
+            RawResponse {
+                status,
+                headers,
+                body,
+                version: HttpVersion::Http1,
+            },
+            reusable,
+        ));
+    }
+}
+
+/// Chrome's `HttpResponseHeaders::IsKeepAlive`: HTTP/1.1 is persistent
+/// unless `Connection` (or `Proxy-Connection`) has `close`; HTTP/1.0 only
+/// with `keep-alive`.
+fn is_keep_alive(headers: &OrderedHeaders, http11: bool) -> bool {
+    let mut tokens = headers
+        .iter()
+        .filter(|(n, _)| n == "connection" || n == "proxy-connection")
+        .flat_map(|(_, v)| v.split(','))
+        .map(|t| t.trim().to_ascii_lowercase());
+    if http11 {
+        !tokens.any(|t| t == "close")
+    } else {
+        tokens.any(|t| t == "keep-alive")
     }
 }
 
@@ -224,8 +325,14 @@ fn header<'a>(headers: &'a OrderedHeaders, name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-/// Decode a chunked body. `buf` holds what was read past the head.
-async fn read_chunked<S>(io: &mut S, mut buf: BytesMut, max_body: usize) -> Result<Bytes, NetError>
+/// Decode a chunked body. `buf` holds what was read past the head. Also
+/// returns whether bytes arrived past the end of the message (the trailer
+/// section is read, so a reused connection starts at the next response).
+async fn read_chunked<S>(
+    io: &mut S,
+    mut buf: BytesMut,
+    max_body: usize,
+) -> Result<(Bytes, bool), NetError>
 where
     S: AsyncRead + Unpin,
 {
@@ -249,9 +356,24 @@ where
             .map_err(|_| NetError::Http(format!("bad chunk size {size_text:?}")))?;
         let _ = buf.split_to(line_end + 2);
         if size == 0 {
-            // Trailers (ignored) end with an empty line; the connection is
-            // dropped afterwards, so there is no need to read them.
-            return Ok(body.freeze());
+            // Trailer lines (ignored), then an empty line.
+            loop {
+                if let Some(i) = buf.windows(2).position(|w| w == b"\r\n") {
+                    let _ = buf.split_to(i + 2);
+                    if i == 0 {
+                        return Ok((body.freeze(), !buf.is_empty()));
+                    }
+                    continue;
+                }
+                if buf.len() > MAX_HEAD {
+                    return Err(NetError::Http("chunk trailers too large".into()));
+                }
+                if io.read_buf(&mut buf).await.map_err(NetError::Connect)? == 0 {
+                    // Closed after the last chunk: the body is complete, the
+                    // connection is not reusable.
+                    return Ok((body.freeze(), true));
+                }
+            }
         }
         if body.len() + size > max_body {
             return Err(NetError::BodyTooLarge { limit: max_body });

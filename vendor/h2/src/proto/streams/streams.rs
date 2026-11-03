@@ -272,6 +272,11 @@ where
         use http::Method;
 
         let protocol = request.extensions_mut().remove::<Protocol>();
+        // LIGHTBROWSER patch: Chrome stream dependencies.
+        let urgency = request
+            .extensions_mut()
+            .remove::<crate::client::Urgency>()
+            .map(|u| u.0);
 
         // Clear before taking lock, incase extensions contain a StreamRef.
         request.extensions_mut().clear();
@@ -320,8 +325,12 @@ where
         }
 
         // Convert the message
-        let headers =
+        let mut headers =
             client::Peer::convert_send_message(stream_id, request, protocol, end_of_stream)?;
+        // LIGHTBROWSER patch: Chrome stream dependencies.
+        if let Some(dep) = urgency.and_then(|u| me.counts.chrome_dependency(stream_id, u)) {
+            headers.set_stream_dep(dep);
+        }
 
         let mut stream = me.store.insert(stream.id, stream);
 
@@ -1078,6 +1087,11 @@ impl<B> Streams<B, client::Peer>
 where
     B: Buf,
 {
+    /// Turns on Chrome's stream dependencies (LIGHTBROWSER patch).
+    pub fn enable_chrome_priorities(&self) {
+        self.inner.lock().unwrap().counts.enable_chrome_priorities();
+    }
+
     pub fn poll_pending_open(
         &mut self,
         cx: &Context,

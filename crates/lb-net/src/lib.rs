@@ -1,5 +1,5 @@
 //! Network stack: BoringSSL TLS with per-family ClientHello profiles,
-//! HTTP/1.1 (hyper), HTTP/2 (forked h2 with profile-driven SETTINGS and
+//! HTTP/1.1 (own writer), HTTP/2 (forked h2 with profile-driven SETTINGS and
 //! pseudo-header order), cookies, body decoding and proxies.
 //!
 //! Every fingerprint-relevant value comes from the context's
@@ -16,6 +16,8 @@
 //! - [`headers`]: per-family navigation headers, cookie placement
 //! - [`cookies`]: in-memory cookie jar
 //! - [`decompress`]: gzip / brotli / zstd body decoding
+//! - [`pool`]: connection reuse per browser context (HTTP/1.1 keep-alive,
+//!   HTTP/2 sessions, TLS resumption; ADR 0018)
 //! - [`fetch`]: the pipeline that ties the above together
 
 pub mod client_hints;
@@ -28,6 +30,7 @@ pub mod h1;
 pub mod h2;
 pub mod header_profile;
 pub mod headers;
+pub mod pool;
 pub mod profile;
 pub mod tls;
 
@@ -35,6 +38,7 @@ pub use client_hints::{ClientHintsStore, UaHint};
 pub use error::NetError;
 pub use fetch::{RedirectHop, Request, Response, fetch};
 pub use header_profile::{HeaderProfile, RequestKind, RequestMeta};
+pub use pool::ConnectionPool;
 pub use profile::ClientHelloProfile;
 
 /// Which HTTP version a connection negotiated (via ALPN).

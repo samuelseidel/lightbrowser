@@ -1,24 +1,17 @@
 //! Browser contexts: persona, cookie jar, storage partitions and the
 //! network pool shared by every page of the context. Engine-neutral.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use lb_net::ClientHelloProfile;
 use lb_net::client_hints::ClientHintsStore;
 use lb_net::cookies::CookieJar;
 use lb_net::fetch::{NetContext, RedirectHop, Request};
 use lb_net::header_profile::{RequestKind, RequestMeta};
+use lb_net::{ClientHelloProfile, ConnectionPool};
 use lb_persona::{Persona, PersonaProfile};
 use lb_webapi::host::{Destination, NetRequest, NetResponse, StoragePartition};
-use tokio::sync::Semaphore;
 use url::Url;
-
-/// Chrome's limit of simultaneous connections per host (its socket pool
-/// group: scheme, host and port). Above it requests queue. Without the cap
-/// a page with many images opened them all at once, overflowed small
-/// listen backlogs and waited for the 1 s SYN retransmit.
-const MAX_CONNECTIONS_PER_HOST: usize = 6;
 
 /// How to create a [`BrowserContext`].
 #[derive(Clone)]
@@ -59,8 +52,10 @@ struct Shared {
     header_profile: std::sync::OnceLock<Option<Arc<lb_net::header_profile::HeaderProfile>>>,
     /// Favicon URLs already requested by this context (Chrome asks once).
     favicons: Mutex<HashSet<String>>,
-    /// Connection slots per origin ([`MAX_CONNECTIONS_PER_HOST`]).
-    hosts: Mutex<HashMap<String, Arc<Semaphore>>>,
+    /// The context's connections (ADR 0018): HTTP/1.1 keep-alive with at
+    /// most 6 sockets per group, one HTTP/2 session per group, TLS session
+    /// resumption. Never shared with another context.
+    connections: ConnectionPool,
 }
 
 /// What happened on the wire for one [`BrowserContext::fetch_traced`] call,
@@ -132,7 +127,7 @@ impl BrowserContext {
             pool: Mutex::new(Vec::new()),
             header_profile: std::sync::OnceLock::new(),
             favicons: Mutex::new(HashSet::new()),
-            hosts: Mutex::new(HashMap::new()),
+            connections: ConnectionPool::new(),
         }));
         ctx.put_back(probe);
         Ok(ctx)
@@ -160,6 +155,11 @@ impl BrowserContext {
         &self.0.client_hints
     }
 
+    /// The context's connection pool.
+    pub fn connections(&self) -> &ConnectionPool {
+        &self.0.connections
+    }
+
     /// `localStorage` areas of this context.
     pub fn local_storage(&self) -> &StoragePartition {
         &self.0.local_storage
@@ -185,17 +185,8 @@ impl BrowserContext {
         net.cookies = self.0.cookies.clone();
         net.client_hints = self.0.client_hints.clone();
         net.danger_accept_invalid_certs = self.0.opts.accept_invalid_certs;
+        net.pool = Some(self.0.connections.clone());
         Ok(net)
-    }
-
-    /// The connection slots of `url`'s origin.
-    fn host_slots(&self, url: &Url) -> Arc<Semaphore> {
-        let key = url.origin().ascii_serialization();
-        let mut hosts = self.0.hosts.lock().unwrap_or_else(|e| e.into_inner());
-        hosts
-            .entry(key)
-            .or_insert_with(|| Arc::new(Semaphore::new(MAX_CONNECTIONS_PER_HOST)))
-            .clone()
     }
 
     fn put_back(&self, mut net: NetContext) {
@@ -238,8 +229,7 @@ impl BrowserContext {
         kind: Option<RequestKind>,
         top_frame: Option<Url>,
     ) -> Result<(NetResponse, FetchTrace), String> {
-        // Wait for one of the origin's connection slots (never closed).
-        let slot = self.host_slots(&req.url).acquire_owned().await.ok();
+        // The pool limits sockets per group (6, as Chrome) and reuses them.
         let mut net = self.take_net().map_err(|e| e.to_string())?;
         let url = req.url.clone();
         let wire = Request {
@@ -254,7 +244,6 @@ impl BrowserContext {
             }),
         };
         let r = lb_net::fetch(&mut net, wire).await;
-        drop(slot);
         self.put_back(net);
         let resp = r.map_err(|e| e.to_string())?;
         let trace = FetchTrace {

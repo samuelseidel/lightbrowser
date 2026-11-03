@@ -1,4 +1,5 @@
 use super::*;
+use crate::frame::StreamId;
 
 #[derive(Debug)]
 struct Budget {
@@ -42,6 +43,10 @@ pub(super) struct Counts {
     /// Acting as a client or server. This allows us to track which values to
     /// inc / dec.
     peer: peer::Dyn,
+
+    /// Chrome's HTTP/2 stream dependencies (LIGHTBROWSER patch): open
+    /// streams per urgency, in creation order. `None` = off.
+    priorities: Option<[Vec<StreamId>; 8]>,
 
     /// Maximum number of locally initiated streams
     max_send_streams: usize,
@@ -93,6 +98,7 @@ impl Counts {
     pub fn new(peer: peer::Dyn, config: &Config) -> Self {
         Counts {
             peer,
+            priorities: None,
             max_send_streams: config.initial_max_send_streams,
             num_send_streams: 0,
             max_recv_streams: config.remote_max_initiated.unwrap_or(usize::MAX),
@@ -294,6 +300,31 @@ impl Counts {
     }
 
     // TODO: move this to macro?
+    /// Turns on Chrome's stream dependencies (LIGHTBROWSER patch).
+    pub fn enable_chrome_priorities(&mut self) {
+        self.priorities = Some(Default::default());
+    }
+
+    /// The priority block for a new stream of `urgency` (0 = highest, 7 =
+    /// lowest), as Chrome computes it (`Http2PriorityDependencies`): the
+    /// stream depends exclusively on the most recently opened stream that
+    /// is still open, searching the stream's own urgency first and then the
+    /// more urgent ones; 0 if there is none. The weight is
+    /// `Spdy3PriorityToHttp2Weight(urgency)`. `None` when off
+    /// (LIGHTBROWSER patch).
+    pub fn chrome_dependency(&mut self, id: StreamId, urgency: u8) -> Option<crate::frame::StreamDependency> {
+        let lists = self.priorities.as_mut()?;
+        let urgency = urgency.min(7) as usize;
+        let parent = (0..=urgency)
+            .rev()
+            .find_map(|i| lists[i].last().copied())
+            .unwrap_or(StreamId::zero());
+        lists[urgency].push(id);
+        // Spdy3PriorityToHttp2Weight: 256, 220, 183, 147, 110, 74, 37, 1.
+        let weight = (255.9f32 / 7.0 * (7 - urgency) as f32) as u16 + 1;
+        Some(crate::frame::StreamDependency::new(parent, (weight - 1) as u8, true))
+    }
+
     pub fn transition_after(&mut self, mut stream: store::Ptr, is_reset_counted: bool) {
         tracing::trace!(
             "transition_after; stream={:?}; state={:?}; is_closed={:?}; \
@@ -309,6 +340,13 @@ impl Counts {
         );
 
         if stream.is_closed() {
+            // LIGHTBROWSER patch: a closed stream is no longer a parent.
+            if let Some(lists) = self.priorities.as_mut() {
+                let id = stream.id;
+                for l in lists.iter_mut() {
+                    l.retain(|s| *s != id);
+                }
+            }
             if !stream.is_pending_reset_expiration() {
                 stream.unlink();
                 if is_reset_counted {

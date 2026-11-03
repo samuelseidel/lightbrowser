@@ -47,7 +47,16 @@
 //! - **key_share groups**: BoringSSL picks them (first group, plus the second
 //!   one when the first is post-quantum). Firefox sends x25519 + P-256; the
 //!   profile has no field for this yet.
-//! - **pre_shared_key (41)**: no client session cache yet, so no resumption.
+//! - **pre_shared_key (41)**: sent on resumption, as Chrome does, only by a
+//!   connector made with [`TlsConnector::with_sessions`] (the connection
+//!   pool's, ADR 0018). Firefox's resumed ClientHello is not checked.
+//!
+//! Session resumption (ADR 0018) follows Chrome's `SSLClientSessionCache`:
+//! sessions are kept per [`SessionKey`] (host, port and the connection
+//! pool's partition), at most two per key, newest first; a TLS 1.3 session
+//! is used once. BoringSSL then adds `pre_shared_key` as the last
+//! extension, which is what Chrome 153 sends (checked with `lb-fptest` on
+//! loopback). No early data, as in Chrome.
 //!
 //! Certificate verification is on by default against the system roots
 //! BoringSSL finds through its default verify paths. Set
@@ -57,9 +66,14 @@
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
+
+use boring::ex_data::Index;
 use boring::ssl::{
-    CertificateCompressionAlgorithm, CertificateCompressor, ConnectConfiguration, SslConnector,
-    SslMethod, SslOptions, SslVerifyMode, SslVersion,
+    CertificateCompressionAlgorithm, CertificateCompressor, ConnectConfiguration, Ssl,
+    SslConnector, SslMethod, SslOptions, SslSession, SslSessionCacheMode, SslVerifyMode,
+    SslVersion,
 };
 use foreign_types::ForeignTypeRef;
 use tokio::net::TcpStream;
@@ -77,6 +91,61 @@ const EXT_SCT: u16 = 18;
 const EXT_SERVER_PADDING: u16 = 4832;
 const EXT_TRUST_ANCHORS: u16 = 51764;
 
+/// Sessions kept per key (Chrome: `SSLClientSessionCache::Entry` holds two).
+const SESSIONS_PER_KEY: usize = 2;
+/// Keys kept before the cache is cleared (Chrome's cache holds 1024).
+const MAX_SESSION_KEYS: usize = 1024;
+
+/// What a TLS session is cached under: Chrome keys its client session cache
+/// by server (host and port) and network partition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SessionKey {
+    pub host: String,
+    pub port: u16,
+    /// The connection pool's partition (`crate::pool`), empty when none.
+    pub partition: String,
+}
+
+/// Client session cache of one browser context (memory only).
+#[derive(Default)]
+pub struct SessionCache {
+    map: Mutex<HashMap<SessionKey, VecDeque<SslSession>>>,
+}
+
+impl SessionCache {
+    fn insert(&self, key: SessionKey, session: SslSession) {
+        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() >= MAX_SESSION_KEYS && !map.contains_key(&key) {
+            map.clear();
+        }
+        let list = map.entry(key).or_default();
+        list.push_front(session);
+        list.truncate(SESSIONS_PER_KEY);
+    }
+
+    /// The newest session for `key`; a TLS 1.3 one is removed (single use).
+    fn lookup(&self, key: &SessionKey) -> Option<SslSession> {
+        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        let list = map.get_mut(key)?;
+        let s = list.front()?;
+        let s = if s.protocol_version() == SslVersion::TLS1_3 {
+            list.pop_front()
+        } else {
+            Some(s.clone())
+        };
+        if list.is_empty() {
+            map.remove(key);
+        }
+        s
+    }
+
+    /// Sessions cached for `key` (tests).
+    pub fn count(&self, key: &SessionKey) -> usize {
+        let map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(key).map_or(0, VecDeque::len)
+    }
+}
+
 /// A reusable TLS configuration derived from one profile.
 pub struct TlsConnector {
     profile: Arc<ClientHelloProfile>,
@@ -90,12 +159,35 @@ pub struct TlsConnector {
     /// Skip certificate chain and hostname checks. Only for our local test
     /// servers with self-signed certificates. Default `false`.
     pub danger_accept_invalid_certs: bool,
+    /// Session cache and the `SSL` ex-data slot that carries each
+    /// connection's key to the new-session callback.
+    sessions: Option<(Arc<SessionCache>, Index<Ssl, SessionKey>)>,
 }
 
 impl TlsConnector {
     pub fn new(profile: Arc<ClientHelloProfile>) -> Result<Self, NetError> {
+        Self::build(profile, None)
+    }
+
+    /// Like [`new`](Self::new), with TLS session resumption through `cache`
+    /// for connections made with [`connect_resuming`](Self::connect_resuming).
+    pub fn with_sessions(
+        profile: Arc<ClientHelloProfile>,
+        cache: Arc<SessionCache>,
+    ) -> Result<Self, NetError> {
+        Self::build(profile, Some(cache))
+    }
+
+    fn build(
+        profile: Arc<ClientHelloProfile>,
+        cache: Option<Arc<SessionCache>>,
+    ) -> Result<Self, NetError> {
         let mut gaps = Vec::new();
-        let connector = build_connector(&profile, &mut gaps)?;
+        let sessions = match cache {
+            Some(c) => Some((c, Ssl::new_ex_index::<SessionKey>()?)),
+            None => None,
+        };
+        let connector = build_connector(&profile, &mut gaps, sessions.as_ref())?;
 
         let mut alps = Vec::new();
         for proto in &profile.alps_protocols {
@@ -123,6 +215,7 @@ impl TlsConnector {
             server_padding,
             gaps,
             danger_accept_invalid_certs: false,
+            sessions,
         })
     }
 
@@ -155,7 +248,28 @@ impl TlsConnector {
         host: &str,
         tcp: TcpStream,
     ) -> Result<(tokio_boring::SslStream<TcpStream>, HttpVersion), NetError> {
-        let config = self.configure()?;
+        self.connect_resuming(host, tcp, None).await
+    }
+
+    /// [`connect`](Self::connect), offering the newest cached session for
+    /// `key` and caching the sessions the server sends under it. Without a
+    /// cache ([`new`](Self::new)) `key` is ignored.
+    pub async fn connect_resuming(
+        &self,
+        host: &str,
+        tcp: TcpStream,
+        key: Option<&SessionKey>,
+    ) -> Result<(tokio_boring::SslStream<TcpStream>, HttpVersion), NetError> {
+        let mut config = self.configure()?;
+        if let (Some((cache, index)), Some(key)) = (&self.sessions, key) {
+            if let Some(session) = cache.lookup(key) {
+                // SAFETY: `session` is a valid session made by this
+                // `SSL_CTX` (its new-session callback stored it); BoringSSL
+                // takes its own reference.
+                unsafe { config.set_session(&session)? };
+            }
+            config.set_ex_data(*index, key.clone());
+        }
         let host = host.trim_start_matches('[').trim_end_matches(']');
         let stream = tokio_boring::connect(config, host, tcp)
             .await
@@ -212,6 +326,7 @@ impl TlsConnector {
 fn build_connector(
     p: &ClientHelloProfile,
     gaps: &mut Vec<String>,
+    sessions: Option<&(Arc<SessionCache>, Index<Ssl, SessionKey>)>,
 ) -> Result<SslConnector, NetError> {
     // Verifies peers against the default verify paths (system roots).
     let mut b = SslConnector::builder(SslMethod::tls())?;
@@ -332,6 +447,16 @@ fn build_connector(
         }
     }
 
+    if let Some((cache, index)) = sessions {
+        // As Chrome: client-side caching with a new-session callback.
+        b.set_session_cache_mode(SslSessionCacheMode::CLIENT);
+        let (cache, index) = (Arc::clone(cache), *index);
+        b.set_new_session_callback(move |ssl, session| {
+            if let Some(key) = ssl.ex_data(index) {
+                cache.insert(key.clone(), session);
+            }
+        });
+    }
     Ok(b.build())
 }
 
