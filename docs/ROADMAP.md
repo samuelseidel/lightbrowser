@@ -29,10 +29,10 @@ Budgets (ARCHITECTURE.md), with the evidence for each:
 | Budget | Result | Evidence |
 |---|---|---|
 | Idle RSS < 15 MB | Met: 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
+| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
 | Realm creation < 5 ms | Met: 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | Met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB | "M6 status: Lightpanda comparison" (second pass) |
+| Wall time, peak RSS and CPU <= Lightpanda | Met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -2060,7 +2060,21 @@ Chrome's dump: `DETACHED` (`w.Blob`, `w.URL` read `undefined`) and
 `MISC` (`Image.prototype === HTMLImageElement.prototype`); `Audio()`
 without `new` now gives Chrome's message.
 
-Checks on this build: BENCH_PLACEHOLDER
+Checks on this build (`cf3ac89`, hot-symbol order regenerated twice
+with `tools/hot_symbols`, the second time after the receiver lookup moved
+out of every binding closure, which had cost 0.54 MB): release binary
+40,411,000 bytes (40.41 MB, was 40.38 MB); `realm_bench` 1.41 / 1.12 ms
+(snapshot line); bench 5 x 50 with Lightpanda 1.1.0-nightly.11582
+(`bench/results/2026-11-03-cf3ac89.json`, loopback): **6 of 6 checks
+pass**, `fetch` wall 1.10 vs 3.34 s, peak RSS 21.92 vs 23.19 MB, CPU 0.90
+vs 1.23 s; CDP wall 0.96 vs 5.08 s, peak RSS 26.76 vs 29.06 MB, CPU 0.66
+vs 0.96 s; idle RSS 6.15 MB; no files, `write_bytes` 0. WPT subset
+2556/2788 (was 2552; 53/83 files fully pass); Playwright 20/20;
+fingerprint-report 0 mismatch for all 8 reference personas (`pages`
+gate); T-010 fp 0 and `--input human` beh 0 (Windows 10 persona, fresh
+`serve` per run); fmt, clippy (chrome workspace and the firefox checks)
+clean; tests of `lb-dom`, `lb-js`, `lb-webapi`, `lb-page` (every target),
+`lb-cdp`, `lightbrowser` and the firefox family pass.
 
 ## Risks
 

@@ -39,7 +39,9 @@ pass (`fetch` wall 1.08 vs 3.37 s, peak RSS 22.1 vs 24.5 MB, CPU 0.88 vs
 `fetch` peak RSS margin is small and moves with the code layout and the
 page cache (22.06 vs 24.48 MB in that run; 23.09 vs 23.20 MB in an
 independent re-run on a clean tree, `2026-11-03-02ca87f.json`, which also
-passes 6 of 6; binary 40.38 MB, idle RSS 7.1 MB), so regenerate the hot-symbol list after code changes
+passes 6 of 6; binary 40.38 MB, idle RSS 7.1 MB; after the frames work
+`2026-11-03-cf3ac89.json`: 6 of 6, 21.9 vs 23.2 MB, binary 40.41 MB), so
+regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), workers and service workers, shader execution in
