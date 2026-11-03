@@ -169,3 +169,14 @@ with every OS rule at full weight; each adversarial persona fails with its
 one rule; stock Chrome 153 fires no OS rule. Windows and macOS values are
 not captured (see Consequences). Details: "M7 status: verification and
 close-out" in `docs/ROADMAP.md`. No TCP/IP-level code exists by decision.
+
+### Adversarial personas the bench sees
+
+Of the M7 adversarial personas, `chrome153_wayland_avail_top` (R20) is seen
+by the bench rule `window_work_area` (Linux window above or left of a
+non-zero work-area offset; the page cannot read the display server, but it
+reads `screenX/Y` and `availTop/Left`). `chrome153_linux_mesa_kernel_mismatch`
+(R19) is validate-only: the page sees the Mesa renderer string, and nothing
+in the UA, client hints or any API exposes the kernel it would be compared
+with. Stock Chrome 153 (headed under `xvfb-run`, `--headless=new`) has no
+work-area offset and fires neither rule.

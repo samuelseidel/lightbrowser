@@ -735,6 +735,27 @@ def chk_screen_os(s, cfg):
     return None
 
 
+def chk_window_work_area(s, cfg):
+    """Linux: a window sits inside the work area. Window managers keep a
+    window below a top bar and right of a dock (struts), so screenY < availTop
+    or screenX < availLeft cannot happen in Chrome; it is what a Wayland
+    persona (window at 0,0, no work-area offset) given X11 bars looks like.
+    Quiet when there are no bars (availTop and availLeft 0: stock Chrome on
+    Xvfb, Wayland). Windows (taskbar at the bottom, maximized windows overhang
+    by 8 px) and macOS are not checked."""
+    o, _ = _chrome_os(s)
+    sc = (probe_value(s, "os_surface") or {}).get("screen")
+    if o != "linux" or not isinstance(sc, dict):
+        return None
+    top, left = sc.get("availTop") or 0, sc.get("availLeft") or 0
+    x, y = sc.get("screenX"), sc.get("screenY")
+    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+        return None
+    if (top > 0 and y < top) or (left > 0 and x < left):
+        return f"window at {x},{y} outside the work area starting at {left},{top}"
+    return None
+
+
 # ---- the catalogue ----------------------------------------------------------
 
 def P(id_, weight, cat, why, probe=None):
@@ -861,6 +882,8 @@ RULES: list[dict] = [
       "Info until Windows/macOS captures (target 15): HEVC or H.264 power efficiency contradicts OS and GPU."),
     S("screen_os", 0, "consistency", chk_screen_os,
       "Info until captures (target 15): taskbar or menu bar size impossible for the OS."),
+    S("window_work_area", 0, "consistency", chk_window_work_area,
+      "Info until a GNOME capture (target 15): Linux window above or left of the work area."),
     S("wheel_os", 0, "behavior", chk_wheel_os,
       "Info until captures (target 20): wheelDeltaY/deltaY ratio of another OS."),
 ]

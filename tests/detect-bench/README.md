@@ -287,6 +287,7 @@ contradict the claimed browser or OS), `fingerprint` (device surfaces),
 | `os_bluetooth` | 15 | consistency | `navigator.bluetooth`/`Bluetooth` present on Linux (captured) or missing on Windows/macOS (not captured). |
 | `codecs_os` | 0 | consistency | Info until Windows/macOS captures (target 15): HEVC "probably" on Linux with Mesa, or H.264 1080p not power efficient on Windows/macOS with a GPU. |
 | `screen_os` | 0 | consistency | Info until captures (target 15): macOS menu bar not 23-25/30-39 px, Windows taskbar not 40/48 px at the DPR. |
+| `window_work_area` | 0 | consistency | Info until a GNOME capture (target 15): on Linux `screenY < availTop` or `screenX < availLeft` (window managers keep windows inside the work area; a Wayland persona with window at 0,0 given X11 bars). Quiet without bars (stock Chrome on Xvfb, Wayland). |
 | `wheel_os` | 0 | behavior | Info until Windows/macOS captures (target 20): `wheelDeltaY/deltaY` not about -1 (Linux, captured), -1.2 (Windows) or -3 (macOS). |
 | `os_surface` | 0 | consistency | Info only: scrollbars, OS-gated APIs, fonts, emoji, WebGL limits, screen. |
 | `os_media` | 0 | consistency | Info only: high-entropy UA-CH, codecs, WebGPU, keyboard map, API errors. |
@@ -345,6 +346,16 @@ captured; rules that rest only on them are marked below or start at weight
 - This container's fontconfig maps "Segoe UI" and "Helvetica Neue" to Inter,
   so on Linux a foreign font only counts when its size differs from every
   other detected font (an alias has the same size as the font it maps to).
+
+Two adversarial personas have no rule that can see their fault, one now
+does. `chrome153_wayland_avail_top` (R20): a page cannot read the display
+server, but the persona's window at 0,0 under a 32 px work-area offset is
+observable, and `window_work_area` fires on it. `chrome153_linux_mesa_kernel_mismatch`
+(R19) stays validate-only: the kernel string in the Mesa renderer differs
+from `os.kernel`, but the page sees only the renderer; no UA, client hint or
+API exposes the kernel, so there is nothing to compare it with (mapping DRM
+versions to kernels would be a table we cannot check against a capture).
+ADR 0015 records the same.
 
 Stock check (2026-11-03): T-010 with stock Chrome 153 over CDP, headed
 under `xvfb-run` and `--headless=new`, fires no OS rule, also with the info

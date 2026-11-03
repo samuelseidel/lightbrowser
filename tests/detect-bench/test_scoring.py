@@ -178,14 +178,14 @@ class ServerRules(unittest.TestCase):
 
 OS_RULES = ["uach_platform_version", "uach_arch_gpu", "ch_high_entropy", "api_throws", "webgl_backend_os",
             "fonts_os_markers", "os_api_surface", "generic_fonts_os", "voices_os", "scrollbar_os", "emoji_render",
-            "webgpu_os", "os_bluetooth", "codecs_os", "screen_os", "wheel_os"]
+            "webgpu_os", "os_bluetooth", "codecs_os", "screen_os", "window_work_area", "wheel_os"]
 OS_TRUTH = HERE.parent / "fixtures" / "os"
 
 
 def os_cfg() -> dict:
     """Default config with the info-only OS rules at their target weights."""
     cfg = scoring.load_config()
-    cfg["weights"].update({"codecs_os": 15, "screen_os": 15, "wheel_os": 20})
+    cfg["weights"].update({"codecs_os": 15, "screen_os": 15, "window_work_area": 15, "wheel_os": 20})
     return cfg
 
 
@@ -379,6 +379,17 @@ class OsRules(unittest.TestCase):
                    ("os_surface", lambda v: v.update(gl={"renderer": "ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)"})))
         self.fires("screen_os", "mac", ("os_surface", lambda v: v["screen"].update(availTop=0)))
         self.fires("screen_os", "windows", ("os_surface", lambda v: v["screen"].update(availHeight=1020)))
+        # Linux window outside the work area (Wayland geometry with X11 bars).
+        self.fires("window_work_area", "linux", ("os_surface", lambda v: v["screen"].update(
+            availTop=32, availLeft=0, screenX=0, screenY=0)))
+        self.fires("window_work_area", "linux", ("os_surface", lambda v: v["screen"].update(
+            availTop=0, availLeft=64, screenX=0, screenY=0)))
+        self.quiet("window_work_area", "linux", ("os_surface", lambda v: v["screen"].update(
+            availTop=32, availLeft=64, screenX=64, screenY=32)))
+        self.quiet("window_work_area", "linux", ("os_surface", lambda v: v["screen"].update(
+            availTop=0, availLeft=0, screenX=0, screenY=0)))
+        self.quiet("window_work_area", "windows", ("os_surface", lambda v: v["screen"].update(
+            availTop=32, screenX=-8, screenY=0)))
         wheel = lambda pairs: ("beh_wheel_deltas", lambda w: w.update(pairs=pairs) if w["pairs"] else None)  # noqa: E731
         self.fires("wheel_os", "linux", wheel([[100, -120, 0]] * 4))
         self.fires("wheel_os", "mac", wheel([[120, -120, 0]] * 4))
