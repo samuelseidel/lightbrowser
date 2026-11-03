@@ -2001,6 +2001,67 @@ target (the disk does not hold all test binaries at once).
   gate); T-010 fp 0 and `--input human` beh 0 for one persona per OS.
 - Surface diff against M7: identical except the `Attr` case above.
 
+## Frames fidelity: cross-document nodes, removed frames, factories (2026-11-03)
+
+Closes the three gaps the surface dump found (see "Second pass" above),
+checked against local Chrome for Testing 153.0.8010.12 on loopback pages
+(ADR 0017).
+
+- **Cross-document node calls.** Node refs carry a runtime-wide document
+  key instead of a per-window slot; a window resolves keys to its own
+  slots and gives another window's document a slot of its own (the same
+  shared document). Host functions run with their receiver's window and
+  wrap what they return in the receiver's realm; interceptors use the
+  holder's realm. Before: a frame's `nodeName` getter on the top `body`
+  returned `"TITLE"`, and `Node.prototype.appendChild` on frame nodes
+  panicked the worker (the release build aborted). Now 26 cross-realm
+  cases print exactly what Chrome prints (identity of returned nodes,
+  prototypes from the node's realm, exceptions from the caller's realm,
+  `getBoundingClientRect` / `childNodes` / `classList` across frames).
+- **One node wrapper per world** (`Engine::set_shared_hosts`): a node
+  reached from several frames is one object, as in Blink.
+- **Adoption keeps identity.** `adoptNode`, `appendChild` and the other
+  insertion methods with a node of another document move the subtree to
+  the target arena and move its wrappers (every realm), listeners, inline
+  handlers, form values and selections with it: `appendChild(n) === n`,
+  listeners still fire. `compareDocumentPosition` across documents is
+  consistent; `adoptNode(document)` has Chrome's message.
+- **No page action panics the worker.** Decoding a node ref checks the
+  document and node exist. A fuzz test calls every member of 21 DOM
+  interfaces (Node, Element, Document, HTMLElement, form controls, media,
+  table, template, SVG, ...) cross-realm in both directions with a pool
+  of arguments, then moves nodes back and forth: 192,544 calls, no panic
+  (the build before this aborts on it with the reported index out of
+  bounds).
+- **Removed frames.** A removed iframe's window keeps its realm, closed
+  and detached, until the page navigates (16 per page at most): 93 checks
+  equal Chrome's (interface objects not made yet are `undefined`, made
+  ones stay; document, `eval`, built-ins work; `parent`, `top`,
+  `frameElement`, storage `null`; `closed` true; geometry, screen sizes,
+  timers 0; empty user agent; `history` throws `SecurityError`; empty
+  computed style; `matchMedia` false). Still different: the `CSS`
+  namespace stays an object (installed eagerly), and globals LightBrowser
+  lacks everywhere (`crypto`, `customElements`, `indexedDB`, ...).
+- **Legacy factory functions.** `Image`, `Audio` (new) and `Option` share
+  their interface's prototype object (read-only, as in Chrome);
+  `Reflect.construct` and subclasses get `new.target`'s prototype;
+  lengths, names, `toString`, own keys and errors match.
+
+Tests: `lb-page` `pages` `frames::cross_realm` (Chrome-checked probes for
+cross-realm calls, factories and removed frames, plus the fuzz),
+`lb-dom` `import_node_mapped`, the `lb-webapi` snapshot test now wraps
+nodes of distinct documents per realm.
+
+Surface diff (`tools/surface_diff`, `1001587` against this build, three
+personas, `fetch` and CDP): outside `Image`, `Audio`, `Option` and their
+`HTML*Element` interfaces (whose prototype is now shared, so the dump
+walks it under the factory) only two lines change, both now equal to
+Chrome's dump: `DETACHED` (`w.Blob`, `w.URL` read `undefined`) and
+`MISC` (`Image.prototype === HTMLImageElement.prototype`); `Audio()`
+without `new` now gives Chrome's message.
+
+Checks on this build: BENCH_PLACEHOLDER
+
 ## Risks
 
 - **TCP/IP fingerprint.** SYN TTL and TCP options always come from the host

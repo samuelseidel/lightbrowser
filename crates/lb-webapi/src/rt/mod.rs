@@ -1777,30 +1777,39 @@ pub(crate) fn wf(
 ) -> lb_js::HostFn {
     let rt = rt.clone();
     host_fn(move |cx| {
-        let caller = rt.win(cx.realm())?;
-        let Some(h) = cx.this_host() else {
-            return f(cx, &caller);
-        };
-        // The receiver's realm, when it is not the calling one.
-        let recv = cx.this_realm();
-        let w = if h.kind & 0xff == K_NODE {
-            node_key(h)
-                .filter(|&(key, _)| !caller.owns_key(key))
-                .and_then(|(key, _)| rt.doc_owner(key))
-                .map(|(o, _)| o)
-        } else {
-            recv.and_then(|r| rt.window(r))
-        };
-        if let Some(r) = recv
-            && cx.realm() == caller.realm()
-            && rt.window(r).is_some_and(|x| x.realm() == r)
-        {
-            cx.set_wrap_realm(r);
-        }
-        match w {
-            Some(w) if !Rc::ptr_eq(&w, &caller) => f(cx, &w),
-            _ => f(cx, &caller),
-        }
+        let w = call_window(&rt, cx)?;
+        f(cx, &w)
+    })
+}
+
+/// The window a host call acts for (see [`wf`]); sets the call's wrap
+/// realm. Not inlined: one shared copy instead of one in every binding
+/// closure (binary size).
+#[inline(never)]
+fn call_window(rt: &Runtime, cx: &mut CallCtx<'_, '_, '_>) -> Result<Rc<Window>, HostError> {
+    let caller = rt.win(cx.realm())?;
+    let Some(h) = cx.this_host() else {
+        return Ok(caller);
+    };
+    // The receiver's realm, when it is not the calling one.
+    let recv = cx.this_realm();
+    let w = if h.kind & 0xff == K_NODE {
+        node_key(h)
+            .filter(|&(key, _)| !caller.owns_key(key))
+            .and_then(|(key, _)| rt.doc_owner(key))
+            .map(|(o, _)| o)
+    } else {
+        recv.and_then(|r| rt.window(r))
+    };
+    if let Some(r) = recv
+        && cx.realm() == caller.realm()
+        && rt.window(r).is_some_and(|x| x.realm() == r)
+    {
+        cx.set_wrap_realm(r);
+    }
+    Ok(match w {
+        Some(w) if !Rc::ptr_eq(&w, &caller) => w,
+        _ => caller,
     })
 }
 
