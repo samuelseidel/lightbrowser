@@ -34,11 +34,11 @@ Persona profiles, TLS/H2 profiles, request-header profiles and font tables. Mile
 |---|---|---|
 | `chrome153_linux_with_d3d11` | R19 | `webgl_backend_os`, `webgl_os_mismatch` |
 | `chrome153_win_metal_renderer` | R19 | `webgl_backend_os`, `webgl_os_mismatch` |
-| `chrome153_linux_mesa_kernel_mismatch` | R19 | none (the bench cannot see the kernel) |
+| `chrome153_linux_mesa_kernel_mismatch` | R19 | none: validate-only (the page sees the Mesa renderer string but nothing it could compare the kernel with; ADR 0015) |
 | `chrome153_mac_arm_intel_gpu` | R18 | `uach_arch_gpu` |
 | `chrome153_win11_fonts_pv10` | R17 | `fonts_os_markers` |
 | `chrome153_linux_segoe_fonts` | R21 | `fonts_os_markers` (since WP-C a persona font with no table for its OS borrows another OS's table) |
-| `chrome153_wayland_avail_top` | R20 | none (no Wayland screen rule in the bench) |
+| `chrome153_wayland_avail_top` | R20 | `window_work_area` (info rule, target weight 15: window at 0,0 under a non-zero work-area offset) |
 | `chrome153_mac_scrollbar17` | R24 | `scrollbar_os` (17 px scrollbars on macOS, since WP-C) |
 | `chrome153_mac_microsoft_voices` | R22 | `voices_os` |
 | `chrome153_intel_mac_macos27` | R26 | `uach_arch_gpu` |

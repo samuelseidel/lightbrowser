@@ -32,7 +32,7 @@ Budgets (ARCHITECTURE.md), with the evidence for each:
 | Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
 | Realm creation < 5 ms | Met: 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | Met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s | "M6 status: Lightpanda comparison" (second pass) |
+| Wall time, peak RSS and CPU <= Lightpanda | Met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -1928,6 +1928,54 @@ With Playwright input both personas fire the same behaviour rules
 `beh_click_hold`, `beh_wheel_pattern`, `page_dwell_short`); fp is 0.
 
 All budgets met in the recorded run (`bench/results/2026-11-03-af2c264.json`).
+
+### Independent re-run (close-out verification)
+
+A second agent re-ran everything from a fresh release build of the clean
+tree `02ca87f` (`bench/results/2026-11-03-02ca87f.json`, binary 40,382,328
+bytes, sha256 `f08456d26e01922e`, same corpus, 5 x 50, Lightpanda
+1.1.0-nightly.11582, loopback, telemetry off, no change to `bench/run.py`).
+Median (min-max):
+
+| | fetch: LightBrowser | fetch: Lightpanda | CDP: LightBrowser | CDP: Lightpanda | CDP: Chromium |
+|---|---|---|---|---|---|
+| crawl wall time | 1.06 s (1.00-1.07) | 3.31 s (3.25-3.38) | 0.99 s (0.93-1.01) | 4.99 s (4.90-5.01) | 10.2 s |
+| page median / p90 | 19.7 / 27.9 ms | 64.9 / 69.0 ms | 18.0 / 27.4 ms | 100.2 / 103.2 ms | 203 / 217 ms |
+| peak RSS | 23.09 MB (23.0-23.3) | 23.20 MB (22.9-23.2) | 27.48 MB (27.4-27.9) | 29.05 MB (29.0-29.1) | 2825 MB (PSS 695) |
+| CPU (user+sys) | 0.86 s | 1.16 s | 0.67 s | 0.88 s | 24.8 s |
+| idle RSS (serve) | | | 7.13 MB | 12.1 MB | 1083 MB |
+
+6 of 6 Lightpanda checks pass again, and binary 40.38 MB, realm
+1.38 / 1.13 ms, idle RSS 7.13 MB, no disk writes. The `fetch` peak RSS
+check passes by 0.1 MB here (the first run: 2.4 MB): Lightpanda measured
+1.3 MB lower than in the first run, LightBrowser 1 MB higher (the page
+cache and the build differ). Treat that check as a near tie that two runs
+both resolved in LightBrowser's favour, not as a safe margin.
+
+Surface dump diff against the M7 binary (`tools/surface_diff`, Windows 10,
+macOS 15, Ubuntu 24; `fetch` and CDP with two pages): the same single moved
+line in all six dumps (`Attr` after `function Attr(){}` moves to the end of
+`getOwnPropertyNames(window)`, as in Chrome 153); everything else
+identical. The M7 side is the binary built from `525e94d` earlier in the
+session (39,841,656 bytes), not rebuilt here.
+
+M7 acceptance in the re-run (release binary, a fresh `serve` per run):
+`pages` report gate 0 mismatch; `validate` passes all 8 reference personas,
+and each adversarial persona fails its rule(s); T-010 `fp<=30` fp 0 and
+`--input human` `beh<=30` beh 0 for all 8 reference personas; stock Chrome
+153 (headed under `xvfb-run`, and `--headless=new`) fires no OS rule, with
+the info rules at their target weights; Playwright 20/20; WPT 2552/2788;
+fmt, clippy (chrome and firefox) clean; tests per package pass (the first
+`lb-page` run hit a full disk and was repeated); `bench` unittest 12 OK,
+detect-bench unittest 33 OK; `sdk/python` pytest 93 passed, 4 skipped (the
+scenarios need Python Playwright >= 1.63; 1.52 is installed here).
+
+New bench rule `window_work_area` (Linux, `screenY < availTop` or
+`screenX < availLeft`; info weight 0, target 15): fires on the
+`wayland_avail_top` persona served with `--unchecked-persona`, quiet on all
+8 references and on stock Chrome. `linux_mesa_kernel_mismatch` stays
+validate-only (no page-visible kernel; ADR 0015). Existing rules, weights
+and probes are unchanged.
 
 ## Workspace check: lazy interfaces and 50 MB budget (2026-11-03)
 

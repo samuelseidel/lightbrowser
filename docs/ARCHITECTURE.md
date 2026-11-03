@@ -31,7 +31,10 @@ first/next realm 1.37/1.11 ms, no disk writes. Against Lightpanda
 telemetry off) all 6 checks pass: `fetch` wall 1.08 vs 3.37 s, peak RSS
 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS
 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s (lazy interfaces, ADR 0016). The
-`fetch` peak RSS margin is ~0.4 MB in standalone runs. Details:
+`fetch` peak RSS margin is small: an independent re-run on a clean tree
+(`bench/results/2026-11-03-02ca87f.json`) also passes 6 of 6 but with
+23.09 vs 23.20 MB (binary 40.38 MB, idle RSS 7.13 MB, realm 1.38/1.13 ms).
+Details:
 `docs/ROADMAP.md`, "M6 status: Lightpanda comparison".
 
 ## Decisions (see `docs/adr/`)

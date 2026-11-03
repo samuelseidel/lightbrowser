@@ -21,7 +21,7 @@ macOS Intel and Apple Silicon, Ubuntu X11, Fedora Wayland), each scoring
 fp 0 and beh 0 on the bench with all OS rules in force (Linux values
 captured, Windows and macOS from a reference; TCP/IP signals are the
 host's).
-Idle RSS is 6.2 MB, realm creation 1.4 ms, and the release binary
+Idle RSS is 6-7 MB, realm creation 1.4 ms, and the release binary
 40.4 MB (budget < 50 MB, raised from < 40 MB by user decision, ADR 0013).
 On the `bench/` corpus every LightBrowser page is faster than headless
 Chromium's median, and against Lightpanda (a user-approved 1.1.0 nightly,

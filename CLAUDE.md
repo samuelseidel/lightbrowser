@@ -36,8 +36,10 @@ off-by-default flags reach not linked, root crate and bindings at
 comparison", `bench/results/2026-11-03-af2c264.json`): 6 of 6 checks
 pass (`fetch` wall 1.08 vs 3.37 s, peak RSS 22.1 vs 24.5 MB, CPU 0.88 vs
 1.23 s; CDP 0.99 vs 5.04 s, 27.0 vs 31.4 MB, 0.68 vs 0.95 s); the
-`fetch` peak RSS margin is ~0.4 MB in standalone runs and moves with the
-code layout, so regenerate the hot-symbol list after code changes
+`fetch` peak RSS margin is small and moves with the code layout and the
+page cache (22.06 vs 24.48 MB in that run; 23.09 vs 23.20 MB in an
+independent re-run on a clean tree, `2026-11-03-02ca87f.json`, which also
+passes 6 of 6; binary 40.38 MB, idle RSS 7.1 MB), so regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), workers and service workers, shader execution in
