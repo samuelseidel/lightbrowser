@@ -27,7 +27,9 @@
 //! become resident instead of all of it (10.9 MB, ~15 ms). If the
 //! reservation or the fault handler cannot be set up, if the system's page
 //! size does not divide [`CHUNK`], or on other systems, the whole package
-//! is decompressed into the heap at once.
+//! is decompressed into the heap at once. `LB_ICU_EAGER=1` asks for that
+//! too: valgrind's callgrind does not retry a faulting load correctly after
+//! the handler filled the page in, so `tools/hot_symbols` sets it.
 
 use std::sync::OnceLock;
 
@@ -176,7 +178,9 @@ static DATA: OnceLock<&'static [u8]> = OnceLock::new();
 pub fn data() -> &'static [u8] {
     DATA.get_or_init(|| {
         #[cfg(target_os = "linux")]
-        if let Some(d) = lazy::map(Packed::get()) {
+        if std::env::var_os("LB_ICU_EAGER").is_none()
+            && let Some(d) = lazy::map(Packed::get())
+        {
             return d;
         }
         let words: &'static [u128] = Box::leak(decompress_all());

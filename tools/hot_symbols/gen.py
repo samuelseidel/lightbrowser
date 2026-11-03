@@ -166,12 +166,12 @@ def main() -> int:
     urls = ([f"http://127.0.0.1:{det_port}{p}" for p in SITES]
             + [f"http://127.0.0.1:{wpt_port}/{p}" for p in WPT]
             + [f"http://127.0.0.1:{pages_port}/common.html"])
-    # Precise registers at every memory access: the lazily paged ICU data
-    # (lb-js icu_data) is filled in by a SIGSEGV handler, and the faulting
-    # load is retried; with valgrind's default (only SP/IP/FP precise) the
-    # retried code can see stale registers and read garbage.
-    vg = ["valgrind", "--tool=callgrind", "--demangle=no", "--fair-sched=yes",
-          "--vex-iropt-register-updates=allregs-at-mem-access"]
+    vg = ["valgrind", "--tool=callgrind", "--demangle=no", "--fair-sched=yes"]
+    # The lazily paged ICU data (lb-js icu_data) is filled in by a SIGSEGV
+    # handler and the faulting load retried, which callgrind does not get
+    # right (the retried load reads through a stale register): decompress
+    # it at once instead.
+    env["LB_ICU_EAGER"] = "1"
     outs = []
     idle = tmp / "idle"
     try:
