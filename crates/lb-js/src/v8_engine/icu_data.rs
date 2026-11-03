@@ -205,7 +205,11 @@ fn release_packed() {
             // MADV_DONTNEED on a private file mapping that was never
             // written leaves its contents unchanged.
             unsafe {
-                libc::madvise(first as *mut libc::c_void, last - first, libc::MADV_DONTNEED);
+                libc::madvise(
+                    first as *mut libc::c_void,
+                    last - first,
+                    libc::MADV_DONTNEED,
+                );
             }
         }
     }
@@ -287,7 +291,7 @@ mod lazy {
     pub(super) fn map(packed: Packed) -> Option<&'static [u8]> {
         // SAFETY: sysconf has no preconditions.
         let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-        if packed.count > MAX_CHUNKS || page <= 0 || CHUNK % page as usize != 0 {
+        if packed.count > MAX_CHUNKS || page <= 0 || !CHUNK.is_multiple_of(page as usize) {
             return None;
         }
         let dctx = zstd::bulk::Decompressor::new().ok()?;
