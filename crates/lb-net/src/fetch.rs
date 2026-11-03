@@ -18,6 +18,7 @@ use crate::cookies::CookieJar;
 use crate::error::NetError;
 use crate::headers::{self, OrderedHeaders};
 use crate::profile::ClientHelloProfile;
+use crate::tcpfp::{self, TcpProfile};
 use crate::tls::TlsConnector;
 use crate::{decompress, h1, h2};
 
@@ -79,6 +80,9 @@ impl Response {
 pub struct NetContext {
     pub persona: Arc<Persona>,
     pub profile: Arc<ClientHelloProfile>,
+    /// TCP/IP SYN profile (ADR 0007). `None` leaves the host's own stack on
+    /// the wire. Set it with [`NetContext::with_tcp_profile`].
+    pub tcp_profile: Option<Arc<TcpProfile>>,
     pub cookies: CookieJar,
     /// Maximum body size, enforced on the wire and again after decoding.
     /// Default 32 MiB.
@@ -107,12 +111,45 @@ impl NetContext {
         Ok(Self {
             persona,
             profile,
+            tcp_profile: None,
             cookies: CookieJar::new(),
             max_body: 32 << 20,
             danger_accept_invalid_certs: false,
             connector: None,
             resolver: None,
         })
+    }
+
+    /// Shape the SYN of every connection from this context with `tcp`.
+    ///
+    /// Fails if the persona's `User-Agent` names a different operating system
+    /// than the profile: a Windows browser with a Linux SYN is exactly the
+    /// mismatch this layer exists to avoid. A UA with no known OS is accepted.
+    /// Profiles that need the packet shim also need it running
+    /// (`lightbrowser tcp-shim`), or connections time out.
+    pub fn with_tcp_profile(mut self, tcp: Arc<TcpProfile>) -> Result<Self, NetError> {
+        let os = tcp.os()?;
+        if let Some(ua_os) = self.persona.ua_os()
+            && ua_os != os
+        {
+            return Err(NetError::TcpOsMismatch {
+                persona: ua_os.to_string(),
+                profile: tcp.profile_id.clone(),
+                profile_os: os.to_string(),
+            });
+        }
+        #[cfg(target_os = "linux")]
+        if tcp.needs_shim() {
+            // Refuse only when we can see the rule is missing. If iptables
+            // cannot be run (rules managed another way), trust the operator.
+            match tcpfp::nfq::rule_installed() {
+                Ok(false) => return Err(NetError::TcpShimMissing(tcp.profile_id.clone())),
+                Ok(true) => {}
+                Err(e) => tracing::warn!(error = %e, "cannot check for the TCP shim rule"),
+            }
+        }
+        self.tcp_profile = Some(tcp);
+        Ok(self)
     }
 
     /// The cached TLS connector for this context, built on first use.
@@ -169,7 +206,8 @@ impl NetContext {
         let addrs = self.resolve(host, port).await?;
         let mut last = None;
         for addr in addrs {
-            match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
+            let connect = tcpfp::connect(addr, self.tcp_profile.as_deref());
+            match tokio::time::timeout(CONNECT_TIMEOUT, connect).await {
                 Ok(Ok(tcp)) => {
                     // Small writes (h2 preface, request headers) should not wait.
                     let _ = tcp.set_nodelay(true);

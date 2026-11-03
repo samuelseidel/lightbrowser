@@ -16,3 +16,5 @@ lb-persona = { path = "../../crates/lb-persona" }
 lb-net = { path = "../../crates/lb-net" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = "2"
+# Signal handling for `tcp-shim` (Linux only).
+libc = "0.2"

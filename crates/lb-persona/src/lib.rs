@@ -24,6 +24,9 @@ pub struct Persona {
     pub sec_ch_ua_mobile: Option<String>,
     /// `profile_id` of the TLS/H2 profile in `profiles/tls/`.
     pub tls_profile_id: String,
+    /// `profile_id` of the TCP/IP SYN profile in `profiles/tcp/`. Its OS must
+    /// match the platform in `user_agent` (see [`Persona::ua_os`]).
+    pub tcp_profile_id: String,
 }
 
 impl Persona {
@@ -47,6 +50,7 @@ impl Persona {
             sec_ch_ua_platform: Some("Windows".into()),
             sec_ch_ua_mobile: Some("?0".into()),
             tls_profile_id: "chrome_153_linux".into(),
+            tcp_profile_id: "windows_10_11".into(),
         }
     }
 
@@ -63,6 +67,62 @@ Firefox/128.0"
             sec_ch_ua_platform: None,
             sec_ch_ua_mobile: None,
             tls_profile_id: "firefox_128_win10".into(),
+            tcp_profile_id: "windows_10_11".into(),
+        }
+    }
+
+    /// The operating system the `user_agent` claims, or `None` if the string
+    /// names none we know (Android and iOS are not supported personas).
+    pub fn ua_os(&self) -> Option<OsFamily> {
+        let ua = self.user_agent.as_str();
+        if ua.contains("Android") || ua.contains("iPhone") || ua.contains("iPad") {
+            None
+        } else if ua.contains("Windows NT") {
+            Some(OsFamily::Windows)
+        } else if ua.contains("Macintosh") || ua.contains("Mac OS X") {
+            Some(OsFamily::Macos)
+        } else if ua.contains("Linux") || ua.contains("X11") {
+            Some(OsFamily::Linux)
+        } else {
+            None
+        }
+    }
+}
+
+/// The desktop operating system a persona claims. Picks the TCP/IP stack
+/// behaviour on the wire (`profiles/tcp/`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OsFamily {
+    Windows,
+    Macos,
+    Linux,
+}
+
+impl OsFamily {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Windows => "windows",
+            Self::Macos => "macos",
+            Self::Linux => "linux",
+        }
+    }
+}
+
+impl fmt::Display for OsFamily {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for OsFamily {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "windows" | "win" => Ok(Self::Windows),
+            "macos" | "mac" | "darwin" => Ok(Self::Macos),
+            "linux" => Ok(Self::Linux),
+            _ => Err(format!("unknown os: {s:?}")),
         }
     }
 }
@@ -128,5 +188,25 @@ mod tests {
             assert_eq!(f.as_str().parse::<BrowserFamily>(), Ok(f));
         }
         assert!("safari".parse::<BrowserFamily>().is_err());
+    }
+
+    #[test]
+    fn ua_os_follows_the_user_agent() {
+        let mut p = Persona::default_chrome();
+        assert_eq!(p.ua_os(), Some(OsFamily::Windows));
+        p.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36".into();
+        assert_eq!(p.ua_os(), Some(OsFamily::Macos));
+        p.user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36".into();
+        assert_eq!(p.ua_os(), Some(OsFamily::Linux));
+        p.user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36".into();
+        assert_eq!(p.ua_os(), None);
+    }
+
+    #[test]
+    fn os_family_round_trip() {
+        for o in [OsFamily::Windows, OsFamily::Macos, OsFamily::Linux] {
+            assert_eq!(o.as_str().parse::<OsFamily>(), Ok(o));
+        }
+        assert!("beos".parse::<OsFamily>().is_err());
     }
 }

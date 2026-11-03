@@ -25,3 +25,5 @@ hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
+# AF_PACKET capture of client SYNs (tcp module, Linux only).
+libc = "0.2"

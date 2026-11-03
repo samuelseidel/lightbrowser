@@ -28,6 +28,40 @@ cargo test -p lb-net --test fingerprint -- --nocapture   # prints measured JA3/J
     ADR 0003 and the profile's own `ja3_string` vs `extensions_order`
     mismatch.
 
+## TCP SYN fingerprint test (M1b, in place)
+
+`crates/lb-net/tests/tcp_fingerprint.rs` (ADR 0007), loopback only. Needs root
+for raw capture, the netfilter queue and iptables; without them it prints
+`SKIP` and passes.
+
+```bash
+cargo test -p lb-net --test tcp_fingerprint -- --nocapture --test-threads=1
+```
+
+For each `profiles/tcp/` profile it fetches from a local HTTP server with a
+3 MiB body, captures the SYN on `lo` and asserts TTL, DF, window, MSS, scale,
+option bytes and order, timestamps, JA4T and (for rewritten packets) both
+checksums. Linux runs with no shim; Windows and macOS run with the shim
+in-process. Also checked: no profile shows the host stack, a UA/OS mismatch is
+refused, a stopped shim drops SYNs, and a shim profile is refused when the rule
+is missing.
+
+### Verifying a Windows or macOS profile on a real device
+
+The Windows and macOS profiles are from public signatures. Check them on one of
+our own machines connecting to our own test host:
+
+```bash
+# on the Linux test host (root); the device connects to HOST:18446
+./target/debug/lb-fptest tcp-capture --listen HOST_IP:18446 --iface eth0 \
+    --allow-non-loopback --count 3
+# on the device:  curl http://HOST_IP:18446/   (or any TCP connect), three times
+```
+
+Compare `ja4t`, `ttl`, `df`, `option_bytes` with `profiles/tcp/<os>.json`. If
+they differ, update the profile (and `expected.ja4t`), set `provenance.status`
+to `captured`, and run the test above.
+
 ## Planned suites
 
 - **WPT subset** (M2): web-platform-tests for DOM, events, timers, fetch.

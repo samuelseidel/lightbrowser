@@ -4,7 +4,7 @@ LightBrowser is a headless browser written from scratch in Rust. It has no GUI.
 Stock Playwright and Puppeteer drive it over the Chrome DevTools Protocol (CDP).
 
 It presents a coherent persona, either **Chrome** or **Firefox**. The persona covers:
-- the network fingerprint: TLS ClientHello, HTTP/2 settings and header order
+- the network fingerprint: TCP SYN (Windows, macOS or Linux stack), TLS ClientHello, HTTP/2 settings and header order
 - the JavaScript surface
 - device fingerprints: canvas, WebGL, audio, fonts and screen
 
@@ -35,6 +35,7 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 | 0004 | Lazy style/layout, CPU canvas, no painting by default |
 | 0005 | CDP server as the control API |
 | 0006 | Two browser families, one binary per family |
+| 0007 | TCP/IP stack fingerprint: socket options plus a netfilter shim |
 
 ## Layers
 
@@ -77,6 +78,7 @@ browser context. Nothing reads a global.
 | JS (Firefox) | Servo's `mozjs` (SpiderMonkey), per-realm heap cap | Same engine as Firefox, with a maintained Rust embedding. |
 | Bindings | Own WebIDL → Rust codegen (`weedle2`), using the Chromium IDL set for Chrome and the Gecko IDL set for Firefox | Interface list, prototype chains, property order and descriptors all match the claimed browser. This is a large fingerprint surface. |
 | TLS | BoringSSL (`boring`, `tokio-boring`, `boring-sys` FFI for unwrapped knobs) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ML-KEM, ML-DSA, trust_anchors, server_padding. Firefox's ciphers, sigalgs, groups and ALPN match by configuration. delegated_credentials, record_size_limit, ffdhe and Firefox's extension order need small BoringSSL patches (M4b, ADR 0003). rustls can do neither. |
+| TCP/IP | `setsockopt` (TTL, MSS, window clamp) per connection, plus a netfilter-queue shim (`lightbrowser tcp-shim`, root) that rewrites the SYN's option block. Profiles in `profiles/tcp/`. | Passive OS fingerprinting (p0f, JA4T) reads the SYN. Windows is `MSS,NOP,WS,NOP,NOP,SACK` with TTL 128, Linux is `MSS,SACK,TS,NOP,WS`, macOS differs again. Sockets cannot reorder options, hence the shim. The shim only removes, reorders or shrinks what the kernel offered, and fails closed (ADR 0007). |
 | HTTP | hyper 1.x for h1. A fork of `h2` (`vendor/h2`) exposes SETTINGS order/values, the initial WINDOW_UPDATE, pseudo-header order and the HEADERS priority block, and writes the preface before reading. h3 via quiche later. | Akamai H2 fingerprint. Pseudo-header order: Chrome `m,a,s,p`, Firefox `m,p,a,s`. |
 | Net misc | hickory-resolver, per-context cookie jar, in-memory LRU cache, gzip/br/zstd, HTTP and SOCKS5 proxies | No disk use. |
 | HTML | `html5ever` tokenizer/tree builder → our own tree sink | Parses exactly like a browser. |
@@ -127,7 +129,7 @@ The existing GeckoPhantom personas (`persona_v1`, Firefox 128) load as
 
 ## Page lifecycle
 
-1. `Page.navigate` → `lb-net` request. The persona's family picks the ClientHello, H2 settings and header order.
+1. `Page.navigate` → `lb-net` request. The persona's OS picks the TCP SYN, and its family picks the ClientHello, H2 settings and header order.
 2. The response body streams into `html5ever`, which builds the DOM arena incrementally.
 3. Scripts run in the realm (classic, `defer`, `async`, modules) through the HTML event loop: tasks, microtasks and timers.
 4. Style and layout stay dirty. They are computed only when JS or CDP asks for geometry (`getBoundingClientRect`, `offsetWidth`, `elementFromPoint`, Playwright actionability, IntersectionObserver).
@@ -141,6 +143,7 @@ to skip idle waiting. It is off when the persona needs realistic timing.
 
 | Surface | Module | Source of truth |
 |---|---|---|
+| TCP SYN: TTL, DF, window, option order, timestamps | lb-net (`tcpfp`) + `tcp-shim` | `profiles/tcp/<os>.json`, persona `tcp_profile_id` |
 | JA3/JA4, ALPN, cert compression | lb-net | `profiles/tls/<family>_*.json` |
 | H2 SETTINGS, WINDOW_UPDATE, PRIORITY, pseudo-header order | lb-net (h2 fork) | TLS profile `http2_*` |
 | Header order, Accept, Accept-Language, Sec-CH-UA* | lb-net | persona `browser`, `locale`, `client_hints` |
@@ -186,6 +189,12 @@ check:    lb_net::fetch  ──TLS/H2──▶ CaptureServer (in-process) ──
 - **Check.** `crates/lb-net/tests/fingerprint.rs` runs `lb_net::fetch` for
   each family against an in-process `CaptureServer` and asserts the values
   against the profile (ADR 0003 lists the Firefox gaps).
+- **TCP SYN.** `crates/lb-net/tests/tcp_fingerprint.rs` runs `lb_net::fetch` for
+  each `profiles/tcp/` profile, captures the SYN on `lo` with `lb-fptest`'s own
+  parser (`SynCapture`, JA4T) and compares TTL, DF, window, MSS, scale, option
+  bytes and checksums. It also checks that a stopped shim drops SYNs instead of
+  leaking the host's. Needs root; it skips otherwise. `lb-fptest tcp-capture`
+  records a real device's SYN for a new profile.
 - **Spot checks.** `lb-fptest serve` prints one JSON line per connection,
   e.g. to compare header order with `--alpn http/1.1`.
 

@@ -1,0 +1,21 @@
+{
+  "profile_id": "linux_6",
+  "description": "Linux 5.x / 6.x client SYN over Ethernet (MSS 1460), the kernel's own layout",
+  "os": "linux",
+  "slot": 3,
+  "ip": { "ttl": 64, "df": true },
+  "tcp": {
+    "window": 64240,
+    "mss": 1460,
+    "window_scale": 7,
+    "options": ["mss", "sack_ok", "ts", "nop", "ws"],
+    "ecn": false
+  },
+  "expected": {
+    "ja4t": "64240_2-4-8-1-3_1460_7"
+  },
+  "provenance": {
+    "status": "captured",
+    "notes": "Measured on the Linux 6.18 kernel in the dev sandbox with TCP_MAXSEG=1460 and TCP_WINDOW_CLAMP=4 MiB. No packet rewriting is needed: socket options alone produce this SYN."
+  }
+}
