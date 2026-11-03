@@ -325,7 +325,9 @@ impl LayoutEngine {
                 if reserve_scrollbars(&mut state, doc, sb) {
                     let w = vw - state.root_scrollbar;
                     let root = state.built.root;
-                    state.built.tree.boxes[root].style.size.width = taffy::Dimension::length(w);
+                    Rc::make_mut(&mut state.built.tree.boxes[root].style)
+                        .size
+                        .width = taffy::Dimension::length(w);
                     state.built.tree.clear_caches();
                     state.built.tree.compute(root, w, vh);
                     self.stats.layouts += 1;
@@ -902,7 +904,7 @@ fn reserve_scrollbars(st: &mut LayoutState, doc: &Document, sb: f32) -> bool {
         let ph = l.size.height - l.border.top - l.border.bottom;
         let y = auto(css.overflow_y) && eh > ph + 0.5;
         let x = auto(css.overflow_x) && ew > pw + 0.5;
-        let o = &mut st.built.tree.boxes[i].style.overflow;
+        let o = &mut Rc::make_mut(&mut st.built.tree.boxes[i].style).overflow;
         if y {
             o.y = taffy::Overflow::Scroll;
             changed = true;

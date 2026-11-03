@@ -39,7 +39,9 @@ pub(crate) struct LBox {
     /// DOM node (element or text) this box belongs to.
     pub(crate) dom: Option<NodeId>,
     pub(crate) kind: BoxKind,
-    pub(crate) style: Style,
+    /// Shared between boxes with equal styles (see [`BoxTree::push`]);
+    /// changed in place with `Rc::make_mut`.
+    pub(crate) style: Rc<Style>,
     /// Computed style of the element (text boxes: their parent's).
     pub(crate) css: Option<Rc<ComputedStyle>>,
     pub(crate) children: Vec<TNode>,
@@ -54,7 +56,7 @@ impl LBox {
         LBox {
             dom,
             kind,
-            style,
+            style: Rc::new(style),
             css: None,
             children: Vec::new(),
             parent: None,
@@ -74,10 +76,27 @@ impl LBox {
 pub(crate) struct BoxTree {
     pub(crate) boxes: Vec<LBox>,
     calcs: Vec<Rc<Calc>>,
+    /// The last few distinct styles pushed, most recent first.
+    recent_styles: Vec<Rc<Style>>,
 }
 
+/// How many recent styles [`BoxTree::push`] compares a new box's with.
+const RECENT_STYLES: usize = 8;
+
 impl BoxTree {
-    pub(crate) fn push(&mut self, b: LBox) -> usize {
+    /// Adds a box. A taffy `Style` is 552 bytes and most boxes share one
+    /// with a recent box (every text run has the same, so do the rows and
+    /// cells of a table), so an equal style is shared instead of stored
+    /// again.
+    pub(crate) fn push(&mut self, mut b: LBox) -> usize {
+        if let Some(at) = self.recent_styles.iter().position(|s| *s == b.style) {
+            let s = self.recent_styles.remove(at);
+            b.style = s.clone();
+            self.recent_styles.insert(0, s);
+        } else {
+            self.recent_styles.truncate(RECENT_STYLES - 1);
+            self.recent_styles.insert(0, b.style.clone());
+        }
         self.boxes.push(b);
         self.boxes.len() - 1
     }
@@ -167,7 +186,7 @@ impl BoxTree {
         let b = self.node(node_id);
         let calc = |h: *const (), basis: f32| self.resolve_calc(h, basis);
         match &b.kind {
-            BoxKind::Text(run) => compute_leaf_layout(inputs, &b.style, calc, |known, avail| {
+            BoxKind::Text(run) => compute_leaf_layout(inputs, &*b.style, calc, |known, avail| {
                 let max = known.width.or(match avail.width {
                     AvailableSpace::Definite(w) => Some(w),
                     AvailableSpace::MinContent => Some(0.0),
@@ -188,7 +207,7 @@ impl BoxTree {
                 width,
                 height,
                 ratio,
-            } => compute_leaf_layout(inputs, &b.style, calc, |known, _| {
+            } => compute_leaf_layout(inputs, &*b.style, calc, |known, _| {
                 let (w, h) = match (known.width, known.height) {
                     (Some(w), Some(h)) => (w, h),
                     (Some(w), None) => (w, ratio.map_or(height.unwrap_or(0.0), |r| w / r)),
@@ -200,7 +219,7 @@ impl BoxTree {
                     height: h,
                 }
             }),
-            _ => compute_leaf_layout(inputs, &b.style, calc, |known, _| Size {
+            _ => compute_leaf_layout(inputs, &*b.style, calc, |known, _| Size {
                 width: known.width.unwrap_or(0.0),
                 height: known.height.unwrap_or(0.0),
             }),
