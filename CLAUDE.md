@@ -9,15 +9,22 @@ or Firefox persona.
 `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` are the source of truth. Read them
 first and do not contradict them. Current state (Chrome build): M1 (network),
 M2 (DOM + V8), M3 (layout + CDP), M4 (Chrome fingerprints), M5 (human input
-and Python SDK) and most of M6 are done. `lightbrowser serve` runs real V8
+and Python SDK), most of M6 and M7 (OS personas) are done. `lightbrowser serve` runs real V8
 pages through `lb_page::CdpHost`; stock Playwright `connectOverCDP` passes
 20 tests (including screenshots); the WPT subset passes 2552/2788. On our
-detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for both
-reference Chrome personas. With `--input human` (`LightBrowser.human*`)
-both reference personas score beh 0 on their own seeds (seeds 1-20: 20/20
-Windows, 19/20 macOS), see "M5 status" in `docs/ROADMAP.md`. M6: V8 startup
+detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for all
+8 reference Chrome personas, with the M7 OS rules at full weight. With
+`--input human` (`LightBrowser.human*`) all 8 score beh 0 on their own
+seeds; see "M5 status" and "M7 status" in `docs/ROADMAP.md`. M7 (ADR 0015):
+desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu X11,
+Fedora Wayland) Chrome personas; persona OS axis, rules R17-R26, catalog and
+generator; scrollbars, fonts and emoji, OS-gated APIs, codecs, WebGPU,
+WebGL backends, audio, wheel and shortcuts per OS; `Accept-CH` /
+`Critical-CH` client hints. Linux values are captured from local Chrome;
+Windows and macOS values come from a reference, not a capture. TCP/IP-level
+signals are always the host's. M6: V8 startup
 snapshot (realm 2.5 ms), idle RSS 10.2 MB, `bench/` runner (every corpus
-page faster than headless Chromium's median), release binary 39.63 MB
+page faster than headless Chromium's median), release binary 39.84 MB
 against < 40 MB (ADR 0013; ICU data in zstd chunks paged in on first
 touch, no unwind tables, V8 code only off-by-default flags reach not
 linked, root crate and bindings at `opt-level = "s"`). Lightpanda
@@ -38,15 +45,15 @@ and the status sections in `docs/ROADMAP.md`.
 ## Crate map
 | Crate | Role | State |
 |---|---|---|
-| `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R16, sfc32 done; optional `preferences`, media devices, battery |
+| `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R26, sfc32 done; OS axis and per-OS accessors (M7), `profiles/catalog/` + `gen_personas` example; optional `preferences`, media devices, battery |
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (startup snapshot made in memory, ADR 0013; ICU data in 128 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
-| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`) | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open (`lb-page` caps 6 connections per origin) |
+| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open (`lb-page` caps 6 connections per origin) |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`). WebGL runs no shaders; no workers, crypto or WebSocket |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`) and the OS-gated surface (share, bluetooth, codecs, keyboard, gpu). WebGL runs no shaders; no workers, crypto or WebSocket |
 | `lb-css` | Lazy cascade | Done (~75 longhands; no pseudo-elements, animations) |
-| `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); `display_list` for screenshots |
+| `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014) | Done (no filters or shaping; screenshots lack background images, radius, shadows, transforms) |
 | `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot` done; no workers or popups |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
@@ -67,7 +74,13 @@ cargo fmt --all --check
 cargo test -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox
 cargo clippy -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox -- -D warnings
 ./target/release/lightbrowser --version       # prints the compiled family
-./target/debug/lightbrowser validate profiles/reference/chrome/*.json   # persona rules
+./target/debug/lightbrowser validate profiles/reference/chrome/*.json   # persona rules (8 personas)
+./target/debug/lightbrowser validate profiles/generated/adversarial/*.json  # each must fail its one rule
+cargo run -p lb-persona --example gen_personas -- --os linux --count 50 --seed 1 --out profiles/generated/linux
+# M7 per-OS tests
+cargo test -p lb-layout --test os
+cargo test -p lb-page --test os_apis
+cargo test -p lb-net --test accept_ch
 # Network fingerprint check vs profiles/tls (loopback only, prints JA3/JA4/H2)
 cargo test -p lb-net --test fingerprint -- --nocapture
 # Fetch from a local test server (self-signed cert)
@@ -87,7 +100,8 @@ node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
 # stop both servers afterwards
-python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (18)
+python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (33)
+# Linux ground truth from local Chrome (loopback, headed under xvfb-run): see tools/os_truth/README.md
 # Python SDK tests (run from sdk/python; scenarios need Playwright >= 1.63, else skipped)
 (cd sdk/python && python3 -m pytest tests)
 # Crawl benchmark (release binary, loopback only); tooling tests need no browser
