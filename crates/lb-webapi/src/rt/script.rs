@@ -253,8 +253,7 @@ fn run_script_parser(js: &mut dyn Js, w: &Rc<Window>, to_end: bool) {
             let mut p = w.parser.borrow_mut();
             let Some(parser) = p.as_mut() else { return };
             let doc = w.doc_rc(0);
-            let r = parser.run(&mut doc.borrow_mut());
-            r
+            parser.run(&mut doc.borrow_mut())
         };
         match step {
             ParseStep::Script(n) => {

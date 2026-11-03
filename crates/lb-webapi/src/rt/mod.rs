@@ -961,14 +961,12 @@ impl Window {
 
     pub(crate) fn doc_slot<R>(&self, slot: u32, f: impl FnOnce(&Document) -> R) -> R {
         let d = self.doc_rc(slot);
-        let r = f(&d.borrow());
-        r
+        f(&d.borrow())
     }
 
     pub(crate) fn doc_slot_mut<R>(&self, slot: u32, f: impl FnOnce(&mut Document) -> R) -> R {
         let d = self.doc_rc(slot);
-        let r = f(&mut d.borrow_mut());
-        r
+        f(&mut d.borrow_mut())
     }
 
     /// Add a document (DOMParser, createHTMLDocument); returns its slot.
@@ -1378,8 +1376,7 @@ impl Window {
             engine.styles().set_external_sheet(link, Some(&text));
         }
         let doc = self.doc_rc(slot);
-        let r = f(engine, &doc.borrow());
-        r
+        f(engine, &doc.borrow())
     }
 
     /// The main document's layout engine (created on first use), for the

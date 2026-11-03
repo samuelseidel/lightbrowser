@@ -2636,7 +2636,7 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
     /// `this` another prototype (`Reflect.construct(Image, [], F)`, a
     /// subclass), the returned object gets that prototype, as in Chrome.
     pub fn ret_constructed(&mut self, value: impl Into<Arg>) -> Result<(), HostError> {
-        let v = self.to_v8(&value.into())?;
+        let v = self.host_value(&value.into())?;
         if self.args.is_construct_call()
             && let Ok(obj) = v8::Local::<v8::Object>::try_from(v)
             && let Some(want) = self.args.this().get_prototype(self.scope)
@@ -2650,7 +2650,7 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
 
     /// Set the return value.
     pub fn ret(&mut self, value: impl Into<Arg>) -> Result<(), HostError> {
-        let v = self.to_v8(&value.into())?;
+        let v = self.host_value(&value.into())?;
         self.rv.set(v);
         Ok(())
     }
@@ -2697,7 +2697,7 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
 
     /// A value for this call's return or a handle: host objects in the
     /// wrap realm (if set), everything else in the calling realm.
-    fn to_v8(&mut self, arg: &Arg) -> Result<v8::Local<'s, v8::Value>, HostError> {
+    fn host_value(&mut self, arg: &Arg) -> Result<v8::Local<'s, v8::Value>, HostError> {
         match (self.wrap_realm, arg) {
             (Some(r), Arg::Host(iface, host)) => {
                 Ok(wrap_host(self.scope, &self.state, r, *iface, *host)
@@ -2707,7 +2707,7 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
             (Some(_), Arg::Array(items)) => {
                 let mut elems = Vec::with_capacity(items.len());
                 for a in items {
-                    elems.push(self.to_v8(a)?);
+                    elems.push(self.host_value(a)?);
                 }
                 Ok(v8::Array::new_with_elements(self.scope, &elems).into())
             }
