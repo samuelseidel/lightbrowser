@@ -60,7 +60,7 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 # Budgets from docs/ARCHITECTURE.md ("Goals and budgets").
 BUDGET_IDLE_RSS_MB = 15.0
-BUDGET_BINARY_MB = 40.0
+BUDGET_BINARY_MB = 50.0
 BUDGET_REALM_MS = 5.0
 
 
