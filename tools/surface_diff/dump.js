@@ -62,8 +62,9 @@
     try { new f.Event(); } catch (e) { X.push('Event', e instanceof f.TypeError, e.message); }
     try { f.Event('x'); } catch (e) { X.push('Event()', e instanceof f.TypeError, e.message); }
     // Not dumped: a method or getter of one realm called on a node of
-    // another document resolves the node in the wrong document (open bug,
-    // the same in M7; see docs/ROADMAP.md).
+    // another document (fixed by ADR 0017; builds before it abort on
+    // some of these calls, so they are checked by lb-page's
+    // frames::cross_realm tests against Chrome instead).
     X.push(f.document.body instanceof f.Node, f.document.body instanceof Node, Node[Symbol.hasInstance].call(f.Node, document.body));
     class Sub extends f.Blob {}
     X.push(new Sub([]) instanceof f.Blob, Object.getPrototypeOf(Sub) === f.Blob, fts.call(f.URL), f.webkitURL === f.URL, f.webkitURL.name);

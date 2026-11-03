@@ -6,7 +6,7 @@ Each milestone ends with something we can run and measure.
 |---|---|---|
 | **M0 Foundations** | Architecture docs, ADRs, workspace skeleton, CI, SFC32 port | `cargo build/test/clippy` green for both families ✅ |
 | **M1 Network** | `lb-net`: BoringSSL ClientHello profiles, h1 + forked h2, cookies, decompression, proxy. `lightbrowser fetch <url>` | JA3/JA4 and Akamai H2 hash match real Chrome on our local TLS/H2 echo server ✅ (Chrome). Proxies moved to M2. |
-| **M2 DOM + V8** | Arena DOM, html5ever sink, selectors, WebIDL codegen (Chromium set), V8 backend + snapshot, event loop, timers, fetch/XHR | `fetch --dump html` prints the DOM *after* scripts run. A WPT DOM subset passes. ✅ (Chrome; 2540/2788 WPT subtests at M2, 2552 now) |
+| **M2 DOM + V8** | Arena DOM, html5ever sink, selectors, WebIDL codegen (Chromium set), V8 backend + snapshot, event loop, timers, fetch/XHR | `fetch --dump html` prints the DOM *after* scripts run. A WPT DOM subset passes. ✅ (Chrome; 2540/2788 WPT subtests at M2, 2556 now) |
 | **M3 Layout + CDP core** | Lazy cascade, taffy layout, hit-testing, AX tree, CDP server with the domains in ARCHITECTURE.md | Playwright `connectOverCDP`: goto, evaluate, click, fill, getByRole, content all pass ✅ (Chrome; real V8 page host, 16 Playwright tests, see "M3 status") |
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
@@ -144,8 +144,8 @@ bench's Python tests and `node --test tests/playwright/`.
 
 Still open from M2:
 
-- Bindings: `Image`/`Option`/`Audio` are separate interface objects; no
-  `WindowProperties` object; `NodeFilter` has a `prototype`; no weak
+- Bindings: no `WindowProperties` object (`Image`/`Option`/`Audio`
+  share their interface's prototype since "Frames fidelity"); `NodeFilter` has a `prototype`; no weak
   wrappers (host objects live until the window drops); no `DOMException`
   `stack`; namespace and worker-only member order is from the IDL, not a
   fixture.
@@ -160,7 +160,8 @@ Still open from M2:
   cache). (Per-destination headers and exact h1 header-name case landed in
   M4, see "M4 status: request headers".)
 - DOM: no shadow DOM, custom elements, Range, Selection, TreeWalker, CDATA
-  or XML parsing; cross-document adopt copies the node.
+  or XML parsing. (Adoption across documents keeps the node's identity
+  since "Frames fidelity", ADR 0017.)
 - Realm creation is about 30 ms per navigation (budget < 5 ms with the M6
   snapshot).
 - `lb-persona`: rule R04 rejects the upstream Apple Silicon profiles; the
@@ -1316,7 +1317,8 @@ interface object now puts the key last in
 `Object.getOwnPropertyNames(window)`, as the local Chrome for Testing
 153.0.8010.12 does; M7 kept its old place.
 
-Found by the new surface dump, the same in M7 and now, not fixed here:
+Found by the new surface dump, the same in M7 and now, not fixed here
+(all three fixed since, see "Frames fidelity"):
 
 - A method or getter of one realm called on a node of another document
   resolves the node in its own realm's document:

@@ -1,6 +1,8 @@
 # ADR 0012: Frames are realms in the page's engine, built on the spot
 
-Status: Accepted (2026-11-03)
+Status: Accepted (2026-11-03). The cross-frame node gap below is closed by
+ADR 0017 (document keys in node refs, one node wrapper per world, removed
+frames stay usable).
 
 ## Context
 
@@ -67,9 +69,10 @@ must also be unreachable from the parent, as in Chrome.
   Playwright suite run with frames.
 - A frame costs a realm (same cost as a navigation). Script-created frames
   build it inside the inserting callback.
-- Gaps: host refs are per window, so nodes of one frame passed to another
-  frame's DOM methods are not supported, and `DOM.*`/`Input.*` on nodes
-  inside frames (clicks into frames) are refused for now; no named frame
+- Gaps: host refs were per window, so nodes of one frame passed to
+  another frame's DOM methods were not supported (fixed by ADR 0017), and
+  `DOM.*`/`Input.*` on nodes inside frames (clicks into frames) are
+  refused for now; no named frame
   access (`window.frameName`), `sandbox`, `<frame>`/`<object>` browsing
   contexts; `postMessage` clones through JSON; network events of frame
   requests are attributed to the main frame.

@@ -11,7 +11,7 @@ first and do not contradict them. Current state (Chrome build): M1 (network),
 M2 (DOM + V8), M3 (layout + CDP), M4 (Chrome fingerprints), M5 (human input
 and Python SDK), most of M6 and M7 (OS personas) are done. `lightbrowser serve` runs real V8
 pages through `lb_page::CdpHost`; stock Playwright `connectOverCDP` passes
-20 tests (including screenshots); the WPT subset passes 2552/2788. On our
+20 tests (including screenshots); the WPT subset passes 2556/2788. On our
 detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for all
 8 reference Chrome personas, with the M7 OS rules at full weight. With
 `--input human` (`LightBrowser.human*`) all 8 score beh 0 on their own
@@ -44,9 +44,12 @@ passes 6 of 6; binary 40.38 MB, idle RSS 7.1 MB), so regenerate the hot-symbol l
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), workers and service workers, shader execution in
 WebGL, HTTP keep-alive, stylesheets blocking scripts, CSS background
-images in screenshots, and three surface gaps found by the surface dump
-(cross-document node calls, detached-frame globals, `Image.prototype`;
-see ROADMAP). See "Where we stand"
+images in screenshots. Frames (ADR 0017): node refs carry a runtime-wide
+document key, so one frame's DOM methods act on another frame's nodes,
+nodes keep one wrapper per world and adoption keeps identity; a removed
+frame's window stays usable, detached, as in Chrome; `Image`/`Audio`/
+`Option` share their interface's prototype (all checked against local
+Chrome in `lb-page`'s `frames::cross_realm` tests). See "Where we stand"
 and the status sections in `docs/ROADMAP.md`.
 
 ## Internal use and legal
@@ -61,7 +64,7 @@ and the status sections in `docs/ROADMAP.md`.
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
 | `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open (`lb-page` caps 6 connections per origin) |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
-| `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |
+| `lb-dom` | Arena DOM, html5ever sink, selectors | Done (one arena per document; `import_node_mapped` for adoption across documents); no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
 | `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`) and the OS-gated surface (share, bluetooth, codecs, keyboard, gpu). WebGL runs no shaders; no workers, crypto or WebSocket |
 | `lb-css` | Lazy cascade | Done (~75 longhands; no pseudo-elements, animations) |

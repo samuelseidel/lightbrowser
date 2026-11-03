@@ -1,6 +1,8 @@
 # ADR 0008: Host objects are `(kind, id)` pairs with a per-realm wrapper cache
 
-Status: Accepted (2026-11-03)
+Status: Accepted (2026-11-03). Node refs (`document_slot`) and the
+per-realm cache for nodes are superseded by ADR 0017: a node ref carries a
+runtime-wide document key, and main-world realms share one wrapper per node.
 
 ## Context
 
