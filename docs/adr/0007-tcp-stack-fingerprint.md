@@ -1,7 +1,9 @@
 # ADR 0007: TCP/IP stack fingerprint: socket options plus a netfilter shim
 
 Status: Accepted (2026-11-03). Implemented for the SYN, IPv4 and IPv6. The
-Windows and macOS profiles are unverified (see Consequences).
+Windows and macOS profiles are unverified (see Consequences). Extended by
+[0008](0008-whole-connection-tcp-shaping.md), which shapes the packets after the
+SYN too.
 
 ## Context
 
@@ -60,8 +62,8 @@ handshake. Without a profile the host SYN shows; with the shim stopped none leav
 ## Consequences
 
 - Linux only. Windows and macOS personas need root; a Linux persona does not.
-- Only the first packet is shaped. Not mimicked: SYN retransmit timing, IP ID,
-  timestamp clock, later window sizes, ECN and RST behaviour.
+- Only the first packet is shaped here; ADR 0008 adds SYN retransmit timing and
+  IP ID. Still not mimicked: later window sizes, ECN and RST behaviour.
 - Direct connections only. Behind a proxy (M2) the server sees the proxy's SYN.
   NAT, load balancers and MSS clamping can still alter packets.
 - `TCP_WINDOW_CLAMP` caps the receive window at `2^(15+scale)` (2 MiB for macOS:

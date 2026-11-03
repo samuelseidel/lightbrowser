@@ -17,6 +17,12 @@ Placeholder. Persona profiles and TLS profiles. Milestones: M1 (TLS), M4 (Chrome
   `documented-unverified` (public p0f/JA4T signature; Windows, macOS). Re-capture
   steps are in `tests/README.md`.
 - `slot` must be unique: it selects the profile in the packet shim.
+- `ip.id`: `kernel` (leave it), `zero` (macOS), `host_counter` (Windows).
+- `syn_retransmit.schedule_ms`: when an unanswered SYN is retransmitted, in ms
+  after the first; `option_variants` change the option layout from an attempt on
+  (Windows drops window scale). Omit it to keep the kernel's schedule, which is
+  kernel-dependent (Linux 6.1+: 1, 2, 3, 4, 6, 10 s).
+- Sources for the values are in each profile's `provenance.notes` and ADR 0008.
 
 ## TLS (`profiles/tls/`)
 

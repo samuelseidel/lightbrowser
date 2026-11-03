@@ -3,12 +3,25 @@
   "description": "macOS 12 to 15 client SYN over Ethernet or Wi-Fi (MSS 1460)",
   "os": "macos",
   "slot": 2,
-  "ip": { "ttl": 64, "df": true },
+  "ip": {
+    "ttl": 64,
+    "df": true,
+    "id": "zero"
+  },
   "tcp": {
     "window": 65535,
     "mss": 1460,
     "window_scale": 6,
-    "options": ["mss", "nop", "ws", "nop", "nop", "ts", "sack_ok", "eol"],
+    "options": [
+      "mss",
+      "nop",
+      "ws",
+      "nop",
+      "nop",
+      "ts",
+      "sack_ok",
+      "eol"
+    ],
     "ecn": false
   },
   "expected": {
@@ -16,6 +29,22 @@
   },
   "provenance": {
     "status": "documented-unverified",
-    "notes": "From public p0f / JA4T signatures for macOS: TTL 64, DF, window 65535, options MSS,NOP,WS,NOP,NOP,TS,SACK_PERM,EOL (padded to 24 bytes), WS 6. Whether recent macOS sets ECE+CWR on the SYN (ecn) is not confirmed. Re-capture on our own Macs with `lb-fptest tcp-capture` and set status to captured."
+    "notes": "SYN: p0f lists 65535, mss,nop,ws,nop,nop,ts,sok,eol+1, TTL 64, DF for Mac OS X (confirmed layout). p0f's window scale for 10.9+ is 4 (1 and 3 for older); 6 here is not confirmed for current macOS and is the least certain value. IP ID 0: XNU ip_output.c sets ip_id = 0 for atomic (DF) packets when rfc6864=1, the default; p0f's id+ for macOS is older. Retransmits: XNU tcp_syn_backoff {1,1,1,1,1,2,4,8,16,32,64,64,64} times a base RTO assumed to be 1 s (base not confirmed). Timestamps: XNU tsval = t_ts_offset + tcp_now (random per-connection offset by default, 1 ms ticks), the same as Linux, so no rewriting. Whether the SYN carries ECE+CWR is unconfirmed. Re-capture on our own Macs with `lb-fptest tcp-capture --flow` and set status to captured."
+  },
+  "syn_retransmit": {
+    "schedule_ms": [
+      1000,
+      2000,
+      3000,
+      4000,
+      6000,
+      10000,
+      18000,
+      34000,
+      66000,
+      130000,
+      194000,
+      258000
+    ]
   }
 }

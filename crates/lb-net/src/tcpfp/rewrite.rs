@@ -19,6 +19,12 @@
 //!
 //! Only IPv4 and IPv6 packets without extension headers are handled; anything
 //! else is left alone.
+//!
+//! Beyond the SYN: [`classify`] names the connection a packet belongs to,
+//! [`set_ipv4_id`] applies an IP ID policy and [`retransmit_syn`] builds the
+//! copies of a SYN that a profile's retransmission schedule sends.
+
+use std::net::IpAddr;
 
 use super::profile::{TcpOpt, TcpProfile};
 
@@ -326,6 +332,186 @@ fn rewrite_v6(pkt: &mut Vec<u8>, p: &TcpProfile) -> Result<Outcome, RewriteError
     Ok(Outcome::Rewritten(report))
 }
 
+/// A connection, seen from the client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FlowKey {
+    pub src: IpAddr,
+    pub dst: IpAddr,
+    pub sport: u16,
+    pub dport: u16,
+}
+
+/// What a client TCP packet is, for connection tracking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// SYN without ACK: a connection attempt or a retransmission of it.
+    Syn,
+    /// RST or FIN.
+    Closing,
+    /// Everything else; the first one after a SYN is the handshake ACK.
+    Other,
+}
+
+/// The IP header length and total length of a TCP packet, or `None` if it is
+/// not an unfragmented IPv4 or IPv6 (no extension headers) TCP packet.
+fn tcp_layout(pkt: &[u8]) -> Option<(usize, usize)> {
+    match pkt.first()? >> 4 {
+        4 if pkt.len() >= 20 => {
+            let ihl = usize::from(pkt[0] & 15) * 4;
+            let total = usize::from(u16::from_be_bytes([pkt[2], pkt[3]]));
+            let frag = u16::from_be_bytes([pkt[6], pkt[7]]);
+            (ihl >= 20
+                && total >= ihl + 20
+                && total <= pkt.len()
+                && pkt[9] == PROTO_TCP
+                && frag & 0x1fff == 0)
+                .then_some((ihl, total))
+        }
+        6 if pkt.len() >= 60 => {
+            let total = 40 + usize::from(u16::from_be_bytes([pkt[4], pkt[5]]));
+            (pkt[6] == PROTO_TCP && total >= 60 && total <= pkt.len()).then_some((40, total))
+        }
+        _ => None,
+    }
+}
+
+/// Which connection `pkt` belongs to and what kind of packet it is.
+pub fn classify(pkt: &[u8]) -> Option<(FlowKey, Kind)> {
+    let (ip, total) = tcp_layout(pkt)?;
+    let tcp = &pkt[ip..total];
+    let addr = |b: &[u8]| -> IpAddr {
+        if b.len() == 4 {
+            <[u8; 4]>::try_from(b)
+                .map(IpAddr::from)
+                .unwrap_or([0, 0, 0, 0].into())
+        } else {
+            <[u8; 16]>::try_from(b)
+                .map(IpAddr::from)
+                .unwrap_or([0u8; 16].into())
+        }
+    };
+    let (src, dst) = if ip == 40 {
+        (addr(&pkt[8..24]), addr(&pkt[24..40]))
+    } else {
+        (addr(&pkt[12..16]), addr(&pkt[16..20]))
+    };
+    let flags = tcp[13];
+    let kind = if flags & (FLAG_SYN | FLAG_ACK | 0x04) == FLAG_SYN {
+        Kind::Syn
+    } else if flags & 0x05 != 0 {
+        Kind::Closing
+    } else {
+        Kind::Other
+    };
+    let key = FlowKey {
+        src,
+        dst,
+        sport: u16::from_be_bytes([tcp[0], tcp[1]]),
+        dport: u16::from_be_bytes([tcp[2], tcp[3]]),
+    };
+    Some((key, kind))
+}
+
+/// The TCP sequence number of `pkt`. A retransmitted SYN has the same one as
+/// the original; a new connection that reuses the port has another.
+pub fn tcp_seq(pkt: &[u8]) -> Option<u32> {
+    let (ip, _) = tcp_layout(pkt)?;
+    Some(u32::from_be_bytes(pkt[ip + 4..ip + 8].try_into().ok()?))
+}
+
+/// Recompute the IPv4 header checksum and the TCP checksum of `pkt`.
+///
+/// Needed after any edit, and even for the packets the kernel meant to
+/// checksum in hardware: a packet handed back by the shim is treated as
+/// complete, so a queued packet's partial TCP checksum would go out wrong.
+pub fn refresh_checksums(pkt: &mut [u8]) {
+    let Some((ip, total)) = tcp_layout(pkt) else {
+        return;
+    };
+    if ip == 40 {
+        let (src, dst) = (pkt[8..24].to_vec(), pkt[24..40].to_vec());
+        pkt[56..58].copy_from_slice(&[0, 0]);
+        let c = tcp_checksum(&src, &dst, &pkt[40..total]);
+        pkt[56..58].copy_from_slice(&c.to_be_bytes());
+        return;
+    }
+    pkt[10..12].copy_from_slice(&[0, 0]);
+    let h = checksum(&pkt[..ip]);
+    pkt[10..12].copy_from_slice(&h.to_be_bytes());
+    let (src, dst) = (pkt[12..16].to_vec(), pkt[16..20].to_vec());
+    pkt[ip + 16..ip + 18].copy_from_slice(&[0, 0]);
+    let c = tcp_checksum(&src, &dst, &pkt[ip..total]);
+    pkt[ip + 16..ip + 18].copy_from_slice(&c.to_be_bytes());
+}
+
+/// Set the IPv4 identification field and fix the checksums. Returns false
+/// (and changes nothing) for IPv6 and for packets that are not TCP.
+pub fn set_ipv4_id(pkt: &mut [u8], id: u16) -> bool {
+    match tcp_layout(pkt) {
+        Some((ip, _)) if ip != 40 => {
+            pkt[4..6].copy_from_slice(&id.to_be_bytes());
+            refresh_checksums(pkt);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Add `delta` ticks to the TSval of a SYN in the kernel's layout. Checksums
+/// are not updated; [`rewrite_syn`] does that.
+fn bump_tsval(pkt: &mut [u8], delta: u32) {
+    let Some((ip, total)) = tcp_layout(pkt) else {
+        return;
+    };
+    let hlen = usize::from(pkt[ip + 12] >> 4) * 4;
+    let (mut i, end) = (ip + 20, (ip + hlen).min(total));
+    while i < end {
+        match pkt[i] {
+            0 => break,
+            1 => i += 1,
+            k => {
+                let Some(&len) = pkt.get(i + 1) else { break };
+                let len = usize::from(len);
+                if len < 2 || i + len > end {
+                    break;
+                }
+                if k == 8 && len == 10 {
+                    let v = u32::from_be_bytes([pkt[i + 2], pkt[i + 3], pkt[i + 4], pkt[i + 5]]);
+                    pkt[i + 2..i + 6].copy_from_slice(&v.wrapping_add(delta).to_be_bytes());
+                }
+                i += len;
+            }
+        }
+    }
+}
+
+/// The SYN that retransmission number `attempt` (1 = the first) sends, built
+/// from the kernel's original SYN `kernel_syn` sent `elapsed_ms` earlier. It
+/// has the profile's layout for that attempt (see `OptionVariant`) and the
+/// timestamp the kernel itself would have sent by then.
+pub fn retransmit_syn(
+    kernel_syn: &[u8],
+    p: &TcpProfile,
+    attempt: u8,
+    elapsed_ms: u32,
+) -> Result<Vec<u8>, RewriteError> {
+    let mut pkt = kernel_syn.to_vec();
+    bump_tsval(&mut pkt, elapsed_ms);
+    let mut profile = p.clone();
+    if let Some(v) = p
+        .syn_retransmit
+        .iter()
+        .flat_map(|r| &r.option_variants)
+        .rfind(|v| v.from_attempt <= attempt)
+    {
+        profile.tcp.options.clone_from(&v.options);
+    }
+    match rewrite_syn(&mut pkt, &profile)? {
+        Outcome::Rewritten(_) => Ok(pkt),
+        Outcome::Untouched => Err(RewriteError::Malformed("not a client SYN")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,5 +743,68 @@ mod tests {
         let mut pkt = linux_syn(false, 10);
         pkt[20 + 21] = 1; // option length 1 for MSS
         assert!(rewrite_syn(&mut pkt, &profile("windows_10_11")).is_err());
+    }
+
+    #[test]
+    fn classify_names_the_flow_and_the_kind() {
+        let pkt = linux_syn(false, 10);
+        let (k, kind) = classify(&pkt).unwrap();
+        assert_eq!((k.sport, k.dport, kind), (40000, 443, Kind::Syn));
+        assert_eq!(k.dst, "192.0.2.2".parse::<IpAddr>().unwrap());
+        let (k6, _) = classify(&linux_syn(true, 10)).unwrap();
+        assert!(k6.src.is_ipv6());
+        for (flags, want) in [
+            (FLAG_ACK, Kind::Other),
+            (0x18, Kind::Other),
+            (0x04, Kind::Closing),
+            (0x11, Kind::Closing),
+        ] {
+            let mut p = linux_syn(false, 10);
+            p[20 + 13] = flags;
+            assert_eq!(classify(&p).unwrap().1, want, "{flags:#x}");
+        }
+        let mut udp = linux_syn(false, 10);
+        udp[9] = 17;
+        assert!(classify(&udp).is_none());
+    }
+
+    #[test]
+    fn ip_id_edit_keeps_both_checksums_valid() {
+        let mut pkt = linux_syn(false, 10);
+        assert!(set_ipv4_id(&mut pkt, 0));
+        assert_eq!(&pkt[4..6], [0, 0]);
+        assert_valid(&pkt);
+        // A queued packet carries only the pseudo-header seed in its TCP
+        // checksum (hardware offload); the refresh must still make it whole.
+        let mut offloaded = linux_syn(false, 10);
+        offloaded[20 + 16..20 + 18].copy_from_slice(&[0x12, 0x34]);
+        assert!(set_ipv4_id(&mut offloaded, 0xabcd));
+        assert_valid(&offloaded);
+        let mut v6 = linux_syn(true, 10);
+        assert!(!set_ipv4_id(&mut v6, 1), "IPv6 has no id field");
+    }
+
+    #[test]
+    fn retransmission_follows_the_option_variants_and_advances_the_clock() {
+        let win = profile("windows_10_11");
+        let first = retransmit_syn(&linux_syn(false, 10), &win, 1, 1000).unwrap();
+        assert_eq!(
+            opts_of(&first),
+            [2, 4, 5, 0xb4, 1, 3, 3, 8, 1, 1, 4, 2],
+            "attempt 1 keeps window scale"
+        );
+        let late = retransmit_syn(&linux_syn(false, 10), &win, 2, 3000).unwrap();
+        assert_eq!(
+            opts_of(&late),
+            [2, 4, 5, 0xb4, 1, 1, 4, 2],
+            "attempt 2 drops it"
+        );
+        assert_valid(&late);
+
+        let mac = retransmit_syn(&linux_syn(false, 10), &profile("macos_14"), 3, 3000).unwrap();
+        let o = opts_of(&mac);
+        let tsval = u32::from_be_bytes([o[12], o[13], o[14], o[15]]);
+        assert_eq!(tsval, TSVAL + 3000, "TSval advances with the elapsed time");
+        assert_valid(&mac);
     }
 }

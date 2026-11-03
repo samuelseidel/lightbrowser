@@ -67,12 +67,50 @@ pub const KERNEL_LAYOUT: [TcpOpt; 5] = [
     TcpOpt::Ws,
 ];
 
+/// What the IPv4 identification field of every outgoing packet holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IdPolicy {
+    /// Leave the kernel's value (Linux: a per-connection counter from a random
+    /// start).
+    #[default]
+    Kernel,
+    /// Always 0, as macOS does for DF packets (RFC 6864).
+    Zero,
+    /// One counter shared by every connection of the profile, +1 per packet,
+    /// from a random start, as Windows does.
+    HostCounter,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpParams {
     /// Initial IPv4 TTL / IPv6 hop limit.
     pub ttl: u8,
     /// Don't-fragment bit (IPv4 only).
     pub df: bool,
+    /// Identification field policy (IPv4 only).
+    #[serde(default)]
+    pub id: IdPolicy,
+}
+
+/// The option layout of SYN retransmissions from `from_attempt` on
+/// (1 = the first retransmission).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptionVariant {
+    pub from_attempt: u8,
+    pub options: Vec<TcpOpt>,
+}
+
+/// How the stack retransmits an unanswered SYN.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SynRetransmit {
+    /// Milliseconds after the first SYN at which each retransmission is sent.
+    /// The shim drops the kernel's own retransmissions and sends these.
+    pub schedule_ms: Vec<u32>,
+    /// Different option layouts for later retransmissions (Windows drops
+    /// window scaling).
+    #[serde(default)]
+    pub option_variants: Vec<OptionVariant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,6 +155,11 @@ pub struct TcpProfile {
     pub slot: u16,
     pub ip: IpParams,
     pub tcp: TcpParams,
+    /// Retransmission timing of an unanswered SYN. `None` keeps the kernel's,
+    /// which depends on its version (Linux 6.1+: 1, 2, 3, 4, 6, 10 s because of
+    /// `tcp_syn_linear_timeouts`; older: 1, 3, 7, 15 s).
+    #[serde(default)]
+    pub syn_retransmit: Option<SynRetransmit>,
     pub expected: Expected,
     #[serde(default)]
     pub provenance: Provenance,
@@ -194,6 +237,25 @@ impl TcpProfile {
         if self.tcp.window_scale > 14 {
             return bad("window_scale must be 14 or less".into());
         }
+        if self.slot >= super::MARK_ALL as u16 {
+            return bad(format!("slot must be below {}", super::MARK_ALL));
+        }
+        if let Some(r) = &self.syn_retransmit {
+            let s = &r.schedule_ms;
+            if s.is_empty() || s.len() > 12 || s[0] < 100 || s.windows(2).any(|w| w[1] <= w[0]) {
+                return bad(
+                    "syn_retransmit.schedule_ms must be 1 to 12 increasing times of at least 100 ms"
+                        .into(),
+                );
+            }
+            for v in &r.option_variants {
+                let mut copy = self.clone();
+                copy.syn_retransmit = None;
+                copy.tcp.options.clone_from(&v.options);
+                copy.expected.ja4t = copy.ja4t();
+                copy.validate()?;
+            }
+        }
         let ja4t = self.ja4t();
         if ja4t != self.expected.ja4t {
             return bad(format!(
@@ -237,18 +299,37 @@ impl TcpProfile {
         (65535 / mss) * mss
     }
 
-    /// True if sockets alone cannot produce this SYN, so connections need the
-    /// packet shim (`nfq`): a different option layout than the kernel's, a
-    /// window the kernel would not choose, or ECN flags.
-    pub fn needs_shim(&self) -> bool {
+    /// True if the SYN itself needs rewriting: a different option layout than
+    /// the kernel's, a window the kernel would not choose, or ECN flags.
+    pub fn needs_syn_rewrite(&self) -> bool {
         self.tcp.options != KERNEL_LAYOUT
             || self.tcp.window != Self::kernel_window(self.tcp.mss)
             || self.tcp.ecn
     }
 
-    /// The socket mark that selects this profile in the shim.
+    /// True if every packet of the connection must pass the shim: it rewrites
+    /// the IP ID or controls SYN retransmissions.
+    pub fn needs_every_packet(&self) -> bool {
+        self.ip.id != IdPolicy::Kernel || self.syn_retransmit.is_some()
+    }
+
+    /// True if sockets alone cannot produce this connection, so it needs the
+    /// packet shim (`nfq`).
+    pub fn needs_shim(&self) -> bool {
+        self.needs_syn_rewrite() || self.needs_every_packet()
+    }
+
+    /// The socket mark that selects this profile in the shim. [`MARK_ALL`]
+    /// asks for every packet of the connection, not just the SYN.
+    ///
+    /// [`MARK_ALL`]: super::MARK_ALL
     pub fn mark(&self) -> u32 {
-        super::MARK_BASE | u32::from(self.slot)
+        let all = if self.needs_every_packet() {
+            super::MARK_ALL
+        } else {
+            0
+        };
+        super::MARK_BASE | all | u32::from(self.slot)
     }
 
     /// `TCP_WINDOW_CLAMP` value that makes the kernel pick `window_scale`.

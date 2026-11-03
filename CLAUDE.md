@@ -92,7 +92,8 @@ and run the fingerprint test. Only capture on loopback with a local browser.
 - **TCP profile matches the UA's OS.** `persona.tcp_profile_id` names a
   `profiles/tcp/` profile for the same OS as the User-Agent. Windows and macOS
   profiles need `tcp-shim` and fail closed without it; never send the host's SYN
-  by accident (ADR 0007).
+  by accident (ADR 0007). The shim also sets the IP ID and the SYN retransmit
+  schedule of every packet (ADR 0008).
 - **Nothing automation-related is visible to the page world** (`webdriver`,
   CDP leaks). CDP helper code runs in an isolated world.
 - **Keep docs current.** When a decision changes, update

@@ -35,6 +35,9 @@ pub use profile::{TcpOpt, TcpProfile};
 pub const MARK_BASE: u32 = 0x4c42_0000;
 /// Mask that isolates [`MARK_BASE`] in a mark.
 pub const MARK_MASK: u32 = 0xffff_0000;
+/// Mark bit that sends every packet of the connection to the shim, not only
+/// the SYN. The profile slot is the low 15 bits.
+pub const MARK_ALL: u32 = 0x8000;
 
 /// Set the per-socket knobs for `p` on a socket that has not connected yet.
 #[cfg(target_os = "linux")]

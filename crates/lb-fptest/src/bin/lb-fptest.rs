@@ -86,6 +86,12 @@ enum Cmd {
         /// network and our own devices only.
         #[arg(long)]
         allow_non_loopback: bool,
+        /// Record the whole connection, not just the SYN: every packet plus a
+        /// summary of SYN retransmit times, IP ID pattern, timestamp rate and
+        /// window fields. To see retransmissions, make this host ignore SYNs
+        /// for a while: `iptables -I INPUT -p tcp --syn --dport PORT -j DROP`.
+        #[arg(long)]
+        flow: bool,
     },
 }
 
@@ -96,8 +102,9 @@ fn tcp_capture(
     count: usize,
     timeout_secs: u64,
     allow: bool,
+    flow: bool,
 ) -> Result<(), String> {
-    use lb_fptest::tcp::SynCapture;
+    use lb_fptest::tcp::{Capture, flow_summary, packets, syns};
     if !listen.ip().is_loopback() && !allow {
         return Err(format!(
             "{listen} is not a loopback address; pass --allow-non-loopback to capture from \
@@ -107,7 +114,7 @@ fn tcp_capture(
     let l = std::net::TcpListener::bind(listen).map_err(|e| format!("bind {listen}: {e}"))?;
     l.set_nonblocking(true).map_err(|e| e.to_string())?;
     let cap =
-        SynCapture::start(iface, listen.port()).map_err(|e| format!("capture on {iface}: {e}"))?;
+        Capture::start(iface, listen.port()).map_err(|e| format!("capture on {iface}: {e}"))?;
     eprintln!("lb-fptest: waiting for {count} connection(s) to {listen} (capturing on {iface})");
     let end = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     let (mut seen, mut held) = (0, Vec::new());
@@ -124,7 +131,23 @@ fn tcp_capture(
             Err(e) => return Err(e.to_string()),
         }
     }
-    for syn in cap.finish() {
+    if flow {
+        // Give the device time to send its request and for retransmissions.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+    let (raw, lost) = cap.finish_stats();
+    if lost > 0 {
+        eprintln!("lb-fptest: warning: the kernel dropped {lost} packets before capture saw them");
+    }
+    if flow {
+        let pkts = packets(&raw);
+        for p in &pkts {
+            println!("{}", serde_json::to_string(p).map_err(|e| e.to_string())?);
+        }
+        println!("{}", flow_summary(&pkts));
+        return Ok(());
+    }
+    for syn in syns(&raw) {
         let mut v = serde_json::to_value(&syn).map_err(|e| e.to_string())?;
         v["ja4t"] = syn.ja4t().into();
         println!("{v}");
@@ -172,8 +195,16 @@ async fn run(cli: Cli) -> Result<(), String> {
             count,
             timeout_secs,
             allow_non_loopback,
+            flow,
         } => {
-            return tcp_capture(*listen, iface, *count, *timeout_secs, *allow_non_loopback);
+            return tcp_capture(
+                *listen,
+                iface,
+                *count,
+                *timeout_secs,
+                *allow_non_loopback,
+                *flow,
+            );
         }
         #[cfg(not(target_os = "linux"))]
         Cmd::TcpCapture { .. } => return Err("tcp-capture needs Linux".into()),

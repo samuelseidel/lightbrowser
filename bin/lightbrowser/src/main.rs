@@ -37,8 +37,8 @@ TCP-SHIM OPTIONS:
   --queue N              netfilter queue number (default 4100)
   --tcp-dir DIR          TCP profiles (default: nearest profiles/tcp)
   --no-rules             do not install the iptables rule; you manage it
-  Rewrites the SYN of connections marked by `fetch --tcp-profile`. Needs
-  CAP_NET_ADMIN. If it stops, marked connections fail: they never leak the
+  Rewrites the SYN, IP ID and SYN retransmissions of connections marked by
+  `fetch --tcp-profile`. Needs CAP_NET_ADMIN and CAP_NET_RAW. If it stops, marked connections fail: they never leak the
   host's own stack. Runs until Ctrl-C.
 
 Exit code: 0 on 2xx/3xx, 1 on other statuses or errors, 2 on bad usage.

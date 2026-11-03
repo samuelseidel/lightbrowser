@@ -17,9 +17,10 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
-use lb_fptest::tcp::SynCapture;
+use lb_fptest::tcp::{Capture, SynCapture, packets, syns};
 use lb_net::fetch::{NetContext, Request};
-use lb_net::tcpfp::nfq::{RuleGuard, Shim};
+use lb_net::tcpfp::nfq::{RuleGuard, Shim, ShimHandle};
+use lb_net::tcpfp::profile::IdPolicy;
 use lb_net::tcpfp::{TcpOpt, TcpProfile};
 use lb_net::{ClientHelloProfile, fetch};
 use lb_persona::Persona;
@@ -291,4 +292,247 @@ async fn shim_profile_needs_the_rule() {
     let ctx = NetContext::new(Arc::clone(&persona), tls_profile(&persona)).unwrap();
     ctx.with_tcp_profile(Arc::new(win.clone()))
         .expect("rule present: must be accepted");
+}
+
+/// Bring up the shim and its iptables rules for `p` if it needs them.
+fn shim_for(p: &TcpProfile, all: &[TcpProfile], queue: u16) -> Option<(ShimHandle, RuleGuard)> {
+    if !p.needs_shim() {
+        return None;
+    }
+    let shim = Shim::bind(queue, all.to_vec()).expect("bind the netfilter queue");
+    let rules = RuleGuard::install(queue).expect("install iptables rules");
+    Some((shim.spawn(), rules))
+}
+
+fn context_for(p: &TcpProfile) -> NetContext {
+    let persona = Arc::new(persona_for(p));
+    NetContext::new(Arc::clone(&persona), tls_profile(&persona))
+        .unwrap()
+        .with_tcp_profile(Arc::new(p.clone()))
+        .unwrap()
+}
+
+fn get(addr: SocketAddr) -> Request {
+    Request::get(url::Url::parse(&format!("http://{addr}/")).unwrap())
+}
+
+/// The IP ID of every packet follows the profile: macOS sends 0, Windows one
+/// counter across connections, Linux the kernel's per-connection counter.
+#[tokio::test(flavor = "multi_thread")]
+async fn ip_id_follows_the_profile() {
+    let _lock = RULES.lock().await;
+    if let Err(why) = can_capture() {
+        eprintln!("SKIP: {why}");
+        return;
+    }
+    let all = profiles();
+    let addr = serve().await;
+    for (i, p) in all.iter().enumerate() {
+        let shim = shim_for(p, &all, 4300 + i as u16);
+        let mut ctx = context_for(p);
+        let cap = Capture::start("lo", addr.port()).unwrap();
+        for _ in 0..2 {
+            let r = fetch(&mut ctx, get(addr)).await.unwrap();
+            assert_eq!(r.body.len(), BODY_LEN, "{}: body", p.profile_id);
+        }
+        let (raw, lost) = cap.finish_stats();
+        assert_eq!(lost, 0, "{}: the capture lost packets", p.profile_id);
+        let pkts = packets(&raw);
+        let stats = shim.map(|(h, _rules)| h.stop().unwrap());
+        let ids: Vec<u16> = pkts.iter().map(|k| k.ip_id).collect();
+        println!(
+            "{:14} {} packets, ids {:?}…  {stats:?}",
+            p.profile_id,
+            ids.len(),
+            &ids[..ids.len().min(6)]
+        );
+        assert!(
+            ids.len() >= 6,
+            "{}: expected two connections, saw {ids:?}",
+            p.profile_id
+        );
+        match p.ip.id {
+            IdPolicy::Zero => assert!(ids.iter().all(|&x| x == 0), "{}: {ids:?}", p.profile_id),
+            IdPolicy::HostCounter => {
+                // One counter for both connections, +1 per packet, in order.
+                assert!(
+                    ids.windows(2).all(|w| w[1] == w[0].wrapping_add(1)),
+                    "{}: not one sequential counter: {ids:?}",
+                    p.profile_id
+                );
+            }
+            IdPolicy::Kernel => {
+                // Left alone: each connection counts +1 per packet on its own
+                // (a Linux per-socket counter), and none is 0.
+                let mut ports: Vec<u16> = pkts.iter().map(|k| k.src_port).collect();
+                ports.sort_unstable();
+                ports.dedup();
+                assert_eq!(ports.len(), 2, "{}: two connections", p.profile_id);
+                for port in ports {
+                    let own: Vec<u16> = pkts
+                        .iter()
+                        .filter(|k| k.src_port == port)
+                        .map(|k| k.ip_id)
+                        .collect();
+                    assert!(own.iter().all(|&x| x != 0), "{own:?}");
+                    assert!(
+                        own.windows(2).all(|w| w[1] == w[0].wrapping_add(1)),
+                        "{own:?}"
+                    );
+                }
+            }
+        }
+        if let Some(st) = stats {
+            assert!(
+                st.id_rewritten as usize >= ids.len(),
+                "{}: {st:?}",
+                p.profile_id
+            );
+            assert_eq!(st.dropped, 0, "{}: {st:?}", p.profile_id);
+        }
+    }
+}
+
+/// An iptables rule that makes the local server ignore SYNs to one port, so
+/// the client has to retransmit. Removed on drop.
+struct IgnoreSyns(u16, bool);
+
+impl IgnoreSyns {
+    fn args(&self, action: &str) -> Vec<String> {
+        [
+            "-t",
+            "filter",
+            action,
+            "INPUT",
+            "-p",
+            "tcp",
+            "--syn",
+            "--dport",
+            &self.0.to_string(),
+            "-j",
+            "DROP",
+        ]
+        .map(String::from)
+        .to_vec()
+    }
+    fn on(port: u16) -> Self {
+        let g = Self(port, true);
+        let ok = std::process::Command::new("iptables")
+            .args(g.args("-I"))
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "cannot install the DROP rule");
+        g
+    }
+    fn off(&mut self) {
+        if std::mem::take(&mut self.1) {
+            let _ = std::process::Command::new("iptables")
+                .args(self.args("-D"))
+                .status();
+        }
+    }
+}
+
+impl Drop for IgnoreSyns {
+    fn drop(&mut self) {
+        self.off();
+    }
+}
+
+/// An unanswered SYN is retransmitted on the profile's schedule, with its
+/// option variants and an advancing timestamp, instead of the kernel's.
+#[tokio::test(flavor = "multi_thread")]
+async fn syn_retransmission_follows_the_schedule() {
+    let _lock = RULES.lock().await;
+    if let Err(why) = can_capture() {
+        eprintln!("SKIP: {why}");
+        return;
+    }
+    let all = profiles();
+    let addr = serve().await;
+    // (profile os, how long the server ignores SYNs, expected SYN times in ms)
+    for (os, ignore_ms, want) in [
+        ("macos", 2500u64, vec![0u64, 1000, 2000, 3000]),
+        ("windows", 3500, vec![0, 1000, 3000, 7000]),
+    ] {
+        let (i, p) = all.iter().enumerate().find(|(_, p)| p.os == os).unwrap();
+        let (shim, rules) = shim_for(p, &all, 4320 + i as u16).unwrap();
+        let mut ctx = context_for(p);
+        let mut ignore = IgnoreSyns::on(addr.port());
+        let cap = Capture::start("lo", addr.port()).unwrap();
+        let task =
+            tokio::spawn(async move { fetch(&mut ctx, get(addr)).await.map(|r| r.body.len()) });
+        tokio::time::sleep(std::time::Duration::from_millis(ignore_ms)).await;
+        ignore.off();
+        let len = task
+            .await
+            .unwrap()
+            .unwrap_or_else(|e| panic!("{os}: fetch failed: {e}"));
+        let raw = cap.finish();
+        let stats = shim.stop().unwrap();
+        drop(rules);
+
+        let seen: Vec<_> = syns(&raw)
+            .into_iter()
+            .zip(packets(&raw).into_iter().filter(|k| k.is_syn()))
+            .collect();
+        let times: Vec<u64> = seen.iter().map(|(_, k)| k.at_ms).collect();
+        println!(
+            "{os:8} SYNs at {times:?} ms; kinds {:?}; {stats:?}",
+            seen.iter()
+                .map(|(s, _)| s.option_kinds.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            len, BODY_LEN,
+            "{os}: the connection works after the retransmissions"
+        );
+        assert_eq!(
+            times.len(),
+            want.len(),
+            "{os}: SYN count (kernel retransmits must not leak): {times:?}"
+        );
+        for (got, want) in times.iter().zip(&want) {
+            assert!(
+                got.abs_diff(*want) <= 150,
+                "{os}: SYN times {times:?}, want {want:?}"
+            );
+        }
+        assert!(stats.kernel_retransmits_dropped >= 1, "{os}: {stats:?}");
+        assert_eq!(
+            stats.retransmits_sent as usize,
+            want.len() - 1,
+            "{os}: {stats:?}"
+        );
+        assert_eq!(stats.dropped, 0, "{os}: {stats:?}");
+
+        let first = &seen[0].0;
+        for (s, k) in &seen {
+            assert_eq!(s.ttl, p.ip.ttl);
+            assert_eq!(s.window, p.tcp.window);
+            assert_eq!(s.mss, Some(p.tcp.mss));
+            // The timestamp keeps the kernel's 1 kHz clock between SYNs.
+            if let (Some((t0, _)), Some((t, _))) = (first.timestamps, s.timestamps) {
+                assert!(
+                    u64::from(t.wrapping_sub(t0)).abs_diff(k.at_ms) <= 100,
+                    "{os}: TSval drift"
+                );
+            }
+        }
+        if os == "windows" {
+            // Window scaling is dropped from the 2nd retransmission (attempt 2).
+            let kinds: Vec<_> = seen.iter().map(|(s, _)| s.option_kinds.clone()).collect();
+            assert_eq!(kinds[0], [2, 1, 3, 1, 1, 4]);
+            assert_eq!(kinds[1], [2, 1, 3, 1, 1, 4]);
+            assert_eq!(kinds[2], [2, 1, 1, 4]);
+            assert_eq!(kinds[3], [2, 1, 1, 4]);
+        } else {
+            assert!(
+                seen.iter()
+                    .all(|(s, _)| s.timestamps.is_some()
+                        && s.window_scale == Some(p.tcp.window_scale))
+            );
+        }
+    }
 }

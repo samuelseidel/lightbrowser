@@ -6,7 +6,7 @@ Each milestone ends with something we can run and measure.
 |---|---|---|
 | **M0 Foundations** | Architecture docs, ADRs, workspace skeleton, CI, SFC32 port | `cargo build/test/clippy` green for both families ✅ |
 | **M1 Network** | `lb-net`: BoringSSL ClientHello profiles, h1 + forked h2, cookies, decompression, proxy. `lightbrowser fetch <url>` | JA3/JA4 and Akamai H2 hash match real Chrome on our local TLS/H2 echo server ✅ (Chrome). Proxies moved to M2. |
-| **M1b TCP stack** | `lb-net::tcpfp`: SYN profiles for Windows, macOS and Linux, socket options, `tcp-shim` (NFQUEUE) | Our own parser sees the profile's exact SYN on loopback for all three ✅. Windows and macOS profiles re-captured from real devices ⏳ |
+| **M1b TCP stack** | `lb-net::tcpfp`: SYN profiles for Windows, macOS and Linux, socket options, `tcp-shim` (NFQUEUE): SYN, IP ID, SYN retransmit timing | Our own parser sees the profile's exact SYN, IP ID and retransmit timeline on loopback for all three ✅. Windows and macOS profiles re-captured from real devices ⏳ |
 | **M2 DOM + V8** | Arena DOM, html5ever sink, selectors, WebIDL codegen (Chromium set), V8 backend + snapshot, event loop, timers, fetch/XHR | `fetch --dump html` prints the DOM *after* scripts run. A WPT DOM subset passes. |
 | **M3 Layout + CDP core** | Lazy cascade, taffy layout, hit-testing, AX tree, CDP server with the domains in ARCHITECTURE.md | Playwright `connectOverCDP`: goto, evaluate, click, fill, getByRole, content all pass |
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine scores the Chrome personas as consistent. Same seed gives the same fingerprint. |
@@ -53,13 +53,19 @@ Done (ADR 0007):
 - Tier 2 (`lightbrowser tcp-shim`): exact Windows and macOS SYN, IPv4 and IPv6
   rewrite, fail-closed, rule preflight.
 - `cargo test -p lb-net --test tcp_fingerprint`, `lb-fptest tcp-capture`.
+- ADR 0008: the shim also sets the IP ID of every packet (macOS 0, Windows a
+  host counter) and replaces the kernel's SYN retransmissions with the OS
+  schedule (Windows 1, 3, 7, 15 s without window scale from the 2nd; macOS 1, 2,
+  3, 4, 6, 10 s…). The timestamp clock already matches, so it is untouched.
 
 Open:
 
 - Re-capture the Windows and macOS profiles on our own devices (they come from
-  public signatures today), including whether macOS sets ECE+CWR.
-- Not shaped yet: SYN retransmit timing, IP ID, timestamp clock, post-handshake
-  windows. A userspace TCP stack is the option if the detection engine checks them.
+  public sources today): macOS window scale (p0f says 4 for 10.9+, we use 6),
+  whether macOS sets ECE+CWR, the retransmit base RTO and counts, Windows' IP ID.
+- Not shaped: post-handshake window sizes (no source for the values; record them
+  with `lb-fptest tcp-capture --flow`). A userspace TCP stack is the option if the
+  detection engine checks them or more.
 - Make the shim part of the process (one lifecycle) and `--tcp-profile persona`
   the default once packaged.
 
