@@ -45,6 +45,8 @@ Not done, moved:
 
 ## M1b status (2026-11-03)
 
+Analysis, results and the full list of remaining steps: [tcp-handshake/](tcp-handshake/).
+
 Done (ADR 0007):
 
 - `profiles/tcp/{windows_65535,windows_64240,macos_14,linux_6}.json`, `Persona::tcp_profile_id`

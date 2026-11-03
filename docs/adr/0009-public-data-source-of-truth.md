@@ -6,7 +6,7 @@ Status: Accepted (2026-11-03). Corrects values in ADR 0007 and 0008.
 
 ADR 0007 and 0008 took the Windows and macOS values from memory, p0f and vendor
 documents, and marked them unverified. A public dataset of real client SYNs
-exists: the Zardaxt OS database (1,453 fingerprints, 20,547 sessions, each
+exists: the Zardaxt OS database (1,453 fingerprints, 23,467 sessions, each
 labelled with the OS its User-Agent claims) at
 [NikolaiT/zardaxt](https://github.com/NikolaiT/zardaxt). It also publishes
 aggregates in its README. Its licence is all-rights-reserved, so we may analyse
