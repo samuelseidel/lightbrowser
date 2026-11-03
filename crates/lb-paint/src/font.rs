@@ -10,17 +10,21 @@
 //!   (`examples/gen_glyph_pack.rs`). Each family is drawn with the pack of
 //!   its style class (sans, serif, mono) at the table's advances. Italic is
 //!   synthesized with a 1/4 skew, like Skia's fake italic. Characters
-//!   without a glyph (emoji, CJK) advance but draw nothing.
+//!   without a glyph (CJK) advance but draw nothing.
+//! - Emoji advance by the persona's emoji font (lb-layout) and are drawn
+//!   in colour, as Chrome draws them from the OS colour emoji font, but
+//!   with flat stand-in shapes ([`FontSet::emoji_layers`]): we bundle no
+//!   emoji images.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use lb_css::{
-    Calc, ComputedStyle, Decl, DeclarationBlock, Defaults, FamilyName, FontSizeSpec, FontStyle,
-    FontWeightSpec, LonghandId, OsKind, Sv, Unit,
+    Calc, Color, ComputedStyle, Decl, DeclarationBlock, Defaults, FamilyName, FontSizeSpec,
+    FontStyle, FontWeightSpec, LonghandId, OsKind, Sv, Unit,
 };
-use lb_layout::{FontAvailability, FontDb, TextFont, resolve_font};
+use lb_layout::{FontAvailability, FontDb, TextFont, is_emoji, resolve_font};
 use lb_persona::PersonaProfile;
 use tiny_skia::Transform;
 
@@ -196,8 +200,23 @@ fn calc_px(c: &Calc, em: f32) -> f32 {
 
 impl CanvasFont {
     /// Parses a CSS `font` shorthand value. `None` if invalid (the canvas
-    /// keeps its current font).
+    /// keeps its current font). System font keywords (`caption`, ...) use
+    /// Windows defaults; [`CanvasFont::parse_with`] takes the persona's.
     pub fn parse(s: &str) -> Option<CanvasFont> {
+        Self::parse_with(s, None)
+    }
+
+    /// [`CanvasFont::parse`] with the persona's defaults for the system
+    /// font keywords.
+    pub fn parse_with(s: &str, defaults: Option<&Defaults>) -> Option<CanvasFont> {
+        let fallback;
+        let defaults = match defaults {
+            Some(d) => d,
+            None => {
+                fallback = Defaults::for_os(OsKind::Windows);
+                &fallback
+            }
+        };
         let s = s.trim();
         if s.is_empty() || s.contains([';', '{', '}', '!']) {
             return None;
@@ -221,12 +240,19 @@ impl CanvasFont {
                 (LonghandId::FontSize, Sv::FontSize(sz)) => {
                     f.size = match sz {
                         FontSizeSpec::Keyword(k) => 16.0 * k,
+                        FontSizeSpec::System(k) => defaults.system_font(*k).1,
                         FontSizeSpec::Larger => 12.0,
                         FontSizeSpec::Smaller => 10.0 / 1.2,
                         FontSizeSpec::Length(c) => calc_px(c, 10.0),
                     }
                 }
                 (LonghandId::FontFamily, Sv::FontFamily(fams)) => f.families = fams.clone(),
+                (LonghandId::FontFamily, Sv::SystemFont(k)) => {
+                    f.families = Rc::from(vec![FamilyName {
+                        name: defaults.system_font(*k).0.to_owned(),
+                        generic: false,
+                    }]);
+                }
                 _ => continue,
             }
             seen += 1;
@@ -390,16 +416,28 @@ impl FontSet {
     /// Windows tables with every family installed.
     pub fn new(profile: Option<&PersonaProfile>) -> FontSet {
         let os = profile.map_or(OsKind::Windows, |p| OsKind::from_name(&p.os.name));
-        let avail = match profile {
-            Some(p) => FontAvailability::from_list(p.fonts.available.iter().map(String::as_str)),
-            None => FontAvailability::everything(),
+        let (avail, defaults) = match profile {
+            Some(p) => (
+                FontAvailability::for_persona(p),
+                Defaults::for_env(&lb_css::MediaEnv::from_persona(p)),
+            ),
+            None => (FontAvailability::everything(), Defaults::for_os(os)),
         };
+        let mut db = FontDb::for_os(os);
+        if let Some(p) = profile {
+            db.add_foreign(p.fonts.available.iter().map(String::as_str));
+        }
         FontSet {
-            db: FontDb::for_os(os),
+            db,
             avail,
-            defaults: Defaults::for_os(os),
+            defaults,
             packs: Default::default(),
         }
+    }
+
+    /// The persona's font defaults (standard family, system font keywords).
+    pub fn defaults(&self) -> &Defaults {
+        &self.defaults
     }
 
     /// The metric-table font a canvas font resolves to (layout's matching).
@@ -441,13 +479,11 @@ impl FontSet {
 
     fn lay_out(&self, tf: &TextFont, text: &str) -> Laid {
         let face = tf.family.face(tf.weight, tf.italic);
-        let upem = tf.family.units_per_em;
-        let k = tf.size / upem;
         let mut x = 0.0;
         let mut glyphs = Vec::with_capacity(text.len());
         for c in text.chars() {
             glyphs.push((c, x));
-            x += face.advance(c, upem) * k + tf.letter_spacing;
+            x += tf.advance(face, c) + tf.letter_spacing;
             if c == ' ' || c == '\u{a0}' {
                 x += tf.word_spacing;
             }
@@ -502,6 +538,16 @@ impl FontSet {
                 x1 = x1.max(px + (bx1 + sk1) * s);
                 up = up.max(by1 * s);
                 down = down.min(by0 * s);
+            }
+        }
+        for &(c, px) in &laid.glyphs {
+            if is_emoji(c) {
+                let (cx, cy, r) = emoji_disc(px, 0.0, tf);
+                ink = true;
+                x0 = x0.min(cx - r);
+                x1 = x1.max(cx + r);
+                up = up.max(-(cy - r));
+                down = down.min(-(cy + r));
             }
         }
         if !ink {
@@ -572,6 +618,119 @@ impl FontSet {
     }
 }
 
+/// Centre (x, y relative to the baseline, y down) and radius of the disc
+/// an emoji at pen position `px` is drawn in: the middle of its advance,
+/// centred in the emoji font's box (Noto Color Emoji: 0.93 em above and
+/// 0.25 em below the baseline).
+fn emoji_disc(px: f32, baseline: f32, tf: &TextFont) -> (f32, f32, f32) {
+    let em = tf.size;
+    let adv = tf.emoji_advance * em;
+    (px + adv / 2.0, baseline - 0.34 * em, 0.47 * em)
+}
+
+/// Smileys and people faces (yellow round faces).
+fn is_face(c: char) -> bool {
+    matches!(c as u32,
+        0x1f600..=0x1f637 | 0x1f641..=0x1f644 | 0x1f910..=0x1f915 | 0x1f917..=0x1f925
+        | 0x1f927..=0x1f92f | 0x1f970..=0x1f976 | 0x1f978..=0x1f97a | 0x1f9d0 | 0x1fae0..=0x1fae8)
+}
+
+fn rgb(r: u8, g: u8, b: u8) -> Color {
+    Color { r, g, b, a: 1.0 }
+}
+
+impl FontSet {
+    /// Colour layers of the emoji in `text` drawn like
+    /// [`FontSet::text_path`] lays the text out: `(device path, colour)`,
+    /// in paint order. Chrome draws emoji in the emoji font's colours
+    /// whatever the fill style; we have no emoji images, so each emoji is a
+    /// flat stand-in in its box: a yellow face for smileys, else a disc
+    /// coloured by code point.
+    #[allow(clippy::too_many_arguments)]
+    pub fn emoji_layers(
+        &self,
+        st: &TextStyle,
+        text: &str,
+        x: f64,
+        y: f64,
+        max_width: Option<f64>,
+        ts: &Transform,
+    ) -> Vec<(PathData, Color)> {
+        let text = prepare_text(text);
+        if !text.chars().any(is_emoji) {
+            return Vec::new();
+        }
+        let tf = &st.font;
+        let laid = self.lay_out(tf, &text);
+        let (ax, dy) = self.anchor(st, laid.width);
+        let sx = match max_width {
+            Some(m) if f64::from(laid.width) > m && laid.width > 0.0 => m / f64::from(laid.width),
+            _ => 1.0,
+        };
+        let mut out = Vec::new();
+        let tau = std::f64::consts::TAU;
+        for &(c, px) in &laid.glyphs {
+            if !is_emoji(c) {
+                continue;
+            }
+            let (cx, cy, r) = emoji_disc(ax + px, dy, tf);
+            let (cx, cy, r) = (x + f64::from(cx) * sx, y + f64::from(cy), f64::from(r));
+            let ell = |ox: f64, oy: f64, rx: f64, ry: f64, color: Color| {
+                let mut p = PathData::new();
+                p.ellipse(
+                    ts,
+                    cx + ox * r * sx,
+                    cy + oy * r,
+                    rx * r * sx,
+                    ry * r,
+                    0.0,
+                    0.0,
+                    tau,
+                    false,
+                );
+                p.close();
+                (p, color)
+            };
+            if is_face(c) {
+                let dark = rgb(0x66, 0x45, 0x00);
+                out.push(ell(0.0, 0.0, 1.0, 1.0, rgb(0xe5, 0x96, 0x00)));
+                out.push(ell(0.0, 0.0, 0.93, 0.93, rgb(0xff, 0xcc, 0x4d)));
+                out.push(ell(-0.33, -0.22, 0.11, 0.17, dark));
+                out.push(ell(0.33, -0.22, 0.11, 0.17, dark));
+                // Smile: the lower half of an ellipse.
+                let mut m = PathData::new();
+                m.ellipse(
+                    ts,
+                    cx,
+                    cy + 0.12 * r,
+                    0.5 * r * sx,
+                    0.42 * r,
+                    0.0,
+                    0.0,
+                    tau / 2.0,
+                    false,
+                );
+                m.close();
+                out.push((m, dark));
+            } else {
+                const PALETTE: [(u8, u8, u8); 7] = [
+                    (0xdd, 0x2e, 0x44),
+                    (0x3b, 0x88, 0xc3),
+                    (0x77, 0xb2, 0x55),
+                    (0xff, 0xac, 0x33),
+                    (0xaa, 0x8d, 0xd8),
+                    (0xf4, 0x90, 0x0c),
+                    (0x5d, 0xad, 0xec),
+                ];
+                let (r8, g8, b8) = PALETTE[(c as usize) % PALETTE.len()];
+                out.push(ell(0.0, 0.0, 1.0, 1.0, rgb(r8, g8, b8)));
+                out.push(ell(-0.3, -0.35, 0.28, 0.18, rgb(0xff, 0xff, 0xff)));
+            }
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,6 +758,16 @@ mod tests {
             "600 20px \"Times New Roman\""
         );
         assert_eq!(CanvasFont::default().to_css(), "10px sans-serif");
+        // System font keywords resolve to the persona's (here Windows).
+        assert_eq!(
+            CanvasFont::parse("caption").unwrap().to_css(),
+            "12px \"Segoe UI\""
+        );
+        assert_eq!(
+            CanvasFont::parse("-webkit-small-control").unwrap().to_css(),
+            "13.3333px Arial"
+        );
+        assert!(CanvasFont::parse("caption 12px").is_none());
         assert!(CanvasFont::parse("bold").is_none());
         assert!(CanvasFont::parse("inherit").is_none());
         assert!(CanvasFont::parse("12px a; color: red").is_none());
@@ -636,10 +805,11 @@ mod tests {
             (mt.actual_bounding_box_left - (m.width / 2.0 + m.actual_bounding_box_left)).abs()
                 < 1e-3
         );
-        // Unknown families fall back like layout does; a missing glyph
-        // still advances.
+        // Unknown families fall back like layout does; an emoji advances
+        // by the emoji font (Segoe UI Emoji without a persona).
         let e = fs.measure(&st, "\u{1F600}");
-        assert_eq!(e.width, 16.0);
+        assert!((e.width - 16.0 * 1.3).abs() < 1e-3, "{}", e.width);
+        assert!(e.actual_bounding_box_ascent > 0.0);
         assert!(
             !fs.text_path(&st, "Hi", 0.0, 20.0, None, &Transform::identity())
                 .is_empty()

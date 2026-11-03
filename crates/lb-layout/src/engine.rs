@@ -128,6 +128,9 @@ struct LayoutState {
     paint_order: Vec<usize>,
     /// Scrollable content size per scroll container box (incl. viewport).
     extents: HashMap<usize, (f32, f32)>,
+    /// Width of the viewport's vertical scrollbar (0 when the document
+    /// does not overflow or scrollbars overlay).
+    root_scrollbar: f32,
 }
 
 /// Lazy layout for one document.
@@ -196,14 +199,15 @@ impl LayoutEngine {
     /// another OS than the persona's is not used.
     pub fn new_with(persona: Arc<PersonaProfile>, base: &LayoutBase) -> LayoutEngine {
         let env = MediaEnv::from_persona(&persona);
-        let available =
-            FontAvailability::from_list(persona.fonts.available.iter().map(String::as_str));
+        let available = FontAvailability::for_persona(&persona);
         let mut e = if base.os == env.os {
             Self::with_base(env, base.clone())
         } else {
             Self::with_env(env)
         };
         e.available = available;
+        e.fonts
+            .add_foreign(persona.fonts.available.iter().map(String::as_str));
         e.persona = Some(persona);
         e
     }
@@ -295,25 +299,40 @@ impl LayoutEngine {
             .is_some_and(|s| s.key == key && s.viewport == self.viewport);
         if !fresh {
             // Styles may refresh (and bump nothing): re-read the key after.
-            let built = Builder::new(doc, &mut self.styles, &self.fonts, &self.available)
+            let (vw, vh) = self.viewport;
+            let mut built = Builder::new(doc, &mut self.styles, &self.fonts, &self.available)
                 .with_intrinsic(&self.intrinsic)
-                .build(self.viewport.0, self.viewport.1);
-            let mut built = built;
-            built
-                .tree
-                .compute(built.root, self.viewport.0, self.viewport.1);
+                .build(vw, vh);
+            built.tree.compute(built.root, vw, vh);
             self.stats.layouts += 1;
             let n = built.tree.boxes.len();
-            let paint_order = paint_order(&built);
-            self.state = Some(LayoutState {
+            let mut state = LayoutState {
                 key: self.styles.style_key(doc),
                 viewport: self.viewport,
                 built,
                 geo: vec![Geo::default(); n],
                 geo_valid: false,
-                paint_order,
+                paint_order: Vec::new(),
                 extents: HashMap::new(),
-            });
+                root_scrollbar: 0.0,
+            };
+            let sb = self.styles.env().scrollbar_width;
+            if sb > 0.0 {
+                // Classic scrollbars take space: find the scroll
+                // containers whose content overflows, reserve their
+                // scrollbar and lay out once more (Chrome does the same).
+                place_all(&mut state, &mut self.scroll, &mut self.viewport_scroll);
+                if reserve_scrollbars(&mut state, doc, sb) {
+                    let w = vw - state.root_scrollbar;
+                    let root = state.built.root;
+                    state.built.tree.boxes[root].style.size.width = taffy::Dimension::length(w);
+                    state.built.tree.clear_caches();
+                    state.built.tree.compute(root, w, vh);
+                    self.stats.layouts += 1;
+                }
+            }
+            state.paint_order = paint_order(&state.built);
+            self.state = Some(state);
         }
         let state = self.state.as_mut().expect("layout state");
         if !state.geo_valid {
@@ -442,11 +461,12 @@ impl LayoutEngine {
         (r.width.round(), r.height.round())
     }
 
-    /// `clientWidth` / `clientHeight`: padding box (no scrollbars), 0 for
-    /// inline boxes; the viewport for the root element.
+    /// `clientWidth` / `clientHeight`: padding box minus scrollbars, 0
+    /// for inline boxes; the viewport minus its scrollbar for the root
+    /// element.
     pub fn client_size(&mut self, doc: &Document, node: NodeId) -> (f32, f32) {
         if Some(node) == doc.document_element() {
-            return (self.viewport.0, self.viewport.1);
+            return self.viewport_client_size(doc);
         }
         let Some(style) = self.styles.computed_style(doc, node) else {
             return (0.0, 0.0);
@@ -454,10 +474,34 @@ impl LayoutEngine {
         if style.display == Display::Inline {
             return (0.0, 0.0);
         }
-        match self.box_model(doc, node) {
-            Some(m) => (m.padding.width.round(), m.padding.height.round()),
-            None => (0.0, 0.0),
-        }
+        let Some(m) = self.box_model(doc, node) else {
+            return (0.0, 0.0);
+        };
+        let (bar_w, bar_h) = self.scrollbars_of(doc, node);
+        (
+            (m.padding.width - bar_w).max(0.0).round(),
+            (m.padding.height - bar_h).max(0.0).round(),
+        )
+    }
+
+    /// The viewport without its scrollbar (`documentElement.clientWidth`).
+    pub fn viewport_client_size(&mut self, doc: &Document) -> (f32, f32) {
+        let bar = self.state(doc).root_scrollbar;
+        (self.viewport.0 - bar, self.viewport.1)
+    }
+
+    /// Space taken by an element's (vertical, horizontal) scrollbars.
+    fn scrollbars_of(&mut self, doc: &Document, node: NodeId) -> (f32, f32) {
+        let sb = self.styles.env().scrollbar_width;
+        let Some(b) = self.box_of(doc, node) else {
+            return (0.0, 0.0);
+        };
+        let o = self.state(doc).built.tree.boxes[b].style.overflow;
+        let bar = |on: bool| if on { sb } else { 0.0 };
+        (
+            bar(o.y == taffy::Overflow::Scroll),
+            bar(o.x == taffy::Overflow::Scroll),
+        )
     }
 
     /// `clientLeft` / `clientTop`: left and top border widths.
@@ -487,7 +531,7 @@ impl LayoutEngine {
 
     /// Scrollable size of the whole document.
     pub fn document_size(&mut self, doc: &Document) -> (f32, f32) {
-        let vp = self.viewport;
+        let vp = self.viewport_client_size(doc);
         let st = self.state(doc);
         let root = st.built.root;
         let (w, h) = st.extents.get(&root).copied().unwrap_or((0.0, 0.0));
@@ -553,8 +597,9 @@ impl LayoutEngine {
     /// `window.scrollTo(x, y)`, clamped to the document size.
     pub fn scroll_window_to(&mut self, doc: &Document, x: f32, y: f32) {
         let (dw, dh) = self.document_size(doc);
-        let x = x.clamp(0.0, (dw - self.viewport.0).max(0.0));
-        let y = y.clamp(0.0, (dh - self.viewport.1).max(0.0));
+        let (cw, ch) = self.viewport_client_size(doc);
+        let x = x.clamp(0.0, (dw - cw).max(0.0));
+        let y = y.clamp(0.0, (dh - ch).max(0.0));
         if (x, y) != self.viewport_scroll {
             self.viewport_scroll = (x, y);
             if let Some(st) = self.state.as_mut() {
@@ -807,6 +852,67 @@ fn union(rects: &[Rect]) -> Rect {
         r = Rect::new(x, y, right - x, bottom - y);
     }
     r
+}
+
+/// After a first layout and placement: reserves scrollbar space (taffy
+/// `Overflow::Scroll` gutters) in `overflow: auto` boxes whose content
+/// overflows, and sets the viewport's scrollbar when the document overflows
+/// vertically (`overflow` of the root, or of the body when the root's is
+/// `visible`). Returns whether anything changed (lay out again).
+fn reserve_scrollbars(st: &mut LayoutState, doc: &Document, sb: f32) -> bool {
+    let html = doc.document_element();
+    let body = doc.body();
+    let css_of = |n: Option<NodeId>| {
+        n.and_then(|n| st.built.node_box.get(&n))
+            .and_then(|b| st.built.tree.boxes[*b].css.clone())
+    };
+    let root_y = match css_of(html).map(|c| c.overflow_y) {
+        Some(Overflow::Visible) | None => css_of(body).map_or(Overflow::Visible, |c| c.overflow_y),
+        Some(o) => o,
+    };
+    let root = st.built.root;
+    let doc_h = st.extents.get(&root).map_or(0.0, |e| e.1);
+    let vh = st.viewport.1;
+    let root_bar = match root_y {
+        Overflow::Scroll => true,
+        Overflow::Visible | Overflow::Auto | Overflow::Overlay => doc_h > vh + 0.5,
+        Overflow::Hidden | Overflow::Clip => false,
+    };
+    // `overlay` is an alias of `auto` in Chrome.
+    let auto = |o: Overflow| matches!(o, Overflow::Auto | Overflow::Overlay);
+    let mut changed = false;
+    if root_bar {
+        st.root_scrollbar = sb;
+        changed = true;
+    }
+    for i in 0..st.built.tree.boxes.len() {
+        let b = &st.built.tree.boxes[i];
+        let Some(css) = b.css.as_ref() else { continue };
+        if b.dom.is_none()
+            || b.dom == html
+            || b.dom == body
+            || !matches!(b.kind, BoxKind::Element)
+            || !(auto(css.overflow_x) || auto(css.overflow_y))
+        {
+            continue;
+        }
+        let l = b.layout;
+        let (ew, eh) = st.extents.get(&i).copied().unwrap_or((0.0, 0.0));
+        let pw = l.size.width - l.border.left - l.border.right;
+        let ph = l.size.height - l.border.top - l.border.bottom;
+        let y = auto(css.overflow_y) && eh > ph + 0.5;
+        let x = auto(css.overflow_x) && ew > pw + 0.5;
+        let o = &mut st.built.tree.boxes[i].style.overflow;
+        if y {
+            o.y = taffy::Overflow::Scroll;
+            changed = true;
+        }
+        if x {
+            o.x = taffy::Overflow::Scroll;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Computes client and document rects, clips and scroll extents.

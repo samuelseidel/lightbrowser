@@ -316,8 +316,15 @@ fn persona_viewport_and_fonts() {
     let arial = (1479.0 + 455.0) * 16.0 / 2048.0;
     assert!((a.width - arial).abs() < 0.01);
     let b = rect(&mut e, &doc, "b");
-    // Courier New: 1229 units per character.
-    assert!((b.width - 2.0 * 1229.0 * 16.0 / 2048.0).abs() < 0.01);
+    // Chrome's Windows monospace font is Consolas (a derived table: Courier
+    // New's 1229 units per character, scaled).
+    let consolas = e.fonts().get("Consolas").unwrap().clone();
+    assert!(consolas.approximate);
+    let adv = consolas
+        .face(400.0, false)
+        .advance('H', consolas.units_per_em);
+    assert!(adv < 1229.0);
+    assert!((b.width - 2.0 * adv * 16.0 / consolas.units_per_em).abs() < 0.01);
 }
 
 #[test]

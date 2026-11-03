@@ -54,6 +54,31 @@ capped at 8, one wheel notch is 120 px).
   were captured and which come from the reference.
 - **No TCP/IP layer.** TTL and TCP options always come from the host OS;
   personas have no field for them.
+- **Rendering per OS (WP-C).** `MediaEnv` carries the persona's
+  `scrollbar_width` and `font_defaults`; nothing in lb-css, lb-layout or
+  lb-paint checks the OS for these any more.
+  - Scrollbars take space as in Chrome: `overflow: scroll` always,
+    `overflow: auto` and the viewport only when the content overflows
+    (the viewport also when the root or body says `scroll`; never for
+    `hidden`). Layout runs a second taffy pass with the gutters reserved
+    when a first pass finds overflow. Textareas always include the
+    scrollbar in their width (Blink).
+  - Font matching: a family is used when the persona has it, else through
+    `font_aliases` (Arial -> Liberation Sans on Linux, Helvetica -> Arial
+    elsewhere); generic keywords name the `font_defaults` families; `ui-*`
+    keywords are generic only on macOS; an unmatched list falls back to the
+    standard font. The `font:` system keywords (`caption`, `menu`, ...)
+    use the persona's system font; `-webkit-small-control` the UA's
+    control font.
+  - Emoji advance by the OS emoji font (Noto Color Emoji 136/109 em,
+    captured; Segoe UI Emoji 1.3 and Apple Color Emoji 1.25, not
+    captured) and grow `line-height: normal` to that font's metrics. Canvas
+    and screenshots draw them in colour with flat stand-in shapes (a yellow
+    face for smileys, a coloured disc otherwise): we bundle no emoji
+    images, so emoji pixels differ from Chrome's.
+  - A persona font with no table for its OS borrows another OS's table, so
+    an inconsistent persona (Segoe UI on Linux) is detectable, as it would
+    be on a real machine.
 
 ## Alternatives considered
 
@@ -68,10 +93,12 @@ capped at 8, one wheel notch is 120 px).
 
 ## Consequences
 
-- WP-C (layout, fonts, scrollbars), WP-D (web APIs, input) and WP-E
-  (Accept-CH) read these accessors; until they land, the new reference
-  personas still fire the bench rules listed in `docs/ROADMAP.md` ("M7
-  status: WP-B").
+- WP-C (layout, fonts, scrollbars) reads these accessors; WP-D (web APIs,
+  input) and WP-E (Accept-CH) still have to. Until they land, the
+  reference personas still fire the bench rules listed in
+  `docs/ROADMAP.md` ("M7 status: WP-C").
+- Pages taller than the viewport (and overflowing `overflow: auto` boxes)
+  cost a second taffy pass when scrollbars take space (Windows, Linux).
 - Windows and macOS defaults are medium confidence until internal captures
   exist. Changing one is a data change plus a test update.
 - `fonts.available` must have a metric table or a `derived.json` entry per

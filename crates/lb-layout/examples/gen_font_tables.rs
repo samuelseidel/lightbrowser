@@ -136,6 +136,28 @@ const CARLITO: &[Face] = &[
         italic: true,
     },
 ];
+const CALADEA: &[Face] = &[
+    Face {
+        file: "truetype/crosextra/Caladea-Regular.ttf",
+        weight: 400,
+        italic: false,
+    },
+    Face {
+        file: "truetype/crosextra/Caladea-Bold.ttf",
+        weight: 700,
+        italic: false,
+    },
+    Face {
+        file: "truetype/crosextra/Caladea-Italic.ttf",
+        weight: 400,
+        italic: true,
+    },
+    Face {
+        file: "truetype/crosextra/Caladea-BoldItalic.ttf",
+        weight: 700,
+        italic: true,
+    },
+];
 const DEJAVU_SANS: &[Face] = &[
     Face {
         file: "truetype/dejavu/DejaVuSans.ttf",
@@ -306,6 +328,9 @@ fn families() -> Vec<Family> {
         ("DejaVu Sans", DEJAVU_SANS),
         ("DejaVu Serif", DEJAVU_SERIF),
         ("DejaVu Sans Mono", DEJAVU_MONO),
+        // M7: fontconfig's Calibri and Cambria aliases (SIL OFL files).
+        ("Carlito", CARLITO),
+        ("Caladea", CALADEA),
     ] {
         v.push(exact("linux", family, faces, "local font file"));
     }

@@ -33,5 +33,5 @@ pub use display::{DisplayItem, DisplayKind, DisplayList, DisplayStep, TextLine};
 pub use engine::{BoxModel, LayoutBase, LayoutEngine, LayoutStats, Rect, ScrollAlign};
 pub use fonts::{
     FontAvailability, FontDb, FontFace, FontFamily, LineMetrics, TextFont, bundled_table_count,
-    resolve_font,
+    emoji_advance_em, is_emoji, resolve_font,
 };

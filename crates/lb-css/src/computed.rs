@@ -9,7 +9,7 @@ use cssparser::{Parser, Token};
 use crate::media::{MediaEnv, OsKind};
 use crate::props::{
     CustomDeclaration, Decl, FamilyName, FontSizeSpec, FontWeightSpec, LonghandId, Pending, Sv,
-    parse_property,
+    SystemFont, parse_property,
 };
 use crate::values::{
     Align, BorderStyle, BoxSizing, Calc, Clear, Color, ColorValue, Direction, Display,
@@ -29,7 +29,7 @@ pub struct Transform {
     pub matrix: Option<Matrix>,
 }
 
-/// Per-OS defaults the UA uses (Chrome's default font settings).
+/// Per-persona defaults the UA uses (Chrome's default font settings).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Defaults {
     /// Family of the initial `font-family` (Chrome's "standard" font).
@@ -38,18 +38,46 @@ pub struct Defaults {
     pub font_size: f32,
     /// Default monospace size in px.
     pub monospace_size: f32,
+    /// Family and size in px of the system font keywords (`font: caption`,
+    /// `icon`, `menu`, `message-box`, `small-caption`, `status-bar`).
+    pub system_family: String,
+    pub system_size: f32,
+    /// Family of the form-control keywords (`-webkit-small-control`, ...),
+    /// as the UA stylesheet uses for controls.
+    pub control_family: String,
 }
 
 impl Defaults {
+    /// Defaults of an OS without a persona.
     pub fn for_os(os: OsKind) -> Defaults {
+        Self::from_fonts(os, &os.font_defaults())
+    }
+
+    /// Defaults of a media environment (the persona's fonts).
+    pub fn for_env(env: &MediaEnv) -> Defaults {
+        Self::from_fonts(env.os, &env.fonts)
+    }
+
+    fn from_fonts(os: OsKind, f: &lb_persona::FontDefaults) -> Defaults {
         Defaults {
-            standard_family: match os {
-                OsKind::MacOs => "Times",
-                _ => "Times New Roman",
-            }
-            .into(),
+            standard_family: f.standard.clone(),
             font_size: 16.0,
             monospace_size: 13.0,
+            system_family: f.system_font.clone(),
+            system_size: f.system_font_px as f32,
+            control_family: crate::ua::control_family(os).into(),
+        }
+    }
+
+    /// Family and size of a system font keyword.
+    pub fn system_font(&self, k: SystemFont) -> (&str, f32) {
+        match k {
+            SystemFont::WebkitSmallControl | SystemFont::WebkitControl => {
+                (&self.control_family, self.font_size * 5.0 / 6.0)
+            }
+            // `x-small`.
+            SystemFont::WebkitMiniControl => (&self.control_family, self.font_size * 10.0 / 16.0),
+            _ => (&self.system_family, self.system_size),
         }
     }
 }
@@ -647,6 +675,12 @@ fn apply(
         (L::JustifyItems, Sv::Align(a)) => s.justify_items = *a,
         (L::JustifySelf, Sv::Align(a)) => s.justify_self = *a,
         (L::FontFamily, Sv::FontFamily(f)) => s.font_family = f.clone(),
+        (L::FontFamily, Sv::SystemFont(k)) => {
+            s.font_family = Rc::from(vec![FamilyName {
+                name: ctx.defaults.system_font(*k).0.to_owned(),
+                generic: false,
+            }]);
+        }
         (L::FontSize, Sv::FontSize(spec)) => {
             let parent_size = parent.map_or(ctx.defaults.font_size, |p| p.font_size);
             let parent_kw = parent.map_or(Some(1.0), |p| p.font_size_keyword);
@@ -654,6 +688,10 @@ fn apply(
                 FontSizeSpec::Keyword(r) => {
                     s.font_size = keyword_base(&s.font_family, ctx.defaults) * r;
                     s.font_size_keyword = Some(*r);
+                }
+                FontSizeSpec::System(k) => {
+                    s.font_size = ctx.defaults.system_font(*k).1;
+                    s.font_size_keyword = None;
                 }
                 FontSizeSpec::Larger => {
                     s.font_size = parent_size * 1.2;

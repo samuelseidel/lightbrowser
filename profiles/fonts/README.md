@@ -32,7 +32,9 @@ Covered characters: U+0020-007E, U+00A0-00FF and common punctuation
 
 - Exact advances via metric-compatible fonts: Arial (Liberation Sans),
   Times New Roman (Liberation Serif), Courier New (Liberation Mono),
-  Calibri (Carlito); Linux: Liberation and DejaVu files themselves.
+  Calibri (Carlito); Linux: the Liberation, DejaVu, Carlito and Caladea
+  files themselves (Carlito and Caladea added in M7 WP-C, SIL OFL, for
+  fontconfig's Calibri and Cambria aliases).
 - Approximate (`approximate: true`): Segoe UI, Verdana, Tahoma, Georgia
   (similar designs with the real fonts' documented vertical metrics),
   Helvetica, Helvetica Neue, Times, Courier and macOS `system-ui` (Inter).
@@ -57,7 +59,18 @@ Caladea, Noto Color Emoji). The FreeFont, Noto Color Emoji, Carlito,
 Caladea and Inter-based Adwaita Sans scales follow the widths the local
 Chrome for Testing 153 measured (`tests/fixtures/os/`); the rest are
 estimates from published metrics. Regenerate them from the OFL font files
-when those are available.
+when those are available. Noto Color Emoji's vertical metrics (0.9277 /
+0.2441 em) are the local font file's (`hhea` 1900/500 at 2048 upem); Linux
+Carlito and Caladea now have real tables, which win over their derived
+entries.
+
+Matching (M7 WP-C, ADR 0015): a family the persona does not have resolves
+through `PersonaProfile::font_aliases` (fontconfig's metric aliases on
+Linux, Blink's alternates everywhere); generic keywords name
+`font_defaults`. `crates/lb-layout/tests/os.rs` checks the Ubuntu and
+Fedora personas against the captured Linux widths and heights (exact). A
+persona font with no table for its OS (a Windows font on a Linux persona)
+borrows another OS's table, so such a persona is detectable.
 
 ## Glyph outlines (`outlines/`)
 

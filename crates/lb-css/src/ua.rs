@@ -76,13 +76,19 @@ ruby { display: ruby }
 rt { display: ruby-text }
 "#;
 
+/// Family of form controls (`-webkit-small-control`): Arial on Windows
+/// and Linux (captured on Linux), `system-ui` on macOS.
+pub fn control_family(os: OsKind) -> &'static str {
+    match os {
+        OsKind::MacOs => "system-ui",
+        _ => "Arial",
+    }
+}
+
 /// The UA stylesheet for an OS. Form controls use Arial 13.333px on
 /// Windows and Linux and `system-ui` on macOS, as Chrome does.
 pub fn ua_stylesheet(os: OsKind) -> String {
-    let control_font = match os {
-        OsKind::MacOs => "system-ui",
-        _ => "Arial",
-    };
+    let control_font = control_family(os);
     format!(
         "{COMMON}\ninput, select, button {{ font: 400 13.333333px {control_font} }}\n\
          textarea {{ font-size: 13.333333px }}\n"

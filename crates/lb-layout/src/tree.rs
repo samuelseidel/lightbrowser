@@ -104,6 +104,13 @@ impl BoxTree {
         &self.boxes[i].hoisted
     }
 
+    /// Forgets every cached taffy result (styles changed in place).
+    pub(crate) fn clear_caches(&mut self) {
+        for b in &mut self.boxes {
+            b.cache.clear();
+        }
+    }
+
     /// Runs taffy from the viewport box.
     pub(crate) fn compute(&mut self, root: usize, width: f32, height: f32) {
         taffy::compute_root_layout(

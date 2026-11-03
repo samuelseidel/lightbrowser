@@ -573,7 +573,7 @@ impl Canvas2d {
     }
     /// `font` setter; invalid values are ignored.
     pub fn set_font(&mut self, v: &str) {
-        if let Some(f) = CanvasFont::parse(v) {
+        if let Some(f) = CanvasFont::parse_with(v, Some(self.env.fonts.defaults())) {
             self.state.font_css = f.to_css();
             self.state.font = f;
             self.state.resolved = None;
@@ -945,6 +945,12 @@ impl Canvas2d {
         if let Some(p) = path.to_skia() {
             let style = self.state.fill.clone();
             self.render_style(Shape::Fill(p, FillRule::Winding), &style);
+        }
+        // Emoji keep their own colours (Chrome's colour emoji font).
+        for (path, color) in self.env.fonts.emoji_layers(&st, text, x, y, max_width, &ts) {
+            if let Some(p) = path.to_skia() {
+                self.render_style(Shape::Fill(p, FillRule::Winding), &Style::Color(color));
+            }
         }
     }
 
@@ -1475,6 +1481,52 @@ mod tests {
                 .chunks_exact(4)
                 .all(|p| p == [10, 20, 30, 255])
         );
+    }
+
+    /// The detect-bench `emoji_render` probe: an emoji drawn with a black
+    /// fill style comes out in colour, sized by the persona's emoji font.
+    #[test]
+    fn emoji_draw_in_colour_for_every_reference_persona() {
+        let dir = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../profiles/reference/chrome"
+        );
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let p = PersonaProfile::from_path(&path).unwrap();
+            let mut c = Canvas2d::new(Rc::new(PaintEnv::new(Some(&p))), 80, 70, true);
+            c.set_fill_style(Style::Color(Color::BLACK));
+            c.set_text_baseline(TextBaseline::Top);
+            c.set_font("56px sans-serif");
+            c.fill_text("\u{1F600}", 4.0, 4.0, None);
+            let d = c.get_image_data(0, 0, 80, 70).data;
+            let (mut inked, mut colored) = (0, 0);
+            for px in d.chunks_exact(4) {
+                if px[3] == 0 {
+                    continue;
+                }
+                inked += 1;
+                let (mx, mn) = (px[..3].iter().max().unwrap(), px[..3].iter().min().unwrap());
+                if mx - mn > 40 {
+                    colored += 1;
+                }
+            }
+            assert!(
+                colored > 1000 && inked >= colored,
+                "{}: {inked} {colored}",
+                path.display()
+            );
+            let m = c.measure_text("\u{1F600}");
+            let want = 56.0 * lb_layout::emoji_advance_em(&p.font_defaults().emoji);
+            assert!(
+                (m.width - f64::from(want)).abs() < 1e-3,
+                "{}",
+                path.display()
+            );
+            assert!(m.actual_bounding_box_right > 0.0);
+            // Text around it still uses the fill style.
+            c.fill_text("A\u{1F600}", 4.0, 4.0, None);
+        }
     }
 
     #[test]

@@ -104,9 +104,10 @@ function glScene(gl) {
   const cx = document.createElement('canvas').getContext('2d');
   const m = (f) => { cx.font = '72px ' + f; return cx.measureText('mmmmmmmmmmlli1WQ@#').width; };
   R.fonts = {
-    mono: w('monospace'), consolas: w('"Consolas", monospace'), ubuntu: w('"Ubuntu", monospace'),
-    menlo: w('"Menlo", monospace'), segoe: w('"Segoe UI", serif'), serif: w('serif'),
-    cMono: m('monospace'), cConsolas: m('Consolas, monospace'), cUbuntu: m('Ubuntu, monospace'),
+    mono: w('monospace'), consolas: w('"Consolas", serif'), ubuntu: w('"Ubuntu", serif'),
+    menlo: w('"Menlo", serif'), segoe: w('"Segoe UI", serif'), serif: w('serif'),
+    cSerif: m('serif'), cMono: m('monospace'), cConsolas: m('Consolas, serif'),
+    cUbuntu: m('Ubuntu, serif'),
     size: document.fonts.size, status: document.fonts.status,
     check: document.fonts.check('12px Arial'), check2: document.fonts.check('12px NoSuchFontX'),
     tag: Object.prototype.toString.call(document.fonts), qlf: typeof window.queryLocalFonts,
@@ -271,20 +272,23 @@ async fn surfaces_follow_the_persona() {
 
     let f = &r["fonts"];
     assert_ne!(
-        f["consolas"], f["mono"],
+        f["consolas"], f["serif"],
         "installed font measures differently: {f}"
     );
+    // Chrome's Windows monospace font is Consolas.
+    assert_eq!(f["consolas"], f["mono"], "{f}");
     assert_eq!(
-        f["ubuntu"], f["mono"],
+        f["ubuntu"], f["serif"],
         "missing font measures as the fallback"
     );
     assert_eq!(
-        f["menlo"], f["mono"],
+        f["menlo"], f["serif"],
         "macOS font is not on a Windows persona"
     );
     assert_ne!(f["segoe"], f["serif"]);
-    assert_ne!(f["cConsolas"], f["cMono"], "canvas agrees with layout");
-    assert_eq!(f["cUbuntu"], f["cMono"]);
+    assert_ne!(f["cConsolas"], f["cSerif"], "canvas agrees with layout");
+    assert_eq!(f["cConsolas"], f["cMono"]);
+    assert_eq!(f["cUbuntu"], f["cSerif"]);
     assert_eq!(f["size"], 0);
     assert_eq!(f["status"], "loaded");
     assert_eq!(f["check"], true);

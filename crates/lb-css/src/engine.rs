@@ -95,7 +95,7 @@ impl StyleEngine {
     /// [`StyleEngine::new`] with a UA sheet parsed earlier by
     /// [`StyleEngine::ua_sheet`] for `env.os`.
     pub fn with_ua(env: MediaEnv, ua: Rc<Stylesheet>) -> StyleEngine {
-        let defaults = Defaults::for_os(env.os);
+        let defaults = Defaults::for_env(&env);
         let initial = ComputedStyle::initial(&defaults);
         StyleEngine {
             env,
@@ -130,9 +130,11 @@ impl StyleEngine {
     /// Replaces the media environment (e.g. CDP device metrics).
     pub fn set_env(&mut self, env: MediaEnv) {
         if env != self.env {
-            if env.os != self.env.os {
-                self.defaults = Defaults::for_os(env.os);
+            if env.os != self.env.os || env.fonts != self.env.fonts {
+                self.defaults = Defaults::for_env(&env);
                 self.initial = ComputedStyle::initial(&self.defaults);
+            }
+            if env.os != self.env.os {
                 self.ua = Rc::new(Stylesheet::parse(&ua_stylesheet(env.os), Origin::UserAgent));
             }
             self.env = env;

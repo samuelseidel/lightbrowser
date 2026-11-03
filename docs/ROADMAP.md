@@ -11,7 +11,7 @@ Each milestone ends with something we can run and measure.
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
-| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules) and WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015) done; WP-C..E open. See "M7 status" |
+| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015) and WP-C (scrollbars, fonts, aliases, emoji per OS) done; WP-D and WP-E open. See "M7 status" |
 | **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.63 MB, the < 40 MB budget is met (ADR 0013); `bench/` runner done; Lightpanda compared (user-approved nightly, loopback only): 4 of 6 checks pass, `fetch` CPU and CDP peak RSS still lose; service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
@@ -21,7 +21,7 @@ Each milestone ends with something we can run and measure.
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
-| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones | WP-C..E; with the OS rules T-010 scores fp 83.9-88.0 for every reference persona, see "M7 status" |
+| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona | WP-D and WP-E; with the OS rules T-010 scores fp 64 (Linux) and 78.6 (Windows, macOS), see "M7 status: WP-C" |
 | M6 Performance | Snapshot, memory, binary size (39.63 MB, < 40 MB met), `bench/` runner, screenshots, Lightpanda comparison (wall time wins in both modes; 4 of 6 checks pass) done | `fetch` CPU and CDP peak RSS vs Lightpanda, service workers |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
@@ -1424,6 +1424,94 @@ Dark color schemes: `run.js` opens its page with Playwright's default
 dark persona (ADR 0009), so the reference personas are light; about a
 quarter of generated personas are dark and need `colorScheme: null` (or
 `dark`) in the client.
+
+## M7 status: WP-C, rendering per OS (2026-11-03)
+
+**What changed (ADR 0015).** `lb_css::MediaEnv` carries the persona's
+`scrollbar_width` and `font_defaults`; lb-css, lb-layout and lb-paint no
+longer pick fonts or scrollbars by OS.
+
+- **Scrollbars.** taffy reserves the persona's width for `overflow:
+  scroll`; `overflow: auto` boxes and the viewport get it when their
+  content overflows (a second taffy pass with the gutters reserved), never
+  with `overflow: hidden` on the root or body. `clientWidth/Height`, the
+  root's `clientWidth`, `scrollTo` clamping and `scrollWidth` account for
+  them. Textareas include the scrollbar in their width (Blink). The
+  default `MediaEnv` (no persona, tests and tools) has none.
+- **Fonts.** `FontAvailability::for_persona` holds the installed list,
+  `font_defaults` and `font_aliases`. A family resolves if installed, else
+  through its alias (Linux: Arial, Helvetica, Arimo -> Liberation Sans and
+  so on; elsewhere Blink's alternates); generic keywords name the
+  `font_defaults` families (Windows monospace is now Consolas, Linux
+  DejaVu Sans Mono or Noto Sans Mono, Linux system-ui the GTK font);
+  `ui-*` keywords are generic only on macOS; the fallback is the standard
+  font. A persona font with no table on its OS borrows one from another
+  OS, so foreign fonts are detectable.
+- **`font:` system keywords** (`caption`, `icon`, `menu`, `message-box`,
+  `small-caption`, `status-bar`) use the persona's system font (Linux Arial
+  16px, captured; Windows Segoe UI 12px and macOS system-ui 13px, not
+  captured); `-webkit-*-control` use the UA control font. In CSS and in
+  canvas `font`.
+- **Emoji.** Advance by the OS emoji font (Noto Color Emoji 136/109 em,
+  captured; Segoe UI Emoji 1.3 and Apple Color Emoji 1.25 em, not
+  captured); `line-height: normal` grows to the emoji font's metrics.
+  Canvas `fillText` and screenshots draw emoji in colour with flat
+  stand-in shapes (yellow face for smileys, coloured disc otherwise),
+  whatever the fill style, as Chrome draws colour emoji. The pixels are not
+  Chrome's (no emoji images are bundled).
+- **Tables.** Real Linux tables for Carlito and Caladea from the local SIL
+  OFL files (`gen_font_tables`; regenerating every other table gives
+  identical files). Noto Color Emoji's vertical metrics come from the local
+  font file. No downloads.
+
+**Checks.** New `crates/lb-layout/tests/os.rs` (7 tests): scrollbars for
+every reference persona (`overflow: scroll`/`auto`/`hidden`, root of a tall
+and a short page, `overflow: hidden`/`scroll` roots, textarea, body width);
+Ubuntu and Fedora widths and heights at 72px for 12 aliased families, 3
+DejaVu families and 12 generic keywords equal the Linux capture exactly;
+the Linux scrollbar probe equals the capture (15/15, root 15/0, textarea
+182x36, client 180); generic keywords follow `font_defaults` per persona;
+emoji advance and line height per OS (Linux 125x117 as captured); system
+font keywords; foreign fonts detectable. Also new: lb-css
+`persona_font_defaults_and_system_fonts`, lb-paint
+`emoji_draw_in_colour_for_every_reference_persona`, system keywords in
+canvas `font`. Updated: two tests that assumed Courier New as Windows
+monospace (lb-layout `persona_viewport_and_fonts`, lb-page
+`fingerprint_surfaces` now measures against `serif`). Results: `lb-css`
+13 + 6, `lb-layout` 7 + 10 + 7, `lb-paint` 26, `lb-persona` 13 + 41,
+`lb-webapi` 23 + 10 + 4, `lb-page` (lib 9, `canvas` 3, `cdp_host` 2,
+`connections` 1, `fingerprint_surfaces` 2, `human` 2, `navigator` 1, `pages`
+19, `tables` 3), `lb-cdp` 13 + 10, `lightbrowser` 6 + 1, all pass; WPT
+subset 2552/2788 (unchanged); Playwright 20/20; `fingerprint-report` 0
+mismatch, 0 unimplemented for all 8 references (112-115 ok). Clippy `-D
+warnings` (workspace and firefox) and `fmt` clean; firefox tests 15 pass, 2
+ignored. Release: stripped binary 39,722,872 bytes (< 40,000,000; +32,768
+since WP-B: two tables, the emoji and keyword code); `realm_bench`: first
+realm 3.09 ms, next 2.46 ms with the snapshot.
+
+**Bench** (debug build, fresh `serve` per run, T-010, loopback):
+
+| Persona | fp (Playwright input) | beh (`--input human`) | OS rules still firing | WP |
+|---|---|---|---|---|
+| Windows 10, Windows 11 (both) | 78.6 | 0 (Windows 10, Windows 11 RTX 4060) | `ch_high_entropy`, `api_throws`, `os_api_surface`, `os_bluetooth` | D, E |
+| macOS 14, 15, 26 | 78.6 | 0 (macOS 15) | as Windows | D, E |
+| Ubuntu 24.04, Fedora 42 | 64 | 0 (Ubuntu) | `ch_high_entropy`, `api_throws` | D, E |
+
+`scrollbar_os`, `emoji_render` and `generic_fonts_os` no longer fire for
+any reference persona. The Windows 11 RTX 4060 reference now scores beh 0
+with human input (35 after WP-B): the page geometry changed with the
+scrollbar, not the seed or lb-behavior, so the `beh_mouse_linear` issue
+noted in WP-B may still show on other layouts. Adversarial personas: 
+`mac_scrollbar17` now fires `scrollbar_os` and `linux_segoe_fonts` fires
+`fonts_os_markers`; `linux_mesa_kernel_mismatch` and `wayland_avail_top`
+still have no bench rule that can see them.
+
+**Not done in WP-C.** Pixel-accurate emoji (needs the OS emoji images);
+real tables for Ubuntu Sans, Cantarell, Adwaita, Noto text fonts and URW
+fonts (no local files; derived entries stay); content that overflows only
+because the viewport scrollbar narrowed it gets no second scrollbar pass;
+horizontal viewport scrollbars are not modelled; screenshots do not draw
+scrollbars.
 
 ## Workspace check (2026-11-03)
 

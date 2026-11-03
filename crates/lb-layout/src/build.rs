@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use lb_css::{
-    Align, BoxSizing, ComputedStyle, Display, Float, Lp, LpAuto, OsKind, Overflow, Position,
+    Align, BoxSizing, ComputedStyle, Display, Float, LineHeight, Lp, LpAuto, Overflow, Position,
     StyleEngine, TextAlign, TrackListEntry, TrackSize,
 };
 use lb_dom::{Document, NodeId, NodeType, ns};
@@ -22,7 +22,7 @@ use taffy::style::{
 };
 use taffy::{Point, Rect, Size, Style};
 
-use crate::fonts::{FontAvailability, FontDb, TextFont, resolve_font};
+use crate::fonts::{FontAvailability, FontDb, TextFont, is_emoji, resolve_font};
 use crate::text::{TextRun, collapse};
 use crate::tree::{BoxKind, BoxTree, LBox};
 
@@ -39,7 +39,9 @@ pub(crate) struct Builder<'a> {
     styles: &'a mut StyleEngine,
     fonts: &'a FontDb,
     avail: &'a FontAvailability,
-    os: OsKind,
+    /// Classic scrollbar width in px (0 for overlay scrollbars), from the
+    /// persona (`MediaEnv::scrollbar_width`).
+    scrollbar: f32,
     tree: BoxTree,
     node_box: HashMap<NodeId, usize>,
     /// The inline content so far ends in a collapsible space (or a run is
@@ -71,13 +73,13 @@ impl<'a> Builder<'a> {
         fonts: &'a FontDb,
         avail: &'a FontAvailability,
     ) -> Self {
-        let os = styles.env().os;
+        let scrollbar = styles.env().scrollbar_width;
         Builder {
             doc,
             styles,
             fonts,
             avail,
-            os,
+            scrollbar,
             tree: BoxTree::default(),
             node_box: HashMap::new(),
             ends_in_space: true,
@@ -143,6 +145,7 @@ impl<'a> Builder<'a> {
         if let Some(kind) = self.replaced(el, &local, &css) {
             // Replaced elements are atomic: sizes apply even when inline.
             let mut style = taffy_style(&css, &mut self.tree, in_run, true);
+            style.scrollbar_width = self.scrollbar;
             style.item_is_replaced = local != "input" || kind.1;
             style.item_is_compressible_replaced = matches!(
                 local.as_str(),
@@ -162,6 +165,7 @@ impl<'a> Builder<'a> {
             return vec![Item { idx, inline }];
         }
         let mut style = taffy_style(&css, &mut self.tree, in_run, false);
+        style.scrollbar_width = self.scrollbar;
         if local == "br" {
             // A forced break: a zero-height item that takes a whole line.
             style.flex_basis = Dimension::percent(1.0);
@@ -281,7 +285,14 @@ impl<'a> Builder<'a> {
             self.ends_in_space = false;
         }
         let font = resolve_font(self.fonts, self.avail, css);
-        let lh = font.line_height(css);
+        let mut lh = font.line_height(css);
+        // `line-height: normal` grows to fit the emoji fallback font.
+        if css.line_height == LineHeight::Normal
+            && text.chars().any(is_emoji)
+            && let Some(e) = self.avail.emoji_family(self.fonts)
+        {
+            lh = lh.max(e.line_metrics(css.font_size).normal_line_height());
+        }
         let run = TextRun::new(text, &font, lh, ws);
         let style = Style {
             display: taffy::Display::Block,
@@ -312,7 +323,8 @@ impl<'a> Builder<'a> {
             height: Some(h),
             ratio: None,
         };
-        let scrollbar = if self.os == OsKind::MacOs { 0.0 } else { 17.0 };
+        // Blink sizes a textarea for its scrollbar even when none shows.
+        let scrollbar = self.scrollbar;
         Some(match local {
             "img" if self.intrinsic.and_then(|m| m.get(&el)).is_some() => {
                 let (w, h) = self

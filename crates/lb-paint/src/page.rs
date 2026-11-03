@@ -425,6 +425,14 @@ fn text(
     if let Some(p) = path.to_skia() {
         px.fill_path(&p, paint, FillRule::Winding, Transform::identity(), mask);
     }
+    let (x, baseline) = (f64::from(x), f64::from(baseline));
+    for (path, c) in fonts.emoji_layers(&st, s, x, baseline, None, &ts) {
+        if let Some(p) = path.to_skia() {
+            let mut paint = paint.clone();
+            paint.set_color(tiny_skia::Color::from_rgba8(c.r, c.g, c.b, 255));
+            px.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), mask);
+        }
+    }
 }
 
 /// Side colors for 3D border styles: (top, right, bottom, left).

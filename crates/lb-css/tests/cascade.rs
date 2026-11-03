@@ -220,3 +220,56 @@ fn vars_calc_and_box_values() {
     let s = e.computed_style(&doc, by_id(&doc, "a")).unwrap();
     assert_eq!(computed_value(&s, "--pad").as_deref(), Some("4px"));
 }
+
+/// M7: the initial family, the system font keywords and the scrollbar
+/// width come from the persona's OS accessors.
+#[test]
+fn persona_font_defaults_and_system_fonts() {
+    let doc = Document::parse_html(
+        r#"<body><p id=c style="font: caption">x</p><p id=sb style="font: italic status-bar">x</p>
+           <p id=i style="font: icon; font-size: 20px">x</p>
+           <p id=m style="font: -webkit-mini-control">x</p></body>"#,
+    );
+    let cases = [
+        (
+            "chrome153_win10_rtx3060_1080p",
+            "\"Segoe UI\"",
+            "12px",
+            "\"Times New Roman\"",
+            17.0,
+        ),
+        (
+            "chrome153_macos15_apple_m2_retina",
+            "system-ui",
+            "13px",
+            "Times",
+            0.0,
+        ),
+        (
+            "chrome153_ubuntu24_intel_uhd630_x11_1080p",
+            "Arial",
+            "16px",
+            "\"Times New Roman\"",
+            15.0,
+        ),
+    ];
+    for (name, family, size, standard, sb) in cases {
+        let p = persona(name);
+        let env = MediaEnv::from_persona(&p);
+        assert_eq!(env.scrollbar_width, sb, "{name}");
+        let mut e = StyleEngine::new(env);
+        assert_eq!(val(&mut e, &doc, "c", "font-family"), family, "{name}");
+        assert_eq!(val(&mut e, &doc, "c", "font-size"), size, "{name}");
+        assert_eq!(val(&mut e, &doc, "c", "font-weight"), "400", "{name}");
+        // A keyword alone: `italic status-bar` is invalid.
+        assert_eq!(val(&mut e, &doc, "sb", "font-family"), standard, "{name}");
+        // Longhands after the keyword still apply.
+        assert_eq!(val(&mut e, &doc, "i", "font-size"), "20px", "{name}");
+        assert_eq!(val(&mut e, &doc, "m", "font-size"), "10px", "{name}");
+        assert_eq!(
+            e.defaults().standard_family,
+            standard.trim_matches('"'),
+            "{name}"
+        );
+    }
+}

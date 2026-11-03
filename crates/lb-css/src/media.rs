@@ -1,8 +1,10 @@
 //! Media queries: parsing, evaluation against a [`MediaEnv`] built from the
 //! persona, and serialization for `MediaQueryList.media`.
 
+use std::sync::Arc;
+
 use cssparser::{Parser, Token};
-use lb_persona::PersonaProfile;
+use lb_persona::{FontDefaults, PersonaProfile};
 
 use crate::values::{PResult, bad, fmt_num};
 
@@ -48,6 +50,21 @@ impl OsKind {
             OsKind::Other => "other",
         }
     }
+
+    /// The same OS as `lb-persona` names it.
+    pub fn to_persona(self) -> lb_persona::OsKind {
+        match self {
+            OsKind::Windows => lb_persona::OsKind::Windows,
+            OsKind::MacOs => lb_persona::OsKind::MacOs,
+            OsKind::Linux => lb_persona::OsKind::Linux,
+            OsKind::Other => lb_persona::OsKind::Other,
+        }
+    }
+
+    /// Chrome's default fonts for this OS (no distro).
+    pub fn font_defaults(self) -> FontDefaults {
+        lb_persona::os_font_defaults(self.to_persona(), None)
+    }
 }
 
 /// Everything media queries and viewport units read. Built from the
@@ -79,10 +96,18 @@ pub struct MediaEnv {
     pub color_gamut: u8,
     /// `dynamic-range: high`.
     pub high_dynamic_range: bool,
+    /// Width of classic (space-taking) scrollbars in CSS px; 0 for overlay
+    /// scrollbars (persona `scrollbar_width`, ADR 0015).
+    pub scrollbar_width: f32,
+    /// Default fonts: initial family, generic families and the system
+    /// font keywords (persona `font_defaults`).
+    pub fonts: Arc<FontDefaults>,
 }
 
 impl Default for MediaEnv {
-    /// A 1920x1080 Windows desktop with a 1920x947 viewport.
+    /// A 1920x1080 Windows desktop with a 1920x947 viewport, Windows
+    /// fonts and no scrollbars (tests and tools; a persona always sets its
+    /// scrollbar width).
     fn default() -> Self {
         MediaEnv {
             viewport_width: 1920.0,
@@ -101,13 +126,16 @@ impl Default for MediaEnv {
             forced_colors: false,
             color_gamut: 0,
             high_dynamic_range: false,
+            scrollbar_width: 0.0,
+            fonts: Arc::new(OsKind::Windows.font_defaults()),
         }
     }
 }
 
 impl MediaEnv {
     /// Media environment of a persona: viewport from `screen.inner_*`,
-    /// device size and DPR from `screen`, pointer from `client_hints.mobile`.
+    /// device size and DPR from `screen`, pointer from `client_hints.mobile`,
+    /// scrollbar width and default fonts from the persona's OS accessors.
     pub fn from_persona(p: &PersonaProfile) -> MediaEnv {
         let mobile = p.client_hints.as_ref().is_some_and(|h| h.mobile);
         let prefs = p.preferences();
@@ -141,6 +169,8 @@ impl MediaEnv {
                 _ => 0,
             },
             high_dynamic_range: prefs.high_dynamic_range,
+            scrollbar_width: p.scrollbar_width() as f32,
+            fonts: Arc::new(p.font_defaults()),
         }
     }
 }

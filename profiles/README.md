@@ -37,9 +37,9 @@ Persona profiles, TLS/H2 profiles, request-header profiles and font tables. Mile
 | `chrome153_linux_mesa_kernel_mismatch` | R19 | none (the bench cannot see the kernel) |
 | `chrome153_mac_arm_intel_gpu` | R18 | `uach_arch_gpu` |
 | `chrome153_win11_fonts_pv10` | R17 | `fonts_os_markers` |
-| `chrome153_linux_segoe_fonts` | R21 | none: Linux has no metric tables for Windows fonts, so they stay undetectable |
+| `chrome153_linux_segoe_fonts` | R21 | `fonts_os_markers` (since WP-C a persona font with no table for its OS borrows another OS's table) |
 | `chrome153_wayland_avail_top` | R20 | none (no Wayland screen rule in the bench) |
-| `chrome153_mac_scrollbar17` | R24 | none until WP-C draws persona scrollbars |
+| `chrome153_mac_scrollbar17` | R24 | `scrollbar_os` (17 px scrollbars on macOS, since WP-C) |
 | `chrome153_mac_microsoft_voices` | R22 | `voices_os` |
 | `chrome153_intel_mac_macos27` | R26 | `uach_arch_gpu` |
 | `chrome153_devicememory12` | R25 | `hardware` |

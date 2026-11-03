@@ -33,6 +33,8 @@ const TABLES: &[(&str, &str)] = &[
     ("linux", "linux/dejavu_sans.json"),
     ("linux", "linux/dejavu_serif.json"),
     ("linux", "linux/dejavu_sans_mono.json"),
+    ("linux", "linux/carlito.json"),
+    ("linux", "linux/caladea.json"),
 ];
 
 /// Approximate tables for persona fonts without their own table.

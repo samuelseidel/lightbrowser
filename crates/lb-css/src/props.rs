@@ -178,6 +178,8 @@ const GENERIC_FAMILIES: &[&str] = &[
 pub enum FontSizeSpec {
     /// Absolute keyword as a ratio of `medium` (e.g. `large` = 1.125).
     Keyword(f32),
+    /// Size of a system font keyword (`font: caption`), per persona.
+    System(SystemFont),
     Larger,
     Smaller,
     /// Length or percentage of the parent font size.
@@ -227,6 +229,54 @@ pub enum Sv {
     Transform(Rc<str>),
     Cursor(Rc<str>),
     Ratio(f32, f32),
+    /// `font-family` of a system font keyword (`font: menu`), per persona.
+    SystemFont(SystemFont),
+}
+
+/// The system font keywords of the `font` shorthand. Family and size come
+/// from the persona's font defaults (`lb_css::Defaults::system_font`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SystemFont {
+    Caption,
+    Icon,
+    Menu,
+    MessageBox,
+    SmallCaption,
+    StatusBar,
+    WebkitControl,
+    WebkitSmallControl,
+    WebkitMiniControl,
+}
+
+impl SystemFont {
+    pub fn from_ident(s: &str) -> Option<SystemFont> {
+        Some(match s.to_ascii_lowercase().as_str() {
+            "caption" => SystemFont::Caption,
+            "icon" => SystemFont::Icon,
+            "menu" => SystemFont::Menu,
+            "message-box" => SystemFont::MessageBox,
+            "small-caption" => SystemFont::SmallCaption,
+            "status-bar" => SystemFont::StatusBar,
+            "-webkit-control" => SystemFont::WebkitControl,
+            "-webkit-small-control" => SystemFont::WebkitSmallControl,
+            "-webkit-mini-control" => SystemFont::WebkitMiniControl,
+            _ => return None,
+        })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SystemFont::Caption => "caption",
+            SystemFont::Icon => "icon",
+            SystemFont::Menu => "menu",
+            SystemFont::MessageBox => "message-box",
+            SystemFont::SmallCaption => "small-caption",
+            SystemFont::StatusBar => "status-bar",
+            SystemFont::WebkitControl => "-webkit-control",
+            SystemFont::WebkitSmallControl => "-webkit-small-control",
+            SystemFont::WebkitMiniControl => "-webkit-mini-control",
+        }
+    }
 }
 
 /// A `var()`-dependent declaration, parsed after substitution.
@@ -1030,6 +1080,21 @@ fn flex_shorthand<'i>(p: &mut Parser<'i>) -> PResult<Vec<Sv>> {
 }
 
 fn font_shorthand<'i>(p: &mut Parser<'i>) -> PResult<Vec<Sv>> {
+    // A system font keyword stands alone and sets everything.
+    if let Ok(k) = p.try_parse(|p| {
+        let i = p.expect_ident_cloned()?;
+        let k = SystemFont::from_ident(&i).map_or_else(|| bad(p), Ok)?;
+        p.expect_exhausted()?;
+        PResult::Ok(k)
+    }) {
+        return Ok(vec![
+            Sv::FontStyle(FontStyle::Normal),
+            Sv::FontWeight(FontWeightSpec::Absolute(400.0)),
+            Sv::FontSize(FontSizeSpec::System(k)),
+            Sv::Normal,
+            Sv::SystemFont(k),
+        ]);
+    }
     let mut style = None;
     let mut weight = None;
     for _ in 0..4 {

@@ -24,7 +24,7 @@ pub use consistency::{
 };
 pub use os::{
     AudioDefaults, Codecs, DisplayServer, Distro, FontDefaults, HighEntropyHints, OsApis, OsKind,
-    WebGpuAdapter, WheelModel,
+    WebGpuAdapter, WheelModel, os_font_aliases, os_font_defaults,
 };
 pub use profile::{
     BatteryInfo, BrandVersion, ClientHints, MediaDevices, PersonaError, PersonaProfile,

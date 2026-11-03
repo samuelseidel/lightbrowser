@@ -202,6 +202,23 @@ const LINUX_METRIC_ALIASES: &[(&str, &str)] = &[
     ("Cambria", "Caladea"),
 ];
 
+/// Every family alias of an OS, `(requested, used)`, without the
+/// installed-font filter of [`PersonaProfile::font_aliases`]: fontconfig's
+/// metric aliases first on Linux, then Blink's alternates. For callers
+/// without a persona (every font installed).
+pub fn os_font_aliases(os: OsKind) -> Vec<(&'static str, &'static str)> {
+    let mut out: Vec<(&'static str, &'static str)> = Vec::new();
+    if os == OsKind::Linux {
+        out.extend_from_slice(LINUX_METRIC_ALIASES);
+    }
+    for &(a, b) in BLINK_ALTERNATES {
+        if !out.iter().any(|(x, _)| *x == a) {
+            out.push((a, b));
+        }
+    }
+    out
+}
+
 /// Logical CPU count for an Apple chip name (`M2 Pro` ...). Every
 /// configuration Apple sells. `None` for unknown chips.
 pub fn apple_chip_threads(chip: &str) -> Option<&'static [u32]> {
@@ -368,6 +385,108 @@ fn av1_hw_decode(renderer: &str) -> bool {
         || has("680M")
 }
 
+/// Chrome's default fonts for an OS (and Linux distro, `(family, version)`)
+/// when the persona sets none: see [`PersonaProfile::font_defaults`].
+pub fn os_font_defaults(os: OsKind, distro: Option<(Distro, &str)>) -> FontDefaults {
+    let f = |standard: &str,
+             serif: &str,
+             sans: &str,
+             mono: &str,
+             cursive: &str,
+             fantasy: &str,
+             system_ui: &str,
+             emoji: &str,
+             system_font: &str,
+             px: f64| FontDefaults {
+        standard: standard.into(),
+        serif: serif.into(),
+        sans_serif: sans.into(),
+        monospace: mono.into(),
+        cursive: cursive.into(),
+        fantasy: fantasy.into(),
+        system_ui: system_ui.into(),
+        emoji: emoji.into(),
+        system_font: system_font.into(),
+        system_font_px: px,
+    };
+    match os {
+        // Not captured: Chrome's Windows font settings (Consolas is the
+        // fixed font) and the 9 pt NONCLIENTMETRICS fonts.
+        OsKind::Windows => f(
+            "Times New Roman",
+            "Times New Roman",
+            "Arial",
+            "Consolas",
+            "Comic Sans MS",
+            "Impact",
+            "Segoe UI",
+            "Segoe UI Emoji",
+            "Segoe UI",
+            12.0,
+        ),
+        // Not captured: Chrome's macOS font settings; `system-ui` is SF.
+        OsKind::MacOs => f(
+            "Times",
+            "Times",
+            "Helvetica",
+            "Courier",
+            "Apple Chancery",
+            "Papyrus",
+            "system-ui",
+            "Apple Color Emoji",
+            "system-ui",
+            13.0,
+        ),
+        // Captured (CfT 153 with Ubuntu/Fedora-like fontconfig):
+        // standard, cursive and fantasy are Times New Roman, sans-serif
+        // Arial, monospace fontconfig "Monospace", the keywords Arial
+        // 16px; system-ui is the GTK font.
+        OsKind::Linux => {
+            let (system_ui, mono) = match distro {
+                Some((Distro::Ubuntu, v)) if v >= "23.10" => ("Ubuntu Sans", "DejaVu Sans Mono"),
+                Some((Distro::Ubuntu, _)) => ("Ubuntu", "DejaVu Sans Mono"),
+                Some((Distro::Fedora, v)) => {
+                    let major: u32 = v
+                        .split('.')
+                        .next()
+                        .and_then(|m| m.parse().ok())
+                        .unwrap_or(0);
+                    if major >= 42 {
+                        ("Adwaita Sans", "Noto Sans Mono")
+                    } else {
+                        ("Cantarell", "Noto Sans Mono")
+                    }
+                }
+                _ => ("DejaVu Sans", "DejaVu Sans Mono"),
+            };
+            f(
+                "Times New Roman",
+                "Times New Roman",
+                "Arial",
+                mono,
+                "Times New Roman",
+                "Times New Roman",
+                system_ui,
+                "Noto Color Emoji",
+                "Arial",
+                16.0,
+            )
+        }
+        OsKind::Other => f(
+            "Times New Roman",
+            "Times New Roman",
+            "Arial",
+            "Courier New",
+            "Comic Sans MS",
+            "Impact",
+            "Arial",
+            "Noto Color Emoji",
+            "Arial",
+            16.0,
+        ),
+    }
+}
+
 impl PersonaProfile {
     /// The OS from `os.name`.
     pub fn os_kind(&self) -> OsKind {
@@ -461,105 +580,11 @@ impl PersonaProfile {
     }
 
     fn os_font_defaults(&self) -> FontDefaults {
-        let f = |standard: &str,
-                 serif: &str,
-                 sans: &str,
-                 mono: &str,
-                 cursive: &str,
-                 fantasy: &str,
-                 system_ui: &str,
-                 emoji: &str,
-                 system_font: &str,
-                 px: f64| FontDefaults {
-            standard: standard.into(),
-            serif: serif.into(),
-            sans_serif: sans.into(),
-            monospace: mono.into(),
-            cursive: cursive.into(),
-            fantasy: fantasy.into(),
-            system_ui: system_ui.into(),
-            emoji: emoji.into(),
-            system_font: system_font.into(),
-            system_font_px: px,
-        };
-        match self.os_kind() {
-            // Not captured: Chrome's Windows font settings (Consolas is the
-            // fixed font) and the 9 pt NONCLIENTMETRICS fonts.
-            OsKind::Windows => f(
-                "Times New Roman",
-                "Times New Roman",
-                "Arial",
-                "Consolas",
-                "Comic Sans MS",
-                "Impact",
-                "Segoe UI",
-                "Segoe UI Emoji",
-                "Segoe UI",
-                12.0,
-            ),
-            // Not captured: Chrome's macOS font settings; `system-ui` is SF.
-            OsKind::MacOs => f(
-                "Times",
-                "Times",
-                "Helvetica",
-                "Courier",
-                "Apple Chancery",
-                "Papyrus",
-                "system-ui",
-                "Apple Color Emoji",
-                "system-ui",
-                13.0,
-            ),
-            // Captured (CfT 153 with Ubuntu/Fedora-like fontconfig):
-            // standard, cursive and fantasy are Times New Roman, sans-serif
-            // Arial, monospace fontconfig "Monospace", the keywords Arial
-            // 16px; system-ui is the GTK font.
-            OsKind::Linux => {
-                let (system_ui, mono) = match self.linux_distro() {
-                    Some((Distro::Ubuntu, v)) if v.as_str() >= "23.10" => {
-                        ("Ubuntu Sans", "DejaVu Sans Mono")
-                    }
-                    Some((Distro::Ubuntu, _)) => ("Ubuntu", "DejaVu Sans Mono"),
-                    Some((Distro::Fedora, v)) => {
-                        let major: u32 = v
-                            .split('.')
-                            .next()
-                            .and_then(|m| m.parse().ok())
-                            .unwrap_or(0);
-                        if major >= 42 {
-                            ("Adwaita Sans", "Noto Sans Mono")
-                        } else {
-                            ("Cantarell", "Noto Sans Mono")
-                        }
-                    }
-                    _ => ("DejaVu Sans", "DejaVu Sans Mono"),
-                };
-                f(
-                    "Times New Roman",
-                    "Times New Roman",
-                    "Arial",
-                    mono,
-                    "Times New Roman",
-                    "Times New Roman",
-                    system_ui,
-                    "Noto Color Emoji",
-                    "Arial",
-                    16.0,
-                )
-            }
-            OsKind::Other => f(
-                "Times New Roman",
-                "Times New Roman",
-                "Arial",
-                "Courier New",
-                "Comic Sans MS",
-                "Impact",
-                "Arial",
-                "Noto Color Emoji",
-                "Arial",
-                16.0,
-            ),
-        }
+        let distro = self.linux_distro();
+        os_font_defaults(
+            self.os_kind(),
+            distro.as_ref().map(|(d, v)| (*d, v.as_str())),
+        )
     }
 
     /// Family aliases Chrome resolves when a page names a family that is

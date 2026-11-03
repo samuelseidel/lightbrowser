@@ -34,7 +34,7 @@ pub use engine::{SheetId, StyleEngine, StyleStats, in_display_none};
 pub use media::{MediaEnv, MediaQueryList, MediaQueryResult, OsKind, PointerKind, match_media};
 pub use props::{
     CustomDeclaration, Decl, Declaration, DeclarationBlock, FamilyName, FontSizeSpec,
-    FontWeightSpec, LonghandId, Sv,
+    FontWeightSpec, LonghandId, Sv, SystemFont,
 };
 pub use serialize::{computed_property_names, computed_value, longhand_value};
 pub use sheet::{ImportRule, Origin, StyleRule, Stylesheet};
