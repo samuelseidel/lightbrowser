@@ -80,7 +80,7 @@ class Report(unittest.TestCase):
         self.assertEqual(by["binary size (stripped)"], "pass")
         self.assertEqual(by["idle RSS (serve, no client, 1 s after listen)"], "pass")
         self.assertTrue(all(v == "skip" for k, v in by.items() if "Lightpanda" in k))
-        bs = run.budgets(s, 40.1, None)
+        bs = run.budgets(s, run.BUDGET_BINARY_MB + 0.1, None)
         self.assertEqual({b["budget"]: b["status"] for b in bs}["binary size (stripped)"], "fail")
 
     def test_budgets_compare_with_lightpanda(self):

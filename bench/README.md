@@ -59,6 +59,13 @@ must be 50/50 for LightBrowser and Chromium. `gen_corpus.py` is deterministic
   startup. Median and nearest-rank p90 over the 50 pages, then the median over
   repetitions. Total crawl time is the whole loop.
 - *Peak RSS*: fetch: the largest `ru_maxrss` of any single process (exact).
+  The `fetch` processes are started by a small spawner process, not by the
+  runner: Linux copies the old address space's high-water mark into the
+  child's `ru_maxrss` at `exec`, so a child of the runner (tens of MB with
+  Playwright loaded) "peaked" at the runner's size whatever it used. The
+  spawner (~10 MB) is below every browser measured. Same for all targets.
+  RSS counts the binary's mapped pages, so it depends on which of them are
+  in the page cache (a freshly built or copied binary is fully cached).
   CDP: the sum of the live process tree's own high-water marks (`VmHWM`,
   read every 50 ms from spawn, so it includes startup and the one-time V8
   snapshot peak). That is exact for LightBrowser (one process) and an upper
@@ -85,7 +92,8 @@ must be 50/50 for LightBrowser and Chromium. `gen_corpus.py` is deterministic
   `TMPDIR`; the budget passes if nothing is created there and
   `/proc/PID/io` `write_bytes` stays 0 during the crawl.
 
-**Budgets** checked (from ARCHITECTURE): idle RSS < 15 MB, binary < 40 MB,
+**Budgets** checked (from ARCHITECTURE): idle RSS < 15 MB, binary < 50 MB
+(< 40 MB until the user raised it, ADR 0013 revision 4),
 realm creation < 5 ms, no disk writes, and wall time / peak RSS / CPU no worse
 than Lightpanda (status `skip` while Lightpanda is absent).
 
