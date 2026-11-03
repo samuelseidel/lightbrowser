@@ -19,19 +19,19 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | ≤ Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 40 MB (ADR 0013). Chrome: 39.63 MB with the prebuilt V8 (code that only off-by-default V8 flags reach is not linked; ICU data in lazily paged zstd chunks) |
+| Binary size (per family, stripped) | < 50 MB (ADR 0013; raised from < 40 MB by user decision, revision 4). Chrome: 40.39 MB with the prebuilt V8 (code that only off-by-default V8 flags reach is not linked; ICU data in lazily paged 4 KiB zstd chunks) |
 | Disk writes during a session | none by default |
-| Isolate/realm creation | < 5 ms (startup snapshot, ADR 0013) |
+| Isolate/realm creation | < 5 ms (lazy interfaces, ADR 0016; startup snapshot optional, ADR 0013) |
 
 `bench/run.py` measures these (see the "Bench runner" row in the Stack table). Measured on
-2026-11-03 (`bench/results/2026-11-03-ca3f1b4.json`, 5 runs x 50 pages):
-idle RSS 10.2 MB, binary 39.63 MB (39,628,664 bytes), first/next realm
-3.1/2.5 ms, no disk writes. Against Lightpanda 1.1.0-nightly.11582 (a
-user-approved nightly, run on loopback with telemetry off) 4 of the 6
-checks pass: wall time `fetch` 2.63 vs 3.50 s and CDP 1.32 vs 5.15 s,
-peak RSS `fetch` 43.8 vs 44.9 MB, CPU CDP 0.99 vs 1.06 s. Two fail:
-CPU `fetch` 2.51 vs 1.37 s (no snapshot in a one-page process) and peak
-RSS CDP 42.2 vs 31.4 MB (eager interface objects per realm). Details:
+2026-11-03 (`bench/results/2026-11-03-af2c264.json`, 5 runs x 50 pages,
+clean tree): idle RSS 6.17 MB, binary 40.39 MB (40,386,424 bytes),
+first/next realm 1.37/1.11 ms, no disk writes. Against Lightpanda
+1.1.0-nightly.11582 (a user-approved nightly, run on loopback with
+telemetry off) all 6 checks pass: `fetch` wall 1.08 vs 3.37 s, peak RSS
+22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS
+26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s (lazy interfaces, ADR 0016). The
+`fetch` peak RSS margin is ~0.4 MB in standalone runs. Details:
 `docs/ROADMAP.md`, "M6 status: Lightpanda comparison".
 
 ## Decisions (see `docs/adr/`)
@@ -50,7 +50,7 @@ RSS CDP 42.2 vs 31.4 MB (eager interface objects per realm). Details:
 | 0010 | Own box tree over taffy; font metric tables compiled in from `profiles/fonts` |
 | 0011 | Request headers per destination from `profiles/headers`, captured from local Chromium; own HTTP/1.1 writer |
 | 0012 | Each frame is a realm in the page's engine, built synchronously through `lb_js::RealmOps`; origins via V8 security tokens |
-| 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary < 40 MB: ICU data compressed in chunks and paged in on first touch, no unwind tables, V8 code that only off-by-default flags reach not linked; the window global's members are defined after context creation (linear, not V8's O(n²) template instantiation) |
+| 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary < 50 MB (< 40 MB until revision 4): ICU data compressed in 4 KiB chunks and paged in on first touch, no unwind tables, V8 code that only off-by-default flags reach not linked; the window global's members are defined after context creation (linear, not V8's O(n²) template instantiation) |
 | 0014 | Page screenshots painted on demand from a per-capture display list (no retained paint state, never noised) |
 | 0015 | OS personas: one OS axis (`OsKind`, display server, distro) in `lb-persona`; layers read OS-dependent values through `PersonaProfile` accessors with per-OS defaults; rules R17-R26; catalog and generator |
 | 0016 | Interfaces defined on demand and interface objects as lazy data properties (as Blink), fixed up natively as each is made; no startup snapshot by default; `fetch` skips the initial about:blank realm and teardown; hot functions first in `.text` (order list from a training workload) |

@@ -12,7 +12,7 @@ Each milestone ends with something we can run and measure.
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
 | **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015), WP-C (scrollbars, fonts, aliases, emoji per OS) WP-D (OS-gated APIs, codecs, WebGPU, keyboard, WebGL backends, audio, window position, wheel and shortcuts per OS) and WP-E (`Accept-CH` / `Critical-CH` client hints) done: all 8 reference personas fp 0 and beh 0. See "M7 status" |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.63 MB, the < 40 MB budget is met (ADR 0013); `bench/` runner done; Lightpanda compared (user-approved nightly, loopback only): 4 of 6 checks pass, `fetch` CPU and CDP peak RSS still lose; service workers open. See "M6 status". |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 40.39 MB against < 50 MB (raised from < 40 MB by user decision, ADR 0013 revision 4); `bench/` runner done; lazy interfaces (ADR 0016); Lightpanda compared (user-approved nightly, loopback only): 6 of 6 checks pass; service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
 
@@ -22,17 +22,17 @@ Each milestone ends with something we can run and measure.
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
-| M6 Performance | Snapshot, memory, binary size (39.63 MB, < 40 MB met), `bench/` runner, screenshots, Lightpanda comparison (wall time wins in both modes; 4 of 6 checks pass) done | `fetch` CPU and CDP peak RSS vs Lightpanda, service workers |
+| M6 Performance | Snapshot, memory, binary size (40.39 MB, < 50 MB met), `bench/` runner, screenshots, lazy interfaces (ADR 0016), Lightpanda comparison (6 of 6 checks pass: wall time, peak RSS and CPU in `fetch` and CDP) done | Service workers; the `fetch` peak RSS margin over Lightpanda is small outside the recorded run (see "M6 status: Lightpanda comparison") |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 10.2 MB (9.9-10.3 MB in earlier runs) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 40 MB (< 56 MB in between) | Met: 39.84 MB (39,841,656 bytes) after M7 WP-E, 0.16 MB under; 39.63 MB at the end of M6 | "M6 status: binary size, third pass", "M6 status: Lightpanda comparison" |
-| Realm creation < 5 ms | Met: 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
+| Idle RSS < 15 MB | Met: 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
+| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
+| Realm creation < 5 ms | Met: 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | Partly met (Lightpanda 1.1.0-nightly.11582): wall time `fetch` 2.63 vs 3.50 s and CDP 1.32 vs 5.15 s, peak RSS `fetch` 43.8 vs 44.9 MB, CPU CDP 0.99 vs 1.06 s pass; **CPU `fetch` 2.51 vs 1.37 s and peak RSS CDP 42.2 vs 31.4 MB fail** | "M6 status: Lightpanda comparison" |
+| Wall time, peak RSS and CPU <= Lightpanda | Met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -1246,6 +1246,95 @@ close (no measurable CPU gain, peak up to 50 MB); a code cache
 made after the run (+6 MB RSS); HTTP keep-alive (network is ~1 % of CPU
 here; still open).
 
+### Second pass: lazy interfaces, 6 of 6 (2026-11-03)
+
+After M7. ADR 0016 (interface objects as lazy data properties of the
+global, as Blink does; specs and templates built on demand; no startup
+snapshot by default; `fetch` exits fast; pointer-free binding table;
+shared response bodies; hot code first in `.text`) and ADR 0013
+revision 4 (binary budget raised to < 50 MB by the user; ICU data in
+4 KiB chunks). Plus: layout boxes share equal taffy styles; the
+hot-symbol order was regenerated for the final code
+(`tools/hot_symbols`, trained on detect-bench pages, the WPT subset and
+one generic page, never the bench corpus).
+
+Bench correctness fix (applies to every target): `fetch` processes are
+now started by a small spawner process. Linux copies the parent's
+address-space high-water mark into the child's `ru_maxrss` at `exec`, so
+every `fetch` process "peaked" at least at the size of the Python runner
+(Playwright loaded). Lightpanda's `fetch` peak went from 44.9 to ~24 MB
+with the fix, LightBrowser's from 43.8 to ~22 MB. Nothing else in
+`bench/run.py` changed except the binary budget (50 MB).
+
+Recorded run: `bench/results/2026-11-03-af2c264.json`, clean tree
+`af2c264`, 5 runs x 50 pages, same corpus, markers and settings for every
+target, release binary 40,386,424 bytes (sha256 `efed4704af536560`),
+Lightpanda 1.1.0-nightly.11582 (loopback, telemetry off). Median
+(min-max):
+
+| | fetch: LightBrowser | fetch: Lightpanda | CDP: LightBrowser | CDP: Lightpanda | CDP: Chromium |
+|---|---|---|---|---|---|
+| crawl wall time | **1.08 s** (1.07-1.09) | 3.37 s (3.31-3.39) | **0.99 s** (0.95-1.01) | 5.04 s (4.91-5.07) | 10.6 s |
+| page median / p90 | 20.1 / 29.0 ms | 67.4 / 70.8 ms | 18.2 / 27.1 ms | 100.5 / 105.8 ms | 210 / 226 ms |
+| peak RSS | **22.06 MB** (22.02-22.25) | 24.48 MB (24.47-24.59) | **26.95 MB** (26.64-27.18) | 31.40 MB (31.28-31.52) | 2852 MB (PSS 693) |
+| CPU (user+sys) | **0.88 s** (0.87-0.89) | 1.23 s (1.19-1.25) | **0.68 s** (0.64-0.69) | 0.95 s (0.86-0.96) | 26.6 s |
+| idle RSS (serve) | | | 6.17 MB | 12.40 MB | 1087 MB |
+| first new page / later | | | 12.6 / 4.5 ms | 4.8 / 3.9 ms | |
+| pages verified | 50/50 | 50/50 | 50/50 | 50/50 | 50/50 |
+
+**6 of 6 checks pass**, and every other budget: binary 40.39 MB
+(< 50 MB), realm 1.37 / 1.11 ms (`realm_bench`, snapshot line), idle RSS
+6.17 MB, no files and `write_bytes` 0.
+
+The `fetch` peak RSS margin is smaller outside this run. In standalone
+measurements (3 x 50 pages, binaries fully in the page cache, spawned
+from a small process) LightBrowser's largest process was 22.4-22.6 MB and
+Lightpanda's 22.8-23.0 MB, a margin of ~0.4 MB; Lightpanda measured 1.5 MB
+higher inside the recorded run (24.5 MB, after the Chromium target).
+About two thirds of a LightBrowser `fetch` process's peak are mapped pages
+of the binary (~9 MB of code, ~3.6 MB of constants including V8's
+snapshot blob, 0.9 MB of relocated data), so the number moves with the
+code layout: two builds that differed only in a few functions measured
+0.8 MB apart before the order list was regenerated. A stale
+`hot-symbols.txt` costs memory; regenerate it after code changes.
+
+`fetch` peak RSS by step (largest page, median of 2-3 standalone runs
+of 50 pages; noisy by ~0.3 MB): the WIP head 23.5 MB → ICU data in 4 KiB
+chunks 22.9 MB → the compressed pack's pages released after use (clean
+file pages, so this lowers RSS, not the page cache) 22.4-22.7 MB → boxes
+share styles (-0.3 MB of anonymous memory, but 23.2 MB overall: the
+code layout moved) → order list regenerated 22.5 MB.
+
+Fidelity (`tools/surface_diff`, M7 build `525e94d` against this one,
+Windows 10, macOS 15 and Ubuntu 24 personas, `fetch` and two CDP pages
+each): identical, 72,606-73,222 lines per dump (global keys in order,
+every global and interface object with prototype, descriptors, names,
+lengths, `toString`, wrong-receiver errors, cross-realm and
+detached-frame behaviour, page changes to interface objects), except one
+line that moved: `function Attr() {}` run by a page over the `Attr`
+interface object now puts the key last in
+`Object.getOwnPropertyNames(window)`, as the local Chrome for Testing
+153.0.8010.12 does; M7 kept its old place.
+
+Found by the new surface dump, the same in M7 and now, not fixed here:
+
+- A method or getter of one realm called on a node of another document
+  resolves the node in its own realm's document:
+  `Node.prototype.appendChild.call(frameDoc.body, frameDoc.createElement('i'))`
+  panics the worker (index out of bounds in `lb-dom`), and a frame's
+  `nodeName` getter called on the top document's `body` returns
+  `"TITLE"`.
+- After an iframe is removed, its window still returns interface objects
+  (`w.Blob`, `w.URL`); Chrome returns `undefined`.
+- `Image.prototype === HTMLImageElement.prototype` is `false`; in Chrome
+  it is `true`.
+
+Checked on the final binary: fingerprint-report 0 mismatch for all 8
+reference personas (130-133 ok each; `cargo test -p lb-page --test pages
+report`), T-010 `fp<=30` (fp 0) and `--input human` `beh<=30` (beh 0) for
+Windows 10, macOS 15 and Ubuntu 24 (fresh `serve` per run, own seeds),
+Playwright 20/20, WPT 2552/2788.
+
 ## M7 status: WP-A, Linux ground truth and OS rules (2026-11-03)
 
 **Ground truth.** `tools/os_truth` (`capture.js`, `page.html`, `xtest.py`,
@@ -1838,8 +1927,29 @@ With Playwright input both personas fire the same behaviour rules
 (`beh_typing_no_keys`, `beh_click_center`, `beh_click_no_path`,
 `beh_click_hold`, `beh_wheel_pattern`, `page_dwell_short`); fp is 0.
 
-Not green: the two Lightpanda checks that fail in the recorded run (`fetch`
-CPU and CDP peak RSS), see "M6 status: Lightpanda comparison".
+All budgets met in the recorded run (`bench/results/2026-11-03-af2c264.json`).
+
+## Workspace check: lazy interfaces and 50 MB budget (2026-11-03)
+
+Chrome build unless noted, 4 cores, on the tree of the recorded run
+(`af2c264`) and its release binary. Tests per package and per test
+target (the disk does not hold all test binaries at once).
+
+- `cargo fmt --all --check` and `cargo clippy --workspace --all-targets
+  -- -D warnings`: clean; Firefox clippy (`lightbrowser`, `lb-js`,
+  `lb-webapi`, `lb-page`): clean.
+- Tests, all pass: `lb-persona`, `lb-dom`, `lb-css`, `lb-behavior`,
+  `lb-webidl-gen` (and `--check`: the bindings table is current),
+  `lb-fptest`, `lb-net`, `lb-js` (lib 9, `v8` 33, `snapshot` 5),
+  `lb-layout`, `lb-paint`, `lb-cdp`, `lb-webapi` (lib 26, `install` 11,
+  `snapshot` 4), `lb-page` (every target, `pages` 19, `wpt`),
+  `lightbrowser` 6. Firefox family: 15 pass, 2 ignored. `bench` unittest
+  12 OK (the budget test now follows `BUDGET_BINARY_MB`); detect-bench
+  unittest 33 OK.
+- WPT subset 2552/2788; Playwright 20/20 (debug build); fingerprint-report
+  0 mismatch for all 8 reference personas (release, CLI and the `pages`
+  gate); T-010 fp 0 and `--input human` beh 0 for one persona per OS.
+- Surface diff against M7: identical except the `Attr` case above.
 
 ## Risks
 

@@ -21,15 +21,15 @@ macOS Intel and Apple Silicon, Ubuntu X11, Fedora Wayland), each scoring
 fp 0 and beh 0 on the bench with all OS rules in force (Linux values
 captured, Windows and macOS from a reference; TCP/IP signals are the
 host's).
-Idle RSS is 10.2 MB, realm creation 2.5 ms, and the release binary
-39.6 MB (budget < 40 MB, ADR 0013). On the `bench/` corpus every
-LightBrowser page is faster than headless Chromium's median, and the
-crawl is faster than Lightpanda's (a user-approved 1.1.0 nightly, run on
-loopback with telemetry off) in both `fetch` and CDP mode; 4 of the 6
-Lightpanda checks pass (see `bench/results/README.md`).
+Idle RSS is 6.2 MB, realm creation 1.4 ms, and the release binary
+40.4 MB (budget < 50 MB, raised from < 40 MB by user decision, ADR 0013).
+On the `bench/` corpus every LightBrowser page is faster than headless
+Chromium's median, and against Lightpanda (a user-approved 1.1.0 nightly,
+run on loopback with telemetry off) all 6 checks pass: wall time, peak
+RSS and CPU in both `fetch` and CDP mode (see `bench/results/README.md`;
+the `fetch` peak RSS margin is small).
 Not done: Firefox (M4b, no SpiderMonkey backend yet), workers and service
-workers, and two Lightpanda gaps: CPU per `fetch` process and peak RSS in
-CDP mode.
+workers.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only
@@ -46,9 +46,9 @@ distribute binaries or push them to public repos or registries.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | <= Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 40 MB (ADR 0013); Chrome measured 39.6 MB |
+| Binary size (per family, stripped) | < 50 MB (ADR 0013); Chrome measured 40.4 MB |
 | Disk writes during a session | none by default |
-| Isolate/realm creation | < 5 ms (startup snapshot) |
+| Isolate/realm creation | < 5 ms (lazy interfaces, ADR 0016) |
 
 ## Families
 

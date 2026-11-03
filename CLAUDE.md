@@ -22,19 +22,29 @@ generator; scrollbars, fonts and emoji, OS-gated APIs, codecs, WebGPU,
 WebGL backends, audio, wheel and shortcuts per OS; `Accept-CH` /
 `Critical-CH` client hints. Linux values are captured from local Chrome;
 Windows and macOS values come from a reference, not a capture. TCP/IP-level
-signals are always the host's. M6: V8 startup
-snapshot (realm 2.5 ms), idle RSS 10.2 MB, `bench/` runner (every corpus
-page faster than headless Chromium's median), release binary 39.84 MB
-against < 40 MB (ADR 0013; ICU data in zstd chunks paged in on first
-touch, no unwind tables, V8 code only off-by-default flags reach not
-linked, root crate and bindings at `opt-level = "s"`). Lightpanda
-comparison (user-approved 1.1.0 nightly, loopback only, telemetry off;
-"M6 status: Lightpanda comparison"): wall time wins in `fetch` and CDP
-mode, 4 of 6 checks pass; `fetch` CPU (2.5 vs 1.4 s) and CDP peak RSS
-(42 vs 31 MB) still lose. Open: Firefox (M4b: no SpiderMonkey backend,
-TLS gaps in ADR 0003), workers and service workers, shader execution in
-WebGL, those two Lightpanda gaps, HTTP keep-alive, stylesheets blocking
-scripts, and CSS background images in screenshots. See "Where we stand"
+signals are always the host's. M6: lazy interface
+objects (ADR 0016: lazy data properties of the global as in Blink,
+templates on demand, no startup snapshot by default; realm 1.4 ms), idle
+RSS 6.2 MB, `bench/` runner (every corpus page faster than headless
+Chromium's median), release binary 40.39 MB against < 50 MB (the user
+raised the budget from < 40 MB, ADR 0013 revision 4; ICU data in 4 KiB
+zstd chunks paged in on first touch, no unwind tables, V8 code only
+off-by-default flags reach not linked, root crate and bindings at
+`opt-level = "s"`, hot code first in `.text` from
+`bin/lightbrowser/hot-symbols.txt`). Lightpanda comparison (user-approved
+1.1.0 nightly, loopback only, telemetry off; "M6 status: Lightpanda
+comparison", `bench/results/2026-11-03-af2c264.json`): 6 of 6 checks
+pass (`fetch` wall 1.08 vs 3.37 s, peak RSS 22.1 vs 24.5 MB, CPU 0.88 vs
+1.23 s; CDP 0.99 vs 5.04 s, 27.0 vs 31.4 MB, 0.68 vs 0.95 s); the
+`fetch` peak RSS margin is ~0.4 MB in standalone runs and moves with the
+code layout, so regenerate the hot-symbol list after code changes
+(`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
+surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
+gaps in ADR 0003), workers and service workers, shader execution in
+WebGL, HTTP keep-alive, stylesheets blocking scripts, CSS background
+images in screenshots, and three surface gaps found by the surface dump
+(cross-document node calls, detached-frame globals, `Image.prototype`;
+see ROADMAP). See "Where we stand"
 and the status sections in `docs/ROADMAP.md`.
 
 ## Internal use and legal
@@ -46,7 +56,7 @@ and the status sections in `docs/ROADMAP.md`.
 | Crate | Role | State |
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R26, sfc32 done; OS axis and per-OS accessors (M7), `profiles/catalog/` + `gen_personas` example; optional `preferences`, media devices, battery |
-| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (startup snapshot made in memory, ADR 0013; ICU data in 128 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
+| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
 | `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open (`lb-page` caps 6 connections per origin) |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |
@@ -59,7 +69,7 @@ and the status sections in `docs/ROADMAP.md`.
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
 | `sdk/python` | `lightbrowser` package: launcher, `Persona`, sync/async Playwright wrappers with `human_*` and `verify_fingerprint`, scenarios T-001..T-007 | Done; needs Python Playwright >= 1.63 |
-| `bench/` | Crawl benchmark (generated 50-page corpus, loopback only) vs headless Chromium and Lightpanda; results in `bench/results/` | Runner done; Lightpanda compared (4 of 6 checks pass, see ROADMAP) |
+| `bench/` | Crawl benchmark (generated 50-page corpus, loopback only) vs headless Chromium and Lightpanda; results in `bench/results/` | Runner done; Lightpanda compared (6 of 6 checks pass, see ROADMAP) |
 | `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate`, `serve`, `fingerprint-report` | All done for chrome; the firefox build's `serve` uses `MockHost` and `fingerprint-report` needs the JS engine |
 
 ## Commands
@@ -110,6 +120,11 @@ python3 bench/run.py                          # 5 runs x 50 pages -> bench/resul
 # run.py sets LIGHTPANDA_DISABLE_TELEMETRY=true; set it yourself for manual runs)
 PATH=/path/to/lightpanda-dir:$PATH python3 bench/run.py
 python3 -m unittest discover -s bench
+# Hot-code order for the release link (after code changes; valgrind, ~10 min)
+cargo build --release -p lightbrowser --config 'profile.release.package.lightbrowser.strip=false'
+python3 tools/hot_symbols/gen.py --binary "$PWD/target/release/lightbrowser" && cargo build --release -p lightbrowser
+# Page-visible surface of two builds (binaries below the repo; loopback only)
+python3 tools/surface_diff/run.py --out "$(mktemp -d)" OLD_BIN NEW_BIN
 # Regenerate the Chrome bindings table (--check: fail if stale)
 cargo run -p lb-webidl-gen -- --family chrome
 ```
