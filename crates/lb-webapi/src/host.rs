@@ -77,7 +77,9 @@ pub struct NetResponse {
     pub status: u16,
     pub status_text: String,
     pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
+    /// Shared, not copied: the page and the CDP body store
+    /// (`Network.getResponseBody`) hold the same bytes.
+    pub body: bytes::Bytes,
     /// URL after redirects.
     pub url: Url,
     pub redirected: bool,

@@ -1,5 +1,10 @@
 //! Print a [`Table`] as static Rust data for `lb_webapi::desc`.
+//!
+//! The data holds no pointers (so a position-independent binary needs no
+//! relocations for it): strings are `S::new(offset, len)` into `STRINGS`,
+//! lists `L::new(start, len)` into one pool per element type.
 
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::ir::{
@@ -7,8 +12,39 @@ use crate::ir::{
     Table,
 };
 
-fn q(s: &str) -> String {
-    format!("{s:?}")
+/// The pools the table's strings and lists point into.
+#[derive(Default)]
+struct Pools {
+    strings: String,
+    interned: HashMap<String, (usize, usize)>,
+    attrs: Vec<String>,
+    ops: Vec<String>,
+    slots: Vec<String>,
+    names: Vec<String>,
+    consts: Vec<String>,
+}
+
+impl Pools {
+    /// `S::new(..)` for `s`, interned.
+    fn q(&mut self, s: &str) -> String {
+        let (off, len) = match self.interned.get(s) {
+            Some(&v) => v,
+            None => {
+                let v = (self.strings.len(), s.len());
+                self.strings.push_str(s);
+                self.interned.insert(s.to_owned(), v);
+                v
+            }
+        };
+        format!("S::new({off}, {len})")
+    }
+
+    fn list(pool: &mut Vec<String>, items: Vec<String>) -> String {
+        let start = pool.len();
+        let len = items.len();
+        pool.extend(items);
+        format!("L::new({start}, {len})")
+    }
 }
 
 fn const_value(v: ConstV) -> String {
@@ -23,8 +59,8 @@ fn const_value(v: ConstV) -> String {
     }
 }
 
-fn attr(a: &Attr) -> String {
-    let mut f = vec![format!("name: {}", q(&a.name))];
+fn attr(p: &mut Pools, a: &Attr) -> String {
+    let mut f = vec![format!("name: {}", p.q(&a.name))];
     if a.readonly {
         f.push("readonly: true".into());
     }
@@ -40,8 +76,8 @@ fn attr(a: &Attr) -> String {
     if a.same_object {
         f.push("same_object: true".into());
     }
-    if let Some(p) = &a.put_forwards {
-        f.push(format!("put_forwards: Some({})", q(p)));
+    if let Some(fwd) = &a.put_forwards {
+        f.push(format!("put_forwards: Some({})", p.q(fwd)));
     }
     if a.on_instance {
         f.push("on_instance: true".into());
@@ -68,8 +104,8 @@ fn attr(a: &Attr) -> String {
     format!("AttrDesc {{ {}, ..AttrDesc::DEFAULT }}", f.join(", "))
 }
 
-fn op(o: &Op) -> String {
-    let mut f = vec![format!("name: {}", q(&o.name))];
+fn op(p: &mut Pools, o: &Op) -> String {
+    let mut f = vec![format!("name: {}", p.q(&o.name))];
     if o.length != 0 {
         f.push(format!("length: {}", o.length));
     }
@@ -100,7 +136,7 @@ fn op(o: &Op) -> String {
     format!("OpDesc {{ {}, ..OpDesc::DEFAULT }}", f.join(", "))
 }
 
-fn slots(s: &[Slot]) -> String {
+fn slots(p: &mut Pools, s: &[Slot]) -> String {
     let parts: Vec<String> = s
         .iter()
         .map(|s| match s {
@@ -109,31 +145,36 @@ fn slots(s: &[Slot]) -> String {
             Slot::Op(i) => format!("O({i})"),
         })
         .collect();
-    format!("&[{}]", parts.join(", "))
+    Pools::list(&mut p.slots, parts)
 }
 
-fn strs(v: &[String]) -> String {
-    let parts: Vec<String> = v.iter().map(|s| q(s)).collect();
-    format!("&[{}]", parts.join(", "))
+fn strs(p: &mut Pools, v: &[String]) -> String {
+    let parts: Vec<String> = v.iter().map(|s| p.q(s)).collect();
+    Pools::list(&mut p.names, parts)
 }
 
-fn list<T>(items: &[T], f: impl Fn(&T) -> String, indent: &str) -> String {
-    if items.is_empty() {
-        return "&[]".into();
-    }
-    let mut s = String::from("&[\n");
-    for it in items {
-        let _ = writeln!(s, "{indent}    {},", f(it));
-    }
-    let _ = write!(s, "{indent}]");
-    s
+fn consts(p: &mut Pools, v: &[(String, ConstV)]) -> String {
+    let parts: Vec<String> = v
+        .iter()
+        .map(|(n, c)| format!("({}, {})", p.q(n), const_value(*c)))
+        .collect();
+    Pools::list(&mut p.consts, parts)
 }
 
-fn interface(i: &Interface) -> String {
-    let ind = "        ";
-    let mut f: Vec<String> = vec![format!("name: {}", q(&i.name))];
-    if let Some(p) = &i.parent {
-        f.push(format!("parent: Some({})", q(p)));
+fn attrs(p: &mut Pools, v: &[Attr]) -> String {
+    let parts: Vec<String> = v.iter().map(|a| attr(p, a)).collect();
+    Pools::list(&mut p.attrs, parts)
+}
+
+fn ops(p: &mut Pools, v: &[Op]) -> String {
+    let parts: Vec<String> = v.iter().map(|o| op(p, o)).collect();
+    Pools::list(&mut p.ops, parts)
+}
+
+fn interface(p: &mut Pools, i: &Interface) -> String {
+    let mut f: Vec<String> = vec![format!("name: {}", p.q(&i.name))];
+    if let Some(par) = &i.parent {
+        f.push(format!("parent: Some({})", p.q(par)));
     }
     if i.exposed != 1 {
         f.push(format!("exposed: Exposed({})", i.exposed));
@@ -144,7 +185,7 @@ fn interface(i: &Interface) -> String {
     if !i.legacy_window_alias.is_empty() {
         f.push(format!(
             "legacy_window_alias: {}",
-            strs(&i.legacy_window_alias)
+            strs(p, &i.legacy_window_alias)
         ));
     }
     if i.has_constructor {
@@ -154,32 +195,25 @@ fn interface(i: &Interface) -> String {
         f.push(format!("constructor_length: {}", i.constructor_length));
     }
     if let Some((n, len)) = &i.legacy_factory {
-        f.push(format!("legacy_factory: Some({})", q(n)));
+        f.push(format!("legacy_factory: Some({})", p.q(n)));
         if *len != 0 {
             f.push(format!("legacy_factory_length: {len}"));
         }
     }
     if !i.constants.is_empty() {
-        f.push(format!(
-            "constants: {}",
-            list(
-                &i.constants,
-                |(n, v)| format!("({}, {})", q(n), const_value(*v)),
-                ind
-            )
-        ));
+        f.push(format!("constants: {}", consts(p, &i.constants)));
     }
     if !i.attributes.is_empty() {
-        f.push(format!("attributes: {}", list(&i.attributes, attr, ind)));
+        f.push(format!("attributes: {}", attrs(p, &i.attributes)));
     }
     if !i.operations.is_empty() {
-        f.push(format!("operations: {}", list(&i.operations, op, ind)));
+        f.push(format!("operations: {}", ops(p, &i.operations)));
     }
     if i.stringifier {
         f.push("stringifier: true".into());
     }
     if let Some(a) = &i.stringifier_attr {
-        f.push(format!("stringifier_attr: Some({})", q(a)));
+        f.push(format!("stringifier_attr: Some({})", p.q(a)));
     }
     let it = match i.iterable {
         Iterable::None => None,
@@ -212,33 +246,36 @@ fn interface(i: &Interface) -> String {
         }
     }
     if !i.to_string_tag.is_empty() {
-        f.push(format!("to_string_tag: {}", q(&i.to_string_tag)));
+        f.push(format!("to_string_tag: {}", p.q(&i.to_string_tag)));
     }
     if !i.proto_order.is_empty() {
-        f.push(format!("proto_order: {}", slots(&i.proto_order)));
+        f.push(format!("proto_order: {}", slots(p, &i.proto_order)));
     }
     if !i.static_order.is_empty() {
-        f.push(format!("static_order: {}", slots(&i.static_order)));
+        f.push(format!("static_order: {}", slots(p, &i.static_order)));
     }
     if !i.instance_order.is_empty() {
-        f.push(format!("instance_order: {}", slots(&i.instance_order)));
+        f.push(format!("instance_order: {}", slots(p, &i.instance_order)));
     }
     match &i.iterator {
         SymIter::None => {}
         SymIter::ArrayValues => f.push("iterator: SymbolIterator::ArrayValues".into()),
-        SymIter::Alias(a) => f.push(format!("iterator: SymbolIterator::Alias({})", q(a))),
+        SymIter::Alias(a) => {
+            let a = p.q(a);
+            f.push(format!("iterator: SymbolIterator::Alias({a})"))
+        }
     }
     if let Some(a) = &i.async_iterator {
-        f.push(format!("async_iterator: Some({})", q(a)));
+        f.push(format!("async_iterator: Some({})", p.q(a)));
     }
     if i.secure_only {
         f.push("secure_context: true".into());
     }
     if let Some(b) = &i.builtin_parent {
-        f.push(format!("builtin_parent: Some({})", q(b)));
+        f.push(format!("builtin_parent: Some({})", p.q(b)));
     }
     if !i.unscopables.is_empty() {
-        f.push(format!("unscopables: {}", strs(&i.unscopables)));
+        f.push(format!("unscopables: {}", strs(p, &i.unscopables)));
     }
     let mut s = String::from("InterfaceDesc {\n");
     for field in f {
@@ -248,47 +285,88 @@ fn interface(i: &Interface) -> String {
     s
 }
 
-fn namespace(n: &Namespace) -> String {
-    let ind = "        ";
+fn namespace(p: &mut Pools, n: &Namespace) -> String {
+    let name = p.q(&n.name);
+    let c = consts(p, &n.constants);
+    let a = attrs(p, &n.attributes);
+    let o = ops(p, &n.operations);
+    let order = slots(p, &n.order);
+    let tag = p.q(&n.to_string_tag);
     format!(
-        "NamespaceDesc {{\n        name: {},\n        exposed: Exposed({}),\n        constants: {},\n        attributes: {},\n        operations: {},\n        order: {},\n        to_string_tag: {},\n    }}",
-        q(&n.name),
+        "NamespaceDesc {{\n        name: {name},\n        exposed: Exposed({}),\n        constants: {c},\n        attributes: {a},\n        operations: {o},\n        order: {order},\n        to_string_tag: {tag},\n    }}",
         n.exposed,
-        list(
-            &n.constants,
-            |(n, v)| format!("({}, {})", q(n), const_value(*v)),
-            ind
-        ),
-        list(&n.attributes, attr, ind),
-        list(&n.operations, op, ind),
-        slots(&n.order),
-        q(&n.to_string_tag),
     )
 }
 
-fn global(p: &GlobalProp) -> String {
-    match p {
-        GlobalProp::Builtin(n) => format!("G::Builtin({})", q(n)),
-        GlobalProp::Interface(n) => format!("G::Interface({})", q(n)),
+fn global(p: &mut Pools, g: &GlobalProp) -> String {
+    match g {
+        GlobalProp::Builtin(n) => format!("G::Builtin({})", p.q(n)),
+        GlobalProp::Interface(n) => format!("G::Interface({})", p.q(n)),
         GlobalProp::Alias { name, target } => {
-            format!("G::Alias {{ name: {}, target: {} }}", q(name), q(target))
+            format!(
+                "G::Alias {{ name: {}, target: {} }}",
+                p.q(name),
+                p.q(target)
+            )
         }
         GlobalProp::LegacyFactory { name, iface } => {
             format!(
                 "G::LegacyFactory {{ name: {}, iface: {} }}",
-                q(name),
-                q(iface)
+                p.q(name),
+                p.q(iface)
             )
         }
-        GlobalProp::Namespace(n) => format!("G::Namespace({})", q(n)),
-        GlobalProp::Attr(n) => format!("G::Attr({})", q(n)),
-        GlobalProp::Op(n) => format!("G::Op({})", q(n)),
-        GlobalProp::Other(n) => format!("G::Other({})", q(n)),
+        GlobalProp::Namespace(n) => format!("G::Namespace({})", p.q(n)),
+        GlobalProp::Attr(n) => format!("G::Attr({})", p.q(n)),
+        GlobalProp::Op(n) => format!("G::Op({})", p.q(n)),
+        GlobalProp::Other(n) => format!("G::Other({})", p.q(n)),
     }
+}
+
+fn pool(s: &mut String, doc: &str, name: &str, ty: &str, items: &[String]) {
+    let _ = writeln!(
+        s,
+        "/// {doc}\npub static {name}: [{ty}; {}] = [",
+        items.len()
+    );
+    for it in items {
+        let _ = writeln!(s, "    {it},");
+    }
+    s.push_str("];\n\n");
 }
 
 /// The whole generated file.
 pub fn emit(table: &Table, header: &str) -> String {
+    let mut p = Pools::default();
+    let interfaces: Vec<String> = table
+        .interfaces
+        .iter()
+        .map(|i| interface(&mut p, i))
+        .collect();
+    let namespaces: Vec<String> = table
+        .namespaces
+        .iter()
+        .map(|n| namespace(&mut p, n))
+        .collect();
+    let props: Vec<String> = table
+        .window_props
+        .iter()
+        .map(|g| global(&mut p, g))
+        .collect();
+    let secure: Vec<String> = table.window_secure_only.iter().map(|n| p.q(n)).collect();
+    let gated: Vec<String> = table
+        .os_gated
+        .iter()
+        .map(|(gate, owner, name)| {
+            format!(
+                "OsGated {{ gate: {}, owner: {}, name: {} }}",
+                p.q(gate),
+                p.q(owner),
+                p.q(name)
+            )
+        })
+        .collect();
+
     let mut s = String::new();
     for line in header.lines() {
         let _ = writeln!(s, "// {line}");
@@ -297,41 +375,75 @@ pub fn emit(table: &Table, header: &str) -> String {
         "\n#![allow(clippy::all)]\n\nuse crate::desc::GlobalProp as G;\nuse crate::desc::Slot::{Attr as A, Const as C, Op as O};\n#[allow(unused_imports)]\nuse crate::desc::*;\n\n",
     );
     s.push_str(
-        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: INTERFACES,\n    namespaces: NAMESPACES,\n    window_props: WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n    window_secure_only: WINDOW_SECURE_ONLY,\n    os_gated: OS_GATED,\n};\n\n",
+        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: &INTERFACES,\n    namespaces: &NAMESPACES,\n    window_props: &WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n    window_secure_only: &WINDOW_SECURE_ONLY,\n    os_gated: &OS_GATED,\n};\n\n",
     );
     let _ = writeln!(
         s,
         "/// Index into [`WINDOW_PROPS`] where late properties start.\npub const WINDOW_LATE_START: usize = {};\n",
         table.window_late_start
     );
-    s.push_str("/// Interfaces, parents first.\npub static INTERFACES: &[InterfaceDesc] = &[\n");
-    for i in &table.interfaces {
-        let _ = writeln!(s, "    {},", interface(i));
-    }
-    s.push_str(
-        "];\n\n/// Namespaces on the window.\npub static NAMESPACES: &[NamespaceDesc] = &[\n",
+    pool(
+        &mut s,
+        "Interfaces, parents first.",
+        "INTERFACES",
+        "InterfaceDesc",
+        &interfaces,
     );
-    for n in &table.namespaces {
-        let _ = writeln!(s, "    {},", namespace(n));
-    }
-    s.push_str("];\n\n/// Own properties of the window global, in Chrome's order.\npub static WINDOW_PROPS: &[GlobalProp] = &[\n");
-    for p in &table.window_props {
-        let _ = writeln!(s, "    {},", global(p));
-    }
-    s.push_str("];\n\n/// Window props that exist only in secure contexts.\npub static WINDOW_SECURE_ONLY: &[&str] = &[\n");
-    for n in &table.window_secure_only {
-        let _ = writeln!(s, "    {},", q(n));
-    }
-    s.push_str("];\n\n/// Members only some OSes have (`gate`, owner interface or `Window`, name).\npub static OS_GATED: &[OsGated] = &[\n");
-    for (gate, owner, name) in &table.os_gated {
-        let _ = writeln!(
-            s,
-            "    OsGated {{ gate: {}, owner: {}, name: {} }},",
-            q(gate),
-            q(owner),
-            q(name)
-        );
-    }
-    s.push_str("];\n");
+    pool(
+        &mut s,
+        "Namespaces on the window.",
+        "NAMESPACES",
+        "NamespaceDesc",
+        &namespaces,
+    );
+    pool(
+        &mut s,
+        "Own properties of the window global, in Chrome's order.",
+        "WINDOW_PROPS",
+        "GlobalProp",
+        &props,
+    );
+    pool(
+        &mut s,
+        "Window props that exist only in secure contexts.",
+        "WINDOW_SECURE_ONLY",
+        "S",
+        &secure,
+    );
+    pool(
+        &mut s,
+        "Members only some OSes have (`gate`, owner interface or `Window`, name).",
+        "OS_GATED",
+        "OsGated",
+        &gated,
+    );
+    pool(
+        &mut s,
+        "Attributes of all interfaces and namespaces.",
+        "ATTRS",
+        "AttrDesc",
+        &p.attrs,
+    );
+    pool(
+        &mut s,
+        "Operations of all interfaces and namespaces.",
+        "OPS",
+        "OpDesc",
+        &p.ops,
+    );
+    pool(&mut s, "Property orders.", "SLOTS", "Slot", &p.slots);
+    pool(
+        &mut s,
+        "String lists (aliases, unscopables).",
+        "NAMES",
+        "S",
+        &p.names,
+    );
+    pool(&mut s, "Constants.", "CONSTS", "(S, ConstValue)", &p.consts);
+    let _ = writeln!(
+        s,
+        "/// Every string of the table.\npub static STRINGS: &str = {:?};",
+        p.strings
+    );
     s
 }

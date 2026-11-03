@@ -300,7 +300,7 @@ fn descriptors_match_fixture_sample() {
     let (mut e, b, r) = setup(&Registry::new());
     let mut all = Vec::new();
     for d in b.table().interfaces.iter().filter(|d| d.from_fixture) {
-        for p in fx["interfaces"][d.name]["proto"]
+        for p in fx["interfaces"][d.name.get()]["proto"]
             .as_array()
             .into_iter()
             .flatten()
@@ -349,11 +349,11 @@ fn surface_matches(secure: bool) {
     let mut ok = 0;
     let mut bad = Vec::new();
     let present = |d: &&lb_webapi::desc::InterfaceDesc| {
-        d.from_fixture && fx["interfaces"].get(d.name).is_some()
+        d.from_fixture && fx["interfaces"].get(d.name.get()).is_some()
     };
     let total = b.table().interfaces.iter().filter(present).count();
     for d in b.table().interfaces.iter().filter(present) {
-        let f = &fx["interfaces"][d.name];
+        let f = &fx["interfaces"][d.name.get()];
         let want_proto = names(&f["proto"]).join(",");
         let want_static = names(&f["static"]).join(",");
         let want_syms: Vec<String> = f["protoSymbols"]
@@ -412,7 +412,7 @@ fn window_props_match(secure: bool) {
             )
         })
         .map(|p| p.name())
-        .filter(|n| secure || !b.table().window_secure_only.contains(n))
+        .filter(|n| secure || !b.table().window_secure_only.iter().any(|s| s.get() == *n))
         .filter(|n| !gated_global(&b, n))
         .collect();
     let got = eval_str(&mut e, r, "Object.getOwnPropertyNames(globalThis).join()");

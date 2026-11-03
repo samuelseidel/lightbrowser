@@ -53,6 +53,7 @@ RSS CDP 42.2 vs 31.4 MB (eager interface objects per realm). Details:
 | 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary < 40 MB: ICU data compressed in chunks and paged in on first touch, no unwind tables, V8 code that only off-by-default flags reach not linked; the window global's members are defined after context creation (linear, not V8's O(n²) template instantiation) |
 | 0014 | Page screenshots painted on demand from a per-capture display list (no retained paint state, never noised) |
 | 0015 | OS personas: one OS axis (`OsKind`, display server, distro) in `lb-persona`; layers read OS-dependent values through `PersonaProfile` accessors with per-OS defaults; rules R17-R26; catalog and generator |
+| 0016 | Interfaces defined on demand and interface objects as lazy data properties (as Blink), fixed up natively as each is made; no startup snapshot by default; `fetch` skips the initial about:blank realm and teardown; hot functions first in `.text` (order list from a training workload) |
 
 ## Layers
 

@@ -44,7 +44,7 @@ pub const PACKED: &[u8] = include_bytes!("../../icu/icudt78.dat.zch");
 /// Smaller chunks keep less of the package resident but compress worse:
 /// 128 KiB costs 0.43 MB of binary over one frame for the whole package
 /// (64 KiB: 0.58 MB, 256 KiB: 0.35 MB).
-pub const CHUNK: usize = 128 * 1024;
+pub const CHUNK: usize = 4 * 1024;
 
 const MAGIC: &[u8; 8] = b"LBICUZC1";
 
@@ -234,7 +234,7 @@ mod lazy {
     use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
     /// More than enough for the 10.9 MB package (84 chunks).
-    const MAX_CHUNKS: usize = 256;
+    const MAX_CHUNKS: usize = 4096;
 
     static BASE: AtomicUsize = AtomicUsize::new(0);
     static SPAN: AtomicUsize = AtomicUsize::new(0);
@@ -319,6 +319,12 @@ mod lazy {
             // SAFETY: errno is thread-local; restored before returning.
             let errno = unsafe { *libc::__errno_location() };
             let ok = fill((addr - base) / CHUNK, base);
+            {
+                let mut buf = *b"ICUPAGE 00000\n";
+                let mut n = (addr - base) / CHUNK;
+                for k in (8..13).rev() { buf[k] = b'0' + (n % 10) as u8; n /= 10; }
+                unsafe { libc::write(2, buf.as_ptr().cast(), buf.len()); }
+            }
             // SAFETY: as above.
             unsafe { *libc::__errno_location() = errno };
             if ok {

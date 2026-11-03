@@ -48,7 +48,7 @@ use lb_persona::BrowserFamily;
 
 use crate::desc::{
     ArrayIntrinsic, AttrDesc, AttrType, ConstValue, GlobalProp, InterfaceDesc, NamespaceDesc,
-    OpDesc, OpKind, Slot, SymbolIterator, Table,
+    OpDesc, OpKind, S, Slot, SymbolIterator, Table,
 };
 use crate::dom_exception::{DomExceptions, register_defaults};
 use crate::registry::{ImplKind, Registry, host_fn};
@@ -185,6 +185,7 @@ impl Bindings {
         let mut registry = registry.clone();
         register_defaults(&mut registry);
         register_window_defaults(&mut registry);
+        registry.freeze();
         let dom = registry.dom_exceptions();
         let registry = Rc::new(registry);
         let stubs = Rc::new(Stubs::new(dom.clone()));
@@ -201,7 +202,7 @@ impl Bindings {
             }
             // The only way `interface_spec` fails: checked now, so the
             // lazy spec cannot.
-            if let Some(p) = desc.parent
+            if let Some(p) = desc.parent.map(S::get)
                 && !shared.borrow().contains_key(p)
             {
                 return Err(InstallError::Unknown(p));
@@ -210,9 +211,9 @@ impl Bindings {
             let id = engine.define_interface_lazy(Box::new(move || {
                 let ids = ids.borrow();
                 interface_spec(table, desc, &reg, &st, &ids)
-                    .unwrap_or_else(|_| InterfaceSpec::new(desc.name))
+                    .unwrap_or_else(|_| InterfaceSpec::new(desc.name.get()))
             }));
-            shared.borrow_mut().insert(desc.name, id);
+            shared.borrow_mut().insert(desc.name.get(), id);
             if desc.name == "DOMException" {
                 dom.set_interface(id);
             }
@@ -237,6 +238,7 @@ impl Bindings {
         let mut factories: HashMap<&'static str, InterfaceId> = HashMap::new();
         for p in table.window_props {
             if let GlobalProp::LegacyFactory { name, iface } = *p {
+                let (name, iface) = (name.get(), iface.get());
                 let desc = table.interface(iface).ok_or(InstallError::Unknown(iface))?;
                 let mut spec = InterfaceSpec::new(name);
                 spec.to_string_tag = false;
@@ -253,7 +255,7 @@ impl Bindings {
         let window_desc = global_desc.ok_or(InstallError::Unknown("Window"))?;
         shared
             .borrow_mut()
-            .insert(window_desc.name, engine.next_interface_id());
+            .insert(window_desc.name.get(), engine.next_interface_id());
         let mut spec = {
             let ids = shared.borrow();
             let mut spec = interface_spec(table, window_desc, &registry, &stubs, &ids)?;
@@ -271,7 +273,7 @@ impl Bindings {
             .collect();
         let window = engine.define_interface(spec);
         let ids = shared.borrow().clone();
-        debug_assert_eq!(ids.get(window_desc.name), Some(&window));
+        debug_assert_eq!(ids.get(window_desc.name.get()), Some(&window));
 
         let base_fixups = base_fixups(table, &ids)?;
         let globals_fixup = globals_script(table);
@@ -290,7 +292,7 @@ impl Bindings {
                 .window_props
                 .iter()
                 .filter_map(|p| match p {
-                    GlobalProp::Other(n) => Some(*n),
+                    GlobalProp::Other(n) => Some(n.get()),
                     _ => None,
                 })
                 .collect(),
@@ -418,8 +420,8 @@ impl Bindings {
                     .table
                     .os_gated
                     .iter()
-                    .filter(|g| !os_gate_on(g.gate, apis))
-                    .map(|g| g.gate)
+                    .filter(|g| !os_gate_on(g.gate.get(), apis))
+                    .map(|g| g.gate.get())
                     .collect();
                 v.sort_unstable();
                 v.dedup();
@@ -585,24 +587,24 @@ fn attr_member(
         (ImplKind::Getter, ImplKind::Setter)
     };
     let get = registry
-        .get_declared(iface, a.name, gk)
+        .get_declared(iface, a.name.get(), gk)
         .cloned()
         .unwrap_or_else(|| stubs.getter(a.ty));
     let set = a.has_setter().then(|| {
         registry
-            .get_declared(iface, a.name, sk)
+            .get_declared(iface, a.name.get(), sk)
             .cloned()
             .unwrap_or_else(|| {
                 if let Some(fwd) = a.put_forwards {
-                    put_forwards_setter(iface, a.name, fwd)
+                    put_forwards_setter(iface, a.name.get(), fwd.get())
                 } else if a.replaceable {
-                    replaceable_setter(a.name)
+                    replaceable_setter(a.name.get())
                 } else {
                     stubs.set_ignore.clone()
                 }
             })
     });
-    Member::accessor(a.name, Some(get), set).with_attrs(PropAttrs {
+    Member::accessor(a.name.get(), Some(get), set).with_attrs(PropAttrs {
         writable: true,
         enumerable: a.enumerable,
         configurable: !a.unforgeable,
@@ -629,7 +631,7 @@ fn op_member(
             ArrayIntrinsic::Values => Intrinsic::ArrayProtoValues,
             ArrayIntrinsic::ForEach => Intrinsic::ArrayProtoForEach,
         };
-        return Member::intrinsic(o.name, intrinsic).with_attrs(attrs);
+        return Member::intrinsic(o.name.get(), intrinsic).with_attrs(attrs);
     }
     let kind = if statics {
         ImplKind::StaticMethod
@@ -637,7 +639,7 @@ fn op_member(
         ImplKind::Method
     };
     let f = registry
-        .get_declared(desc_name, o.name, kind)
+        .get_declared(desc_name, o.name.get(), kind)
         .cloned()
         .or_else(|| {
             // `toString` of `stringifier attribute x` is x's getter.
@@ -645,13 +647,13 @@ fn op_member(
             (o.kind == OpKind::Stringifier)
                 .then(|| {
                     registry
-                        .get_declared(desc_name, attr, ImplKind::Getter)
+                        .get_declared(desc_name, attr.get(), ImplKind::Getter)
                         .cloned()
                 })
                 .flatten()
         });
-    let f = f.unwrap_or_else(|| stubs.operation(desc_name, o.name));
-    Member::method(o.name, u32::from(o.length), f).with_attrs(attrs)
+    let f = f.unwrap_or_else(|| stubs.operation(desc_name, o.name.get()));
+    Member::method(o.name.get(), u32::from(o.length), f).with_attrs(attrs)
 }
 
 fn slot_member(
@@ -664,11 +666,17 @@ fn slot_member(
     match s {
         Slot::Const(i) => {
             let (n, v) = d.constants[i as usize];
-            const_member(n, v)
+            const_member(n.get(), v)
         }
-        Slot::Attr(i) => attr_member(d.name, &d.attributes[i as usize], registry, stubs, statics),
+        Slot::Attr(i) => attr_member(
+            d.name.get(),
+            &d.attributes[i as usize],
+            registry,
+            stubs,
+            statics,
+        ),
         Slot::Op(i) => op_member(
-            d.name,
+            d.name.get(),
             &d.operations[i as usize],
             Some(d),
             registry,
@@ -690,7 +698,7 @@ fn symbol_members(d: &InterfaceDesc, out: &mut Vec<Member>) {
         out.push(
             Member::value(
                 WellKnownSymbol::ToStringTag,
-                JsValue::String(d.to_string_tag.to_owned()),
+                JsValue::String(d.to_string_tag.get().to_owned()),
             )
             .with_attrs(PropAttrs {
                 writable: false,
@@ -721,11 +729,11 @@ fn interface_spec(
     stubs: &Stubs,
     ids: &HashMap<&'static str, InterfaceId>,
 ) -> Result<InterfaceSpec, InstallError> {
-    let mut spec = InterfaceSpec::new(d.name);
-    if let Some(p) = d.parent {
+    let mut spec = InterfaceSpec::new(d.name.get());
+    if let Some(p) = d.parent.map(S::get) {
         spec = spec.parent(*ids.get(p).ok_or(InstallError::Unknown(p))?);
     }
-    match registry.get(d.name, "", ImplKind::Constructor) {
+    match registry.get(d.name.get(), "", ImplKind::Constructor) {
         Some(f) if d.has_constructor => {
             spec = spec.constructor(u32::from(d.constructor_length), f.clone())
         }
@@ -749,7 +757,7 @@ fn interface_spec(
         // properties of every instance too (`isTrusted` on a MouseEvent).
         let mut chain = vec![d];
         let mut parent = d.parent;
-        while let Some(p) = parent.and_then(|p| table.interface(p)) {
+        while let Some(p) = parent.and_then(|p| table.interface(&p)) {
             chain.push(p);
             parent = p.parent;
         }
@@ -760,22 +768,22 @@ fn interface_spec(
             .map(|(a, s)| slot_member(a, *s, registry, stubs, false))
             .collect();
     }
-    if let Some(f) = registry.named_getter_for(d.name) {
+    if let Some(f) = registry.named_getter_for(d.name.get()) {
         spec = spec.named_getter(f.clone());
-        if let Some(f) = registry.named_setter_for(d.name) {
+        if let Some(f) = registry.named_setter_for(d.name.get()) {
             spec = spec.named_setter(f.clone());
         }
-        if let Some(f) = registry.named_deleter_for(d.name) {
+        if let Some(f) = registry.named_deleter_for(d.name.get()) {
             spec = spec.named_deleter(f.clone());
         }
-        if let Some(f) = registry.named_enumerator_for(d.name) {
+        if let Some(f) = registry.named_enumerator_for(d.name.get()) {
             spec = spec.named_enumerator(f.clone());
         }
-        spec.named_unenumerable = registry.is_named_unenumerable(d.name);
+        spec.named_unenumerable = registry.is_named_unenumerable(d.name.get());
     }
-    if let Some(f) = registry.indexed_getter_for(d.name) {
+    if let Some(f) = registry.indexed_getter_for(d.name.get()) {
         spec = spec.indexed_getter(f.clone());
-        if let Some(f) = registry.indexed_length_for(d.name) {
+        if let Some(f) = registry.indexed_length_for(d.name.get()) {
             spec = spec.indexed_length(f.clone());
         }
     }
@@ -789,11 +797,17 @@ fn namespace_member(n: &'static NamespaceDesc, registry: &Registry, stubs: &Stub
         .map(|s| match *s {
             Slot::Const(i) => {
                 let (name, v) = n.constants[i as usize];
-                const_member(name, v)
+                const_member(name.get(), v)
             }
-            Slot::Attr(i) => attr_member(n.name, &n.attributes[i as usize], registry, stubs, false),
+            Slot::Attr(i) => attr_member(
+                n.name.get(),
+                &n.attributes[i as usize],
+                registry,
+                stubs,
+                false,
+            ),
             Slot::Op(i) => op_member(
-                n.name,
+                n.name.get(),
                 &n.operations[i as usize],
                 None,
                 registry,
@@ -802,7 +816,7 @@ fn namespace_member(n: &'static NamespaceDesc, registry: &Registry, stubs: &Stub
             ),
         })
         .collect();
-    Member::namespace(n.name, n.to_string_tag, members)
+    Member::namespace(n.name.get(), n.to_string_tag.get(), members)
 }
 
 /// Own properties of the global, in table order.
@@ -821,6 +835,7 @@ fn global_members(
             // A slot the host fills (`window.chrome`), in Chrome's place.
             GlobalProp::Other(n) => out.push(Member::value(n, JsValue::Undefined)),
             GlobalProp::Interface(n) => {
+                let n = n.get();
                 // `Window` itself resolves to the id the window is about to
                 // get (`Engine::next_interface_id`).
                 out.push(Member::interface(
@@ -829,15 +844,18 @@ fn global_members(
                 ));
             }
             GlobalProp::Alias { name, target } => out.push(Member::interface(
-                name,
-                *ids.get(target).ok_or(InstallError::Unknown(target))?,
+                name.get(),
+                *ids.get(target.get())
+                    .ok_or(InstallError::Unknown(target.get()))?,
             )),
             GlobalProp::LegacyFactory { name, .. } => out.push(Member::interface(
-                name,
-                *factories.get(name).ok_or(InstallError::Unknown(name))?,
+                name.get(),
+                *factories
+                    .get(name.get())
+                    .ok_or(InstallError::Unknown(name.get()))?,
             )),
             GlobalProp::Namespace(n) => {
-                let ns = table.namespace(n).ok_or(InstallError::Unknown(n))?;
+                let ns = table.namespace(&n).ok_or(InstallError::Unknown(n.get()))?;
                 out.push(namespace_member(ns, registry, stubs));
             }
             GlobalProp::Attr(n) => {
@@ -901,8 +919,10 @@ fn base_fixups(
     let mut out = HashMap::new();
     let window = window_interfaces(table);
     for d in table.interfaces {
-        let Some(&id) = ids.get(d.name) else { continue };
-        if !window.contains(d.name) {
+        let Some(&id) = ids.get(d.name.get()) else {
+            continue;
+        };
+        if !window.contains(d.name.get()) {
             continue;
         }
         let mut fx = InterfaceFixup {
@@ -916,10 +936,10 @@ fn base_fixups(
                 })
                 .map(|s| d.slot_name(*s).to_owned())
                 .collect(),
-            unscopables: d.unscopables.iter().map(|s| (*s).to_owned()).collect(),
+            unscopables: d.unscopables.iter().map(|s| s.get().to_owned()).collect(),
             ..Default::default()
         };
-        match d.builtin_parent {
+        match d.builtin_parent.map(S::get) {
             None => {}
             Some("Error") => fx.error_proto = true,
             Some(other) => return Err(InstallError::Unknown(other)),
@@ -937,7 +957,7 @@ fn window_interfaces(table: &Table) -> std::collections::HashSet<&'static str> {
         .window_props
         .iter()
         .filter_map(|p| match p {
-            GlobalProp::Interface(n) => Some(*n),
+            GlobalProp::Interface(n) => Some(n.get()),
             _ => None,
         })
         .collect()
@@ -971,8 +991,10 @@ fn add_insecure_removals(
 ) {
     let window = window_interfaces(table);
     for d in table.interfaces {
-        let Some(&id) = ids.get(d.name) else { continue };
-        if d.is_global || !window.contains(d.name) {
+        let Some(&id) = ids.get(d.name.get()) else {
+            continue;
+        };
+        if d.is_global || !window.contains(d.name.get()) {
             continue;
         }
         let secure = |s: &Slot| match *s {
@@ -1005,7 +1027,7 @@ fn add_insecure_removals(
 fn insecure_window_script(table: &Table) -> String {
     format!(
         "(function(){{'use strict';const g=globalThis;for(const k of {})delete g[k];}})()",
-        js_list(table.window_secure_only.iter().copied())
+        js_list(table.window_secure_only.iter().map(|s| s.get()))
     )
 }
 
@@ -1029,20 +1051,25 @@ fn add_os_gate_removals(
 ) {
     let window = window_interfaces(table);
     for g in table.os_gated {
-        if os_gate_on(g.gate, apis) || g.owner == "Window" || !window.contains(g.owner) {
+        if os_gate_on(g.gate.get(), apis)
+            || g.owner.get() == "Window"
+            || !window.contains(g.owner.get())
+        {
             continue;
         }
-        let Some(&id) = ids.get(g.owner) else {
+        let Some(&id) = ids.get(g.owner.get()) else {
             continue;
         };
-        let is_static = table
-            .interface(g.owner)
-            .is_some_and(|d| d.static_order.iter().any(|s| d.slot_name(*s) == g.name));
+        let is_static = table.interface(g.owner.get()).is_some_and(|d| {
+            d.static_order
+                .iter()
+                .any(|s| d.slot_name(*s) == g.name.get())
+        });
         let fx = out.entry(id).or_default();
         if is_static {
-            fx.remove_static.push(g.name.to_owned());
+            fx.remove_static.push(g.name.get().to_owned());
         } else {
-            fx.remove_proto.push(g.name.to_owned());
+            fx.remove_proto.push(g.name.get().to_owned());
         }
     }
 }
@@ -1054,8 +1081,8 @@ fn os_gate_window_script(table: &Table, apis: lb_persona::OsApis) -> Option<Stri
     let window: Vec<&str> = table
         .os_gated
         .iter()
-        .filter(|g| !os_gate_on(g.gate, apis) && g.owner == "Window")
-        .map(|g| g.name)
+        .filter(|g| !os_gate_on(g.gate.get(), apis) && g.owner.get() == "Window")
+        .map(|g| g.name.get())
         .collect();
     if window.is_empty() {
         return None;
@@ -1075,7 +1102,7 @@ mod tests {
         let table = &crate::generated::chromium::TABLE;
         let mut ids = HashMap::new();
         for (i, d) in table.interfaces.iter().enumerate() {
-            ids.insert(d.name, InterfaceId(i as u32));
+            ids.insert(d.name.get(), InterfaceId(i as u32));
         }
         let fx = base_fixups(table, &ids).unwrap();
         let xhr = &fx[&ids["XMLHttpRequest"]];

@@ -17,7 +17,7 @@ use lb_js::{
 use crate::dom_exception::DomExceptions;
 
 /// What a registered function implements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ImplKind {
     /// Attribute getter (prototype, instance, global or namespace).
     Getter,
@@ -79,10 +79,60 @@ impl KeyHasher {
 
 type KeyMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
 
+type FnKey = (&'static str, &'static str, ImplKind);
+
+/// Registered functions: a hash map while registering, a sorted list once
+/// frozen ([`Registry::freeze`]; about half the memory, and the registry
+/// lives as long as its engine).
+#[derive(Clone)]
+enum Fns {
+    Map(KeyMap<FnKey, HostFn>),
+    Sorted(Rc<[(FnKey, HostFn)]>),
+}
+
+impl Default for Fns {
+    fn default() -> Self {
+        Fns::Map(KeyMap::default())
+    }
+}
+
+impl Fns {
+    fn map(&mut self) -> &mut KeyMap<FnKey, HostFn> {
+        if let Fns::Sorted(list) = self {
+            *self = Fns::Map(list.iter().cloned().collect());
+        }
+        match self {
+            Fns::Map(m) => m,
+            Fns::Sorted(_) => unreachable!(),
+        }
+    }
+    fn get(&self, key: &FnKey) -> Option<&HostFn> {
+        match self {
+            Fns::Map(m) => m.get(key),
+            Fns::Sorted(list) => list
+                .binary_search_by(|(k, _)| k.cmp(key))
+                .ok()
+                .map(|i| &list[i].1),
+        }
+    }
+    fn len(&self) -> usize {
+        match self {
+            Fns::Map(m) => m.len(),
+            Fns::Sorted(list) => list.len(),
+        }
+    }
+    fn keys(&self) -> Vec<&FnKey> {
+        match self {
+            Fns::Map(m) => m.keys().collect(),
+            Fns::Sorted(list) => list.iter().map(|(k, _)| k).collect(),
+        }
+    }
+}
+
 /// Registered implementations. Cheap to build; one per engine.
 #[derive(Clone, Default)]
 pub struct Registry {
-    fns: KeyMap<(&'static str, &'static str, ImplKind), HostFn>,
+    fns: Fns,
     named: KeyMap<&'static str, NamedGetter>,
     indexed: KeyMap<&'static str, IndexedGetter>,
     named_set: KeyMap<&'static str, NamedSetter>,
@@ -108,7 +158,7 @@ impl Inherit {
                 self.table
                     .interfaces
                     .iter()
-                    .filter_map(|d| Some((d.name, d.parent?)))
+                    .filter_map(|d| Some((d.name.get(), d.parent?.get())))
                     .collect()
             })
             .get(iface)
@@ -130,7 +180,7 @@ impl Registry {
         kind: ImplKind,
         f: HostFn,
     ) -> &mut Self {
-        self.fns.insert((iface, member, kind), f);
+        self.fns.map().insert((iface, member, kind), f);
         self
     }
 
@@ -282,6 +332,23 @@ impl Registry {
         self.indexed.get(iface)
     }
 
+    /// Store compactly: a registry is kept for its engine's life once its
+    /// interfaces are defined lazily. Registering again later still works.
+    pub fn freeze(&mut self) {
+        if let Fns::Map(m) = &mut self.fns {
+            let mut list: Vec<(FnKey, HostFn)> = m.drain().collect();
+            list.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            self.fns = Fns::Sorted(list.into());
+        }
+        self.named.shrink_to_fit();
+        self.indexed.shrink_to_fit();
+        self.named_set.shrink_to_fit();
+        self.named_delete.shrink_to_fit();
+        self.named_enum.shrink_to_fit();
+        self.indexed_len.shrink_to_fit();
+        self.unenumerable.shrink_to_fit();
+    }
+
     /// Number of registered functions (getters, setters, methods, ...).
     pub fn len(&self) -> usize {
         self.fns.len() + self.named.len() + self.indexed.len()
@@ -300,7 +367,7 @@ impl Registry {
 
 impl std::fmt::Debug for Registry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut keys: Vec<_> = self.fns.keys().collect();
+        let mut keys: Vec<_> = self.fns.keys();
         keys.sort_by_key(|(i, m, _)| (*i, *m));
         f.debug_struct("Registry")
             .field("fns", &keys)

@@ -943,7 +943,7 @@ impl PageHost for CdpHost {
                 .find(|(k, _)| *k == id)
                 .map(|(_, b)| b.clone())
                 .ok_or_else(|| HostError::new("No resource with given identifier found"))?;
-            Ok(match String::from_utf8(body) {
+            Ok(match String::from_utf8(body.to_vec()) {
                 Ok(s) => (s, false),
                 Err(e) => (net::base64_encode(e.as_bytes()), true),
             })

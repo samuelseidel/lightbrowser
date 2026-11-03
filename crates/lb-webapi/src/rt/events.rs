@@ -1094,8 +1094,8 @@ fn register_handlers(reg: &mut Registry, rt: &Runtime) {
             if !a.name.starts_with("on") || a.ty != AttrType::Null || a.readonly {
                 continue;
             }
-            let iface = d.name;
-            let name = a.name;
+            let iface = d.name.get();
+            let name = a.name.get();
             let forwards = matches!(iface, "HTMLBodyElement" | "HTMLFrameSetElement")
                 && body_forwards_to_window(name);
             let target = move |cx: &mut CallCtx<'_, '_, '_>| -> Result<HostRef, HostError> {

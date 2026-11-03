@@ -86,7 +86,7 @@ pub(crate) async fn navigate_committed(
             status: 200,
             status_text: "OK".into(),
             headers: vec![("content-type".into(), "text/html".into())],
-            body: Vec::new(),
+            body: bytes::Bytes::new(),
             url: url.clone(),
             redirected: false,
         })

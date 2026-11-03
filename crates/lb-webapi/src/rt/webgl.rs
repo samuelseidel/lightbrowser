@@ -331,7 +331,7 @@ fn constant_values() -> HashMap<&'static str, u32> {
         if let Some(d) = crate::generated::chromium::TABLE.interface(iface) {
             for (n, v) in d.constants {
                 if let crate::desc::ConstValue::Number(x) = v {
-                    m.insert(*n, *x as u32);
+                    m.insert(n.get(), *x as u32);
                 }
             }
         }
@@ -1424,7 +1424,7 @@ fn register_defaults(reg: &mut Registry, rt: &Runtime) {
             continue;
         };
         for op in d.operations {
-            let (name, len) = (op.name, usize::from(op.length));
+            let (name, len) = (op.name.get(), usize::from(op.length));
             method(reg, rt, iface, name, move |cx, w| {
                 super::need_args(cx, len, name, iface)?;
                 let _ = this_gl(cx, w)?;
@@ -2408,7 +2408,7 @@ fn register_uniforms(reg: &mut Registry, rt: &Runtime) {
     let names: Vec<&'static str> = IFACES
         .iter()
         .filter_map(|i| crate::generated::chromium::TABLE.interface(i))
-        .flat_map(|d| d.operations.iter().map(|o| o.name))
+        .flat_map(|d| d.operations.iter().map(|o| o.name.get()))
         .filter(|n| n.starts_with("uniform") && !n.starts_with("uniformBlock"))
         .collect::<HashSet<_>>()
         .into_iter()

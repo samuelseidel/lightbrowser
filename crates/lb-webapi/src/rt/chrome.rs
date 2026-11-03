@@ -237,7 +237,7 @@ mod tests {
         let props = crate::generated::chromium::TABLE.window_props;
         let at = props
             .iter()
-            .position(|p| matches!(p, crate::desc::GlobalProp::Other("chrome")))
+            .position(|p| matches!(p, crate::desc::GlobalProp::Other(_)) && p.name() == "chrome")
             .unwrap();
         assert_eq!(props[at - 1].name(), "WebAssembly");
         assert_eq!(props[at + 1].name(), "crashReport");

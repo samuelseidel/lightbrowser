@@ -563,7 +563,7 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
                         status: resp.status,
                         status_text: resp.status_text.clone(),
                         headers: h,
-                        body: Some(resp.body),
+                        body: Some(Vec::from(resp.body)),
                         used: false,
                         url: resp.url.to_string(),
                         redirected: resp.redirected,
@@ -910,7 +910,7 @@ fn xhr_complete(
                 return;
             }
             with_xhr(w, id, |x| {
-                x.body = resp.body;
+                x.body = Vec::from(resp.body);
                 x.ready_state = 3;
             });
             xhr_rsc(js, w, id);

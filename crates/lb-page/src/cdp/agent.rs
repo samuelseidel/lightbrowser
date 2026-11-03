@@ -76,7 +76,7 @@ pub(crate) struct AgentState {
     pub intercept: Option<Vec<RequestPattern>>,
     pub extra_headers: Vec<(String, String)>,
     /// Bodies of recent responses for `Network.getResponseBody`.
-    pub bodies: VecDeque<(String, Vec<u8>)>,
+    pub bodies: VecDeque<(String, bytes::Bytes)>,
     pub viewport: Option<(u32, u32)>,
     /// Navigation sequence of the current document (backend node ids).
     pub seq: u64,
@@ -746,7 +746,7 @@ impl Agent {
         self.st.borrow().seq
     }
 
-    pub(crate) fn store_body(&self, request_id: &str, body: Vec<u8>) {
+    pub(crate) fn store_body(&self, request_id: &str, body: bytes::Bytes) {
         let mut st = self.st.borrow_mut();
         st.bodies.push_back((request_id.to_string(), body));
         while st.bodies.len() > MAX_BODIES {

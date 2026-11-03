@@ -372,30 +372,74 @@ def lightpanda_target(binary: str) -> Target:
     )
 
 
+# Runs `fetch` processes for `run_fetch` and reports their rusage. A child's
+# ru_maxrss also counts the RSS its parent had when the child called exec
+# (Linux copies the old mm's high-water mark at exec), so spawned straight
+# from this process (tens of MB with Playwright loaded, growing over the
+# run) every `fetch` process "peaked" at this process's size. This helper
+# stays small (~10 MB, below any browser measured here), so the peak is the
+# browser's own. Protocol: one argv per line (NUL-separated, hex-encoded);
+# reply "exit utime stime maxrss_kb nbytes\n" plus the child's stdout.
+SPAWNER = r"""
+import os, sys
+inp, out = sys.stdin.buffer, sys.stdout.buffer
+for line in inp:
+    argv = bytes.fromhex(line.strip().decode()).split(b"\0")
+    r, w = os.pipe()
+    fa = [(os.POSIX_SPAWN_DUP2, w, 1), (os.POSIX_SPAWN_CLOSE, r), (os.POSIX_SPAWN_CLOSE, w)]
+    devnull = os.open(os.devnull, os.O_RDWR)
+    fa += [(os.POSIX_SPAWN_DUP2, devnull, 0), (os.POSIX_SPAWN_DUP2, devnull, 2)]
+    pid = os.posix_spawn(argv[0], argv, os.environ, file_actions=fa)
+    os.close(w)
+    os.close(devnull)
+    chunks = []
+    while True:
+        b = os.read(r, 1 << 16)
+        if not b:
+            break
+        chunks.append(b)
+    os.close(r)
+    _, status, ru = os.wait4(pid, 0)
+    data = b"".join(chunks)
+    out.write(f"{os.waitstatus_to_exitcode(status)} {ru.ru_utime} {ru.ru_stime} {ru.ru_maxrss} {len(data)}\n".encode())
+    out.write(data)
+    out.flush()
+"""
+
+
 def run_fetch(t: Target, urls: list[str], expect: list[int]) -> dict:
-    """One process per page. Exact CPU and peak RSS come from wait4 rusage."""
+    """One process per page. Exact CPU and peak RSS come from wait4 rusage,
+    taken in a small spawner process (see `SPAWNER`)."""
     walls, cpus, rss, verified, errors = [], [], [], 0, []
     with tempfile.TemporaryDirectory(prefix="lbbench-") as tmp:
         env = clean_env(tmp)
-        crawl0 = time.perf_counter()
-        for url, want in zip(urls, expect):
-            t0 = time.perf_counter()
-            p = subprocess.Popen(t.fetch_argv(url), env=env, cwd=tmp, stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            _children.append(p)
-            out = p.stdout.read()  # returns at EOF, when the process has exited
-            _, status, ru = os.wait4(p.pid, 0)
-            walls.append((time.perf_counter() - t0) * 1e3)
-            p.returncode = os.waitstatus_to_exitcode(status)
-            cpus.append(ru.ru_utime + ru.ru_stime)
-            rss.append(ru.ru_maxrss / 1024)  # KB on Linux
-            if p.returncode != 0:
-                errors.append(f"{url}: exit {p.returncode}")
-            elif f'{MARK}="{want}"'.encode() in out:
-                verified += 1
-            else:
-                errors.append(f"{url}: marker {MARK}={want} missing")
-        total = time.perf_counter() - crawl0
+        sp = subprocess.Popen([sys.executable, "-I", "-S", "-c", SPAWNER], env=env, cwd=tmp,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        _children.append(sp)
+        try:
+            crawl0 = time.perf_counter()
+            for url, want in zip(urls, expect):
+                argv = t.fetch_argv(url)
+                argv[0] = shutil.which(argv[0]) or argv[0]
+                t0 = time.perf_counter()
+                sp.stdin.write("\0".join(argv).encode().hex().encode() + b"\n")
+                sp.stdin.flush()
+                head = sp.stdout.readline().split()
+                code, utime, stime, maxrss_kb, n = int(head[0]), float(head[1]), float(head[2]), int(head[3]), int(head[4])
+                out = sp.stdout.read(n)
+                walls.append((time.perf_counter() - t0) * 1e3)
+                cpus.append(utime + stime)
+                rss.append(maxrss_kb / 1024)  # KB on Linux
+                if code != 0:
+                    errors.append(f"{url}: exit {code}")
+                elif f'{MARK}="{want}"'.encode() in out:
+                    verified += 1
+                else:
+                    errors.append(f"{url}: marker {MARK}={want} missing")
+            total = time.perf_counter() - crawl0
+        finally:
+            sp.stdin.close()
+            sp.wait()
         leftovers = tree_files(tmp)
     return {
         "pages": len(urls), "verified": verified, "errors": errors[:5],

@@ -13,6 +13,7 @@ chrome = ["lb-js/chrome", "dep:lb-paint"]
 firefox = ["lb-js/firefox"]
 
 [dependencies]
+bytes = "1"
 lb-js = { path = "../lb-js", default-features = false }
 lb-persona = { path = "../lb-persona" }
 lb-dom = { path = "../lb-dom" }

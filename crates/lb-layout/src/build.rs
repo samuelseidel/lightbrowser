@@ -108,6 +108,8 @@ impl<'a> Builder<'a> {
                 self.tree.append(root, it.idx);
             }
         }
+        // The box list grew by doubling and lives as long as the layout.
+        self.tree.boxes.shrink_to_fit();
         Built {
             tree: self.tree,
             root,

@@ -21,6 +21,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0013](0013-startup-snapshot-and-size-budget.md) | V8 startup snapshot made in memory; binary budget follows the V8 floor | Accepted (2026-11-03) |
 | [0014](0014-on-demand-page-screenshots.md) | Page screenshots painted on demand from the layout | Accepted (2026-11-03) |
 | [0015](0015-os-personas.md) | OS personas: one OS axis, read through accessors | Accepted (2026-11-03) |
+| [0016](0016-lazy-interface-objects.md) | Lazy interfaces and interface objects; hot code packed at link time | Accepted (2026-11-03) |
 
 ## Adding an ADR
 

@@ -1392,6 +1392,7 @@ dependencies = [
 name = "lb-webapi"
 version = "0.0.1"
 dependencies = [
+ "bytes",
  "encoding_rs",
  "form_urlencoded",
  "lb-css",

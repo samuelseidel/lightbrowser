@@ -268,7 +268,7 @@ impl BrowserContext {
                 status: resp.status.as_u16(),
                 status_text: resp.status.canonical_reason().unwrap_or("").to_owned(),
                 headers: resp.headers,
-                body: resp.body.to_vec(),
+                body: resp.body,
                 redirected: resp.final_url != url,
                 url: resp.final_url,
             },

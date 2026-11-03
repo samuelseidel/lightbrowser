@@ -50,7 +50,7 @@ pub(crate) struct ImgState {
     seq: u32,
     status: Status,
     info: Option<ImageInfo>,
-    bytes: Option<Rc<Vec<u8>>>,
+    bytes: Option<bytes::Bytes>,
     content_type: Option<String>,
     decoded: Option<Rc<Pixmap>>,
     cors_ok: bool,
@@ -352,35 +352,38 @@ fn fetch(w: &Rc<Window>, n: NodeId, url: Url, seq: u32, delay_load: bool) {
     if delay_load {
         w.pending_loads.set(w.pending_loads.get() + 1);
     }
-    let done =
-        move |js: &mut dyn Js, w: &Rc<Window>, r: Result<(Vec<u8>, Option<String>, bool), ()>| {
-            let ok = match r {
-                Ok((bytes, ct, cors_ok)) => {
-                    let probed = decode::probe(&bytes, ct.as_deref());
-                    let current = with_state(w, n, |st| st.seq == seq);
-                    if current {
-                        with_state(w, n, |st| {
-                            st.cors_ok = cors_ok;
-                            match probed {
-                                Ok(info) => {
-                                    st.info = Some(info);
-                                    st.bytes = Some(Rc::new(bytes));
-                                    st.content_type = ct;
-                                    true
-                                }
-                                Err(_) => false,
+    let done = move |js: &mut dyn Js,
+                     w: &Rc<Window>,
+                     r: Result<(bytes::Bytes, Option<String>, bool), ()>| {
+        let ok = match r {
+            Ok((bytes, ct, cors_ok)) => {
+                let probed = decode::probe(&bytes, ct.as_deref());
+                let current = with_state(w, n, |st| st.seq == seq);
+                if current {
+                    with_state(w, n, |st| {
+                        st.cors_ok = cors_ok;
+                        match probed {
+                            Ok(info) => {
+                                st.info = Some(info);
+                                st.bytes = Some(bytes);
+                                st.content_type = ct;
+                                true
                             }
-                        })
-                    } else {
-                        false
-                    }
+                            Err(_) => false,
+                        }
+                    })
+                } else {
+                    false
                 }
-                Err(()) => false,
-            };
-            settle(js, w, n, seq, ok, delay_load);
+            }
+            Err(()) => false,
         };
+        settle(js, w, n, seq, ok, delay_load);
+    };
     if url.scheme() == "data" {
-        let r = data_url(&url).map(|(b, m)| (b, Some(m), true)).ok_or(());
+        let r = data_url(&url)
+            .map(|(b, m)| (b.into(), Some(m), true))
+            .ok_or(());
         let w2 = w.clone();
         w.queue_task(
             TaskSource::Networking,

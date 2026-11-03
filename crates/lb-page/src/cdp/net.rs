@@ -385,7 +385,7 @@ pub(crate) async fn page_fetch(
                             .to_string()
                     }),
                     headers,
-                    body,
+                    body: body.into(),
                     url: req.url.clone(),
                     redirected: false,
                 });

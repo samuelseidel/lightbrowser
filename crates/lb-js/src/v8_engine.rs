@@ -1001,7 +1001,7 @@ impl Engine {
                 compiled: Some(BrowserFamily::Chrome),
             });
         }
-        init_v8(&std::env::var("LB_EXP_V8FLAGS").unwrap_or_default());
+        init_v8("");
         let mut params = v8::CreateParams::default();
         if let Some(max) = options.max_heap_bytes {
             params = params.heap_limits(0, max);

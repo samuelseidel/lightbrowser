@@ -9,15 +9,19 @@ set costs resident memory and page faults; a packed one does not.
 
 Training workload (loopback only, never the bench corpus, which is what the
 result is measured on): the detect-bench pages served by
-tests/detect-bench/server.py and the WPT subset served from tests/wpt.
+tests/detect-bench/server.py, the WPT subset served from tests/wpt, and
+tools/hot_symbols/pages/common.html, a generic page (images of the common
+formats, flex and grid layout, a table and a form, layout queries, number
+and date formatting, timers, storage, XHR and fetch).
 Each page is loaded with `lightbrowser fetch` (one process per page); one
 `lightbrowser serve` loads them all twice through Playwright (new page,
 goto, evaluate, content, close) and then idles; another `serve` only
 idles. Each run goes under valgrind's callgrind. Every function of the
 binary that ran is listed: first those an idle `serve` runs (start-up),
-then by the number of `fetch` runs that used it (code every page load
-needs before code only some pages need; code only the crawl ran counts as
-used by all), then by instructions.
+then by the share of `fetch` runs that used it, each source of pages
+weighing the same (code every page load needs before code only some pages
+need; code only the crawl ran counts as used by all), then by
+instructions.
 
 Needs valgrind, Python Playwright and an unstripped release build:
 
@@ -85,6 +89,26 @@ def wait_port(port: int, timeout: float = 30.0) -> None:
     sys.exit(f"nothing listening on 127.0.0.1:{port}")
 
 
+def write_pages(www: Path) -> None:
+    """The generic training page, with its images made here."""
+    shutil.copytree(Path(__file__).resolve().parent / "pages", www)
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+    if Image is None:
+        return
+    img = Image.new("RGB", (160, 100))
+    for x in range(160):
+        for y in range(100):
+            img.putpixel((x, y), ((x * 3) % 256, (y * 5) % 256, (x + y) % 256))
+    for ext, fmt in (("png", "PNG"), ("jpg", "JPEG"), ("gif", "GIF"), ("webp", "WEBP")):
+        try:
+            img.save(www / f"pic.{ext}", fmt)
+        except (KeyError, OSError):
+            pass
+
+
 def parse(path: Path, cost: collections.Counter, binary: str) -> None:
     """Add self cost per function of `binary` from a callgrind file (with
     name compression)."""
@@ -113,22 +137,35 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--binary", default=str(ROOT / "target/release/lightbrowser"))
     ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--keep", help="keep the callgrind profiles in this directory")
+    ap.add_argument("--reuse", help="only rank: read the profiles a --keep run left here")
     args = ap.parse_args()
     binary = str(Path(args.binary).resolve())
     if b".symtab" not in subprocess.run(["readelf", "-S", binary], capture_output=True).stdout:
         sys.exit("the binary has no symbols: build it with strip=false (see --help)")
+    if args.reuse:
+        return rank(Path(args.reuse), binary, Path(args.out))
     env = loopback_env()
-    tmp = Path(tempfile.mkdtemp(prefix="lbhot-"))
-    atexit.register(shutil.rmtree, tmp, True)
-    det_port, wpt_port = free_port(), free_port()
+    if args.keep:
+        tmp = Path(args.keep)
+        tmp.mkdir(parents=True, exist_ok=True)
+    else:
+        tmp = Path(tempfile.mkdtemp(prefix="lbhot-"))
+        atexit.register(shutil.rmtree, tmp, True)
+    det_port, wpt_port, pages_port = free_port(), free_port(), free_port()
+    write_pages(tmp / "www")
     servers = [
         subprocess.Popen([sys.executable, str(ROOT / "tests/detect-bench/server.py"), "--port", str(det_port),
                           "--results-dir", str(tmp / "results"), "--quiet"],
                          env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
         subprocess.Popen([sys.executable, "-m", "http.server", str(wpt_port), "--bind", "127.0.0.1"],
                          cwd=ROOT / "tests/wpt", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+        subprocess.Popen([sys.executable, "-m", "http.server", str(pages_port), "--bind", "127.0.0.1"],
+                         cwd=tmp / "www", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
     ]
-    urls = [f"http://127.0.0.1:{det_port}{p}" for p in SITES] + [f"http://127.0.0.1:{wpt_port}/{p}" for p in WPT]
+    urls = ([f"http://127.0.0.1:{det_port}{p}" for p in SITES]
+            + [f"http://127.0.0.1:{wpt_port}/{p}" for p in WPT]
+            + [f"http://127.0.0.1:{pages_port}/common.html"])
     vg = ["valgrind", "--tool=callgrind", "--demangle=no", "--fair-sched=yes"]
     outs = []
     idle = tmp / "idle"
@@ -140,8 +177,10 @@ def main() -> int:
         sp.wait(timeout=300)
         wait_port(det_port)
         wait_port(wpt_port)
+        wait_port(pages_port)
         for i, url in enumerate(urls):
-            out = tmp / f"fetch.{i}"
+            group = "sites" if i < len(SITES) else "wpt" if i < len(SITES) + len(WPT) else "common"
+            out = tmp / f"fetch.{group}.{i}"
             subprocess.run(vg + [f"--callgrind-out-file={out}", binary, "fetch", url, "--dump", "html"],
                            cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
             outs.append(out)
@@ -178,29 +217,42 @@ def main() -> int:
         for s in servers:
             s.terminate()
             s.wait()
+    return rank(tmp, binary, Path(args.out))
+
+
+def rank(tmp: Path, binary: str, out: Path) -> int:
+    """Rank the functions of the profiles in `tmp` and write the list."""
     cost: collections.Counter = collections.Counter()
-    runs: collections.Counter = collections.Counter()
-    for o in outs:
+    use: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    size: collections.Counter = collections.Counter()
+    for o in sorted(tmp.glob("fetch.*")):
+        group = o.name.split(".")[1]
         c: collections.Counter = collections.Counter()
         parse(o, c, binary)
         cost.update(c)
-        runs.update(c.keys())
+        use[group].update(c.keys())
+        size[group] += 1
     serve: collections.Counter = collections.Counter()
-    parse(serve_out, serve, binary)
+    parse(tmp / "serve", serve, binary)
     cost.update(serve)
     start: collections.Counter = collections.Counter()
-    parse(idle, start, binary)
-    if not start or not serve or not runs:
+    parse(tmp / "idle", start, binary)
+    if not start or not serve or not size:
         sys.exit("no profile data for the binary (callgrind output names another object?)")
-    # Code only the crawl ran (CDP, GC, tier-up) runs for every page there:
-    # rank it with code every page load runs.
-    every = len(outs)
+
+    def share(n: str) -> float:
+        # Each source of pages weighs the same, whatever its page count;
+        # code only the crawl ran (CDP, GC, tier-up) ranks with code every
+        # page load runs.
+        s = sum(use[g][n] / size[g] for g in size) / len(size)
+        return s if s > 0 else (1.0 if n in serve else 0.0)
+
     names = sorted(
         (n for n in cost.keys() | start.keys() if not n.startswith("0x") and "'" not in n),
-        key=lambda n: (n not in start, -(runs[n] or (every if n in serve else 0)), -cost[n], n),
+        key=lambda n: (n not in start, -share(n), -cost[n], n),
     )
-    Path(args.out).write_text("\n".join(names) + "\n")
-    print(f"{len(names)} functions -> {args.out}")
+    out.write_text("\n".join(names) + "\n")
+    print(f"{len(names)} functions -> {out}")
     return 0
 
 

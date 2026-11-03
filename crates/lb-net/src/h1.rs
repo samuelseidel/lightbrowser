@@ -181,6 +181,9 @@ where
             if len > max_body {
                 return Err(NetError::BodyTooLarge { limit: max_body });
             }
+            // One allocation of the body's size, not doubling growth: the
+            // frozen buffer is the body pages keep (images, scripts).
+            buf.reserve(len.saturating_sub(buf.len()));
             while buf.len() < len {
                 if io.read_buf(&mut buf).await.map_err(NetError::Connect)? == 0 {
                     return Err(NetError::Http("connection closed inside the body".into()));
