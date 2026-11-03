@@ -130,7 +130,10 @@ struct Fixture {
 
 fn load_fixture(v: &Value) -> Result<Fixture, String> {
     let mut interfaces = HashMap::new();
-    for (name, f) in v["interfaces"].as_object().ok_or("fixture: no interfaces")? {
+    for (name, f) in v["interfaces"]
+        .as_object()
+        .ok_or("fixture: no interfaces")?
+    {
         interfaces.insert(
             name.clone(),
             FixIface {
@@ -228,9 +231,20 @@ fn attr_ty(model: &Model, t: &Type) -> AttrTy {
     match t.name.as_str() {
         "EventHandler" | "OnErrorEventHandler" | "OnBeforeUnloadEventHandler" => AttrTy::Null,
         "boolean" => AttrTy::Bool,
-        "byte" | "octet" | "short" | "unsigned short" | "long" | "unsigned long" | "long long"
-        | "unsigned long long" | "float" | "unrestricted float" | "double"
-        | "unrestricted double" | "DOMHighResTimeStamp" | "EpochTimeStamp" => AttrTy::Number,
+        "byte"
+        | "octet"
+        | "short"
+        | "unsigned short"
+        | "long"
+        | "unsigned long"
+        | "long long"
+        | "unsigned long long"
+        | "float"
+        | "unrestricted float"
+        | "double"
+        | "unrestricted double"
+        | "DOMHighResTimeStamp"
+        | "EpochTimeStamp" => AttrTy::Number,
         "DOMString" | "USVString" | "ByteString" | "CSSOMString" => AttrTy::String,
         n if model.enums.contains(n) => AttrTy::String,
         _ => AttrTy::Other,
@@ -250,9 +264,16 @@ fn parse_const(v: &str) -> ConstV {
                 None => (false, v),
             };
             let n = if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-                u64::from_str_radix(hex, 16).map(|n| n as f64).unwrap_or(0.0)
-            } else if body.len() > 1 && body.starts_with('0') && body.bytes().all(|b| b.is_ascii_digit()) {
-                u64::from_str_radix(&body[1..], 8).map(|n| n as f64).unwrap_or(0.0)
+                u64::from_str_radix(hex, 16)
+                    .map(|n| n as f64)
+                    .unwrap_or(0.0)
+            } else if body.len() > 1
+                && body.starts_with('0')
+                && body.bytes().all(|b| b.is_ascii_digit())
+            {
+                u64::from_str_radix(&body[1..], 8)
+                    .map(|n| n as f64)
+                    .unwrap_or(0.0)
             } else {
                 body.parse::<f64>().unwrap_or(0.0)
             };
@@ -271,6 +292,7 @@ fn op(name: &str, length: usize, kind: OpKind) -> Op {
         enumerable: true,
         late: false,
         kind,
+        secure_only: false,
     }
 }
 
@@ -360,6 +382,7 @@ fn derive(model: &Model, iface: &IdlInterface) -> Derived {
                     enumerable: !m.member.ext.has("NotEnumerable"),
                     late: false,
                     ty: attr_ty(model, ty),
+                    secure_only: false,
                 };
                 if *stringifier {
                     d.stringifier = true;
@@ -466,7 +489,11 @@ fn derive(model: &Model, iface: &IdlInterface) -> Derived {
         });
     }
     if d.stringifier && !d.cands.iter().any(|c| c.name == "toString") {
-        let place = if is_global { Place::Instance } else { Place::Proto };
+        let place = if is_global {
+            Place::Instance
+        } else {
+            Place::Proto
+        };
         d.cands.push(Cand {
             name: "toString".into(),
             place,
@@ -548,8 +575,10 @@ fn derive(model: &Model, iface: &IdlInterface) -> Derived {
         }
         Iterable::None => {}
     }
-    if matches!(d.iterable, Iterable::Maplike { .. } | Iterable::Setlike { .. })
-        && !d.cands.iter().any(|c| c.name == "size")
+    if matches!(
+        d.iterable,
+        Iterable::Maplike { .. } | Iterable::Setlike { .. }
+    ) && !d.cands.iter().any(|c| c.name == "size")
     {
         d.cands.push(Cand {
             name: "size".into(),
@@ -566,6 +595,7 @@ fn derive(model: &Model, iface: &IdlInterface) -> Derived {
                 enumerable: true,
                 late: false,
                 ty: AttrTy::Number,
+                secure_only: false,
             }),
             features: Vec::new(),
             exposed: iface_exposed,
@@ -584,8 +614,16 @@ fn derive(model: &Model, iface: &IdlInterface) -> Derived {
 fn natural_order(cands: &[&Cand]) -> Vec<String> {
     let mut v: Vec<&&Cand> = cands.iter().collect();
     v.sort_by(|a, b| {
-        let ka = (a.conditional, a.rank.0, if a.rank.0 >= 4 { 0 } else { a.rank.1 });
-        let kb = (b.conditional, b.rank.0, if b.rank.0 >= 4 { 0 } else { b.rank.1 });
+        let ka = (
+            a.conditional,
+            a.rank.0,
+            if a.rank.0 >= 4 { 0 } else { a.rank.1 },
+        );
+        let kb = (
+            b.conditional,
+            b.rank.0,
+            if b.rank.0 >= 4 { 0 } else { b.rank.1 },
+        );
         ka.cmp(&kb).then_with(|| {
             if a.rank.0 >= 4 {
                 a.name.cmp(&b.name)
@@ -633,6 +671,7 @@ fn attr_from_fixture(p: &FixProp, place: Place) -> Attr {
         enumerable: p.flag('e'),
         late: false,
         ty: AttrTy::Other,
+        secure_only: false,
     }
 }
 
@@ -667,6 +706,11 @@ fn match_props(
                         let mut a = a.clone();
                         let fix_setter = p.flag('s');
                         if a.has_setter() != fix_setter {
+                            cov.warnings.push(format!(
+                                "{iface_name}.{}: IDL setter {} vs Chrome {fix_setter}",
+                                a.name,
+                                a.has_setter()
+                            ));
                             // The fixture wins; keep IDL flags when they agree.
                             a.readonly = !fix_setter;
                             if !fix_setter {
@@ -761,6 +805,7 @@ fn empty_interface(name: &str) -> Interface {
         callback_interface: false,
         from_fixture: false,
         builtin_parent: None,
+        secure_only: false,
     }
 }
 
@@ -836,9 +881,13 @@ fn enabled_features(
     on
 }
 
-/// Build the Chrome tables from the model and the fixture JSON.
-pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
+/// Build the Chrome tables from the model and the fixture JSON (the
+/// arbiter, captured in a secure context). With `insecure`, a capture of a
+/// non-secure page (`about:blank`), everything it lacks is marked secure
+/// only.
+pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result<Table, String> {
     let fix = load_fixture(fixture)?;
+    let insecure = insecure.map(load_fixture).transpose()?;
     let mut cov = Coverage {
         warnings: model.warnings.clone(),
         ..Coverage::default()
@@ -982,7 +1031,10 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
             out.from_fixture = true;
             out.constructor_length = f.length;
             out.parent = f.parent.clone().filter(|p| p != "Object");
-            if out.parent.is_some() && iface.parent.is_none() && !is_interface(out.parent.as_deref().unwrap_or("")) {
+            if out.parent.is_some()
+                && iface.parent.is_none()
+                && !is_interface(out.parent.as_deref().unwrap_or(""))
+            {
                 out.builtin_parent = out.parent.take();
             } else if out.parent != iface.parent {
                 cov.warnings.push(format!(
@@ -1005,7 +1057,14 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
                 .collect();
             let mut b = Builder { out: &mut out };
             let proto_slots = match_props(
-                name, &proto, Place::Proto, ctor_at, &d.cands, &mut b, &mut cov, &mut used,
+                name,
+                &proto,
+                Place::Proto,
+                ctor_at,
+                &d.cands,
+                &mut b,
+                &mut cov,
+                &mut used,
                 &mut exact,
             );
             let static_slots = match_props(
@@ -1034,9 +1093,6 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
                 let fix_order: Vec<String> = list.iter().map(|p| p.name.clone()).collect();
                 if nat != fix_order {
                     order_ok = false;
-                    if std::env::var_os("LB_WEBIDL_DEBUG").is_some() {
-                        eprintln!("{name} {place:?}\n  idl: {nat:?}\n  fix: {fix_order:?}");
-                    }
                 }
             }
 
@@ -1103,7 +1159,8 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
                 .collect();
             cands.sort_by_key(|c| c.place as u8);
             for place in [Place::Proto, Place::Static] {
-                let these: Vec<&Cand> = cands.iter().copied().filter(|c| c.place == place).collect();
+                let these: Vec<&Cand> =
+                    cands.iter().copied().filter(|c| c.place == place).collect();
                 let order = natural_order(&these);
                 let mut b = Builder { out: &mut out };
                 let mut slots = Vec::new();
@@ -1146,9 +1203,11 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
             };
             let mut b = Builder { out: &mut out };
             let mut slots = Vec::new();
-            for c in d.cands.iter().filter(|c| {
-                c.place == Place::Instance && enabled(c) && c.exposed & want != 0
-            }) {
+            for c in d
+                .cands
+                .iter()
+                .filter(|c| c.place == Place::Instance && enabled(c) && c.exposed & want != 0)
+            {
                 slots.push(match &c.kind {
                     CandKind::Const(v) => b.push_const(&c.name, *v),
                     CandKind::Attr(a) => b.push_attr(a.clone()),
@@ -1194,7 +1253,11 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
             .push(format!("parent {p} not exposed; children lose it"));
         for i in out_ifaces.iter_mut() {
             if i.parent.as_deref() == Some(&p) {
-                i.parent = model.ancestors(&i.name).iter().map(|a| a.name.clone()).find(|a| present.contains(a));
+                i.parent = model
+                    .ancestors(&i.name)
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .find(|a| present.contains(a));
             }
         }
     }
@@ -1203,7 +1266,9 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
     // Namespaces on the window.
     let mut namespaces = Vec::new();
     for p in &window_props {
-        let GlobalProp::Namespace(n) = p else { continue };
+        let GlobalProp::Namespace(n) = p else {
+            continue;
+        };
         let iface = &model.interfaces[n];
         let d = &derived[n];
         let mut tmp = empty_interface(n);
@@ -1236,13 +1301,64 @@ pub fn build(model: &Model, fixture: &Value) -> Result<Table, String> {
         });
     }
 
+    let mut ordered = ordered;
+    let mut window_secure_only = Vec::new();
+    if let Some(ins) = &insecure {
+        mark_secure(&mut ordered, ins);
+        let names: HashSet<&str> = ins.window.iter().map(|p| p.name.as_str()).collect();
+        window_secure_only = window_props
+            .iter()
+            .map(GlobalProp::name)
+            .filter(|n| !names.contains(n))
+            .map(str::to_owned)
+            .collect();
+    }
+
     Ok(Table {
         interfaces: ordered,
         namespaces,
         window_props,
         window_late_start,
+        window_secure_only,
         coverage: cov,
     })
+}
+
+/// Flag what a non-secure capture lacks.
+fn mark_secure(list: &mut [Interface], ins: &Fixture) {
+    let window: HashSet<&str> = ins.window.iter().map(|p| p.name.as_str()).collect();
+    for i in list.iter_mut().filter(|i| i.from_fixture) {
+        let Some(f) = ins.interfaces.get(&i.name) else {
+            // Callback interfaces (NodeFilter) are not in the map.
+            i.secure_only = !window.contains(i.name.as_str());
+            continue;
+        };
+        let lists: [(&Vec<Slot>, &Vec<FixProp>); 2] =
+            [(&i.proto_order, &f.proto), (&i.static_order, &f.statics)];
+        let mut flags = Vec::new();
+        for (slots, props) in lists {
+            for s in slots {
+                let name = i.slot_name(*s);
+                if !props.iter().any(|p| p.name == name) {
+                    flags.push(*s);
+                }
+            }
+        }
+        if i.is_global {
+            for s in &i.instance_order {
+                if !window.contains(i.slot_name(*s)) {
+                    flags.push(*s);
+                }
+            }
+        }
+        for s in flags {
+            match s {
+                Slot::Attr(x) => i.attributes[x].secure_only = true,
+                Slot::Op(x) => i.operations[x].secure_only = true,
+                Slot::Const(_) => {}
+            }
+        }
+    }
 }
 
 /// Stable order with every parent before its children.

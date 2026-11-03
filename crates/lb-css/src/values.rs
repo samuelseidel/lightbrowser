@@ -239,7 +239,11 @@ fn parse_hsl_args<'i>(p: &mut Parser<'i>) -> PResult<ColorValue> {
 
 fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     let h = h.rem_euclid(360.0) / 360.0;
-    let t2 = if l <= 0.5 { l * (s + 1.0) } else { l + s - l * s };
+    let t2 = if l <= 0.5 {
+        l * (s + 1.0)
+    } else {
+        l + s - l * s
+    };
     let t1 = l * 2.0 - t2;
     let hue = |mut h: f32| {
         if h < 0.0 {
@@ -301,7 +305,10 @@ impl Calc {
             Calc::Dim(v, _) | Calc::Num(v) => *v,
             Calc::Sum(xs) => xs.iter().map(|x| x.eval(basis)).sum(),
             Calc::Mul(x, k) => x.eval(basis) * k,
-            Calc::Min(xs) => xs.iter().map(|x| x.eval(basis)).fold(f32::INFINITY, f32::min),
+            Calc::Min(xs) => xs
+                .iter()
+                .map(|x| x.eval(basis))
+                .fold(f32::INFINITY, f32::min),
             Calc::Max(xs) => xs
                 .iter()
                 .map(|x| x.eval(basis))
@@ -387,9 +394,10 @@ impl Lp {
 
     /// Builds the simplest form of a computed (px/% only) expression.
     pub fn from_calc(c: Calc) -> Lp {
+        let has_pct = c.has_pct();
         match c.linear() {
-            Some((px, pct)) if pct == 0.0 => Lp::Px(px),
-            Some((px, pct)) if px == 0.0 => Lp::Pct(pct),
+            Some((px, _)) if !has_pct => Lp::Px(px),
+            Some((0.0, pct)) => Lp::Pct(pct),
             _ => Lp::Calc(Rc::new(c)),
         }
     }
@@ -472,7 +480,8 @@ pub(crate) fn parse_length<'i>(
     if !allow_pct && c.has_pct() {
         return bad(input);
     }
-    if !allow_negative && let Calc::Dim(v, _) = c
+    if !allow_negative
+        && let Calc::Dim(v, _) = c
         && v < 0.0
     {
         return bad(input);
@@ -730,9 +739,7 @@ pub(crate) fn parse_display<'i>(input: &mut Parser<'i>) -> PResult<Display> {
         ("block", Some("flow")) | ("flow", Some("block")) => Some(Display::Block),
         ("inline", Some("flow")) | ("flow", Some("inline")) => Some(Display::Inline),
         ("block", Some("flow-root")) | ("flow-root", Some("block")) => Some(Display::FlowRoot),
-        ("inline", Some("flow-root")) | ("flow-root", Some("inline")) => {
-            Some(Display::InlineBlock)
-        }
+        ("inline", Some("flow-root")) | ("flow-root", Some("inline")) => Some(Display::InlineBlock),
         ("block", Some("flex")) | ("flex", Some("block")) => Some(Display::Flex),
         ("inline", Some("flex")) | ("flex", Some("inline")) => Some(Display::InlineFlex),
         ("block", Some("grid")) | ("grid", Some("block")) => Some(Display::Grid),
@@ -1001,7 +1008,11 @@ impl TrackListEntry<Lp> {
                     -1 => "auto-fit".to_owned(),
                     n => n.to_string(),
                 };
-                let inner = ts.iter().map(TrackSize::to_css).collect::<Vec<_>>().join(" ");
+                let inner = ts
+                    .iter()
+                    .map(TrackSize::to_css)
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 format!("repeat({count}, {inner})")
             }
         }

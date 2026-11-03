@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use lb_js::{HostFn, IndexedGetter, NamedGetter};
+use lb_js::{HostFn, IndexedGetter, NamedDeleter, NamedEnumerator, NamedGetter, NamedSetter};
 
 use crate::dom_exception::DomExceptions;
 
@@ -41,6 +41,9 @@ pub struct Registry {
     fns: HashMap<(&'static str, &'static str, ImplKind), HostFn>,
     named: HashMap<&'static str, NamedGetter>,
     indexed: HashMap<&'static str, IndexedGetter>,
+    named_set: HashMap<&'static str, NamedSetter>,
+    named_delete: HashMap<&'static str, NamedDeleter>,
+    named_enum: HashMap<&'static str, NamedEnumerator>,
     dom_exceptions: DomExceptions,
 }
 
@@ -92,6 +95,37 @@ impl Registry {
     pub fn indexed_getter(&mut self, iface: &'static str, f: IndexedGetter) -> &mut Self {
         self.indexed.insert(iface, f);
         self
+    }
+
+    /// Named property setter (`storage.foo = v`); needs a named getter.
+    pub fn named_setter(&mut self, iface: &'static str, f: NamedSetter) -> &mut Self {
+        self.named_set.insert(iface, f);
+        self
+    }
+
+    /// Named property deleter (`delete storage.foo`); needs a named getter.
+    pub fn named_deleter(&mut self, iface: &'static str, f: NamedDeleter) -> &mut Self {
+        self.named_delete.insert(iface, f);
+        self
+    }
+
+    /// Supported property names (`Object.keys(storage)`); needs a named
+    /// getter.
+    pub fn named_enumerator(&mut self, iface: &'static str, f: NamedEnumerator) -> &mut Self {
+        self.named_enum.insert(iface, f);
+        self
+    }
+
+    pub fn named_setter_for(&self, iface: &'static str) -> Option<&NamedSetter> {
+        self.named_set.get(iface)
+    }
+
+    pub fn named_deleter_for(&self, iface: &'static str) -> Option<&NamedDeleter> {
+        self.named_delete.get(iface)
+    }
+
+    pub fn named_enumerator_for(&self, iface: &'static str) -> Option<&NamedEnumerator> {
+        self.named_enum.get(iface)
     }
 
     pub fn get(

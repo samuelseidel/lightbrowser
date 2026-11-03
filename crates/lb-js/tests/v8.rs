@@ -819,3 +819,110 @@ fn es_modules_with_loader() {
     let p = e.get_property(r, ns, "answer").unwrap();
     assert_eq!(e.get_value(r, p).unwrap(), JsValue::Number(42.0));
 }
+
+/// Additions for the WebIDL installer: method aliases, namespace objects,
+/// `Arg::Construct`, private values on `this`, self-referencing global and
+/// globals with more members than one V8 template holds.
+#[test]
+fn installer_support() {
+    use lb_js::{PropAttrs, WellKnownSymbol};
+    let mut e = engine();
+    let entries = host_fn(|cx| cx.ret("entries"));
+    let pair = e.define_interface(
+        InterfaceSpec::new("Pair")
+            .constructor(
+                1,
+                host_fn(|cx| {
+                    let label = cx.arg_string(0)?;
+                    cx.set_this_private("test#label", label)
+                }),
+            )
+            .prototype(vec![
+                Member::method("entries", 0, entries),
+                Member::getter(
+                    "label",
+                    host_fn(|cx| {
+                        let v = cx.this_private("test#label");
+                        cx.ret(v)
+                    }),
+                ),
+                Member::alias(WellKnownSymbol::Iterator, "entries").with_attrs(PropAttrs {
+                    writable: true,
+                    enumerable: false,
+                    configurable: true,
+                }),
+            ]),
+    );
+    let window_id = e.next_interface_id();
+    let mut instance = vec![
+        Member::interface("Window", window_id),
+        Member::interface("Pair", pair),
+        Member::namespace(
+            "NS",
+            "NS",
+            vec![Member::method(
+                "twice",
+                1,
+                host_fn(|cx| {
+                    let n = cx.arg_f64(0)?;
+                    cx.ret(n * 2.0)
+                }),
+            )],
+        ),
+        Member::method(
+            "makePair",
+            1,
+            host_fn(move |cx| {
+                let s = cx.arg_string(0)?;
+                cx.ret(Arg::Construct(pair, vec![Arg::String(s)]))
+            }),
+        ),
+    ];
+    // Push past the per-template limit; the tail is defined after creation.
+    for i in 0..1100 {
+        instance.push(Member::getter(
+            format!("g{i}"),
+            host_fn(move |cx| cx.ret(i)),
+        ));
+    }
+    let window = e.define_interface(InterfaceSpec::new("Window").instance(instance));
+    assert_eq!(window, window_id);
+    let r = e.new_realm(RealmOptions::with_global(window)).unwrap();
+    let checks: [(&str, JsValue); 9] = [
+        (
+            "Pair.prototype[Symbol.iterator] === Pair.prototype.entries",
+            JsValue::Bool(true),
+        ),
+        (
+            "Window === Object.getPrototypeOf(globalThis).constructor",
+            JsValue::Bool(true),
+        ),
+        (
+            "Object.prototype.toString.call(NS) + typeof NS",
+            JsValue::String("[object NS]object".into()),
+        ),
+        ("NS.twice(21)", JsValue::Number(42.0)),
+        (
+            "Function.prototype.toString.call(NS.twice)",
+            JsValue::String("function twice() { [native code] }".into()),
+        ),
+        (
+            "makePair('a').label + new Pair('b').label",
+            JsValue::String("ab".into()),
+        ),
+        (
+            "makePair('a') instanceof Pair && makePair('a') !== makePair('a')",
+            JsValue::Bool(true),
+        ),
+        ("g0 + g1099", JsValue::Number(1099.0)),
+        (
+            // In member order (V8's late globals may sit before the tail).
+            "Object.getOwnPropertyNames(globalThis).filter(k => /^g\\d+$/.test(k)) \
+             .every((k, i) => k === 'g' + i)",
+            JsValue::Bool(true),
+        ),
+    ];
+    for (src, want) in checks {
+        assert_eq!(eval(&mut e, r, src), want, "{src}");
+    }
+}

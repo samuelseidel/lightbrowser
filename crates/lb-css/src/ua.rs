@@ -84,7 +84,7 @@ pub fn ua_stylesheet(os: OsKind) -> String {
         _ => "Arial",
     };
     format!(
-        "{COMMON}\ninput, select, button {{ font: 400 13.3333px {control_font} }}\n\
-         textarea {{ font-size: 13.3333px }}\n"
+        "{COMMON}\ninput, select, button {{ font: 400 13.333333px {control_font} }}\n\
+         textarea {{ font-size: 13.333333px }}\n"
     )
 }

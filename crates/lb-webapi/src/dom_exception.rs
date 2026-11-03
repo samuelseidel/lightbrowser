@@ -122,7 +122,10 @@ mod imp {
                 }),
             );
         }
-        if reg.get("DOMException", "message", ImplKind::Getter).is_none() {
+        if reg
+            .get("DOMException", "message", ImplKind::Getter)
+            .is_none()
+        {
             reg.getter(
                 "DOMException",
                 "message",

@@ -346,6 +346,9 @@ pub(crate) struct ComputeCtx<'a> {
 /// What the cascade found for each longhand (`None` = not declared).
 pub(crate) type Cascaded<'a> = Vec<Option<&'a Decl>>;
 
+/// Longhand values parsed from one declaration.
+type Parsed = Vec<(LonghandId, Sv)>;
+
 /// Order in which longhands are computed: font properties first (for
 /// `em`), then `color` (for `currentcolor`), then everything else.
 fn compute_order() -> impl Iterator<Item = LonghandId> {
@@ -391,7 +394,7 @@ pub(crate) fn compute(
         }
         s.custom = Rc::new(map);
     }
-    let mut pending_cache: Vec<(*const Pending, Option<Vec<(LonghandId, Sv)>>)> = Vec::new();
+    let mut pending_cache: Vec<(*const Pending, Option<Parsed>)> = Vec::new();
     let font_family_declared = cascaded[LonghandId::FontFamily as usize].is_some();
     let mut font_size_declared = false;
     let mut border_color_set = [false; 4];
@@ -570,7 +573,9 @@ fn apply(
         (L::PaddingRight, Sv::Length(c)) => s.padding[1] = lp(c),
         (L::PaddingBottom, Sv::Length(c)) => s.padding[2] = lp(c),
         (L::PaddingLeft, Sv::Length(c)) => s.padding[3] = lp(c),
-        (L::BorderTopWidth, v) => s.border_width[0] = snap_border(px(v), ctx.env.device_pixel_ratio),
+        (L::BorderTopWidth, v) => {
+            s.border_width[0] = snap_border(px(v), ctx.env.device_pixel_ratio)
+        }
         (L::BorderRightWidth, v) => {
             s.border_width[1] = snap_border(px(v), ctx.env.device_pixel_ratio)
         }
@@ -584,7 +589,10 @@ fn apply(
         (L::BorderRightStyle, Sv::BorderStyle(b)) => s.border_style[1] = *b,
         (L::BorderBottomStyle, Sv::BorderStyle(b)) => s.border_style[2] = *b,
         (L::BorderLeftStyle, Sv::BorderStyle(b)) => s.border_style[3] = *b,
-        (L::BorderTopColor | L::BorderRightColor | L::BorderBottomColor | L::BorderLeftColor, Sv::Color(c)) => {
+        (
+            L::BorderTopColor | L::BorderRightColor | L::BorderBottomColor | L::BorderLeftColor,
+            Sv::Color(c),
+        ) => {
             let i = match id {
                 L::BorderTopColor => 0,
                 L::BorderRightColor => 1,
@@ -958,7 +966,10 @@ mod tests {
         m.insert("--a".into(), "10px".into());
         m.insert("--b".into(), "var(--a) 2px".into());
         assert_eq!(substitute("var(--a)", &m, 0).unwrap(), "10px");
-        assert_eq!(substitute("calc(var(--a) * 2)", &m, 0).unwrap(), "calc(10px * 2)");
+        assert_eq!(
+            substitute("calc(var(--a) * 2)", &m, 0).unwrap(),
+            "calc(10px * 2)"
+        );
         assert_eq!(substitute("var(--b)", &m, 0).unwrap(), "10px 2px");
         assert_eq!(substitute("var(--x, 3px)", &m, 0).unwrap(), "3px");
         assert!(substitute("var(--x)", &m, 0).is_none());

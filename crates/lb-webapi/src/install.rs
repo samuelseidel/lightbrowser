@@ -22,8 +22,9 @@
 //! After a realm is created a short fixup script runs once in it (before
 //! any page script): it moves members Chrome installs late (after
 //! `constructor`, or after the engine's late globals) to the end, adds
-//! `Symbol.unscopables` objects and links `DOMException.prototype` to
-//! `Error.prototype`. It defines nothing new and leaves no trace.
+//! `Symbol.unscopables` objects, links `DOMException.prototype` to
+//! `Error.prototype` and deletes engine globals Chrome does not expose
+//! (`SharedArrayBuffer` without cross-origin isolation). It leaves no trace.
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -31,8 +32,8 @@ use std::rc::Rc;
 
 use lb_js::{
     Engine, HostError, HostFn, HostRef, InterfaceId, InterfaceSpec, Intrinsic, JsError, JsValue,
-    Member, ModuleLoader, PropAttrs, PropKey, RealmId, RealmOptions, ScriptOrigin,
-    WellKnownSymbol, World, v8,
+    Member, ModuleLoader, PropAttrs, RealmId, RealmOptions, ScriptOrigin, WellKnownSymbol, World,
+    v8,
 };
 use lb_persona::BrowserFamily;
 
@@ -81,6 +82,10 @@ pub struct WindowRealmOptions {
     /// Main world, or an isolated world for CDP utility scripts.
     pub world: Option<World>,
     pub module_loader: Option<ModuleLoader>,
+    /// The document is not a secure context (plain `http:` on a
+    /// non-loopback host, `about:blank` of such a page): `[SecureContext]`
+    /// members and interfaces are removed. Default: secure.
+    pub insecure: bool,
 }
 
 impl std::fmt::Debug for WindowRealmOptions {
@@ -89,6 +94,7 @@ impl std::fmt::Debug for WindowRealmOptions {
             .field("window_host", &self.window_host)
             .field("world", &self.world)
             .field("module_loader", &self.module_loader.is_some())
+            .field("insecure", &self.insecure)
             .finish()
     }
 }
@@ -98,6 +104,8 @@ struct Inner {
     ids: HashMap<&'static str, InterfaceId>,
     window: InterfaceId,
     fixup: String,
+    /// Appended to `fixup` for non-secure realms.
+    insecure_fixup: String,
     dom_exceptions: DomExceptions,
 }
 
@@ -139,9 +147,11 @@ impl Bindings {
     ) -> Result<Bindings, InstallError> {
         let mut registry = registry.clone();
         register_defaults(&mut registry);
+        register_window_defaults(&mut registry);
         let dom = registry.dom_exceptions();
         let stubs = Stubs::new(dom.clone());
-        let mut ids: HashMap<&'static str, InterfaceId> = HashMap::with_capacity(table.interfaces.len());
+        let mut ids: HashMap<&'static str, InterfaceId> =
+            HashMap::with_capacity(table.interfaces.len());
         let mut global_desc = None;
 
         for desc in table.interfaces {
@@ -166,7 +176,9 @@ impl Bindings {
                 let mut spec = InterfaceSpec::new(name);
                 spec.to_string_tag = false;
                 match registry.get(iface, name, ImplKind::LegacyFactory) {
-                    Some(f) => spec = spec.constructor(u32::from(desc.legacy_factory_length), f.clone()),
+                    Some(f) => {
+                        spec = spec.constructor(u32::from(desc.legacy_factory_length), f.clone())
+                    }
                     None => spec.length = u32::from(desc.legacy_factory_length),
                 }
                 factories.insert(name, engine.define_interface(spec));
@@ -174,18 +186,21 @@ impl Bindings {
         }
 
         let window_desc = global_desc.ok_or(InstallError::Unknown("Window"))?;
+        ids.insert(window_desc.name, engine.next_interface_id());
         let mut spec = interface_spec(window_desc, &registry, &stubs, &ids)?;
         spec.instance = global_members(table, window_desc, &registry, &stubs, &ids, &factories)?;
         spec.immutable_proto = true;
         let window = engine.define_interface(spec);
-        ids.insert(window_desc.name, window);
+        debug_assert_eq!(ids.get(window_desc.name), Some(&window));
 
         let fixup = fixup_script(table, &ids);
+        let insecure_fixup = insecure_script(table, &ids);
         Ok(Bindings(Rc::new(Inner {
             table,
             ids,
             window,
             fixup,
+            insecure_fixup,
             dom_exceptions: dom,
         })))
     }
@@ -232,7 +247,11 @@ impl Bindings {
             world: options.world.unwrap_or(World::Main),
             module_loader: options.module_loader,
         })?;
-        if let Err(e) = engine.evaluate(realm, &self.0.fixup, ScriptOrigin::new("")) {
+        let mut result = engine.evaluate(realm, &self.0.fixup, ScriptOrigin::new(""));
+        if result.is_ok() && options.insecure {
+            result = engine.evaluate(realm, &self.0.insecure_fixup, ScriptOrigin::new(""));
+        }
+        if let Err(e) = result {
             engine.drop_realm(realm);
             return Err(e);
         }
@@ -250,6 +269,25 @@ pub fn install_window_realm(
     let bindings = Bindings::define(engine, registry)?;
     let realm = bindings.new_window_realm(engine, options)?;
     Ok((bindings, realm))
+}
+
+/// `window`, `self`, `frames`, `top` and `parent` return the global
+/// itself unless registered (right for a top-level window; frames
+/// override `top` / `parent`).
+fn register_window_defaults(reg: &mut Registry) {
+    for name in ["window", "self", "frames", "top", "parent"] {
+        if reg.get("Window", name, ImplKind::Getter).is_none() {
+            reg.getter(
+                "Window",
+                name,
+                host_fn(|cx| {
+                    let this = cx.v8_args().this();
+                    cx.ret_v8(this.into());
+                    Ok(())
+                }),
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +368,9 @@ fn put_forwards_setter(iface: &'static str, name: &'static str, fwd: &'static st
             )));
         };
         let fkey = v8::String::new(scope, fwd).ok_or(HostError::Thrown)?;
-        target.set(scope, fkey.into(), value).ok_or(HostError::Thrown)?;
+        target
+            .set(scope, fkey.into(), value)
+            .ok_or(HostError::Thrown)?;
         Ok(())
     })
 }
@@ -381,7 +421,14 @@ fn attr_member(
     })
 }
 
-fn op_member(desc_name: &'static str, o: &OpDesc, d: Option<&InterfaceDesc>, registry: &Registry, stubs: &Stubs, statics: bool) -> Member {
+fn op_member(
+    desc_name: &'static str,
+    o: &OpDesc,
+    d: Option<&InterfaceDesc>,
+    registry: &Registry,
+    stubs: &Stubs,
+    statics: bool,
+) -> Member {
     let attrs = PropAttrs {
         writable: !o.unforgeable,
         enumerable: o.enumerable,
@@ -425,7 +472,14 @@ fn slot_member(
             const_member(n, v)
         }
         Slot::Attr(i) => attr_member(d.name, &d.attributes[i as usize], registry, stubs, statics),
-        Slot::Op(i) => op_member(d.name, &d.operations[i as usize], Some(d), registry, stubs, statics),
+        Slot::Op(i) => op_member(
+            d.name,
+            &d.operations[i as usize],
+            Some(d),
+            registry,
+            stubs,
+            statics,
+        ),
     }
 }
 
@@ -503,6 +557,15 @@ fn interface_spec(
     }
     if let Some(f) = registry.named_getter_for(d.name) {
         spec = spec.named_getter(f.clone());
+        if let Some(f) = registry.named_setter_for(d.name) {
+            spec = spec.named_setter(f.clone());
+        }
+        if let Some(f) = registry.named_deleter_for(d.name) {
+            spec = spec.named_deleter(f.clone());
+        }
+        if let Some(f) = registry.named_enumerator_for(d.name) {
+            spec = spec.named_enumerator(f.clone());
+        }
     }
     if let Some(f) = registry.indexed_getter_for(d.name) {
         spec = spec.indexed_getter(f.clone());
@@ -520,7 +583,14 @@ fn namespace_member(n: &'static NamespaceDesc, registry: &Registry, stubs: &Stub
                 const_member(name, v)
             }
             Slot::Attr(i) => attr_member(n.name, &n.attributes[i as usize], registry, stubs, false),
-            Slot::Op(i) => op_member(n.name, &n.operations[i as usize], None, registry, stubs, false),
+            Slot::Op(i) => op_member(
+                n.name,
+                &n.operations[i as usize],
+                None,
+                registry,
+                stubs,
+                false,
+            ),
         })
         .collect();
     Member::namespace(n.name, n.to_string_tag, members)
@@ -540,12 +610,12 @@ fn global_members(
         match *p {
             GlobalProp::Builtin(_) | GlobalProp::Other(_) => {}
             GlobalProp::Interface(n) => {
-                // The window's own interface object is defined with the
-                // window itself; it cannot reference its own template yet.
-                if n == window.name {
-                    continue;
-                }
-                out.push(Member::interface(n, *ids.get(n).ok_or(InstallError::Unknown(n))?));
+                // `Window` itself resolves to the id the window is about to
+                // get (`Engine::next_interface_id`).
+                out.push(Member::interface(
+                    n,
+                    *ids.get(n).ok_or(InstallError::Unknown(n))?,
+                ));
             }
             GlobalProp::Alias { name, target } => out.push(Member::interface(
                 name,
@@ -561,12 +631,24 @@ fn global_members(
             }
             GlobalProp::Attr(n) => {
                 if let Some(i) = window.attributes.iter().position(|a| a.name == n) {
-                    out.push(slot_member(window, Slot::Attr(i as u16), registry, stubs, false));
+                    out.push(slot_member(
+                        window,
+                        Slot::Attr(i as u16),
+                        registry,
+                        stubs,
+                        false,
+                    ));
                 }
             }
             GlobalProp::Op(n) => {
                 if let Some(i) = window.operations.iter().position(|o| o.name == n) {
-                    out.push(slot_member(window, Slot::Op(i as u16), registry, stubs, false));
+                    out.push(slot_member(
+                        window,
+                        Slot::Op(i as u16),
+                        registry,
+                        stubs,
+                        false,
+                    ));
                 }
             }
         }
@@ -606,9 +688,10 @@ fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> Stri
          function P(n){const d=gd(g,n);return d&&d.value&&d.value.prototype;}",
     );
     let on_window = |name: &str| {
-        table.window_props.iter().any(|p| {
-            matches!(p, GlobalProp::Interface(n) if *n == name)
-        })
+        table
+            .window_props
+            .iter()
+            .any(|p| matches!(p, GlobalProp::Interface(n) if *n == name))
     };
     for d in table.interfaces {
         if !ids.contains_key(d.name) || !on_window(d.name) {
@@ -636,7 +719,12 @@ fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> Stri
             );
         }
         if let Some(b) = d.builtin_parent {
-            let _ = write!(s, "O.setPrototypeOf(P({}),P({}));", js_str(d.name), js_str(b));
+            let _ = write!(
+                s,
+                "O.setPrototypeOf(P({}),P({}));",
+                js_str(d.name),
+                js_str(b)
+            );
         }
     }
     // Legacy factories inherit from Function.prototype, not from the
@@ -645,6 +733,66 @@ fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> Stri
         .iter()
         .map(GlobalProp::name);
     let _ = write!(s, "L(g,{});", js_list(late_globals));
+    // Engine globals Chrome does not expose here (e.g. `SharedArrayBuffer`
+    // outside cross-origin isolation) are removed.
+    let _ = write!(
+        s,
+        "{{const k=new Set({});for(const n of O.getOwnPropertyNames(g))if(!k.has(n)){{const d=gd(g,n);if(d&&d.configurable)delete g[n];}}}}",
+        js_list(table.window_props.iter().map(GlobalProp::name))
+    );
+    s.push_str("})()");
+    s
+}
+
+/// Removes what only secure contexts have.
+fn insecure_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> String {
+    let mut s = String::from(
+        "(function(){'use strict';const g=globalThis,gd=Object.getOwnPropertyDescriptor;\
+         function I(n){const d=gd(g,n);return d&&d.value;}\
+         function D(o,ks){if(o)for(const k of ks)delete o[k];}",
+    );
+    for d in table.interfaces {
+        if !ids.contains_key(d.name) {
+            continue;
+        }
+        let secure = |s: &Slot| match *s {
+            Slot::Attr(i) => d.attributes[i as usize].secure_context,
+            Slot::Op(i) => d.operations[i as usize].secure_context,
+            Slot::Const(_) => false,
+        };
+        if d.is_global {
+            continue;
+        }
+        let proto: Vec<&str> = d
+            .proto_order
+            .iter()
+            .filter(|s| secure(s))
+            .map(|s| d.slot_name(*s))
+            .collect();
+        if !proto.is_empty() {
+            let _ = write!(
+                s,
+                "{{const i=I({});D(i&&i.prototype,{});}}",
+                js_str(d.name),
+                js_list(proto)
+            );
+        }
+        let statics: Vec<&str> = d
+            .static_order
+            .iter()
+            .filter(|s| secure(s))
+            .map(|s| d.slot_name(*s))
+            .collect();
+        if !statics.is_empty() {
+            let _ = write!(s, "D(I({}),{});", js_str(d.name), js_list(statics));
+        }
+    }
+    // Interface objects and window members, last: the lookups above need them.
+    let _ = write!(
+        s,
+        "D(g,{});",
+        js_list(table.window_secure_only.iter().copied())
+    );
     s.push_str("})()");
     s
 }
@@ -660,7 +808,10 @@ mod tests {
             ids.insert(d.name, InterfaceId(i as u32));
         }
         let s = fixup_script(&crate::generated::chromium::TABLE, &ids);
-        assert!(s.contains(r#"L(P("XMLHttpRequest"),["responseXML"])"#), "{s}");
+        assert!(
+            s.contains(r#"L(P("XMLHttpRequest"),["responseXML","#),
+            "{s}"
+        );
         assert!(s.contains("Symbol.unscopables"));
         assert!(s.contains(r#"O.setPrototypeOf(P("DOMException"),P("Error"))"#));
     }

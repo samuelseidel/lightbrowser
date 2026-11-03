@@ -280,10 +280,7 @@ impl MediaQuery {
         if self.invalid {
             return false;
         }
-        let type_ok = match self.media_type.as_deref() {
-            None | Some("all") | Some("screen") => true,
-            _ => false,
-        };
+        let type_ok = matches!(self.media_type.as_deref(), None | Some("all" | "screen"));
         let r = type_ok && self.cond.as_ref().is_none_or(|c| c.eval(env));
         r != self.not
     }
@@ -463,8 +460,7 @@ impl Feature {
                         cmp.test(cur, n)
                     }
                 };
-                check(first, *value_first)
-                    && second.as_ref().is_none_or(|s| check(s, false))
+                check(first, *value_first) && second.as_ref().is_none_or(|s| check(s, false))
             }
         }
     }
@@ -755,7 +751,9 @@ mod tests {
     fn evaluates_features() {
         assert!(m("(min-width: 1000px)"));
         assert!(!m("(max-width: 1000px)"));
-        assert!(m("screen and (min-width: 600px) and (orientation: landscape)"));
+        assert!(m(
+            "screen and (min-width: 600px) and (orientation: landscape)"
+        ));
         assert!(!m("print"));
         assert!(m("not print"));
         assert!(m("(width >= 1280px)"));
@@ -778,7 +776,10 @@ mod tests {
     #[test]
     fn serializes_like_chrome() {
         let s = |q| match_media(q, &env()).media;
-        assert_eq!(s("screen and (min-width:600px)"), "screen and (min-width: 600px)");
+        assert_eq!(
+            s("screen and (min-width:600px)"),
+            "screen and (min-width: 600px)"
+        );
         assert_eq!(s("(MIN-WIDTH: 40EM)"), "(min-width: 40em)");
         assert_eq!(s("(width>=600px)"), "(width >= 600px)");
         assert_eq!(s("foo bar baz"), "not all");

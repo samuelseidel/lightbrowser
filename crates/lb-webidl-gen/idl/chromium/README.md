@@ -13,5 +13,15 @@ The WebIDL files from Blink's `third_party/blink/renderer/core/` and
   from the GitHub mirror.
 
 `lb-webidl-gen` reads these files at build time. Do not edit them. To move to
-a new Chrome version, fetch again, capture a new surface fixture with
-`tools/dump_surface.js`, and regenerate.
+a new Chrome version, fetch again, capture new surface fixtures with
+`tools/dump_surface.js`, and regenerate (`cargo run -p lb-webidl-gen --
+--family chrome`).
+
+There are two fixtures, both from the local Chromium, loopback only:
+
+- `chromium_153_surface_secure.json`: a secure context. Serve an empty page
+  on loopback and run `node tools/dump_surface.js OUT http://127.0.0.1:PORT/`.
+  This is the generator's default.
+- `chromium_153_surface.json`: `about:blank` (`node tools/dump_surface.js
+  OUT`), which is not a secure context. The generator uses it to mark
+  secure-context-only members, which insecure realms leave out.

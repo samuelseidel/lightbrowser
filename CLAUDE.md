@@ -8,9 +8,13 @@ or Firefox persona.
 
 `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` are the source of truth. Read them
 first and do not contradict them. Current state: M1 (network) done for
-Chrome; Firefox TLS gaps are listed in ADR 0003. M2 is in progress: `lb-js`
-(V8), `lb-dom`, `lb-persona` v2 and `lb-behavior` have landed; the rest are
-still empty skeletons. See "M2 status" in `docs/ROADMAP.md`.
+Chrome; Firefox TLS gaps are listed in ADR 0003. M2 (DOM + V8) is done for
+Chrome: `fetch --dump html` runs scripts and the WPT subset passes 2540/2788.
+M3 is in progress: `lb-css`, `lb-layout` and `lb-cdp` have landed, and
+`serve` runs on a mock page host until `lb-page` implements
+`lb_cdp::PageHost`. `lb-paint` is still an empty skeleton. See "M2 status"
+and "M3 status" in `docs/ROADMAP.md`. Our detection engine for M4/M5 is
+`tests/detect-bench` on loopback (ADR 0007).
 
 ## Internal use and legal
 - Internal only. Never push binaries to public repos or registries.
@@ -22,18 +26,18 @@ still empty skeletons. See "M2 status" in `docs/ROADMAP.md`.
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R16, sfc32 done |
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (no snapshot); SpiderMonkey M4b |
-| `lb-net` | BoringSSL, hyper h1, forked h2 (`vendor/h2`), cookies, decoding, `fetch` | M1 done; cache, proxies M2 |
+| `lb-net` | BoringSSL, hyper h1, forked h2 (`vendor/h2`), cookies, decoding, `fetch` | M1 done; cookies shared across clones; cache, proxies, connection reuse open |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |
-| `lb-webidl-gen` | WebIDL to Rust codegen (build time) | M2 |
-| `lb-webapi` | fetch, XHR, timers, storage, canvas/WebGL/audio APIs | M2+ |
-| `lb-css` | Lazy cascade | M3 |
-| `lb-layout` | taffy layout on demand, font metrics | M3 |
+| `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs; canvas/WebGL/audio later | Installer + core APIs done (chrome); canvas/WebGL/audio M4 |
+| `lb-css` | Lazy cascade | Done (~75 longhands; no pseudo-elements, animations) |
+| `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout) |
 | `lb-paint` | tiny-skia canvas | M4 |
-| `lb-page` | Event loop, navigation, frames, workers | M2/M3 |
-| `lb-cdp` | CDP server | M3 |
+| `lb-page` | Event loop, navigation, frames, workers | Event loop + navigation done; no iframes/workers; `PageHost` for CDP M3 |
+| `lb-cdp` | CDP server | Done against `MockHost`; real page host pending |
 | `lb-behavior` | Human input simulation (vendored from stealth-browser) | Vendored + `cdp` event conversion; replay M5 |
-| `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate` | `fetch`, `validate` done, `serve` stub |
+| `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate`, `serve` | `fetch` (runs scripts), `validate` done; `serve` on mock host |
 
 ## Commands
 ```bash
@@ -44,18 +48,23 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 # Firefox family checks
-cargo test -p lightbrowser -p lb-js --no-default-features --features firefox
-cargo clippy -p lightbrowser -p lb-js --no-default-features --features firefox -- -D warnings
+cargo test -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox
+cargo clippy -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox -- -D warnings
 ./target/release/lightbrowser --version       # prints the compiled family
 ./target/debug/lightbrowser validate profiles/reference/chrome/*.json   # persona rules
 # Network fingerprint check vs profiles/tls (loopback only, prints JA3/JA4/H2)
 cargo test -p lb-net --test fingerprint -- --nocapture
 # Fetch from a local test server (self-signed cert)
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
+# WPT subset (loopback) and the Playwright CDP smoke test
+cargo test -p lb-page --test wpt -- --nocapture
+cargo build -p lightbrowser && node --test tests/playwright/
+# Regenerate the Chrome bindings table (--check: fail if stale)
+cargo run -p lb-webidl-gen -- --family chrome
 ```
 Both families output to `target/release/lightbrowser`; the last build wins.
 Run the chrome and firefox checks before finishing any change that touches
-`lb-js`, `lb-persona` or the binary. Do not run
+`lb-js`, `lb-persona`, `lb-webapi`, `lb-page` or the binary. Do not run
 `cargo build --all-features`: it enables both engines.
 
 ### Re-capturing a TLS profile

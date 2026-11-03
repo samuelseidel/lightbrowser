@@ -2,11 +2,15 @@
 //!
 //! Owner: M1 task 4. Thin wrapper over `cookie_store`.
 
+use std::sync::{Arc, Mutex};
+
 use url::Url;
 
-#[derive(Default)]
+/// A cookie jar. Clones share the same cookies (one jar per browser
+/// context, used by every request of that context, on any thread).
+#[derive(Default, Clone)]
 pub struct CookieJar {
-    store: cookie_store::CookieStore,
+    store: Arc<Mutex<cookie_store::CookieStore>>,
 }
 
 impl CookieJar {
@@ -14,11 +18,15 @@ impl CookieJar {
         Self::default()
     }
 
+    fn lock(&self) -> std::sync::MutexGuard<'_, cookie_store::CookieStore> {
+        self.store.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// `Cookie:` header value for `url` (`name=value; name2=value2`), or
     /// `None` if nothing matches.
     pub fn header_for(&self, url: &Url) -> Option<String> {
         let value = self
-            .store
+            .lock()
             .get_request_values(url)
             .map(|(n, v)| format!("{n}={v}"))
             .collect::<Vec<_>>()
@@ -29,17 +37,62 @@ impl CookieJar {
     /// Store every `Set-Cookie` value from a response for `url`. Invalid or
     /// rejected cookies are dropped silently, as browsers do.
     pub fn store_response(&mut self, url: &Url, set_cookie: &[String]) {
+        let mut store = self.lock();
         for raw in set_cookie {
-            if let Err(e) = self.store.parse(raw, url) {
+            if let Err(e) = store.parse(raw, url) {
                 tracing::debug!("dropped Set-Cookie for {url}: {e}");
             }
         }
+    }
+
+    /// `document.cookie` getter: the cookies for `url` without `HttpOnly`
+    /// ones, `name=value; ...` (empty string if none).
+    pub fn document_cookie(&self, url: &Url) -> String {
+        self.lock()
+            .matches(url)
+            .into_iter()
+            .filter(|c| !c.http_only().unwrap_or(false))
+            .map(|c| format!("{}={}", c.name(), c.value()))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    /// `document.cookie` setter: store one cookie string for `url`. An
+    /// `HttpOnly` cookie from script is ignored, as browsers do.
+    pub fn set_document_cookie(&mut self, url: &Url, cookie: &str) {
+        let Ok(parsed) = cookie::Cookie::parse(cookie.to_owned()) else {
+            return;
+        };
+        if parsed.http_only().unwrap_or(false) {
+            return;
+        }
+        let _ = self.lock().insert_raw(&parsed, url);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clones_share_and_document_cookie_hides_http_only() {
+        let mut jar = CookieJar::new();
+        let other = jar.clone();
+        let u = url("https://example.test/");
+        jar.store_response(&u, &["a=1; Path=/; HttpOnly".into(), "b=2; Path=/".into()]);
+        assert_eq!(other.document_cookie(&u), "b=2");
+        let mut o2 = other.clone();
+        o2.set_document_cookie(&u, "c=3; path=/");
+        o2.set_document_cookie(&u, "d=4; HttpOnly");
+        let mut parts: Vec<String> = jar
+            .header_for(&u)
+            .unwrap()
+            .split("; ")
+            .map(str::to_owned)
+            .collect();
+        parts.sort();
+        assert_eq!(parts, ["a=1", "b=2", "c=3"]);
+    }
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()

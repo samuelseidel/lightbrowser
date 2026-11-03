@@ -157,7 +157,9 @@ impl ExtAttrs {
     pub fn idents(&self, name: &str) -> Vec<String> {
         match self.get(name) {
             Some(ExtValue::Ident(s)) => vec![s.clone()],
-            Some(ExtValue::List(groups)) => groups.iter().filter_map(|g| g.first().cloned()).collect(),
+            Some(ExtValue::List(groups)) => {
+                groups.iter().filter_map(|g| g.first().cloned()).collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -182,7 +184,9 @@ pub struct Argument {
 
 /// Number of required arguments (WebIDL `length`).
 pub fn required_args(args: &[Argument]) -> usize {
-    args.iter().take_while(|a| !a.optional && !a.variadic).count()
+    args.iter()
+        .take_while(|a| !a.optional && !a.variadic)
+        .count()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -707,7 +711,8 @@ impl Parser<'_> {
         if readonly_decl {
             self.pos += 1;
         }
-        let is_async = if self.is_ident("async") && matches!(self.peek_at(1), Some(Tok::Ident(s)) if s == "iterable")
+        let is_async = if self.is_ident("async")
+            && matches!(self.peek_at(1), Some(Tok::Ident(s)) if s == "iterable")
         {
             self.pos += 1;
             true
@@ -764,19 +769,16 @@ impl Parser<'_> {
         let mut inherit = false;
         let mut readonly = false;
         let mut specials = Vec::new();
-        loop {
-            match self.peek() {
-                Some(Tok::Ident(s)) => match s.as_str() {
-                    "static" => is_static = true,
-                    "stringifier" => stringifier = true,
-                    "inherit" => inherit = true,
-                    "readonly" => readonly = true,
-                    "getter" => specials.push(Special::Getter),
-                    "setter" => specials.push(Special::Setter),
-                    "deleter" => specials.push(Special::Deleter),
-                    "legacycaller" => specials.push(Special::LegacyCaller),
-                    _ => break,
-                },
+        while let Some(Tok::Ident(s)) = self.peek() {
+            match s.as_str() {
+                "static" => is_static = true,
+                "stringifier" => stringifier = true,
+                "inherit" => inherit = true,
+                "readonly" => readonly = true,
+                "getter" => specials.push(Special::Getter),
+                "setter" => specials.push(Special::Setter),
+                "deleter" => specials.push(Special::Deleter),
+                "legacycaller" => specials.push(Special::LegacyCaller),
                 _ => break,
             }
             self.pos += 1;
@@ -867,14 +869,20 @@ mod tests {
         assert_eq!(a.parent.as_deref(), Some("B"));
         assert_eq!(a.ext.idents("Exposed"), ["Window", "Worker"]);
         assert_eq!(a.ext.ident("RuntimeEnabled"), Some("X"));
-        assert!(matches!(a.ext.get("LegacyFactoryFunction"), Some(ExtValue::NamedArgs(n, args)) if n == "Image" && required_args(args) == 0));
+        assert!(
+            matches!(a.ext.get("LegacyFactoryFunction"), Some(ExtValue::NamedArgs(n, args)) if n == "Image" && required_args(args) == 0)
+        );
         let names: Vec<_> = a.members.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(
             names,
-            ["ONE", "title", "u", "make", "", "", "", "", "", "", "required"]
+            [
+                "ONE", "title", "u", "make", "", "", "", "", "", "", "required"
+            ]
         );
         match &a.members[3].kind {
-            MemberKind::Operation { is_static, args, .. } => {
+            MemberKind::Operation {
+                is_static, args, ..
+            } => {
                 assert!(*is_static);
                 assert_eq!(required_args(args), 1);
             }

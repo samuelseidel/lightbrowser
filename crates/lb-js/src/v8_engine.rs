@@ -60,6 +60,17 @@ pub type NamedGetter = Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, &str) -> Result<Optio
 /// Indexed property getter (`nodeList[0]`).
 pub type IndexedGetter =
     Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, u32) -> Result<Option<Arg>, HostError>>;
+/// Named property setter (`storage.foo = v`, `style.color = v`). The value
+/// is passed after ToString (every WebIDL named setter Chrome exposes on
+/// the window takes a `DOMString`). `Ok(false)` means "not handled": the
+/// assignment proceeds normally (prototype accessors, own data property).
+pub type NamedSetter = Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, &str, &str) -> Result<bool, HostError>>;
+/// Named property deleter (`delete storage.foo`). `Ok(None)` means "not
+/// handled"; `Ok(Some(b))` makes `delete` return `b`.
+pub type NamedDeleter =
+    Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, &str) -> Result<Option<bool>, HostError>>;
+/// Names the named getter supports, for `Object.keys` / `for in`.
+pub type NamedEnumerator = Rc<dyn Fn(&mut PropCtx<'_, '_, '_>) -> Vec<String>>;
 
 /// Box a closure as a [`HostFn`].
 pub fn host_fn(f: impl Fn(&mut CallCtx<'_, '_, '_>) -> Result<(), HostError> + 'static) -> HostFn {
@@ -98,6 +109,12 @@ pub enum Arg {
     /// A new object made by `new X(...args)`, where `X` is the interface
     /// object of the current realm (e.g. a `DOMException` to throw).
     Construct(InterfaceId, Vec<Arg>),
+    /// A new JS array of these values (`sequence<T>` results).
+    Array(Vec<Arg>),
+    /// A new `ArrayBuffer` holding these bytes.
+    ArrayBuffer(Vec<u8>),
+    /// A new `Uint8Array` (over a fresh `ArrayBuffer`) holding these bytes.
+    Uint8Array(Vec<u8>),
 }
 
 impl From<JsValue> for Arg {
@@ -361,6 +378,9 @@ pub struct InterfaceSpec {
     pub immutable_proto: bool,
     pub named_getter: Option<NamedGetter>,
     pub indexed_getter: Option<IndexedGetter>,
+    pub named_setter: Option<NamedSetter>,
+    pub named_deleter: Option<NamedDeleter>,
+    pub named_enumerator: Option<NamedEnumerator>,
 }
 
 impl InterfaceSpec {
@@ -377,6 +397,9 @@ impl InterfaceSpec {
             immutable_proto: false,
             named_getter: None,
             indexed_getter: None,
+            named_setter: None,
+            named_deleter: None,
+            named_enumerator: None,
         }
     }
     pub fn parent(mut self, parent: InterfaceId) -> Self {
@@ -406,6 +429,21 @@ impl InterfaceSpec {
     }
     pub fn indexed_getter(mut self, f: IndexedGetter) -> Self {
         self.indexed_getter = Some(f);
+        self
+    }
+    /// Needs a named getter too; ignored without one.
+    pub fn named_setter(mut self, f: NamedSetter) -> Self {
+        self.named_setter = Some(f);
+        self
+    }
+    /// Needs a named getter too; ignored without one.
+    pub fn named_deleter(mut self, f: NamedDeleter) -> Self {
+        self.named_deleter = Some(f);
+        self
+    }
+    /// Needs a named getter too; ignored without one.
+    pub fn named_enumerator(mut self, f: NamedEnumerator) -> Self {
+        self.named_enumerator = Some(f);
         self
     }
 }
@@ -489,15 +527,33 @@ impl<T> Slab<T> {
 
 enum Callback {
     Fn(HostFn),
-    Ctor { iface: Rc<str>, f: Option<HostFn> },
+    Ctor {
+        iface: Rc<str>,
+        f: Option<HostFn>,
+    },
     Named(NamedGetter),
     Indexed(IndexedGetter),
+    NamedSet(NamedSetter),
+    NamedDelete(NamedDeleter),
+    NamedEnum(NamedEnumerator),
+    /// Placeholder keeping named callbacks at consecutive indexes.
+    Empty,
 }
 
 struct IfaceEntry {
     template: v8::Global<v8::FunctionTemplate>,
     parent: Option<InterfaceId>,
+    /// Instance members past [`MAX_TEMPLATE_PROPS`], copied onto each
+    /// instance after it is created (see `apply_overflow`).
+    overflow: Option<(v8::Global<v8::ObjectTemplate>, Vec<PropKey>)>,
 }
+
+/// V8 152 crashes (`PushStackTraceAndDie` in the load IC) when an object
+/// template with accessors has more than ~1020 properties: the descriptor
+/// limit of a fast-mode map. A Chrome window global has ~1,200 own
+/// properties, so members past this count go through a second template and
+/// are defined on the instance after creation, in order.
+const MAX_TEMPLATE_PROPS: usize = 960;
 
 struct ModuleEntry {
     url: String,
@@ -676,6 +732,13 @@ impl Engine {
         TerminateHandle(self.isolate.thread_safe_handle())
     }
 
+    /// The id the next [`Engine::define_interface`] call will return, so a
+    /// spec can reference its own interface object (the global's
+    /// `Window` property).
+    pub fn next_interface_id(&self) -> InterfaceId {
+        InterfaceId(self.state.borrow().interfaces.len() as u32)
+    }
+
     /// Define an interface as V8 templates. Templates are per engine; each
     /// realm instantiates them lazily. Define interfaces before the realms
     /// that use them. Panics if `spec.parent` is not an interface of this
@@ -686,6 +749,7 @@ impl Engine {
         let mut st = self.state.borrow_mut();
 
         let name: Rc<str> = spec.name.as_str().into();
+        let self_id = InterfaceId(st.interfaces.len() as u32);
         let ctor_idx = st.push_callback(Callback::Ctor {
             iface: name.clone(),
             f: spec.constructor.clone(),
@@ -707,8 +771,17 @@ impl Engine {
         let proto = ft.prototype_template(scope);
 
         let mut methods = Vec::new();
+        let this_iface = (self_id, ft);
         for m in &spec.statics {
-            install_member(scope, &mut st, Target::Function(ft), None, m, &mut methods);
+            install_member(
+                scope,
+                &mut st,
+                Target::Function(ft),
+                None,
+                m,
+                &mut methods,
+                this_iface,
+            );
         }
         methods.clear();
         for m in &spec.prototype {
@@ -719,6 +792,7 @@ impl Engine {
                 Some(signature),
                 m,
                 &mut methods,
+                this_iface,
             );
         }
         if spec.to_string_tag {
@@ -731,7 +805,8 @@ impl Engine {
             );
         }
         methods.clear();
-        for m in &spec.instance {
+        let split = spec.instance.len().min(MAX_TEMPLATE_PROPS);
+        for m in &spec.instance[..split] {
             install_member(
                 scope,
                 &mut st,
@@ -739,20 +814,67 @@ impl Engine {
                 Some(signature),
                 m,
                 &mut methods,
+                this_iface,
             );
         }
+        let overflow = (split < spec.instance.len()).then(|| {
+            let ot = v8::ObjectTemplate::new(scope);
+            for m in &spec.instance[split..] {
+                install_member(
+                    scope,
+                    &mut st,
+                    Target::Object(ot),
+                    Some(signature),
+                    m,
+                    &mut methods,
+                    this_iface,
+                );
+            }
+            let keys = spec.instance[split..]
+                .iter()
+                .map(|m| m.key.clone())
+                .collect();
+            (v8::Global::new(scope, ot), keys)
+        });
         if spec.immutable_proto {
             inst.set_immutable_proto();
         }
         if let Some(getter) = spec.named_getter {
-            let idx = st.push_callback(Callback::Named(getter));
-            let data = v8::Integer::new_from_unsigned(scope, idx);
-            inst.set_named_property_handler(
-                v8::NamedPropertyHandlerConfiguration::new()
-                    .getter(named_trampoline)
-                    .data(data.into())
-                    .flags(v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS),
+            // The named callbacks sit at consecutive indexes (get, set,
+            // delete, enum) so one integer of data reaches all four.
+            let has = (
+                spec.named_setter.is_some(),
+                spec.named_deleter.is_some(),
+                spec.named_enumerator.is_some(),
             );
+            let base = st.push_callback(Callback::Named(getter));
+            st.push_callback(
+                spec.named_setter
+                    .map_or(Callback::Empty, Callback::NamedSet),
+            );
+            st.push_callback(
+                spec.named_deleter
+                    .map_or(Callback::Empty, Callback::NamedDelete),
+            );
+            st.push_callback(
+                spec.named_enumerator
+                    .map_or(Callback::Empty, Callback::NamedEnum),
+            );
+            let data = v8::Integer::new_from_unsigned(scope, base);
+            let mut config = v8::NamedPropertyHandlerConfiguration::new()
+                .getter(named_trampoline)
+                .data(data.into())
+                .flags(v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS);
+            if has.0 {
+                config = config.setter(named_set_trampoline);
+            }
+            if has.1 {
+                config = config.deleter(named_delete_trampoline);
+            }
+            if has.2 {
+                config = config.enumerator(named_enum_trampoline);
+            }
+            inst.set_named_property_handler(config);
         }
         if let Some(getter) = spec.indexed_getter {
             let idx = st.push_callback(Callback::Indexed(getter));
@@ -768,6 +890,7 @@ impl Engine {
         st.interfaces.push(IfaceEntry {
             template,
             parent: spec.parent,
+            overflow,
         });
         InterfaceId((st.interfaces.len() - 1) as u32)
     }
@@ -821,6 +944,9 @@ impl Engine {
         }
 
         let global = context.global(scope);
+        if let Some(id) = options.global {
+            apply_overflow(scope, &self.state, id, global);
+        }
         let mut st = self.state.borrow_mut();
         if let Some(host) = options.global_host {
             if global.internal_field_count() >= HOST_FIELDS {
@@ -1100,6 +1226,93 @@ impl Engine {
                 Err(HostError::Thrown) => Err(caught(tc, state)),
                 Err(e) => Err(JsError::host(format!("{e:?}"))),
             }
+        })
+    }
+
+    /// A native function in `realm` backed by `f` (`name` and `length` as
+    /// given; `toString` prints `[native code]`). Create these once per
+    /// realm (each call registers a callback for the engine's lifetime).
+    pub fn new_function(
+        &mut self,
+        realm: RealmId,
+        name: &str,
+        length: u32,
+        f: HostFn,
+    ) -> Result<Handle, JsError> {
+        let idx = self.state.borrow_mut().push_callback(Callback::Fn(f));
+        self.run(realm, |scope, state| {
+            let data = v8::Integer::new_from_unsigned(scope, idx);
+            let func = v8::Function::builder(host_trampoline)
+                .data(data.into())
+                .length(length as i32)
+                .constructor_behavior(v8::ConstructorBehavior::Throw)
+                .build(scope)
+                .ok_or_else(|| JsError::host("function creation failed"))?;
+            let n = v8_str(scope, name);
+            func.set_name(n);
+            Ok(store_handle(scope, state, realm, func.into()))
+        })
+    }
+
+    /// Materialize an [`Arg`] as a held value in `realm`.
+    pub fn make_handle(&mut self, realm: RealmId, value: Arg) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            match arg_to_v8(tc, state, realm, &value) {
+                Ok(v) => Ok(store_handle(tc, state, realm, v)),
+                Err(_) => Err(caught(tc, state)),
+            }
+        })
+    }
+
+    /// The realm's global object as a handle.
+    pub fn global(&mut self, realm: RealmId) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            let g = scope.get_current_context().global(scope);
+            Ok(store_handle(scope, state, realm, g.into()))
+        })
+    }
+
+    /// `obj[key] = value` on a held object (no-op for non-objects).
+    pub fn set_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+        value: Arg,
+    ) -> Result<(), JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            let v = load_handle(tc, state, object)?;
+            if let Ok(o) = v8::Local::<v8::Object>::try_from(v) {
+                let val = match arg_to_v8(tc, state, realm, &value) {
+                    Ok(v) => v,
+                    Err(_) => return Err(caught(tc, state)),
+                };
+                let k = v8_str(tc, key);
+                if o.set(tc, k.into(), val).is_none() {
+                    return Err(caught(tc, state));
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Queue a held function as a microtask of its realm.
+    pub fn enqueue_microtask(&mut self, realm: RealmId, func: Handle) -> Result<(), JsError> {
+        self.run(realm, |scope, state| {
+            let v = load_handle(scope, state, func)?;
+            let f = v8::Local::<v8::Function>::try_from(v)
+                .map_err(|_| JsError::host("handle is not a function"))?;
+            scope.enqueue_microtask(f);
+            Ok(())
+        })
+    }
+
+    /// Type of a held value.
+    pub fn value_kind(&mut self, realm: RealmId, handle: Handle) -> Result<ValueKind, JsError> {
+        self.run(realm, |scope, state| {
+            Ok(value_kind(load_handle(scope, state, handle)?))
         })
     }
 
@@ -1401,6 +1614,172 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         }
     }
 
+    /// Call a held function and catch what it throws: the exception comes
+    /// back as a [`JsError`] instead of propagating (event listeners,
+    /// callbacks whose errors are "reported"). A termination still unwinds.
+    pub fn try_call(&mut self, func: Handle, this: Arg, args: &[Arg]) -> Result<JsValue, JsError> {
+        let realm = self.realm;
+        let state = self.state.clone();
+        v8::tc_scope!(let tc, self.scope);
+        match call_inner(tc, &state, realm, func, &this, args)? {
+            Some(v) => Ok(to_js_value(tc, v)),
+            None => Err(caught_nested(tc)),
+        }
+    }
+
+    /// Like [`CallCtx::try_call`], keeping the result as a handle.
+    pub fn try_call_handle(
+        &mut self,
+        func: Handle,
+        this: Arg,
+        args: &[Arg],
+    ) -> Result<Handle, JsError> {
+        let realm = self.realm;
+        let state = self.state.clone();
+        v8::tc_scope!(let tc, self.scope);
+        match call_inner(tc, &state, realm, func, &this, args)? {
+            Some(v) => Ok(store_handle(tc, &state, realm, v)),
+            None => Err(caught_nested(tc)),
+        }
+    }
+
+    /// Compile and run a classic script in the current realm from inside a
+    /// callback (a script element inserted by script). Exceptions are
+    /// caught and returned.
+    pub fn try_evaluate(
+        &mut self,
+        source: &str,
+        origin: ScriptOrigin<'_>,
+    ) -> Result<JsValue, JsError> {
+        v8::tc_scope!(let tc, self.scope);
+        match run_script(tc, source, origin) {
+            Some(v) => Ok(to_js_value(tc, v)),
+            None => Err(caught_nested(tc)),
+        }
+    }
+
+    /// Like [`CallCtx::try_evaluate`], keeping the result as a handle.
+    pub fn try_evaluate_handle(
+        &mut self,
+        source: &str,
+        origin: ScriptOrigin<'_>,
+    ) -> Result<Handle, JsError> {
+        let realm = self.realm;
+        let state = self.state.clone();
+        v8::tc_scope!(let tc, self.scope);
+        match run_script(tc, source, origin) {
+            Some(v) => Ok(store_handle(tc, &state, realm, v)),
+            None => Err(caught_nested(tc)),
+        }
+    }
+
+    /// `this` as a handle.
+    pub fn this_handle(&mut self) -> Handle {
+        let this: v8::Local<v8::Value> = self.args.this().into();
+        store_handle(self.scope, &self.state, self.realm, this)
+    }
+
+    /// `obj[key]` of a held value as a new handle (`undefined` for
+    /// non-objects). Getters run; an exception propagates as
+    /// [`HostError::Thrown`].
+    pub fn get_property(&mut self, obj: Handle, key: &str) -> Result<Handle, HostError> {
+        let v =
+            load_handle(self.scope, &self.state, obj).map_err(|e| HostError::Error(e.message))?;
+        let out = match v8::Local::<v8::Object>::try_from(v) {
+            Ok(o) => {
+                let k = v8_str(self.scope, key);
+                o.get(self.scope, k.into()).ok_or(HostError::Thrown)?
+            }
+            Err(_) => v8::undefined(self.scope).into(),
+        };
+        Ok(store_handle(self.scope, &self.state, self.realm, out))
+    }
+
+    /// `obj[key] = value` on a held object. No-op for non-objects.
+    pub fn set_property(&mut self, obj: Handle, key: &str, value: Arg) -> Result<(), HostError> {
+        let v =
+            load_handle(self.scope, &self.state, obj).map_err(|e| HostError::Error(e.message))?;
+        if let Ok(o) = v8::Local::<v8::Object>::try_from(v) {
+            let val = arg_to_v8(self.scope, &self.state, self.realm, &value)?;
+            let k = v8_str(self.scope, key);
+            o.set(self.scope, k.into(), val).ok_or(HostError::Thrown)?;
+        }
+        Ok(())
+    }
+
+    /// Materialize an [`Arg`] (e.g. [`Arg::Construct`], [`Arg::Json`]) as a
+    /// held value.
+    pub fn make_handle(&mut self, value: Arg) -> Result<Handle, HostError> {
+        let v = arg_to_v8(self.scope, &self.state, self.realm, &value)?;
+        Ok(store_handle(self.scope, &self.state, self.realm, v))
+    }
+
+    /// `a === b` for two held values.
+    pub fn strict_equals(&mut self, a: Handle, b: Handle) -> bool {
+        match (
+            load_handle(self.scope, &self.state, a),
+            load_handle(self.scope, &self.state, b),
+        ) {
+            (Ok(x), Ok(y)) => x.strict_equals(y),
+            _ => false,
+        }
+    }
+
+    /// Type of a held value.
+    pub fn handle_kind(&mut self, h: Handle) -> ValueKind {
+        load_handle(self.scope, &self.state, h).map_or(ValueKind::Undefined, value_kind)
+    }
+
+    /// The host object behind a held value, if it is a wrapper.
+    pub fn handle_host(&mut self, h: Handle) -> Option<HostRef> {
+        let v = load_handle(self.scope, &self.state, h).ok()?;
+        v8::Local::<v8::Object>::try_from(v)
+            .ok()
+            .and_then(|o| read_host(self.scope, o))
+    }
+
+    /// Copy a held value out (objects as JSON).
+    pub fn handle_value(&mut self, h: Handle) -> JsValue {
+        match load_handle(self.scope, &self.state, h) {
+            Ok(v) => to_js_value(self.scope, v),
+            Err(_) => JsValue::Undefined,
+        }
+    }
+
+    /// ToString of a held value (may run `toString` and throw).
+    pub fn handle_string(&mut self, h: Handle) -> Result<String, HostError> {
+        let v = load_handle(self.scope, &self.state, h).map_err(|e| HostError::Error(e.message))?;
+        let s = v.to_string(self.scope).ok_or(HostError::Thrown)?;
+        Ok(s.to_rust_string_lossy(self.scope))
+    }
+
+    /// Bytes of an `ArrayBuffer` / `ArrayBufferView` argument.
+    pub fn arg_bytes(&mut self, i: usize) -> Option<Vec<u8>> {
+        let v = self.arg(i);
+        read_bytes(self.scope, v)
+    }
+
+    /// Bytes of a held `ArrayBuffer` / `ArrayBufferView`.
+    pub fn handle_bytes(&mut self, h: Handle) -> Option<Vec<u8>> {
+        let v = load_handle(self.scope, &self.state, h).ok()?;
+        read_bytes(self.scope, v)
+    }
+
+    /// Forget a handle (e.g. a cleared timer's callback).
+    pub fn release(&mut self, h: Handle) {
+        self.state.borrow_mut().handles.remove(h.idx, h.generation);
+    }
+
+    /// Queue a held function as a microtask (`queueMicrotask`).
+    pub fn enqueue_microtask(&mut self, func: Handle) -> Result<(), HostError> {
+        let v =
+            load_handle(self.scope, &self.state, func).map_err(|e| HostError::Error(e.message))?;
+        let f = v8::Local::<v8::Function>::try_from(v)
+            .map_err(|_| HostError::type_error("not a function"))?;
+        self.scope.enqueue_microtask(f);
+        Ok(())
+    }
+
     /// Escape hatch: the raw V8 scope.
     pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
         self.scope
@@ -1519,7 +1898,11 @@ fn invoke<'s>(
         state,
         realm,
     };
-    if let Err(e) = f(&mut cx) {
+    // A panic must not unwind into V8 (that aborts the process): report it
+    // as a JS error instead (builds with `panic = abort` still abort).
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut cx)))
+        .unwrap_or_else(|_| Err(HostError::Error("internal error in host function".into())));
+    if let Err(e) = r {
         let CallCtx { scope, state, .. } = cx;
         throw(scope, &state, realm, e);
     }
@@ -1532,7 +1915,7 @@ fn named_trampoline<'s>(
     mut rv: v8::ReturnValue<v8::Value>,
 ) -> v8::Intercepted {
     let state = shared_state(scope);
-    let idx = callback_index(scope, args.data());
+    let idx = named_index(scope, args.data(), 0);
     let f = match state.borrow().callbacks.get(idx) {
         Some(Callback::Named(f)) => f.clone(),
         _ => return v8::Intercepted::kNo,
@@ -1542,6 +1925,96 @@ fn named_trampoline<'s>(
     let mut cx = PropCtx { scope, args, realm };
     let result = f(&mut cx, &name);
     finish_interceptor(cx.scope, &state, realm, result, &mut rv)
+}
+
+/// Callback index `slot` (0 get, 1 set, 2 delete, 3 enum) of a named
+/// handler whose data is the getter's index.
+fn named_index(
+    scope: &mut v8::PinScope<'_, '_>,
+    data: v8::Local<'_, v8::Value>,
+    slot: u32,
+) -> usize {
+    callback_index(scope, data).saturating_add(slot as usize)
+}
+
+fn named_set_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let idx = named_index(scope, args.data(), 1);
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::NamedSet(f)) => f.clone(),
+        _ => return v8::Intercepted::kNo,
+    };
+    let name = key.to_rust_string_lossy(scope);
+    let realm = current_realm(scope);
+    let Some(value) = value.to_string(scope) else {
+        return v8::Intercepted::kYes;
+    };
+    let value = value.to_rust_string_lossy(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    match f(&mut cx, &name, &value) {
+        Ok(false) => v8::Intercepted::kNo,
+        Ok(true) => {
+            rv.set_bool(true);
+            v8::Intercepted::kYes
+        }
+        Err(e) => {
+            throw(cx.scope, &state, realm, e);
+            v8::Intercepted::kYes
+        }
+    }
+}
+
+fn named_delete_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let idx = named_index(scope, args.data(), 2);
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::NamedDelete(f)) => f.clone(),
+        _ => return v8::Intercepted::kNo,
+    };
+    let name = key.to_rust_string_lossy(scope);
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    match f(&mut cx, &name) {
+        Ok(None) => v8::Intercepted::kNo,
+        Ok(Some(b)) => {
+            rv.set_bool(b);
+            v8::Intercepted::kYes
+        }
+        Err(e) => {
+            throw(cx.scope, &state, realm, e);
+            v8::Intercepted::kYes
+        }
+    }
+}
+
+fn named_enum_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Array>,
+) {
+    let state = shared_state(scope);
+    let idx = named_index(scope, args.data(), 3);
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::NamedEnum(f)) => f.clone(),
+        _ => return,
+    };
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    let names = f(&mut cx);
+    let scope = cx.scope;
+    let elems: Vec<v8::Local<v8::Value>> = names.iter().map(|n| v8_str(scope, n).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &elems));
 }
 
 fn indexed_trampoline<'s>(
@@ -1673,6 +2146,7 @@ fn install_member<'s>(
     signature: Option<v8::Local<'s, v8::Signature>>,
     m: &Member,
     methods: &mut Vec<(PropKey, v8::Local<'s, v8::FunctionTemplate>)>,
+    this_iface: (InterfaceId, v8::Local<'s, v8::FunctionTemplate>),
 ) {
     let key = v8_key(scope, &m.key);
     let template: &v8::Template = match &target {
@@ -1700,7 +2174,15 @@ fn install_member<'s>(
             let ot = v8::ObjectTemplate::new(scope);
             let mut inner = Vec::new();
             for member in members {
-                install_member(scope, st, Target::Object(ot), None, member, &mut inner);
+                install_member(
+                    scope,
+                    st,
+                    Target::Object(ot),
+                    None,
+                    member,
+                    &mut inner,
+                    this_iface,
+                );
             }
             let tag = v8::Symbol::get_to_string_tag(scope);
             let value = v8_str(scope, to_string_tag);
@@ -1740,6 +2222,10 @@ fn install_member<'s>(
                 }
             };
             template.set_with_attr(key, value, v8_attrs(m.attrs, false));
+        }
+        MemberKind::Interface(id) if *id == this_iface.0 => {
+            // The interface being defined (the global's own interface object).
+            template.set_with_attr(key, this_iface.1.into(), v8_attrs(m.attrs, false));
         }
         MemberKind::Interface(id) => {
             if let Some(entry) = st.interfaces.get(id.0 as usize) {
@@ -1889,9 +2375,70 @@ fn wrap_host<'s>(
         .new_instance(scope)
         .ok_or_else(|| JsError::host("wrapper creation failed"))?;
     set_host(scope, obj, host);
+    apply_overflow(scope, state, iface, obj);
     let global = v8::Global::new(scope, obj);
     state.borrow_mut().wrappers.insert((realm, host), global);
     Ok(obj)
+}
+
+fn desc_field<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    d: v8::Local<'s, v8::Object>,
+    name: &str,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let k = v8_str(scope, name);
+    d.get(scope, k.into())
+}
+
+/// Define an interface's overflow members (past [`MAX_TEMPLATE_PROPS`]) on
+/// a fresh instance, in member order, with their template descriptors.
+fn apply_overflow<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    iface: InterfaceId,
+    obj: v8::Local<'_, v8::Object>,
+) {
+    let (ot, keys) = {
+        let st = state.borrow();
+        let Some((ot, keys)) = st
+            .interfaces
+            .get(iface.0 as usize)
+            .and_then(|e| e.overflow.as_ref())
+        else {
+            return;
+        };
+        (v8::Local::new(scope, ot), keys.clone())
+    };
+    let Some(tmp) = ot.new_instance(scope) else {
+        return;
+    };
+    for key in &keys {
+        let k = v8_key(scope, key);
+        let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
+            continue;
+        };
+        let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
+            continue;
+        };
+        let enumerable = desc_field(scope, d, "enumerable").is_some_and(|v| v.is_true());
+        let configurable = desc_field(scope, d, "configurable").is_some_and(|v| v.is_true());
+        let get = desc_field(scope, d, "get");
+        let set = desc_field(scope, d, "set");
+        let mut desc = match (get, set) {
+            (Some(g), Some(s)) if g.is_function() || s.is_function() => {
+                v8::PropertyDescriptor::new_from_get_set(g, s)
+            }
+            _ => {
+                let value =
+                    desc_field(scope, d, "value").unwrap_or_else(|| v8::undefined(scope).into());
+                let writable = desc_field(scope, d, "writable").is_some_and(|v| v.is_true());
+                v8::PropertyDescriptor::new_from_value_writable(value, writable)
+            }
+        };
+        desc.set_enumerable(enumerable);
+        desc.set_configurable(configurable);
+        obj.define_property(scope, k, &desc);
+    }
 }
 
 fn arg_to_v8<'s>(
@@ -1928,9 +2475,68 @@ fn arg_to_v8<'s>(
             for a in args {
                 argv.push(arg_to_v8(scope, state, realm, a)?);
             }
-            f.new_instance(scope, &argv).ok_or(HostError::Thrown)?.into()
+            f.new_instance(scope, &argv)
+                .ok_or(HostError::Thrown)?
+                .into()
+        }
+        Arg::Array(items) => {
+            let mut elems = Vec::with_capacity(items.len());
+            for a in items {
+                elems.push(arg_to_v8(scope, state, realm, a)?);
+            }
+            v8::Array::new_with_elements(scope, &elems).into()
+        }
+        Arg::ArrayBuffer(bytes) => new_array_buffer(scope, bytes).into(),
+        Arg::Uint8Array(bytes) => {
+            let len = bytes.len();
+            let ab = new_array_buffer(scope, bytes);
+            v8::Uint8Array::new(scope, ab, 0, len)
+                .ok_or(HostError::Thrown)?
+                .into()
         }
     })
+}
+
+fn new_array_buffer<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    bytes: &[u8],
+) -> v8::Local<'s, v8::ArrayBuffer> {
+    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes.to_vec()).make_shared();
+    v8::ArrayBuffer::with_backing_store(scope, &store)
+}
+
+/// Bytes of an `ArrayBuffer` or `ArrayBufferView`, copied out.
+fn read_bytes(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+    if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(v) {
+        let mut out = vec![0u8; view.byte_length()];
+        let n = view.copy_contents(&mut out);
+        out.truncate(n);
+        return Some(out);
+    }
+    if let Ok(ab) = v8::Local::<v8::ArrayBuffer>::try_from(v) {
+        let len = ab.byte_length();
+        let view = v8::Uint8Array::new(scope, ab, 0, len)?;
+        let mut out = vec![0u8; len];
+        let n = view.copy_contents(&mut out);
+        out.truncate(n);
+        return Some(out);
+    }
+    None
+}
+
+/// Like `caught`, but leaves a termination in place so it keeps unwinding
+/// the outer JS (used for calls made from inside a host callback).
+fn caught_nested(tc: &mut v8::PinnedRef<'_, v8::TryCatch<'_, '_, v8::HandleScope<'_>>>) -> JsError {
+    if tc.has_terminated() || tc.is_execution_terminating() {
+        return JsError::new(JsErrorKind::Terminated, "Execution terminated");
+    }
+    match tc.exception() {
+        Some(exc) => {
+            let message = tc.message();
+            exception_to_error(tc, exc, message)
+        }
+        None => JsError::new(JsErrorKind::Exception, "unknown error"),
+    }
 }
 
 fn throw(scope: &mut v8::PinScope<'_, '_>, state: &SharedState, realm: RealmId, err: HostError) {

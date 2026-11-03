@@ -4,9 +4,16 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 (async () => {
   const out = process.argv[2];
+  // Optional page URL. Default about:blank (not a secure context). For the
+  // secure-context fixture, serve an empty page on loopback and pass its URL.
+  // Loopback only.
+  const url = process.argv[3] || 'about:blank';
+  if (url !== 'about:blank' && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) {
+    throw new Error(`refusing non-loopback URL: ${url}`);
+  }
   const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage();
-  await page.goto('about:blank');
+  await page.goto(url);
   const data = await page.evaluate(() => {
     const kind = (d) => d.get || d.set ? `${d.get ? 'g' : ''}${d.set ? 's' : ''}${d.enumerable ? 'e' : ''}${d.configurable ? 'c' : ''}`
       : `${typeof d.value === 'function' ? 'f' : 'v'}${d.writable ? 'w' : ''}${d.enumerable ? 'e' : ''}${d.configurable ? 'c' : ''}`;

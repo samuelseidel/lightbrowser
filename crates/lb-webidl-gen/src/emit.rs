@@ -52,6 +52,9 @@ fn attr(a: &Attr) -> String {
     if a.late {
         f.push("late: true".into());
     }
+    if a.secure_only {
+        f.push("secure_context: true".into());
+    }
     let ty = match a.ty {
         AttrTy::Other => None,
         AttrTy::Null => Some("Null"),
@@ -84,6 +87,9 @@ fn op(o: &Op) -> String {
     }
     if o.late {
         f.push("late: true".into());
+    }
+    if o.secure_only {
+        f.push("secure_context: true".into());
     }
     match o.kind {
         OpKind::Regular => {}
@@ -181,8 +187,12 @@ fn interface(i: &Interface) -> String {
         Iterable::Pair => Some("Iterable::Pair".to_owned()),
         Iterable::AsyncValue => Some("Iterable::AsyncValue".to_owned()),
         Iterable::AsyncPair => Some("Iterable::AsyncPair".to_owned()),
-        Iterable::Maplike { readonly } => Some(format!("Iterable::Maplike {{ readonly: {readonly} }}")),
-        Iterable::Setlike { readonly } => Some(format!("Iterable::Setlike {{ readonly: {readonly} }}")),
+        Iterable::Maplike { readonly } => {
+            Some(format!("Iterable::Maplike {{ readonly: {readonly} }}"))
+        }
+        Iterable::Setlike { readonly } => {
+            Some(format!("Iterable::Setlike {{ readonly: {readonly} }}"))
+        }
     };
     if let Some(it) = it {
         f.push(format!("iterable: {it}"));
@@ -220,6 +230,9 @@ fn interface(i: &Interface) -> String {
     }
     if let Some(a) = &i.async_iterator {
         f.push(format!("async_iterator: Some({})", q(a)));
+    }
+    if i.secure_only {
+        f.push("secure_context: true".into());
     }
     if let Some(b) = &i.builtin_parent {
         f.push(format!("builtin_parent: Some({})", q(b)));
@@ -261,7 +274,11 @@ fn global(p: &GlobalProp) -> String {
             format!("G::Alias {{ name: {}, target: {} }}", q(name), q(target))
         }
         GlobalProp::LegacyFactory { name, iface } => {
-            format!("G::LegacyFactory {{ name: {}, iface: {} }}", q(name), q(iface))
+            format!(
+                "G::LegacyFactory {{ name: {}, iface: {} }}",
+                q(name),
+                q(iface)
+            )
         }
         GlobalProp::Namespace(n) => format!("G::Namespace({})", q(n)),
         GlobalProp::Attr(n) => format!("G::Attr({})", q(n)),
@@ -280,7 +297,7 @@ pub fn emit(table: &Table, header: &str) -> String {
         "\n#![allow(clippy::all)]\n\nuse crate::desc::GlobalProp as G;\nuse crate::desc::Slot::{Attr as A, Const as C, Op as O};\n#[allow(unused_imports)]\nuse crate::desc::*;\n\n",
     );
     s.push_str(
-        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: INTERFACES,\n    namespaces: NAMESPACES,\n    window_props: WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n};\n\n",
+        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: INTERFACES,\n    namespaces: NAMESPACES,\n    window_props: WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n    window_secure_only: WINDOW_SECURE_ONLY,\n};\n\n",
     );
     let _ = writeln!(
         s,
@@ -291,13 +308,19 @@ pub fn emit(table: &Table, header: &str) -> String {
     for i in &table.interfaces {
         let _ = writeln!(s, "    {},", interface(i));
     }
-    s.push_str("];\n\n/// Namespaces on the window.\npub static NAMESPACES: &[NamespaceDesc] = &[\n");
+    s.push_str(
+        "];\n\n/// Namespaces on the window.\npub static NAMESPACES: &[NamespaceDesc] = &[\n",
+    );
     for n in &table.namespaces {
         let _ = writeln!(s, "    {},", namespace(n));
     }
     s.push_str("];\n\n/// Own properties of the window global, in Chrome's order.\npub static WINDOW_PROPS: &[GlobalProp] = &[\n");
     for p in &table.window_props {
         let _ = writeln!(s, "    {},", global(p));
+    }
+    s.push_str("];\n\n/// Window props that exist only in secure contexts.\npub static WINDOW_SECURE_ONLY: &[&str] = &[\n");
+    for n in &table.window_secure_only {
+        let _ = writeln!(s, "    {},", q(n));
     }
     s.push_str("];\n");
     s

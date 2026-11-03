@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "description": "Playwright tests for lightbrowser serve. Run: node --test tests/playwright/",
+  "type": "module",
+  "main": "all.mjs"
+}

@@ -58,7 +58,10 @@ pub fn computed_value(s: &ComputedStyle, name: &str) -> Option<String> {
         }
         "gap" => {
             let r = s.row_gap.as_ref().map_or("normal".into(), |l| l.to_css());
-            let c = s.column_gap.as_ref().map_or("normal".into(), |l| l.to_css());
+            let c = s
+                .column_gap
+                .as_ref()
+                .map_or("normal".into(), |l| l.to_css());
             if r == c { r } else { format!("{r} {c}") }
         }
         "flex" => format!(
@@ -125,7 +128,10 @@ pub fn longhand_value(s: &ComputedStyle, id: LonghandId) -> String {
         L::FlexBasis => lp_auto(&s.flex_basis),
         L::Order => s.order.to_string(),
         L::RowGap => s.row_gap.as_ref().map_or("normal".into(), |l| l.to_css()),
-        L::ColumnGap => s.column_gap.as_ref().map_or("normal".into(), |l| l.to_css()),
+        L::ColumnGap => s
+            .column_gap
+            .as_ref()
+            .map_or("normal".into(), |l| l.to_css()),
         L::GridTemplateRows | L::GridTemplateColumns => {
             let t = if id == L::GridTemplateRows {
                 &s.grid_template_rows

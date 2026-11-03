@@ -149,7 +149,9 @@ fn is_plain_ident_seq(s: &str) -> bool {
             let mut c = w.chars();
             c.next()
                 .is_some_and(|f| f.is_ascii_alphabetic() || f == '_' || f == '-' || !f.is_ascii())
-                && c.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || !ch.is_ascii())
+                && c.all(|ch| {
+                    ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || !ch.is_ascii()
+                })
         })
 }
 
@@ -408,7 +410,12 @@ use LonghandId as L;
 pub(crate) fn shorthand_longhands(name: &str) -> Option<&'static [LonghandId]> {
     Some(match name {
         "margin" => &[L::MarginTop, L::MarginRight, L::MarginBottom, L::MarginLeft],
-        "padding" => &[L::PaddingTop, L::PaddingRight, L::PaddingBottom, L::PaddingLeft],
+        "padding" => &[
+            L::PaddingTop,
+            L::PaddingRight,
+            L::PaddingBottom,
+            L::PaddingLeft,
+        ],
         "inset" => &[L::Top, L::Right, L::Bottom, L::Left],
         "border-width" => &[
             L::BorderTopWidth,
@@ -443,7 +450,11 @@ pub(crate) fn shorthand_longhands(name: &str) -> Option<&'static [LonghandId]> {
             L::BorderLeftColor,
         ],
         "border-top" => &[L::BorderTopWidth, L::BorderTopStyle, L::BorderTopColor],
-        "border-right" => &[L::BorderRightWidth, L::BorderRightStyle, L::BorderRightColor],
+        "border-right" => &[
+            L::BorderRightWidth,
+            L::BorderRightStyle,
+            L::BorderRightColor,
+        ],
         "border-bottom" => &[
             L::BorderBottomWidth,
             L::BorderBottomStyle,
@@ -568,10 +579,7 @@ pub(crate) fn parse_property(name: &str, value: &str) -> Option<Vec<(LonghandId,
     Some(r)
 }
 
-fn ident_of<'i, T>(
-    p: &mut Parser<'i>,
-    f: impl Fn(&str) -> Option<T>,
-) -> PResult<T> {
+fn ident_of<'i, T>(p: &mut Parser<'i>, f: impl Fn(&str) -> Option<T>) -> PResult<T> {
     let i = p.expect_ident()?;
     f(i).ok_or_else(|| cssparser::ParseError::custom(()))
 }
@@ -598,8 +606,13 @@ fn size<'i>(p: &mut Parser<'i>, none_ok: bool, auto_ok: bool) -> PResult<Sv> {
             "auto" if auto_ok => Ok(Sv::Auto),
             "none" if none_ok => Ok(Sv::None),
             // Intrinsic keywords are approximated as auto.
-            "min-content" | "max-content" | "fit-content" | "-webkit-fit-content"
-            | "-webkit-min-content" | "-webkit-max-content" | "stretch"
+            "min-content"
+            | "max-content"
+            | "fit-content"
+            | "-webkit-fit-content"
+            | "-webkit-min-content"
+            | "-webkit-max-content"
+            | "stretch"
             | "-webkit-fill-available" => Ok(if none_ok && !auto_ok {
                 Sv::None
             } else {
@@ -633,14 +646,19 @@ fn color<'i>(p: &mut Parser<'i>) -> PResult<Sv> {
 }
 
 /// 1-4 box values (top, right, bottom, left).
-fn four<'i>(
-    p: &mut Parser<'i>,
-    f: impl Fn(&mut Parser<'i>) -> PResult<Sv>,
-) -> PResult<[Sv; 4]> {
+fn four<'i>(p: &mut Parser<'i>, f: impl Fn(&mut Parser<'i>) -> PResult<Sv>) -> PResult<[Sv; 4]> {
     let a = f(p)?;
     let b = p.try_parse(&f).ok();
-    let c = if b.is_some() { p.try_parse(&f).ok() } else { None };
-    let d = if c.is_some() { p.try_parse(&f).ok() } else { None };
+    let c = if b.is_some() {
+        p.try_parse(&f).ok()
+    } else {
+        None
+    };
+    let d = if c.is_some() {
+        p.try_parse(&f).ok()
+    } else {
+        None
+    };
     Ok(match (b, c, d) {
         (None, _, _) => [a.clone(), a.clone(), a.clone(), a],
         (Some(b), None, _) => [a.clone(), b.clone(), a, b],
@@ -649,10 +667,7 @@ fn four<'i>(
     })
 }
 
-fn two<'i>(
-    p: &mut Parser<'i>,
-    f: impl Fn(&mut Parser<'i>) -> PResult<Sv>,
-) -> PResult<[Sv; 2]> {
+fn two<'i>(p: &mut Parser<'i>, f: impl Fn(&mut Parser<'i>) -> PResult<Sv>) -> PResult<[Sv; 2]> {
     let a = f(p)?;
     let b = p.try_parse(&f).ok().unwrap_or_else(|| a.clone());
     Ok([a, b])
@@ -812,14 +827,15 @@ fn track_size<'i>(p: &mut Parser<'i>) -> PResult<TrackSize<Calc>> {
             _ => return bad(p),
         });
     }
-    if let Ok((v, unit)) = p.try_parse(|p| match p.next()? {
-        Token::Dimension { value, unit, .. } => Ok((*value, unit.clone())),
+    if let Ok(v) = p.try_parse(|p| match p.next()? {
+        Token::Dimension { value, unit, .. }
+            if unit.eq_ignore_ascii_case("fr") && *value >= 0.0 =>
+        {
+            Ok(*value)
+        }
         _ => bad(p),
     }) {
-        if unit.eq_ignore_ascii_case("fr") && v >= 0.0 {
-            return Ok(TrackSize::Fr(v));
-        }
-        return bad(p);
+        return Ok(TrackSize::Fr(v));
     }
     if let Ok(name) = p.try_parse(|p| p.expect_function().map(|f| f.to_ascii_lowercase())) {
         return p.parse_nested_block(|p| match name.as_str() {
@@ -856,7 +872,9 @@ fn track_list<'i>(p: &mut Parser<'i>) -> PResult<Sv> {
         if p.is_exhausted() {
             break;
         }
-        if p.try_parse(|p| p.expect_function_matching("repeat")).is_ok() {
+        if p.try_parse(|p| p.expect_function_matching("repeat"))
+            .is_ok()
+        {
             let entry = p.parse_nested_block(|p| {
                 let count = if let Ok(i) = p.try_parse(|p| p.expect_ident_cloned()) {
                     match i.to_ascii_lowercase().as_str() {
@@ -1030,7 +1048,9 @@ fn font_shorthand<'i>(p: &mut Parser<'i>) -> PResult<Vec<Sv>> {
             weight = Some(w);
             continue;
         }
-        if p.try_parse(|p| p.expect_ident_matching("small-caps")).is_ok() {
+        if p.try_parse(|p| p.expect_ident_matching("small-caps"))
+            .is_ok()
+        {
             continue;
         }
         let stretch = p.try_parse(|p| {
@@ -1093,10 +1113,7 @@ fn gap_value<'i>(p: &mut Parser<'i>) -> PResult<Sv> {
     lp_nonneg(p)
 }
 
-fn parse_property_inner<'i>(
-    name: &str,
-    p: &mut Parser<'i>,
-) -> PResult<Vec<(LonghandId, Sv)>> {
+fn parse_property_inner<'i>(name: &str, p: &mut Parser<'i>) -> PResult<Vec<(LonghandId, Sv)>> {
     if let Some(id) = LonghandId::from_name(name) {
         let v = parse_longhand(id, p)?;
         return Ok(vec![(id, v)]);
@@ -1116,9 +1133,7 @@ fn parse_property_inner<'i>(
             v.extend(std::iter::repeat_n(c, 4));
             v
         }
-        "border-top" | "border-right" | "border-bottom" | "border-left" => {
-            border_side(p)?.into()
-        }
+        "border-top" | "border-right" | "border-bottom" | "border-left" => border_side(p)?.into(),
         "margin-inline" | "margin-block" | "inset-inline" | "inset-block" => {
             two(p, lp_auto)?.into()
         }
@@ -1181,13 +1196,11 @@ pub(crate) fn parse_longhand<'i>(id: LonghandId, p: &mut Parser<'i>) -> PResult<
         L::Clear => Sv::Clear(ident_of(p, Clear::from_ident)?),
         L::Visibility => Sv::Visibility(ident_of(p, Visibility::from_ident)?),
         L::Opacity => {
-            let v = if let Ok(Token::Percentage { unit_value, .. }) =
-                p.try_parse(|p| p.next().cloned())
-            {
-                unit_value
-            } else {
-                parse_number(p)?
-            };
+            let pct = p.try_parse(|p| match p.next()? {
+                Token::Percentage { unit_value, .. } => Ok(*unit_value),
+                _ => bad(p),
+            });
+            let v = if let Ok(v) = pct { v } else { parse_number(p)? };
             Sv::Number(v.clamp(0.0, 1.0))
         }
         L::OverflowX | L::OverflowY => overflow_kw(p)?,

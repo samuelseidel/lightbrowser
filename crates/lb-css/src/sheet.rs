@@ -89,11 +89,7 @@ impl<'i> cssparser::AtRuleParser<'i> for RuleParser<'_> {
     type AtRule = ();
     type Error = ();
 
-    fn parse_prelude(
-        &mut self,
-        name: CowRcStr<'i>,
-        input: &mut Parser<'i>,
-    ) -> PResult<AtPrelude> {
+    fn parse_prelude(&mut self, name: CowRcStr<'i>, input: &mut Parser<'i>) -> PResult<AtPrelude> {
         let name = name.to_ascii_lowercase();
         Ok(match name.as_str() {
             "media" => AtPrelude::Media(MediaQueryList::parse_from(input)),
@@ -107,9 +103,10 @@ impl<'i> cssparser::AtRuleParser<'i> for RuleParser<'_> {
                     Token::UnquotedUrl(u) | Token::QuotedString(u) => u.to_string(),
                     Token::Function(f) if f.eq_ignore_ascii_case("url") => input
                         .parse_nested_block(|p| {
-                            p.expect_string().map(|s| s.to_string()).map_err(ParseError::<()>::from)
-                        })
-                        .map_err(ParseError::<()>::from)?,
+                            p.expect_string()
+                                .map(|s| s.to_string())
+                                .map_err(ParseError::<()>::from)
+                        })?,
                     _ => return bad(input),
                 };
                 // Skip `layer(...)` / `supports(...)`.

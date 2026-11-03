@@ -6,3 +6,14 @@ license.workspace = true
 publish = false
 
 [dependencies]
+lb-css = { path = "../lb-css" }
+lb-dom = { path = "../lb-dom" }
+lb-persona = { path = "../lb-persona" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+taffy = { version = "0.15.1", default-features = false, features = ["std", "block_layout", "flexbox", "grid", "float_layout", "calc", "content_size"] }
+
+[dev-dependencies]
+# Only the font table generator example uses skrifa; it never runs in the
+# browser.
+skrifa = "0.49"

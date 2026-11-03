@@ -7,7 +7,7 @@ publish = false
 
 [features]
 # Same family features as lb-js. The firefox build has only the descriptor
-# tables (no installer) until SpiderMonkey lands in M4b.
+# tables (no installer, no implementations) until SpiderMonkey lands in M4b.
 default = ["chrome"]
 chrome = ["lb-js/chrome"]
 firefox = ["lb-js/firefox"]
@@ -15,3 +15,14 @@ firefox = ["lb-js/firefox"]
 [dependencies]
 lb-js = { path = "../lb-js", default-features = false }
 lb-persona = { path = "../lb-persona" }
+lb-dom = { path = "../lb-dom" }
+lb-css = { path = "../lb-css" }
+lb-layout = { path = "../lb-layout" }
+url = "2"
+encoding_rs = "0.8"
+serde_json = "1"
+percent-encoding = "2"
+form_urlencoded = "1"
+
+[dev-dependencies]
+serde_json = "1"

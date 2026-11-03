@@ -71,6 +71,8 @@ pub struct AttrDesc {
     /// feature), so it comes after `constructor` in property order.
     pub late: bool,
     pub ty: AttrType,
+    /// Only in secure contexts (`[SecureContext]`, as captured).
+    pub secure_context: bool,
 }
 
 impl AttrDesc {
@@ -87,6 +89,7 @@ impl AttrDesc {
         enumerable: true,
         late: false,
         ty: AttrType::Other,
+        secure_context: false,
     };
 
     /// Whether the property has a setter.
@@ -130,6 +133,8 @@ pub struct OpDesc {
     pub enumerable: bool,
     pub late: bool,
     pub kind: OpKind,
+    /// Only in secure contexts.
+    pub secure_context: bool,
 }
 
 impl OpDesc {
@@ -142,6 +147,7 @@ impl OpDesc {
         enumerable: true,
         late: false,
         kind: OpKind::Regular,
+        secure_context: false,
     };
 }
 
@@ -230,6 +236,8 @@ pub struct InterfaceDesc {
     /// The prototype inherits from a JS built-in's prototype instead
     /// (`Error` for `DOMException`).
     pub builtin_parent: Option<&'static str>,
+    /// The interface object exists only in secure contexts.
+    pub secure_context: bool,
     /// Member order and descriptors were checked against the captured
     /// Chrome surface (otherwise IDL order with features guessed).
     pub from_fixture: bool,
@@ -268,6 +276,7 @@ impl InterfaceDesc {
         unscopables: &[],
         callback_interface: false,
         builtin_parent: None,
+        secure_context: false,
         from_fixture: false,
     };
 
@@ -343,6 +352,8 @@ pub struct Table {
     /// Index into `window_props` from which Chrome installs properties after
     /// the engine's late built-ins (conditionally enabled features).
     pub window_late_start: usize,
+    /// Names in `window_props` that exist only in secure contexts.
+    pub window_secure_only: &'static [&'static str],
 }
 
 impl Table {

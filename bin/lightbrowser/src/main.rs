@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use lb_net::fetch::{NetContext, Request};
-use lb_net::{ClientHelloProfile, HttpVersion};
+use lb_net::ClientHelloProfile;
 use lb_persona::Persona;
 
 const USAGE: &str = "\
@@ -16,14 +15,21 @@ lightbrowser - headless browser for detection testing
 
 USAGE:
   lightbrowser --version
-  lightbrowser serve --port 9222 [--persona FILE]   (M3)
+  lightbrowser serve [--port 9222] [--persona FILE] [--remote-allow-origins O]
+                                            CDP server on 127.0.0.1 for Playwright
+                                            connectOverCDP (mock page host until
+                                            lb-page implements lb_cdp::PageHost)
   lightbrowser fetch <url> [OPTIONS]
   lightbrowser validate <persona.json>...   check v1/v2 personas against the
                                             consistency rules (exit 1 on any
                                             violation or load error)
 
 FETCH OPTIONS:
-  --dump html|text       print the body (text = tags stripped); default: none
+  --dump html|text       print the DOM after scripts ran (html) or its text;
+                         default: none
+  --wait-until W         load (default) | networkidle | domcontentloaded |
+                         commit | <ms> (load, then that many ms more)
+  --timeout SECS         give up waiting after SECS (default 30)
   --persona NAME         chrome | firefox (default: the compiled family)
                          PATH.json personas are not supported yet (M4)
   --profiles-dir DIR     TLS profiles (default: nearest profiles/tls above
@@ -45,6 +51,8 @@ enum Dump {
 struct FetchArgs {
     url: String,
     dump: Dump,
+    wait_until: String,
+    timeout: u64,
     persona: Option<String>,
     profiles_dir: Option<PathBuf>,
     insecure: bool,
@@ -56,6 +64,8 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
     let mut out = FetchArgs {
         url: String::new(),
         dump: Dump::None,
+        wait_until: "load".into(),
+        timeout: 30,
         persona: None,
         profiles_dir: None,
         insecure: false,
@@ -83,6 +93,24 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
                 }
             }
             "--persona" => out.persona = Some(value("--persona")?),
+            "--wait-until" => {
+                let v = value("--wait-until")?;
+                if !matches!(
+                    v.as_str(),
+                    "load" | "networkidle" | "domcontentloaded" | "commit"
+                ) && v.trim_end_matches("ms").parse::<u64>().is_err()
+                {
+                    return Err(format!(
+                        "--wait-until must be load, networkidle, domcontentloaded, commit or a number of ms, got {v:?}"
+                    ));
+                }
+                out.wait_until = v;
+            }
+            "--timeout" => {
+                out.timeout = value("--timeout")?
+                    .parse()
+                    .map_err(|_| "--timeout needs a number of seconds".to_owned())?
+            }
             "--profiles-dir" => out.profiles_dir = Some(PathBuf::from(value("--profiles-dir")?)),
             "--insecure" => out.insecure = true,
             "-v" | "--verbose" => out.verbose = true,
@@ -161,44 +189,42 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
     let profile = ClientHelloProfile::load(&profile_path)
         .map_err(|e| format!("loading {}: {e}", profile_path.display()))?;
 
-    let mut ctx = NetContext::new(persona, Arc::new(profile)).map_err(|e| e.to_string())?;
-    ctx.danger_accept_invalid_certs = args.insecure;
+    let ctx = lb_page::BrowserContext::new(lb_page::ContextOptions {
+        persona,
+        profile: None,
+        tls_profile: Arc::new(profile),
+        accept_invalid_certs: args.insecure,
+        virtual_time: false,
+    })
+    .map_err(|e| e.to_string())?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("starting runtime: {e}"))?;
-    let resp = rt
-        .block_on(lb_net::fetch(&mut ctx, Request::get(url)))
-        .map_err(|e| e.to_string())?;
+    let loaded = rt.block_on(load_page(&ctx, url, args))?;
 
-    let version = match resp.version {
-        HttpVersion::Http1 => "HTTP/1.1",
-        HttpVersion::Http2 => "HTTP/2",
-    };
     if args.verbose {
-        eprintln!("{version} {}", resp.status);
-        for (n, v) in &resp.headers {
+        eprintln!("{}", loaded.status);
+        for (n, v) in &loaded.headers {
             eprintln!("{n}: {v}");
         }
         eprintln!();
     }
     eprintln!(
-        "{} {} {} ({} bytes)",
-        version,
-        resp.status.as_u16(),
-        resp.final_url,
-        resp.body.len()
+        "{} {} ({} bytes of HTML)",
+        loaded.status,
+        loaded.url,
+        loaded.html.len()
     );
 
     let mut stdout = std::io::stdout().lock();
     let written = match args.dump {
         Dump::None => Ok(()),
-        Dump::Html => stdout.write_all(&resp.body),
-        Dump::Text => {
-            let text = strip_tags(&String::from_utf8_lossy(&resp.body));
-            stdout.write_all(text.as_bytes())
-        }
+        Dump::Html => stdout.write_all(loaded.html.as_bytes()),
+        Dump::Text => stdout
+            .write_all(loaded.text.as_bytes())
+            .and_then(|()| stdout.write_all(b"\n")),
     };
     // A closed pipe (`| head`) is not an error for us.
     if let Err(e) = written.and_then(|()| stdout.flush())
@@ -207,126 +233,196 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
         return Err(format!("writing output: {e}"));
     }
 
-    let code = resp.status.as_u16();
+    let code = loaded.status;
     Ok(if (200..400).contains(&code) { 0 } else { 1 })
 }
 
-/// Tags that start a new line in text output.
-const BLOCK_TAGS: &[&str] = &[
-    "br", "p", "div", "li", "ul", "ol", "tr", "table", "title", "pre", "section", "article",
-    "header", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
-];
-
-/// Quick tag strip until the DOM exists (M2): drops tags, comments and the
-/// contents of `script`/`style`, decodes `&amp; &lt; &gt; &quot; &#39;`, and
-/// puts block tags on their own lines. Not a parser.
-fn strip_tags(html: &str) -> String {
-    let bytes = html.as_bytes();
-    let lower = html.to_ascii_lowercase();
-    let mut out = String::with_capacity(html.len() / 2);
-    let mut text_start = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'<' {
-            i += 1;
-            continue;
-        }
-        let rest = &html[i..];
-        let is_tag = rest.starts_with("<!--")
-            || bytes
-                .get(i + 1)
-                .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, b'/' | b'!' | b'?'));
-        if !is_tag {
-            i += 1; // a literal '<' in text
-            continue;
-        }
-        out.push_str(&decode_entities(&html[text_start..i]));
-
-        if rest.starts_with("<!--") {
-            i = lower[i + 4..]
-                .find("-->")
-                .map_or(bytes.len(), |p| i + 4 + p + 3);
-        } else {
-            let end = tag_end(bytes, i);
-            let inner = &lower[i + 1..end.saturating_sub(1).max(i + 1)];
-            let closing = inner.starts_with('/');
-            let name: String = inner
-                .trim_start_matches('/')
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric())
-                .collect();
-            i = end;
-            if BLOCK_TAGS.contains(&name.as_str()) && !out.is_empty() && !out.ends_with('\n') {
-                out.push('\n');
-            }
-            if !closing && matches!(name.as_str(), "script" | "style") && !inner.ends_with('/') {
-                let close = format!("</{name}");
-                i = match lower[i..].find(&close) {
-                    Some(p) => tag_end(bytes, i + p),
-                    None => bytes.len(),
-                };
-            }
-        }
-        text_start = i;
-    }
-    if text_start < bytes.len() {
-        out.push_str(&decode_entities(&html[text_start..]));
-    }
-    out
+/// What `fetch` prints.
+struct Loaded {
+    status: u16,
+    url: String,
+    headers: Vec<(String, String)>,
+    html: String,
+    text: String,
 }
 
-/// Index just past the `>` that closes the tag starting at `start`. A quote
-/// only opens a quoted value right after `=`, so a stray apostrophe in an
-/// attribute does not swallow the page.
-fn tag_end(bytes: &[u8], start: usize) -> usize {
-    let mut quote = None;
-    let mut prev = 0u8; // last non-whitespace byte outside quotes
-    for (off, &c) in bytes[start + 1..].iter().enumerate() {
-        match quote {
-            Some(q) => {
-                if c == q {
-                    quote = None;
-                    prev = c;
+/// Load the page and run its scripts (chrome build).
+#[cfg(feature = "chrome")]
+async fn load_page(
+    ctx: &lb_page::BrowserContext,
+    url: url::Url,
+    args: &FetchArgs,
+) -> Result<Loaded, String> {
+    use std::time::Duration;
+    let until: lb_page::WaitUntil = args.wait_until.parse()?;
+    let browser = lb_page::Browser::new(lb_page::BrowserOptions {
+        workers: 1,
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    let page = browser.new_page(ctx).await.map_err(|e| e.to_string())?;
+    let nav = page
+        .navigate(url.as_str())
+        .await
+        .map_err(|e| e.to_string())?;
+    match page
+        .wait_for(until, Duration::from_secs(args.timeout))
+        .await
+    {
+        Ok(()) => {}
+        Err(lb_page::PageError::Timeout) => eprintln!(
+            "warning: timed out waiting for {}; dumping the DOM as it is",
+            args.wait_until
+        ),
+        Err(e) => return Err(e.to_string()),
+    }
+    let html = page.content().await.map_err(|e| e.to_string())?;
+    let text = page.text().await.map_err(|e| e.to_string())?;
+    for m in page.console_messages().await.unwrap_or_default() {
+        if args.verbose || m.level == "error" {
+            eprintln!("console.{}: {}", m.level, m.text);
+        }
+    }
+    let _ = page.close().await;
+    Ok(Loaded {
+        status: nav.status,
+        url: nav.url,
+        headers: nav.headers,
+        html,
+        text,
+    })
+}
+
+/// Fetch and parse without running scripts (firefox build: no
+/// SpiderMonkey yet).
+#[cfg(not(feature = "chrome"))]
+async fn load_page(
+    ctx: &lb_page::BrowserContext,
+    url: url::Url,
+    _args: &FetchArgs,
+) -> Result<Loaded, String> {
+    let (resp, doc) = lb_page::load_document(ctx, url)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(Loaded {
+        status: resp.status,
+        url: resp.url.to_string(),
+        headers: resp.headers,
+        html: doc.to_html(),
+        text: lb_webapi::text::document_text(&doc),
+    })
+}
+
+/// `serve` options.
+#[derive(Debug)]
+struct ServeArgs {
+    port: u16,
+    persona: Option<PathBuf>,
+    allow_origins: Vec<String>,
+}
+
+fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
+    let mut out = ServeArgs {
+        port: 9222,
+        persona: None,
+        allow_origins: Vec::new(),
+    };
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let (flag, inline) = match arg.split_once('=') {
+            Some((f, v)) if f.starts_with("--") => (f, Some(v.to_owned())),
+            _ => (arg.as_str(), None),
+        };
+        let mut value = |name: &str| {
+            inline
+                .clone()
+                .or_else(|| it.next().cloned())
+                .ok_or_else(|| format!("{name} needs a value"))
+        };
+        match flag {
+            "--port" => {
+                out.port = value("--port")?
+                    .parse()
+                    .map_err(|_| "--port needs a port number".to_owned())?
+            }
+            "--persona" => out.persona = Some(PathBuf::from(value("--persona")?)),
+            "--remote-allow-origins" => {
+                out.allow_origins = value("--remote-allow-origins")?
+                    .split(',')
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            }
+            other => return Err(format!("unknown option: {other}")),
+        }
+    }
+    Ok(out)
+}
+
+/// Nearest `profiles/reference` directory above the current directory or
+/// the executable.
+fn find_reference_dir() -> Option<PathBuf> {
+    let up = |start: &Path| {
+        start
+            .ancestors()
+            .map(|d| d.join("profiles").join("reference"))
+            .find(|d| d.is_dir())
+    };
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| up(&d))
+        .or_else(|| up(std::env::current_exe().ok()?.parent()?))
+        .or_else(|| up(Path::new(env!("CARGO_MANIFEST_DIR"))))
+}
+
+/// The persona for `serve`: the given file (checked against the
+/// consistency rules and the compiled family) or the family's reference
+/// persona.
+fn serve_persona(path: Option<&Path>) -> Result<lb_persona::PersonaProfile, String> {
+    let path = match path {
+        Some(p) => p.to_path_buf(),
+        None => {
+            let dir = find_reference_dir().ok_or("no profiles/reference directory found")?;
+            match lb_js::COMPILED_FAMILY {
+                Some(lb_persona::BrowserFamily::Firefox) => {
+                    dir.join("firefox/win10_rtx3060_1080p.json")
                 }
+                _ => dir.join("chrome/chrome153_win10_rtx3060_1080p.json"),
             }
-            None => match c {
-                b'>' => return start + 1 + off + 1,
-                b'"' | b'\'' if prev == b'=' => quote = Some(c),
-                c if c.is_ascii_whitespace() => {}
-                c => prev = c,
-            },
         }
+    };
+    let p = lb_persona::PersonaProfile::from_path_checked(&path)
+        .map_err(|e| format!("loading {}: {e}", path.display()))?;
+    if Some(p.browser.family) != lb_js::COMPILED_FAMILY {
+        return Err(format!(
+            "persona family {} does not match this build ({})",
+            p.browser.family,
+            lb_js::COMPILED_FAMILY.map_or("none", |f| f.as_str())
+        ));
     }
-    bytes.len()
+    Ok(p)
 }
 
-/// Decode the five basic entities in one pass (so `&amp;lt;` becomes `&lt;`).
-fn decode_entities(text: &str) -> String {
-    const ENTITIES: [(&str, char); 5] = [
-        ("&amp;", '&'),
-        ("&lt;", '<'),
-        ("&gt;", '>'),
-        ("&quot;", '"'),
-        ("&#39;", '\''),
-    ];
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(p) = rest.find('&') {
-        out.push_str(&rest[..p]);
-        rest = &rest[p..];
-        match ENTITIES.iter().find(|(e, _)| rest.starts_with(e)) {
-            Some((e, c)) => {
-                out.push(*c);
-                rest = &rest[e.len()..];
-            }
-            None => {
-                out.push('&');
-                rest = &rest[1..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
+fn run_serve(args: &ServeArgs) -> Result<(), String> {
+    let persona = serve_persona(args.persona.as_deref())?;
+    let persona_label = persona.profile_id.clone();
+    let host = std::rc::Rc::new(lb_cdp::mock::MockHost::new(persona));
+    let config = lb_cdp::ServerConfig {
+        addr: std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
+        allow_origins: args.allow_origins.clone(),
+    };
+    eprintln!(
+        "page host: MOCK (lb-dom + lb-layout, no JS engine, loopback URLs only); persona {}",
+        persona_label
+    );
+    lb_cdp::block_on_local(async move {
+        let server = lb_cdp::Server::bind(config, host).await?;
+        // Same line Chrome prints; launchers wait for it.
+        eprintln!("\nDevTools listening on {}", server.browser_ws_url());
+        server.run().await
+    })
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 /// Validate each persona file, print its report, and fail if any is invalid.
@@ -388,8 +484,25 @@ fn main() -> ExitCode {
             run_validate(paths)
         }
         Some("serve") => {
-            eprintln!("not implemented yet; see docs/ROADMAP.md");
-            ExitCode::from(2)
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            let parsed = match parse_serve_args(&args[1..]) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("error: {e}\n");
+                    eprint!("{USAGE}");
+                    return ExitCode::from(2);
+                }
+            };
+            match run_serve(&parsed) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::from(1)
+                }
+            }
         }
         None | Some("--help" | "-h" | "help") => {
             print!("{USAGE}");
@@ -406,33 +519,6 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn strips_tags_scripts_styles_and_comments() {
-        let html = "<html><head><title>T</title><style>p{color:red}</style>\
-<script>if (a < b) { x('</p>'); }</script></head>\
-<body><!-- hidden --><p class=\"a\">Hello <b>world</b></p><p>Next</p></body></html>";
-        assert_eq!(strip_tags(html), "T\nHello world\nNext\n");
-    }
-
-    #[test]
-    fn decodes_entities_once() {
-        assert_eq!(
-            strip_tags("<p>a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39; &amp;lt; &nbsp;</p>"),
-            "a & b <c> \"d\" 'e' &lt; &nbsp;\n"
-        );
-    }
-
-    #[test]
-    fn handles_odd_attributes_and_literal_angle_brackets() {
-        assert_eq!(
-            strip_tags("1 < 2 <a href=\"x>y\" title='z'>link</a> <img alt=it's> done"),
-            "1 < 2 link  done"
-        );
-        // Unterminated tag and script drop the rest instead of panicking.
-        assert_eq!(strip_tags("ok <div class=\"x"), "ok \n");
-        assert_eq!(strip_tags("ok<script>never closed"), "ok");
-    }
 
     #[test]
     fn parses_fetch_args() {
@@ -453,6 +539,48 @@ mod tests {
         assert!(a(&["u", "v"]).is_err());
         assert!(a(&["u", "--dump", "pdf"]).is_err());
         assert!(a(&["u", "--bogus"]).is_err());
+        let p = a(&["u", "--wait-until", "networkidle", "--timeout=5"]).unwrap();
+        assert_eq!((p.wait_until.as_str(), p.timeout), ("networkidle", 5));
+        assert_eq!(a(&["u"]).unwrap().wait_until, "load");
+        assert!(a(&["u", "--wait-until", "500"]).is_ok());
+        assert!(a(&["u", "--wait-until", "soon"]).is_err());
+    }
+
+    #[test]
+    fn parses_serve_args() {
+        let a = |v: &[&str]| parse_serve_args(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(a(&[]).unwrap().port, 9222);
+        let p = a(&[
+            "--port=0",
+            "--persona",
+            "p.json",
+            "--remote-allow-origins",
+            "http://a,http://b",
+        ])
+        .unwrap();
+        assert_eq!(p.port, 0);
+        assert_eq!(p.persona.as_deref(), Some(Path::new("p.json")));
+        assert_eq!(p.allow_origins, ["http://a", "http://b"]);
+        assert!(a(&["--port", "x"]).is_err());
+        assert!(a(&["--bogus"]).is_err());
+    }
+
+    #[test]
+    fn serve_persona_matches_the_build() {
+        let p = serve_persona(None).unwrap();
+        assert_eq!(Some(p.browser.family), lb_js::COMPILED_FAMILY);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles/reference");
+        let other = match lb_js::COMPILED_FAMILY {
+            Some(lb_persona::BrowserFamily::Chrome) => {
+                root.join("firefox/win10_rtx3060_1080p.json")
+            }
+            _ => root.join("chrome/chrome153_win10_rtx3060_1080p.json"),
+        };
+        assert!(
+            serve_persona(Some(&other))
+                .unwrap_err()
+                .contains("does not match")
+        );
     }
 
     #[test]

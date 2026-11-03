@@ -35,6 +35,7 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 | 0004 | Lazy style/layout, CPU canvas, no painting by default |
 | 0005 | CDP server as the control API |
 | 0006 | Two browser families, one binary per family |
+| 0007 | Our own local detection bench (`tests/detect-bench`) is the detection engine for M4/M5 |
 
 ## Layers
 
@@ -75,7 +76,7 @@ browser context. Nothing reads a global.
 | Language | Rust, edition 2024 | Memory safety without GC. Reuses the stealth-browser crates. |
 | JS (Chrome) | `v8` crate (rusty_v8): startup snapshot of all bindings, pointer compression, per-isolate heap cap, optional `--jitless` | Same engine as Chrome, so engine quirks match (error text, stack format, `Function.prototype.toString`, Math precision, timing). |
 | JS (Firefox) | Servo's `mozjs` (SpiderMonkey), per-realm heap cap | Same engine as Firefox, with a maintained Rust embedding. |
-| Bindings | Own WebIDL → Rust codegen (`weedle2`), using the Chromium IDL set for Chrome and the Gecko IDL set for Firefox | Interface list, prototype chains, property order and descriptors all match the claimed browser. This is a large fingerprint surface. |
+| Bindings | Own WebIDL → Rust codegen with its own tolerant IDL parser (Blink's extended attributes parse as-is), using the Chromium IDL set for Chrome and the Gecko IDL set for Firefox. Members are filtered and ordered by a surface fixture captured from the local Chromium. | Interface list, prototype chains, property order and descriptors all match the claimed browser. This is a large fingerprint surface. |
 | TLS | BoringSSL (`boring`, `tokio-boring`, `boring-sys` FFI for unwrapped knobs) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ML-KEM, ML-DSA, trust_anchors, server_padding. Firefox's ciphers, sigalgs, groups and ALPN match by configuration. delegated_credentials, record_size_limit, ffdhe and Firefox's extension order need small BoringSSL patches (M4b, ADR 0003). rustls can do neither. |
 | HTTP | hyper 1.x for h1. A fork of `h2` (`vendor/h2`) exposes SETTINGS order/values, the initial WINDOW_UPDATE, pseudo-header order and the HEADERS priority block, and writes the preface before reading. h3 via quiche later. | Akamai H2 fingerprint. Pseudo-header order: Chrome `m,a,s,p`, Firefox `m,p,a,s`. |
 | Net misc | hickory-resolver, per-context cookie jar, in-memory LRU cache, gzip/br/zstd, HTTP and SOCKS5 proxies | No disk use. |
@@ -83,7 +84,7 @@ browser context. Nothing reads a global.
 | DOM | Arena of compact nodes (u32 ids), interned atoms (`string_cache`). Each document is one arena, freed in one step on navigation. | Low RAM, cache-friendly, cheap teardown. |
 | Selectors | Servo `selectors` + `cssparser` | `querySelector`, `matches`, cascade. |
 | Style | Own cascade, resolved lazily per element | Pages that never ask for style pay nothing. |
-| Layout | `taffy` (block/flex/grid). Text is measured with `skrifa` metrics of the persona's fonts. | Only runs when geometry is requested. |
+| Layout | `taffy` (block/flex/grid/float) over our own box tree that implements taffy's traits, so `calc()` resolves. Inline content is approximated as wrapping flex rows. Text is measured with per-font metric tables (`profiles/fonts/`, generated offline with `skrifa`, compiled in) for the persona's fonts. | Only runs when geometry is requested. |
 | Canvas 2D | `tiny-skia` + glyph outlines from `skrifa`. Seeded SFC32 noise is added on readback (`toDataURL`, `getImageData`). | Real pixels, deterministic per persona. |
 | WebGL | Stub context: parameters, extensions and shader precision come from the persona. `readPixels` returns seeded deterministic output. | No GPU, consistent answers. |
 | Audio | Minimal OfflineAudioContext DSP (oscillator, dynamics compressor, analyser) + seeded noise | Covers the standard audio fingerprint script. |
@@ -135,7 +136,9 @@ The existing GeckoPhantom personas (`persona_v1`, Firefox 128) load as
 6. Navigating away drops the document arena and the realm in one free.
 
 **Virtual time.** Timers and `requestAnimationFrame` can run on a virtual clock
-to skip idle waiting. It is off when the persona needs realistic timing.
+to skip idle waiting: when no task is queued and nothing is in flight, the
+clock jumps to the next timer. It is off when the persona needs realistic
+timing.
 
 ## Fingerprint surface → module
 

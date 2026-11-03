@@ -28,10 +28,35 @@ cargo test -p lb-net --test fingerprint -- --nocapture   # prints measured JA3/J
     ADR 0003 and the profile's own `ja3_string` vs `extensions_order`
     mismatch.
 
+## WPT subset (M2, in place)
+
+`tests/wpt/` holds testharness.js and 83 upstream WPT files (dom/nodes,
+dom/events, html/dom, url, encoding); see `tests/wpt/README.md`.
+`crates/lb-page/tests/wpt.rs` serves them on loopback and fails below 2520
+passing subtests (2540/2788 today).
+
+```bash
+cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
+```
+
+## Playwright CDP suite (M3, in place)
+
+`tests/playwright/` runs stock Playwright `connectOverCDP` against
+`lightbrowser serve` (mock page host for now): goto, evaluate, title,
+content. click, fill and getByRole follow once `lb-page` implements
+`lb_cdp::PageHost`.
+
+```bash
+cargo build -p lightbrowser && node --test tests/playwright/   # LIGHTBROWSER_BIN overrides
+```
+
+## Detection bench (ADR 0007)
+
+`tests/detect-bench` is our detection engine for M4/M5, loopback only. See
+its README.
+
 ## Planned suites
 
-- **WPT subset** (M2): web-platform-tests for DOM, events, timers, fetch.
-- **Playwright CDP suite** (M3): `connectOverCDP` with goto, evaluate, click, fill, getByRole, content.
 - **Fingerprint tests** (M4, M4b): run against OUR detection engine only. Same seed must give the same fingerprint; Chrome personas must score as consistent.
 - **Firefox network fingerprint** (M4b): close the ADR 0003 gaps and re-capture Firefox 128 with `lb-fptest`.
 

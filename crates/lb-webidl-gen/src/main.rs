@@ -1,4 +1,8 @@
-//! `lb-webidl-gen --family chrome [--fixture F] [--idl DIR] [--out FILE] [--check]`
+//! `lb-webidl-gen --family chrome [--fixture F] [--insecure-fixture F] [--idl DIR] [--out FILE] [--check]`
+//!
+//! Defaults: `--fixture tests/fixtures/chromium_153_surface_secure.json`
+//! (arbiter), `--insecure-fixture tests/fixtures/chromium_153_surface.json`
+//! (secure-context marks), output `crates/lb-webapi/src/generated/chromium.rs`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -15,12 +19,14 @@ fn main() -> ExitCode {
         match a.as_str() {
             "--family" => family = value().map(|p| p.display().to_string()).unwrap_or_default(),
             "--fixture" => inputs.fixture = value().unwrap_or(inputs.fixture),
+            "--insecure-fixture" => inputs.insecure_fixture = value(),
+            "--no-insecure-fixture" => inputs.insecure_fixture = None,
             "--idl" => inputs.idl_root = value().unwrap_or(inputs.idl_root),
             "--out" => inputs.out = value().unwrap_or(inputs.out),
             "--check" => check = true,
             "-h" | "--help" => {
                 println!(
-                    "usage: lb-webidl-gen --family chrome [--fixture FILE] [--idl DIR] [--out FILE] [--check]"
+                    "usage: lb-webidl-gen --family chrome [--fixture FILE] [--insecure-fixture FILE | --no-insecure-fixture] [--idl DIR] [--out FILE] [--check]"
                 );
                 return ExitCode::SUCCESS;
             }
@@ -34,7 +40,7 @@ fn main() -> ExitCode {
         eprintln!("only --family chrome exists for now (Gecko IDL arrives in M4b)");
         return ExitCode::from(2);
     }
-    let table = match build_chrome(&inputs.idl_root, &inputs.fixture) {
+    let table = match build_chrome(&inputs) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: {e}");

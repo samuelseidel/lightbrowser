@@ -37,6 +37,14 @@
 //! - **Callbacks** ([`HostFn`]): Rust closures that receive a [`CallCtx`]
 //!   (arguments with WebIDL-style conversions, `this` host ref, return
 //!   value). They throw by returning [`HostError`].
+//! - **Installer support** (chrome): [`Member::alias`] (same function object
+//!   under two keys, e.g. `@@iterator` = `entries`), [`Member::namespace`]
+//!   (plain objects such as `CSS`), [`Arg::Construct`] (`new X(...)`, e.g. a
+//!   `DOMException` to throw), [`CallCtx::set_this_private`] /
+//!   [`CallCtx::this_private`] (per-object host state invisible to JS),
+//!   [`Engine::next_interface_id`] (the global's own interface object).
+//!   Instance member lists longer than one V8 template can hold (~1,000
+//!   with accessors) are split; the tail is defined on each new instance.
 //! - **Handles** ([`Handle`]): persistent references to JS values held by the
 //!   host (event listeners, timer callbacks, promises). Released explicitly
 //!   or when their realm is dropped. Stale handles are detected, never UB.

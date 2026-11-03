@@ -8,10 +8,10 @@ fingerprint (TLS, HTTP/2, header order), JavaScript surface, and device
 fingerprints (canvas, WebGL, audio, fonts, screen). It aims to use less CPU,
 RAM and disk than Lightpanda.
 
-**Status:** M1 (network) done for Chrome; M2 in progress. The V8 backend,
-arena DOM, persona v2 with consistency rules and the vendored behavior crate
-have landed. There is no event loop or CDP server yet. See
-[docs/ROADMAP.md](docs/ROADMAP.md).
+**Status:** M1 (network) and M2 (DOM + V8) done for Chrome: `lightbrowser
+fetch --dump html` prints the DOM after scripts ran. M3 in progress: the
+cascade, layout and the CDP server have landed; `lightbrowser serve` still
+runs on a mock page host without JS. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only
 
@@ -41,9 +41,9 @@ One binary per family, chosen at build time with a cargo feature.
 | JS engine | V8 | SpiderMonkey (Servo's `mozjs`) |
 | TLS / H2 | BoringSSL, Chrome profile | BoringSSL, Firefox profile |
 
-A binary refuses a persona whose family does not match its engine. The JS
-engine backends arrive in M2 (V8) and M4b (SpiderMonkey); for now the features
-only select the compiled family.
+A binary refuses a persona whose family does not match its engine. The V8
+backend has landed; SpiderMonkey arrives in M4b. Until then the firefox build
+loads and parses pages but runs no scripts.
 
 ## Build
 
@@ -69,11 +69,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 # Firefox family
-cargo test -p lightbrowser -p lb-js --no-default-features --features firefox
-cargo clippy -p lightbrowser -p lb-js --no-default-features --features firefox -- -D warnings
+cargo test -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox
+cargo clippy -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox -- -D warnings
 ```
 
-`serve` and `fetch` subcommands are placeholders until M3 and M1.
+Subcommands: `fetch <url> --dump html|text` (runs scripts), `validate
+<persona.json>`, and `serve --port 9222` (CDP for Playwright
+`connectOverCDP`, mock page host for now). Point them only at loopback test
+servers.
 
 ## Layout
 

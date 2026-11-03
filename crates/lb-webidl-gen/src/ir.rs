@@ -23,6 +23,8 @@ pub struct Attr {
     pub enumerable: bool,
     pub late: bool,
     pub ty: AttrTy,
+    /// Only exposed in secure contexts.
+    pub secure_only: bool,
 }
 
 impl Attr {
@@ -50,6 +52,8 @@ pub struct Op {
     pub enumerable: bool,
     pub late: bool,
     pub kind: OpKind,
+    /// Only exposed in secure contexts.
+    pub secure_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -116,6 +120,8 @@ pub struct Interface {
     pub from_fixture: bool,
     /// The prototype's parent is a JS built-in (`Error` for DOMException).
     pub builtin_parent: Option<String>,
+    /// The interface object exists only in secure contexts.
+    pub secure_only: bool,
 }
 
 impl Interface {
@@ -221,6 +227,8 @@ pub struct Table {
     pub namespaces: Vec<Namespace>,
     pub window_props: Vec<GlobalProp>,
     pub window_late_start: usize,
+    /// Window props that exist only in secure contexts.
+    pub window_secure_only: Vec<String>,
     pub coverage: Coverage,
 }
 

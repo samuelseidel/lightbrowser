@@ -247,7 +247,10 @@ impl StyleEngine {
                 if doc.has_attribute(n, "disabled") {
                     continue;
                 }
-                author.push((sheet.clone(), doc.get_attribute(n, "media").map(str::to_owned)));
+                author.push((
+                    sheet.clone(),
+                    doc.get_attribute(n, "media").map(str::to_owned),
+                ));
             }
         }
         for (_, s) in &self.extra {
@@ -314,7 +317,14 @@ impl StyleEngine {
                 .map(|s| s.display)
                 .find(|d| *d != crate::values::Display::Contents);
             let is_root = Some(n) == root;
-            let style = self.compute_one(doc, n, parent.as_deref(), parent_display, is_root, root_font);
+            let style = self.compute_one(
+                doc,
+                n,
+                parent.as_deref(),
+                parent_display,
+                is_root,
+                root_font,
+            );
             if is_root {
                 root_font = Some(style.font_size);
             }
@@ -445,7 +455,10 @@ fn presentational_hints(doc: &Document, id: NodeId) -> Option<DeclarationBlock> 
             | "col"
             | "hr"
             | "svg"
-    ) || (name == "input" && el.attr("type").is_some_and(|t| t.eq_ignore_ascii_case("image")))
+    ) || (name == "input"
+        && el
+            .attr("type")
+            .is_some_and(|t| t.eq_ignore_ascii_case("image")))
     {
         if let Some(w) = el.attr("width").and_then(dim) {
             b.push_text("width", &w);
@@ -464,8 +477,10 @@ fn presentational_hints(doc: &Document, id: NodeId) -> Option<DeclarationBlock> 
     {
         b.push_text("color", c);
     }
-    if matches!(name, "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "td" | "th")
-        && let Some(a) = el.attr("align")
+    if matches!(
+        name,
+        "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "td" | "th"
+    ) && let Some(a) = el.attr("align")
     {
         let v = match a.to_ascii_lowercase().as_str() {
             "center" | "middle" => "-webkit-center",

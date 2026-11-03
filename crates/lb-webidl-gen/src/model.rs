@@ -197,8 +197,10 @@ impl Model {
                 continue;
             };
             let Some(iface) = m.interfaces.get_mut(&inc.target) else {
-                m.warnings
-                    .push(format!("{} includes {} but is undefined", inc.target, inc.mixin));
+                m.warnings.push(format!(
+                    "{} includes {} but is undefined",
+                    inc.target, inc.mixin
+                ));
                 continue;
             };
             iface.members.extend(members.iter().cloned());
@@ -211,7 +213,9 @@ impl Model {
         let mut out = Vec::new();
         let mut cur = self.interfaces.get(name).and_then(|i| i.parent.as_deref());
         while let Some(p) = cur {
-            let Some(i) = self.interfaces.get(p) else { break };
+            let Some(i) = self.interfaces.get(p) else {
+                break;
+            };
             out.push(i);
             cur = i.parent.as_deref();
         }
