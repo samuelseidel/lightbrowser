@@ -10,7 +10,7 @@ memory and faults.
 ```bash
 cargo build --release -p lightbrowser \
     --config 'profile.release.package.lightbrowser.strip=false'
-python3 tools/hot_symbols/gen.py          # ~1 h under valgrind, loopback only
+python3 tools/hot_symbols/gen.py          # ~10 min under valgrind, loopback only
 cargo build --release -p lightbrowser     # relink with the new order
 ```
 
