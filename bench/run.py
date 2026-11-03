@@ -42,6 +42,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -298,6 +299,25 @@ class Spawned:
         return assert_loopback(self.ws)
 
 
+def wait_json_version(sp: Spawned, port: int, timeout: float = 30.0) -> str:
+    """Poll http://127.0.0.1:PORT/json/version until it answers; return its webSocketDebuggerUrl (loopback only)."""
+    url = assert_loopback(f"http://127.0.0.1:{port}/json/version")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if sp.proc.poll() is not None:
+            raise RuntimeError(f"exited with {sp.proc.returncode}; stderr tail: " + " | ".join(sp.tail[-5:]))
+        try:
+            with opener.open(url, timeout=0.5) as r:
+                ws = json.loads(r.read()).get("webSocketDebuggerUrl")
+            if ws:
+                return assert_loopback(ws)
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.01)
+    raise RuntimeError(f"no answer from {url}; stderr tail: " + " | ".join(sp.tail[-5:]))
+
+
 def clean_env(tmp: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
     env.update(HOME=tmp, TMPDIR=tmp, XDG_CACHE_HOME=tmp, XDG_CONFIG_HOME=tmp, NO_PROXY="127.0.0.1,localhost,::1", no_proxy="127.0.0.1,localhost,::1",
@@ -403,14 +423,7 @@ def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: in
         browser = None
         try:
             if t.ws_from_port:
-                deadline = time.time() + 30
-                while time.time() < deadline:
-                    try:
-                        socket.create_connection(("127.0.0.1", port), 0.2).close()
-                        break
-                    except OSError:
-                        time.sleep(0.05)
-                ws = assert_loopback(f"ws://127.0.0.1:{port}")
+                ws = wait_json_version(sp, port)
                 sp.t_listen = time.perf_counter()
             else:
                 ws = sp.wait_ws()
@@ -568,6 +581,7 @@ def versions(lb: Target, chrome: Target | None, lp: Target | None) -> dict:
         v["chromium"] = sh([chrome.binary, "--version"])
     if lp:
         v["lightpanda"] = sh([lp.binary, "version"]) or sh([lp.binary, "--version"]) or "unknown"
+        v["lightpanda_binary_sha256"] = sha256_file(lp.binary)
     return v
 
 
@@ -723,6 +737,7 @@ def main() -> int:
     for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "all_proxy"):
         os.environ.pop(k, None)
     os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost,::1"
+    os.environ["LIGHTPANDA_DISABLE_TELEMETRY"] = "true"  # also for `lightpanda version` below
 
     server = Server()
     pw_ctx = None

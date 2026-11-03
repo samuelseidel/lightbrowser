@@ -133,6 +133,11 @@ impl<H: PageHost + 'static> Server<H> {
                         Err(e) if e.kind() == io::ErrorKind::ConnectionAborted => continue,
                         Err(e) => return Err(e),
                     };
+                    // CDP traffic is many small frames written back to back
+                    // (an event, then a reply). With Nagle on, the second
+                    // waits for the client's delayed ACK (40 ms on Linux).
+                    // Chrome's sockets set TCP_NODELAY too.
+                    let _ = stream.set_nodelay(true);
                     let sh = shared.clone();
                     let cfg = config.clone();
                     tokio::task::spawn_local(async move {
