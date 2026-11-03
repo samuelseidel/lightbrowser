@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn windows_layout_over_ipv4() {
         let mut pkt = linux_syn(false, 10);
-        let out = rewrite_syn(&mut pkt, &profile("windows_10_11")).unwrap();
+        let out = rewrite_syn(&mut pkt, &profile("windows_65535")).unwrap();
         assert_eq!(
             out,
             Outcome::Rewritten(Report {
@@ -615,20 +615,39 @@ mod tests {
         assert_eq!(u16::from_be_bytes([pkt[6], pkt[7]]) & 0x4000, 0x4000, "df");
         assert_eq!(
             u16::from_be_bytes([tcp_part(&pkt)[14], tcp_part(&pkt)[15]]),
-            64240
+            65535
         );
         assert_valid(&pkt);
+    }
+
+    #[test]
+    fn both_windows_variants_differ_only_in_the_window() {
+        let (a, b) = (profile("windows_65535"), profile("windows_64240"));
+        let (mut pa, mut pb) = (linux_syn(false, 10), linux_syn(false, 10));
+        rewrite_syn(&mut pa, &a).unwrap();
+        rewrite_syn(&mut pb, &b).unwrap();
+        assert_eq!(opts_of(&pa), opts_of(&pb));
+        assert_eq!(
+            u16::from_be_bytes([tcp_part(&pa)[14], tcp_part(&pa)[15]]),
+            65535
+        );
+        assert_eq!(
+            u16::from_be_bytes([tcp_part(&pb)[14], tcp_part(&pb)[15]]),
+            64240
+        );
+        assert_valid(&pa);
+        assert_valid(&pb);
     }
 
     #[test]
     fn window_scale_is_lowered_never_raised() {
         // Kernel shift 10 -> profile 8 is safe and applied.
         let mut pkt = linux_syn(false, 10);
-        rewrite_syn(&mut pkt, &profile("windows_10_11")).unwrap();
+        rewrite_syn(&mut pkt, &profile("windows_65535")).unwrap();
         assert_eq!(opts_of(&pkt)[7], 8);
         // Kernel shift 7 < profile 8 would let the peer overrun us: kept at 7.
         let mut pkt = linux_syn(false, 7);
-        let Outcome::Rewritten(r) = rewrite_syn(&mut pkt, &profile("windows_10_11")).unwrap()
+        let Outcome::Rewritten(r) = rewrite_syn(&mut pkt, &profile("windows_65535")).unwrap()
         else {
             panic!()
         };
@@ -657,13 +676,18 @@ mod tests {
             65535
         );
         assert_eq!(pkt[8], 64);
+        assert_eq!(
+            tcp_part(&pkt)[13],
+            FLAG_SYN | FLAG_ECE | FLAG_CWR,
+            "macOS sets ECE+CWR on the SYN"
+        );
         assert_valid(&pkt);
     }
 
     #[test]
     fn ipv6_gets_hop_limit_and_valid_checksum() {
         let mut pkt = linux_syn(true, 10);
-        rewrite_syn(&mut pkt, &profile("windows_10_11")).unwrap();
+        rewrite_syn(&mut pkt, &profile("windows_65535")).unwrap();
         assert_eq!(pkt[7], 128, "hop limit");
         assert_eq!(opts_of(&pkt), [2, 4, 5, 0xb4, 1, 3, 3, 8, 1, 1, 4, 2]);
         assert_valid(&pkt);
@@ -702,7 +726,7 @@ mod tests {
 
     #[test]
     fn ecn_profile_sets_ece_and_cwr() {
-        let mut p = profile("windows_10_11");
+        let mut p = profile("windows_65535");
         p.tcp.ecn = true;
         let mut pkt = linux_syn(false, 10);
         rewrite_syn(&mut pkt, &p).unwrap();
@@ -717,7 +741,7 @@ mod tests {
             pkt[20 + 13] = flags;
             let before = pkt.clone();
             assert_eq!(
-                rewrite_syn(&mut pkt, &profile("windows_10_11")).unwrap(),
+                rewrite_syn(&mut pkt, &profile("windows_65535")).unwrap(),
                 Outcome::Untouched
             );
             assert_eq!(pkt, before);
@@ -725,7 +749,7 @@ mod tests {
         let mut udp = linux_syn(false, 10);
         udp[9] = 17;
         assert_eq!(
-            rewrite_syn(&mut udp, &profile("windows_10_11")).unwrap(),
+            rewrite_syn(&mut udp, &profile("windows_65535")).unwrap(),
             Outcome::Untouched
         );
     }
@@ -735,14 +759,14 @@ mod tests {
         for len in [0usize, 5, 19, 20, 39, 45] {
             let mut pkt = linux_syn(false, 10);
             pkt.truncate(len);
-            let _ = rewrite_syn(&mut pkt, &profile("windows_10_11"));
+            let _ = rewrite_syn(&mut pkt, &profile("windows_65535"));
         }
         let mut pkt = linux_syn(false, 10);
         pkt[20 + 12] = 0xf0; // data offset past the end
-        assert!(rewrite_syn(&mut pkt, &profile("windows_10_11")).is_err());
+        assert!(rewrite_syn(&mut pkt, &profile("windows_65535")).is_err());
         let mut pkt = linux_syn(false, 10);
         pkt[20 + 21] = 1; // option length 1 for MSS
-        assert!(rewrite_syn(&mut pkt, &profile("windows_10_11")).is_err());
+        assert!(rewrite_syn(&mut pkt, &profile("windows_65535")).is_err());
     }
 
     #[test]
@@ -786,7 +810,7 @@ mod tests {
 
     #[test]
     fn retransmission_follows_the_option_variants_and_advances_the_clock() {
-        let win = profile("windows_10_11");
+        let win = profile("windows_65535");
         let first = retransmit_syn(&linux_syn(false, 10), &win, 1, 1000).unwrap();
         assert_eq!(
             opts_of(&first),

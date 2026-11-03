@@ -14,6 +14,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0006](0006-browser-families.md) | Two browser families, one binary per family | Accepted (2026-11-02) |
 | [0007](0007-tcp-stack-fingerprint.md) | TCP/IP stack fingerprint: socket options plus a netfilter shim | Accepted (2026-11-03) |
 | [0008](0008-whole-connection-tcp-shaping.md) | Shape the whole connection, not only the SYN | Accepted (2026-11-03) |
+| [0009](0009-public-data-source-of-truth.md) | Public data is the source of truth for TCP profiles | Accepted (2026-11-03) |
 
 ## Adding an ADR
 

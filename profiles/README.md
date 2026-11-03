@@ -10,12 +10,16 @@ Placeholder. Persona profiles and TLS profiles. Milestones: M1 (TLS), M4 (Chrome
 
 ## TCP (`profiles/tcp/`)
 
-- `windows_10_11.json`, `macos_14.json`, `linux_6.json`: what each stack puts in
+- `windows_65535.json`, `windows_64240.json`, `macos_14.json`, `linux_6.json`: what each stack puts in
   a client SYN (TTL, DF, window, MSS, window scale, option order, ECN). A persona
   picks one with `tcp_profile_id`; its OS must match the User-Agent. ADR 0007.
-- `provenance.status`: `captured` (measured on a stack of ours; Linux) or
-  `documented-unverified` (public p0f/JA4T signature; Windows, macOS). Re-capture
-  steps are in `tests/README.md`.
+- `provenance.status`: `captured` (measured on a stack of ours; Linux),
+  `public-data` (attested by real traffic in `reference/tcp_public.json`; Windows,
+  macOS) or `documented-unverified`. `provenance.unverified` lists what the status
+  does not cover (SYN retransmit timing). Re-capture steps are in `tests/README.md`.
+- `reference/tcp_public.json`: shares from real client SYNs in the public Zardaxt
+  dataset, rebuilt by `scripts/tcp_public_reference.py`. Aggregates only; the source
+  file's licence forbids copying it. ADR 0009.
 - `slot` must be unique: it selects the profile in the packet shim.
 - `ip.id`: `kernel` (leave it), `zero` (macOS), `host_counter` (Windows).
 - `syn_retransmit.schedule_ms`: when an unanswered SYN is retransmitted, in ms

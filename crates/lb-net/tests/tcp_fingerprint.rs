@@ -161,6 +161,12 @@ async fn syn_matches_each_profile() {
         assert_eq!(s.ttl, p.ip.ttl, "{}: ttl", p.profile_id);
         assert_eq!(s.df, p.ip.df, "{}: df", p.profile_id);
         assert_eq!(s.window, p.tcp.window, "{}: window", p.profile_id);
+        assert_eq!(
+            s.flags & 0xc0 == 0xc0,
+            p.tcp.ecn,
+            "{}: ECE+CWR on the SYN",
+            p.profile_id
+        );
         assert_eq!(s.mss, Some(p.tcp.mss), "{}: mss", p.profile_id);
         assert_eq!(
             s.window_scale,

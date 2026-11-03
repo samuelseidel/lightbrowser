@@ -47,7 +47,7 @@ Not done, moved:
 
 Done (ADR 0007):
 
-- `profiles/tcp/{windows_10_11,macos_14,linux_6}.json`, `Persona::tcp_profile_id`
+- `profiles/tcp/{windows_65535,windows_64240,macos_14,linux_6}.json`, `Persona::tcp_profile_id`
   and a UA-vs-profile OS check in `NetContext::with_tcp_profile`.
 - Tier 1 (sockets): exact Linux SYN with no privileges.
 - Tier 2 (`lightbrowser tcp-shim`): exact Windows and macOS SYN, IPv4 and IPv6
@@ -60,9 +60,10 @@ Done (ADR 0007):
 
 Open:
 
-- Re-capture the Windows and macOS profiles on our own devices (they come from
-  public sources today): macOS window scale (p0f says 4 for 10.9+, we use 6),
-  whether macOS sets ECE+CWR, the retransmit base RTO and counts, Windows' IP ID.
+- Re-capture the Windows and macOS profiles on our own devices. Their SYN traits
+  are attested by public traffic data (ADR 0009: macOS scale 6 and ECN on, Windows
+  window 65535 or 64240). Still unverified: the retransmit base RTO and counts, and
+  how Windows' IP ID counts.
 - Not shaped: post-handshake window sizes (no source for the values; record them
   with `lb-fptest tcp-capture --flow`). A userspace TCP stack is the option if the
   detection engine checks them or more.

@@ -28,6 +28,18 @@ cargo test -p lb-net --test fingerprint -- --nocapture   # prints measured JA3/J
     ADR 0003 and the profile's own `ja3_string` vs `extensions_order`
     mismatch.
 
+## TCP profiles vs public data (in place, no root)
+
+`crates/lb-net/tests/public_reference.rs` checks that every trait a
+`profiles/tcp/` profile asserts (layout, TTL, window, scale, ECN, IP ID) is seen in
+at least 5% of real sessions of that OS in `profiles/reference/tcp_public.json`.
+Refresh the reference with `python3 scripts/tcp_public_reference.py` (it downloads
+the public file to memory; nothing is saved). ADR 0009.
+
+```bash
+cargo test -p lb-net --test public_reference -- --nocapture   # prints each share
+```
+
 ## TCP SYN fingerprint test (M1b, in place)
 
 `crates/lb-net/tests/tcp_fingerprint.rs` (ADR 0007), loopback only. Needs root

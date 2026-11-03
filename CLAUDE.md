@@ -48,6 +48,8 @@ cargo clippy -p lightbrowser -p lb-js --no-default-features --features firefox -
 ./target/release/lightbrowser --version       # prints the compiled family
 # Network fingerprint check vs profiles/tls (loopback only, prints JA3/JA4/H2)
 cargo test -p lb-net --test fingerprint -- --nocapture
+# TCP profile values vs real traffic in profiles/reference/tcp_public.json (ADR 0009)
+cargo test -p lb-net --test public_reference -- --nocapture
 # TCP SYN check (Windows/macOS/Linux stack) on loopback; needs root, skips without it
 cargo test -p lb-net --test tcp_fingerprint -- --nocapture --test-threads=1
 # Run the packet shim, then fetch with a persona's TCP stack (ADR 0007)
@@ -93,7 +95,9 @@ and run the fingerprint test. Only capture on loopback with a local browser.
   `profiles/tcp/` profile for the same OS as the User-Agent. Windows and macOS
   profiles need `tcp-shim` and fail closed without it; never send the host's SYN
   by accident (ADR 0007). The shim also sets the IP ID and the SYN retransmit
-  schedule of every packet (ADR 0008).
+  schedule of every packet (ADR 0008). Profile values must be seen in the public
+  traffic data (`profiles/reference/tcp_public.json`, ADR 0009); do not copy that
+  dataset's source file into the repo (its licence forbids it).
 - **Nothing automation-related is visible to the page world** (`webdriver`,
   CDP leaks). CDP helper code runs in an isolated world.
 - **Keep docs current.** When a decision changes, update

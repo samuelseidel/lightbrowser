@@ -22,14 +22,17 @@
       "sack_ok",
       "eol"
     ],
-    "ecn": false
+    "ecn": true
   },
   "expected": {
     "ja4t": "65535_2-1-3-1-1-8-4-0_1460_6"
   },
   "provenance": {
-    "status": "documented-unverified",
-    "notes": "SYN: p0f lists 65535, mss,nop,ws,nop,nop,ts,sok,eol+1, TTL 64, DF for Mac OS X (confirmed layout). p0f's window scale for 10.9+ is 4 (1 and 3 for older); 6 here is not confirmed for current macOS and is the least certain value. IP ID 0: XNU ip_output.c sets ip_id = 0 for atomic (DF) packets when rfc6864=1, the default; p0f's id+ for macOS is older. Retransmits: XNU tcp_syn_backoff {1,1,1,1,1,2,4,8,16,32,64,64,64} times a base RTO assumed to be 1 s (base not confirmed). Timestamps: XNU tsval = t_ts_offset + tcp_now (random per-connection offset by default, 1 ms ticks), the same as Linux, so no rewriting. Whether the SYN carries ECE+CWR is unconfirmed. Re-capture on our own Macs with `lb-fptest tcp-capture --flow` and set status to captured."
+    "status": "public-data",
+    "unverified": [
+      "syn_retransmit"
+    ],
+    "notes": "SYN traits attested by real traffic in the Zardaxt public database: layout MNWNNTSEE 93%, window 65535 95%, scale 6 87% (p0f's 4 for 10.9+ is out of date), TTL 64 99%, zero IP ID 92% (99% among canonical sessions; XNU ip_output.c sets it for DF packets), ECE+CWR set on the SYN in 67% of sessions (73% canonical, the rest send a plain SYN), timestamps always. ecn=true is the majority; the other 27-33% send a plain SYN. The shim sets the flags only on the SYN; a real Mac then marks data packets ECT, which is not shaped. Retransmits: XNU tcp_syn_backoff {1,1,1,1,1,2,4,8,...} times a base RTO assumed to be 1 s; the public data has no retransmit information. Timestamps: XNU tsval = t_ts_offset + tcp_now (random offset, 1 ms ticks), same as Linux. Capture a real Mac with `lb-fptest tcp-capture --flow` to settle the retransmit base."
   },
   "syn_retransmit": {
     "schedule_ms": [

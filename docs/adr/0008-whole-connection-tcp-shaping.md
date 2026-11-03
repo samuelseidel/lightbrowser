@@ -1,7 +1,8 @@
 # ADR 0008: Shape the whole connection, not only the SYN
 
 Status: Accepted (2026-11-03). Extends ADR 0007. Windows and macOS values are
-from public sources, not yet from our devices.
+from public sources, not yet from our devices (SYN-level traits are now checked
+against public traffic data, ADR 0009).
 
 ## Context
 

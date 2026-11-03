@@ -137,9 +137,14 @@ pub struct Expected {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Provenance {
-    /// `captured` (measured on a real stack of ours) or
-    /// `documented-unverified` (from public signatures, not yet re-captured).
+    /// `captured` (measured on a stack of ours), `public-data` (attested by
+    /// real traffic in the public dataset behind
+    /// `profiles/reference/tcp_public.json`) or `documented-unverified`.
     pub status: String,
+    /// Parts of the profile the status does not cover, e.g.
+    /// `syn_retransmit`. They rest on vendor source code or documentation.
+    #[serde(default)]
+    pub unverified: Vec<String>,
     #[serde(default)]
     pub notes: String,
 }
@@ -351,7 +356,10 @@ mod tests {
     fn shipped_profiles_load_and_are_self_consistent() {
         let all = TcpProfile::load_dir(&profiles_dir()).unwrap();
         let ids: Vec<_> = all.iter().map(|p| p.profile_id.as_str()).collect();
-        assert_eq!(ids, ["linux_6", "macos_14", "windows_10_11"]);
+        assert_eq!(
+            ids,
+            ["linux_6", "macos_14", "windows_64240", "windows_65535"]
+        );
     }
 
     #[test]
@@ -369,17 +377,17 @@ mod tests {
 
     #[test]
     fn validate_rejects_a_wrong_ja4t_and_double_options() {
-        let mut p = TcpProfile::load(&profiles_dir().join("windows_10_11.json")).unwrap();
+        let mut p = TcpProfile::load(&profiles_dir().join("windows_65535.json")).unwrap();
         p.expected.ja4t = "1_2_3_4".into();
         assert!(p.validate().is_err());
-        let mut p = TcpProfile::load(&profiles_dir().join("windows_10_11.json")).unwrap();
+        let mut p = TcpProfile::load(&profiles_dir().join("windows_65535.json")).unwrap();
         p.tcp.options.push(TcpOpt::Ws);
         assert!(p.validate().is_err());
     }
 
     #[test]
     fn window_clamp_gives_the_requested_shift() {
-        let p = TcpProfile::load(&profiles_dir().join("windows_10_11.json")).unwrap();
+        let p = TcpProfile::load(&profiles_dir().join("windows_65535.json")).unwrap();
         assert_eq!(p.window_clamp().ilog2() - 15, 8);
     }
 }

@@ -3,12 +3,21 @@
   "description": "Linux 5.x / 6.x client SYN over Ethernet (MSS 1460), the kernel's own layout",
   "os": "linux",
   "slot": 3,
-  "ip": { "ttl": 64, "df": true },
+  "ip": {
+    "ttl": 64,
+    "df": true
+  },
   "tcp": {
     "window": 64240,
     "mss": 1460,
     "window_scale": 7,
-    "options": ["mss", "sack_ok", "ts", "nop", "ws"],
+    "options": [
+      "mss",
+      "sack_ok",
+      "ts",
+      "nop",
+      "ws"
+    ],
     "ecn": false
   },
   "expected": {
@@ -16,6 +25,7 @@
   },
   "provenance": {
     "status": "captured",
-    "notes": "Measured on the Linux 6.18 kernel in the dev sandbox with TCP_MAXSEG=1460 and TCP_WINDOW_CLAMP=4 MiB. No packet rewriting is needed: socket options alone produce this SYN."
+    "unverified": [],
+    "notes": "Measured on the Linux 6.18 kernel in the dev sandbox (TCP_MAXSEG=1460, TCP_WINDOW_CLAMP=4 MiB): no rewriting needed. Public data attests the option order MSTNW (98%), TTL 64 (96%) and no ECN (99%); its 'Linux' class is mostly Android (window 65535, scale 8 to 10), so it cannot confirm a desktop kernel's 64240 / 7. Kernel 6.1+ retransmits an unanswered SYN at 1, 2, 3, 4, 6, 10 s (tcp_syn_linear_timeouts), older kernels at 1, 3, 7, 15 s."
   }
 }

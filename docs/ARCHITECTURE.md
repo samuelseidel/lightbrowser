@@ -37,6 +37,7 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 | 0006 | Two browser families, one binary per family |
 | 0007 | TCP/IP stack fingerprint: socket options plus a netfilter shim |
 | 0008 | Shape the whole connection (IP ID, SYN retransmits), not only the SYN |
+| 0009 | Public data is the source of truth for TCP profiles |
 
 ## Layers
 
@@ -191,6 +192,9 @@ check:    lb_net::fetch  ──TLS/H2──▶ CaptureServer (in-process) ──
 - **Check.** `crates/lb-net/tests/fingerprint.rs` runs `lb_net::fetch` for
   each family against an in-process `CaptureServer` and asserts the values
   against the profile (ADR 0003 lists the Firefox gaps).
+- **TCP profile values.** `crates/lb-net/tests/public_reference.rs` checks every
+  profile trait against shares of real traffic in `profiles/reference/tcp_public.json`
+  (ADR 0009); no root needed.
 - **TCP SYN.** `crates/lb-net/tests/tcp_fingerprint.rs` runs `lb_net::fetch` for
   each `profiles/tcp/` profile, captures the SYN on `lo` with `lb-fptest`'s own
   parser (`SynCapture`, JA4T) and compares TTL, DF, window, MSS, scale, option

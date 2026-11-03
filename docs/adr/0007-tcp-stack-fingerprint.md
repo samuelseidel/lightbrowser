@@ -1,7 +1,9 @@
 # ADR 0007: TCP/IP stack fingerprint: socket options plus a netfilter shim
 
 Status: Accepted (2026-11-03). Implemented for the SYN, IPv4 and IPv6. The
-Windows and macOS profiles are unverified (see Consequences). Extended by
+Windows and macOS profiles are unverified (see Consequences; checked against
+public traffic data and corrected by [0009](0009-public-data-source-of-truth.md),
+which changes the Windows window and macOS ECN in the table below). Extended by
 [0008](0008-whole-connection-tcp-shaping.md), which shapes the packets after the
 SYN too.
 

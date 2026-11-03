@@ -50,7 +50,7 @@ impl Persona {
             sec_ch_ua_platform: Some("Windows".into()),
             sec_ch_ua_mobile: Some("?0".into()),
             tls_profile_id: "chrome_153_linux".into(),
-            tcp_profile_id: "windows_10_11".into(),
+            tcp_profile_id: "windows_65535".into(),
         }
     }
 
@@ -67,7 +67,7 @@ Firefox/128.0"
             sec_ch_ua_platform: None,
             sec_ch_ua_mobile: None,
             tls_profile_id: "firefox_128_win10".into(),
-            tcp_profile_id: "windows_10_11".into(),
+            tcp_profile_id: "windows_65535".into(),
         }
     }
 
