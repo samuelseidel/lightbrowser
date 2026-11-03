@@ -11,7 +11,7 @@ Each milestone ends with something we can run and measure.
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
-| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015), WP-C (scrollbars, fonts, aliases, emoji per OS) and WP-D (OS-gated APIs, codecs, WebGPU, keyboard, WebGL backends, audio, window position, wheel and shortcuts per OS) done; WP-E open. See "M7 status" |
+| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015), WP-C (scrollbars, fonts, aliases, emoji per OS) WP-D (OS-gated APIs, codecs, WebGPU, keyboard, WebGL backends, audio, window position, wheel and shortcuts per OS) and WP-E (`Accept-CH` / `Critical-CH` client hints) done: all 8 reference personas fp 0 and beh 0. See "M7 status" |
 | **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.63 MB, the < 40 MB budget is met (ADR 0013); `bench/` runner done; Lightpanda compared (user-approved nightly, loopback only): 4 of 6 checks pass, `fetch` CPU and CDP peak RSS still lose; service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
@@ -21,7 +21,7 @@ Each milestone ends with something we can run and measure.
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
-| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS | WP-E; with the OS rules T-010 scores fp 40 for every reference persona (`ch_high_entropy` only), see "M7 status: WP-D" |
+| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
 | M6 Performance | Snapshot, memory, binary size (39.63 MB, < 40 MB met), `bench/` runner, screenshots, Lightpanda comparison (wall time wins in both modes; 4 of 6 checks pass) done | `fetch` CPU and CDP peak RSS vs Lightpanda, service workers |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
@@ -29,7 +29,7 @@ Budgets (ARCHITECTURE.md), with the evidence for each:
 | Budget | Result | Evidence |
 |---|---|---|
 | Idle RSS < 15 MB | Met: 10.2 MB (9.9-10.3 MB in earlier runs) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 40 MB (< 56 MB in between) | Met: 39.80 MB (39,800,696 bytes) after M7 WP-D, 0.20 MB under; 39.63 MB at the end of M6 | "M6 status: binary size, third pass", "M6 status: Lightpanda comparison" |
+| Binary < 40 MB (< 56 MB in between) | Met: 39.84 MB (39,841,656 bytes) after M7 WP-E, 0.16 MB under; 39.63 MB at the end of M6 | "M6 status: binary size, third pass", "M6 status: Lightpanda comparison" |
 | Realm creation < 5 ms | Met: 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
 | Wall time, peak RSS and CPU <= Lightpanda | Partly met (Lightpanda 1.1.0-nightly.11582): wall time `fetch` 2.63 vs 3.50 s and CDP 1.32 vs 5.15 s, peak RSS `fetch` 43.8 vs 44.9 MB, CPU CDP 0.99 vs 1.06 s pass; **CPU `fetch` 2.51 vs 1.37 s and peak RSS CDP 42.2 vs 31.4 MB fail** | "M6 status: Lightpanda comparison" |
@@ -1591,7 +1591,10 @@ Windows, Ubuntu and macOS; select-all modifier); `lb-cdp`
 19, `tables` 3, `wpt`), `lightbrowser` 6, all pass; WPT subset 2552/2788
 (unchanged); Playwright 20/20; detect-bench unittest 33 OK; `sdk/python` 93
 pass, 4 skipped. `lb-webidl-gen --check` clean. Clippy `-D warnings`
-(workspace and firefox) and `fmt` clean; firefox tests 15 pass, 2 ignored.
+(workspace and firefox) and `fmt` clean; firefox tests 15 pass, 2 ignored. Release:
+stripped binary 39,841,656 bytes (< 40,000,000; +40,960 since WP-D, 158,344
+bytes left), `--version` prints chrome. `realm_bench` was not re-run: no
+realm or engine code changed.
 `fingerprint-report`: 0 mismatch, 0 unimplemented for all 8 references
 (130-133 ok). Release: stripped binary 39,800,696 bytes (< 40,000,000;
 +77,824 since WP-C: media, GPU, keyboard and Bluetooth code and 8 more
@@ -1619,6 +1622,91 @@ device) are the surface reference, not captures. `GPUAdapter.requestDevice`
 cannot create a device. `AudioContext.resume()` without a user gesture
 still starts the context (the Linux capture stays `suspended`). Files in
 `canShare`/`share` are counted, not type-checked.
+
+## M7 status: WP-E, client hints after Accept-CH (2026-11-03)
+
+**Capture.** `tools/header_capture/accept_ch.js` (new) serves three
+HTTP/1.1 origins and one h2 origin on 127.0.0.1 and drives the local Chrome
+for Testing 153 (throwaway profile, no CDP) through `Accept-CH` with the
+bench's 7 hints plus `Critical-CH: Sec-CH-UA-Platform-Version`, a page with
+every subresource kind, same- and cross-origin frames, later and
+redirected navigations, a hint subset on a fresh origin and a second
+launch. 88 requests are kept in
+`profiles/headers/captures/chrome_153_linux_accept_ch.jsonl`; headed and
+`--headless=new` are identical. Findings:
+
+| Finding | Captured |
+|---|---|
+| Hints on navigations and frames | after `sec-ch-ua-mobile`: full-version, arch, platform, platform-version, model, bitness, wow64, full-version-list, form-factors; hints not asked for are skipped |
+| `Critical-CH` | one retry, cookie from the first response kept, hints after `Accept` and before `Sec-Fetch-*` |
+| Redirect hop | hints after `Sec-Fetch-Dest`, then `Referer` (the old profile put `Referer` first) |
+| `Accept-CH` on a redirect | counts for the next hop |
+| Subresources | hints join Blink's hash-ordered group; 14 orders recorded per hint set and page headers |
+| Cross-origin frame | no hints, nor for anything it loads (even from the top origin); its own `Accept-CH` is ignored |
+| https with certificate errors | `Accept-CH` ignored; the capture trusts its key with `--ignore-certificate-errors-spki-list` |
+| h2 `cookie` | before `priority`; the first capture's decoder (Python `h2`) had moved it last |
+
+**What changed (ADR 0015, ADR 0011 update).**
+
+- `lb_net::client_hints`: `UaHint`, the per-origin `ClientHintsStore`
+  (memory only, one per browser context, shared like the cookie jar),
+  trustworthy-origin check and the delegation rule (`hints_for_request`).
+- `lb_net::fetch`: stores `Accept-CH` from top-level navigation responses
+  (redirects too), sends the hints the origin asked for, and repeats a
+  navigation once when `Critical-CH` names a missing hint. Chrome personas
+  only; Firefox sends none.
+- `lb_persona::Persona` carries `high_entropy` (from
+  `high_entropy_hints()`), so headers and `getHighEntropyValues` agree.
+- `profiles/headers/chrome_153.json`: hint slots in `document`, `iframe`
+  and `document_redirect` (its `Referer` moved after the hints), a new
+  `document_restart` list, `cookie` before `priority`, and
+  `renderer_group.observed_hints` (from
+  `tools/header_capture/derive_groups.py`).
+- lb-page passes the top-level document (`RequestMeta::top_frame`) for
+  frame and subresource requests.
+- Not done: the TLS profile id alias (`chrome_153`) from the plan; nothing
+  at the TCP/IP level (see Risks).
+
+**Checks.** `lb-net` lib 79 (new `client_hints` tests: trustworthy
+origins, hint parsing, store, delegation, values), `--test accept_ch` 5
+(golden: 84 of 88 captured requests match in names, case, order and values,
+75 with hints, both `Critical-CH` retries; 4 cross-site frame requests of
+the https page skipped, see below; 4 pipeline tests on a loopback server),
+`--test fingerprint` 3 (new: every reference Chrome persona gives the same
+exact TLS/H2 match). `lb-page --test client_hints` 1 (real page, same- and
+cross-origin frames). Also run, all pass: `lb-persona` 13 + 41, `lb-page`
+(lib 9, `canvas` 3, `cdp_host` 2, `client_hints` 1, `connections` 1,
+`fingerprint_surfaces` 2, `human` 3, `navigator` 1, `os_apis` 1, `pages`
+19 with the report gate over all 8 references, `tables` 3), WPT subset
+2552/2788 (unchanged), `lb-webapi` 26 + 11 + 4, `lb-cdp` 13 + 10 + 1,
+`lightbrowser` 6; Playwright 20/20; detect-bench unittest 33 OK;
+`sdk/python` 93 pass, 4 skipped. Clippy `-D warnings` (workspace and
+firefox) and `fmt` clean; firefox tests 15 pass, 2 ignored.
+
+**Bench** (debug build, fresh `serve` per run, T-010, loopback, own seeds):
+
+| Persona | Playwright input | `--input human` |
+|---|---|---|
+| All 8 reference personas (Windows 10, Windows 11 x2, macOS 14/15/26, Ubuntu 24.04, Fedora 42) | fp 0, `fp<=30` pass (only behaviour rules fire) | score 0, beh 0, `beh<=30` pass (no rule fires) |
+
+Re-scored with `codecs_os`, `screen_os` and `wheel_os` at their target
+weights (15, 15, 20), no OS rule fires in any of the 16 sessions;
+`ch_high_entropy`, `header_order` and `cookie_not_echoed` are quiet. Each
+session shows the `Critical-CH` retry (5 documents for 4 pages). The
+hinted document headers of the Ubuntu persona equal stock Chrome's
+(`tests/detect-bench/fixtures/os_linux_chrome.json`) name for name, apart
+from `Sec-Fetch-User` after a click (see below). This meets the M7 bench
+target for every reference persona.
+
+**Not done in WP-E.** No `Permissions-Policy` / `Delegate-CH` delegation
+to other origins; device and preference hints (`DPR`, `Viewport-Width`,
+`Device-Memory`, `Sec-CH-Prefers-*`) are not sent; hint sets we have not
+captured on subresources get an approximate order. Seen in the capture but
+not done: `Sec-Fetch-Storage-Access` on cross-site frames of an https page,
+`priority: i` for CSS background images (not fetched yet), and
+`Sec-Fetch-User` on link-click navigations (stock Chrome sends it after a
+click in the bench; LightBrowser does not, ADR 0011). Windows and macOS
+hint values are the persona's (surface reference, not captured).
 
 ## Workspace check (2026-11-03)
 

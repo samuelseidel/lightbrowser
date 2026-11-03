@@ -10,14 +10,15 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Method, StatusCode};
-use lb_persona::Persona;
+use lb_persona::{BrowserFamily, Persona};
 use tokio::net::TcpStream;
 use url::Url;
 
 use crate::HttpVersion;
+use crate::client_hints::{self, ClientHintsStore, UaHint};
 use crate::cookies::CookieJar;
 use crate::error::NetError;
-use crate::header_profile::{BuildInput, HeaderProfile, RequestMeta, Site};
+use crate::header_profile::{BuildInput, HeaderProfile, RequestKind, RequestMeta, Site};
 use crate::headers::{self, OrderedHeaders};
 use crate::profile::ClientHelloProfile;
 use crate::tls::TlsConnector;
@@ -124,6 +125,9 @@ pub struct NetContext {
     /// the navigation set with a small per-kind overlay.
     pub header_profile: Option<Arc<HeaderProfile>>,
     pub cookies: CookieJar,
+    /// Per-origin `Accept-CH` sets (memory only; share it across the
+    /// contexts of one browser context like the cookie jar).
+    pub client_hints: ClientHintsStore,
     /// Maximum body size, enforced on the wire and again after decoding.
     /// Default 32 MiB.
     pub max_body: usize,
@@ -154,6 +158,7 @@ impl NetContext {
             profile,
             header_profile,
             cookies: CookieJar::new(),
+            client_hints: ClientHintsStore::new(),
             max_body: 32 << 20,
             danger_accept_invalid_certs: false,
             connector: None,
@@ -249,6 +254,14 @@ impl NetContext {
 /// profile header of the same name in place; other page headers join the
 /// browser's header group (see [`crate::header_profile`]).
 ///
+/// Client hints (Chrome personas): a top-level navigation's `Accept-CH`
+/// (on the final response or a redirect) is stored per origin in
+/// `ctx.client_hints`, and later requests carry the high-entropy
+/// `Sec-CH-UA-*` hints it asked for (see [`crate::client_hints`]). When a
+/// navigation's response names in `Critical-CH` a hint it asked for and the
+/// request lacked, the navigation is sent again once with the hints (the
+/// first response is dropped; its cookies are kept).
+///
 /// Redirect rules: `303` becomes `GET` (`HEAD` stays `HEAD`), `301`/`302` on
 /// `POST` become `GET`, `307`/`308` keep method and body. When the body is
 /// dropped, the page's `Content-*` headers go too. Page-supplied
@@ -275,11 +288,30 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
     let mut req = req;
     let mut redirects: Vec<RedirectHop> = Vec::new();
     let initiator = req.meta.as_ref().and_then(|m| m.initiator.clone());
+    let meta = req.meta.clone().unwrap_or_default();
+    let top_level = meta.kind == RequestKind::Document;
+    // Only Chrome personas carry high-entropy hints.
+    let hints_on =
+        ctx.persona.family == BrowserFamily::Chrome && ctx.persona.high_entropy.is_some();
     let mut site = Site::None;
+    let mut restart = false;
+    let mut restarted = false;
     loop {
         // Distance of the chain so far, including this hop's URL.
         site = site.max(Site::between(initiator.as_ref(), &req.url));
-        let hop = fetch_once(ctx, &req, redirects.len(), site).await?;
+        let hints = if hints_on {
+            client_hints::hints_for_request(&ctx.client_hints, &meta, &req.url)
+        } else {
+            Vec::new()
+        };
+        let hop = fetch_once(ctx, &req, redirects.len(), site, &hints, restart).await?;
+        restart = false;
+        if hints_on && top_level {
+            let accept_ch = header_values(&hop.headers, "accept-ch");
+            if !accept_ch.is_empty() {
+                ctx.client_hints.accept(&req.url, &accept_ch);
+            }
+        }
 
         if let Some(location) = redirect_location(hop.status, &hop.headers) {
             if redirects.len() >= MAX_REDIRECTS {
@@ -302,6 +334,13 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
                 version: hop.version,
             });
             req = redirected_request(&req, hop.status, next);
+            continue;
+        }
+
+        if hints_on && top_level && !restarted && needs_restart(ctx, &req.url, &hop.headers, &hints)
+        {
+            restarted = true;
+            restart = true;
             continue;
         }
 
@@ -328,12 +367,27 @@ struct Hop {
     sent: OrderedHeaders,
 }
 
+/// `Critical-CH`: the response names a hint its origin asked for (stored
+/// `Accept-CH`) that the request did not carry.
+fn needs_restart(ctx: &NetContext, url: &Url, headers: &OrderedHeaders, sent: &[UaHint]) -> bool {
+    let critical = header_values(headers, "critical-ch");
+    if critical.is_empty() {
+        return false;
+    }
+    let asked = ctx.client_hints.get(url);
+    client_hints::parse_hint_list(critical.iter().map(String::as_str))
+        .iter()
+        .any(|h| asked.contains(h) && !sent.contains(h))
+}
+
 /// One hop: send `req`, store cookies, decode the body.
 async fn fetch_once(
     ctx: &mut NetContext,
     req: &Request,
     hop: usize,
     site: Site,
+    hints: &[UaHint],
+    restart: bool,
 ) -> Result<Hop, NetError> {
     let https = match req.url.scheme() {
         "https" => true,
@@ -370,6 +424,8 @@ async fn fetch_once(
             caller: &req.headers,
             hop,
             site,
+            hints,
+            restart,
         };
         let headers = match &header_profile {
             Some(p) => p.build(&input),

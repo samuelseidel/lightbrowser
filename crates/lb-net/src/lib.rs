@@ -11,11 +11,14 @@
 //! - [`tls`]: builds a BoringSSL connector from a profile
 //! - [`h1`], [`h2`]: HTTP transports over the TLS stream, picked by ALPN
 //! - [`header_profile`]: per-request-kind header sets (`profiles/headers`)
+//! - [`client_hints`]: `Accept-CH` / `Critical-CH` and the high-entropy
+//!   `Sec-CH-UA-*` hints per origin
 //! - [`headers`]: per-family navigation headers, cookie placement
 //! - [`cookies`]: in-memory cookie jar
 //! - [`decompress`]: gzip / brotli / zstd body decoding
 //! - [`fetch`]: the pipeline that ties the above together
 
+pub mod client_hints;
 pub mod cookies;
 pub mod decompress;
 pub mod error;
@@ -27,6 +30,7 @@ pub mod headers;
 pub mod profile;
 pub mod tls;
 
+pub use client_hints::{ClientHintsStore, UaHint};
 pub use error::NetError;
 pub use fetch::{RedirectHop, Request, Response, fetch};
 pub use header_profile::{HeaderProfile, RequestKind, RequestMeta};

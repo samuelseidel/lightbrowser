@@ -249,8 +249,14 @@ pub(crate) async fn page_fetch(
     mut req: NetRequest,
     request_id: Option<String>,
 ) -> Result<NetResponse, String> {
+    // The top-level document decides the client hints of frame and
+    // subresource requests; a top-level navigation uses its own target.
+    let top_frame = match req.destination {
+        Destination::Document => None,
+        _ => page.window().map(|w| w.url()),
+    };
     let Some(agent) = page.agent() else {
-        return page.ctx.fetch(req).await;
+        return page.ctx.fetch_in_page(req, top_frame).await;
     };
     let (extra, intercept) = {
         let st = agent.st.borrow();
@@ -388,7 +394,7 @@ pub(crate) async fn page_fetch(
     }
     let r = match fulfilled {
         Some(r) => Ok(r),
-        None => page.ctx.fetch(req).await,
+        None => page.ctx.fetch_in_page(req, top_frame).await,
     };
     match &r {
         Ok(resp) => {

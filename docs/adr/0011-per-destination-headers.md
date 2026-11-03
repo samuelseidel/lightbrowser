@@ -91,3 +91,35 @@ than names and case:
   navigation was user-activated.
 - The profile is Linux-captured; ordering is OS independent, but the values
   (UA, platform) come from each persona.
+
+## Update (M7, client hints)
+
+A second capture (`tools/header_capture/accept_ch.js`, 88 requests in
+`profiles/headers/captures/chrome_153_linux_accept_ch.jsonl`, headed and
+`--headless=new` identical) recorded Chrome 153 after `Accept-CH` and
+`Critical-CH`, over HTTP/1.1 and h2. It added to the profile and corrected
+two points:
+
+- **High-entropy hint slots.** Navigations and frames send
+  `sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-full-version, sec-ch-ua-arch,
+  sec-ch-ua-platform, sec-ch-ua-platform-version, sec-ch-ua-model,
+  sec-ch-ua-bitness, sec-ch-ua-wow64, sec-ch-ua-full-version-list,
+  sec-ch-ua-form-factors`, skipping hints the origin did not ask for.
+  The `Critical-CH` retry has its own list (`document_restart`): the hints
+  after `Accept`, before `Sec-Fetch-*`.
+- **Subresources** put the hints in the renderer group, in yet another
+  hash order. `renderer_group.observed_hints` keeps the orders seen per
+  hint set (`tools/header_capture/derive_groups.py`); an unseen hint set
+  uses the order without hints with the hints after `user-agent`.
+- **Correction: `cookie` comes before `priority` on h2.** The first
+  capture decoded h2 with Python's `h2` package, which moves `cookie` to
+  the end when it joins cookie crumbs. Node's decoder keeps the wire
+  order; both certificate modes give `cookie, priority`.
+- **Correction: redirect `Referer`.** On a redirect hop `Referer` comes
+  after the `sec-ch-ua*` block; the first capture had no redirect with a
+  referrer.
+- `lb-net/tests/accept_ch.rs` replays the capture through
+  `HeaderProfile::build` (names, case, order and values) as the golden
+  test. Not covered: the `priority: i` of CSS background images (not
+  fetched yet) and `Sec-Fetch-Storage-Access` on cross-site frames of an
+  https page, which LightBrowser does not send.

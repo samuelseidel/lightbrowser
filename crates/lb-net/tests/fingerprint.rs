@@ -121,9 +121,48 @@ async fn chrome_matches_captured_chromium() {
             .is_empty()
     );
     let caps = fetch_captures(Persona::default_chrome(), &profile, 2).await;
-    let order = ids(&profile.extensions_order);
-
     for cap in &caps {
+        assert_chrome_capture(cap, &profile, &json);
+    }
+
+    // Chrome shuffles extensions per connection; so do we. Two equal orders
+    // out of 15! would be a bug, not luck.
+    let o1 = caps[0].client_hello.as_ref().unwrap().extension_ids();
+    let o2 = caps[1].client_hello.as_ref().unwrap().extension_ids();
+    assert_ne!(no_grease(&o1), no_grease(&o2), "extension order permuted");
+}
+
+/// Chrome's TLS and HTTP/2 fingerprint does not depend on the OS: every
+/// reference Chrome persona (Windows, macOS, Linux) must match the capture
+/// exactly (M7).
+#[tokio::test]
+async fn chrome_fingerprint_same_for_every_reference_persona() {
+    let dir = format!(
+        "{}/../../profiles/reference/chrome",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut n = 0;
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let persona = lb_persona::PersonaProfile::from_path_checked(&path)
+            .unwrap()
+            .to_network();
+        let (profile, json) = load(&persona.tls_profile_id);
+        println!("{}", path.display());
+        for cap in &fetch_captures(persona, &profile, 1).await {
+            assert_chrome_capture(cap, &profile, &json);
+        }
+        n += 1;
+    }
+    assert!(n >= 8, "{n} reference personas");
+}
+
+fn assert_chrome_capture(cap: &Capture, profile: &ClientHelloProfile, json: &Value) {
+    let order = ids(&profile.extensions_order);
+    {
         let ch = cap.client_hello.as_ref().unwrap();
         let ja4 = Ja4::from_client_hello(ch, 't');
         let canon = reordered(ch, &order);
@@ -168,7 +207,7 @@ async fn chrome_matches_captured_chromium() {
         assert_eq!(Some(ids_hex), profile.trust_anchor_ids);
 
         // HTTP/2 preface.
-        assert_eq!(h2.settings, settings(&profile));
+        assert_eq!(h2.settings, settings(profile));
         assert_eq!(h2.window_update, Some(profile.http2_window_update));
         assert_eq!(h2.pseudo_header_order, profile.http2_pseudo_header_order);
         assert!(h2.priority_frames.is_empty());
@@ -184,12 +223,6 @@ async fn chrome_matches_captured_chromium() {
             json["http2_akamai_fingerprint"].as_str().unwrap()
         );
     }
-
-    // Chrome shuffles extensions per connection; so do we. Two equal orders
-    // out of 15! would be a bug, not luck.
-    let o1 = caps[0].client_hello.as_ref().unwrap().extension_ids();
-    let o2 = caps[1].client_hello.as_ref().unwrap().extension_ids();
-    assert_ne!(no_grease(&o1), no_grease(&o2), "extension order permuted");
 }
 
 #[tokio::test]

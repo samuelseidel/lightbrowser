@@ -50,6 +50,9 @@ pub struct Persona {
     pub sec_ch_ua_mobile: Option<String>,
     /// `profile_id` of the TLS/H2 profile in `profiles/tls/`.
     pub tls_profile_id: String,
+    /// Chrome only: the high-entropy `Sec-CH-UA-*` values, sent only to
+    /// origins that asked for them with `Accept-CH` (M7, ADR 0015).
+    pub high_entropy: Option<HighEntropyHints>,
 }
 
 impl Persona {
@@ -73,6 +76,21 @@ impl Persona {
             sec_ch_ua_platform: Some("Windows".into()),
             sec_ch_ua_mobile: Some("?0".into()),
             tls_profile_id: "chrome_153_linux".into(),
+            high_entropy: Some(HighEntropyHints {
+                platform: "Windows".into(),
+                platform_version: "10.0.0".into(),
+                architecture: "x86".into(),
+                bitness: "64".into(),
+                model: String::new(),
+                wow64: false,
+                full_version_list: vec![
+                    BrandVersion::new("Google Chrome", "153.0.8010.12"),
+                    BrandVersion::new("Not_A Brand", "8.0.0.0"),
+                    BrandVersion::new("Chromium", "153.0.8010.12"),
+                ],
+                full_version: "153.0.8010.12".into(),
+                form_factors: vec!["Desktop".into()],
+            }),
         }
     }
 
@@ -89,6 +107,7 @@ Firefox/128.0"
             sec_ch_ua_platform: None,
             sec_ch_ua_mobile: None,
             tls_profile_id: "firefox_128_win10".into(),
+            high_entropy: None,
         }
     }
 }

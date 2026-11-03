@@ -22,6 +22,9 @@ cargo test -p lb-net --test fingerprint -- --nocapture   # prints measured JA3/J
   - H2 SETTINGS, WINDOW_UPDATE, pseudo-header order, HEADERS priority, frame
     order and the Akamai text;
   - per-connection extension permutation.
+  - `chrome_fingerprint_same_for_every_reference_persona`: every persona in
+    `profiles/reference/chrome` (Windows, macOS, Linux) gives the same
+    exact match (M7: TLS and H2 do not depend on the OS).
 - **Firefox** (`firefox_128_win10`):
   - Must match: ciphers, sigalgs, ALPN, cert compression, groups (minus
     ffdhe) and all H2 values.
@@ -93,8 +96,28 @@ snapshot` and `cargo test -p lb-webapi --test snapshot` (snapshot and
 built realms expose the identical surface, secure and insecure; V8 allows
 one snapshot per process, so these are separate test binaries), `cargo test -p lb-layout -p lb-paint` (paths, compositing,
 gradients, codecs, noise, display list and page painting), `cargo test -p lb-webapi` (`tests/install.rs`: interface
-surface vs Chrome 153), `cargo test -p lb-net` (74 unit tests, including the
-header profile in `header_profile.rs`, and `--test fingerprint`).
+surface vs Chrome 153), `cargo test -p lb-net` (79 unit tests, including the
+header profile in `header_profile.rs` and `client_hints.rs`, `--test
+fingerprint` and `--test accept_ch`).
+
+## Client hints (M7, WP-E)
+
+- `cargo test -p lb-net --test accept_ch`: the header golden test replays
+  `profiles/headers/captures/chrome_153_linux_accept_ch.jsonl` (84 of 88
+  requests, 75 with high-entropy hints, both `Critical-CH` retries)
+  through `HeaderProfile::build` and compares names, case, order and
+  values. Four pipeline tests run `lb_net::fetch` against a loopback
+  server: the `Critical-CH` retry, later navigations, same-origin frames
+  and subresources, preflights and cross-origin frames (no hints),
+  `Accept-CH` on a redirect, an empty `Accept-CH`, Firefox (no hints, no
+  retry) and the values of every reference persona.
+- `cargo test -p lb-page --test client_hints`: a real page with a
+  same-origin and a cross-origin frame.
+- Re-capture (loopback only, local Chromium): `node
+  tools/header_capture/accept_ch.js --out <file>` (add `--mode headed`
+  under `xvfb-run -a`), then `python3 tools/header_capture/derive_groups.py
+  <file>` for `renderer_group.observed_hints`. See
+  `tools/header_capture/README.md`.
 
 ## Detection bench (ADR 0007)
 
@@ -182,7 +205,7 @@ realm_bench` prints the realm-creation timings the runner reads.
 
 ## Planned suites
 
-- **Header golden test** (M4): replay `profiles/headers/captures/chrome_153_linux.jsonl` through `lb_net::HeaderProfile::build` and compare names, case and order. Not written yet.
+- **Header golden test for the first capture** (M4): replay `profiles/headers/captures/chrome_153_linux.jsonl` the same way as the client-hints capture (its h2 `cookie` position is a decoder artifact, ADR 0011).
 - **Fingerprint tests for Firefox** (M4b): same checks as the Chrome personas, against OUR detection engine only.
 - **Firefox network fingerprint** (M4b): close the ADR 0003 gaps and re-capture Firefox 128 with `lb-fptest`.
 
@@ -193,9 +216,11 @@ Testing 153.0.8010.12 (`--headless=new`) against a local logging server on
 loopback: HTTP/1.1 raw bytes, and HTTPS h2 decoded. The 69 requests are in
 `profiles/headers/captures/chrome_153_linux.jsonl` (document, iframe, scripts,
 style, image, font, fetch/XHR, preflight, favicon, redirect). The capture
-server script is not in the repo yet (it was a throwaway Python script using
-the `h2` package and an `openssl` cert), so a re-capture for a new Chrome
-major is manual: record the same request kinds from a local Chromium, compare
+server script is not in the repo (it was a throwaway Python script using
+the `h2` package, which moves `cookie` last on h2, and an `openssl` cert);
+`tools/header_capture/accept_ch.js` now covers most kinds with and without
+client hints. A full re-capture for a new Chrome major is still partly
+manual: record the same request kinds from a local Chromium, compare
 with the existing JSONL, and update the slot lists (ADR 0011).
 
 ## Re-capturing a Chrome TLS/H2 profile (`lb-fptest`)

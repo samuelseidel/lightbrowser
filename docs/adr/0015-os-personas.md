@@ -97,6 +97,29 @@ capped at 8, one wheel notch is 120 px).
     sets the detent `LightBrowser.human*` scrolls in. WebGL limits default
     per ANGLE backend. Select-all uses the OS's shortcut modifier.
 
+- **Client hints per origin (WP-E).**
+  - `Persona` (the network summary) carries `high_entropy` from
+    `high_entropy_hints()`, so the headers and `getHighEntropyValues`
+    give the same values.
+  - `lb_net::client_hints` keeps each origin's `Accept-CH` set in memory,
+    one store per browser context (shared like the cookie jar). Only
+    potentially trustworthy origins count (https, loopback http). A
+    top-level navigation response, redirects included, replaces the
+    origin's set; `Accept-CH` from frames and subresources is ignored.
+  - A top-level navigation sends its own origin's hints. A frame or
+    subresource request sends the top-level origin's hints only when the
+    request, the frame that made it and the top-level document are all
+    same-origin (`RequestMeta::top_frame`; no `Permissions-Policy`
+    delegation). Preflights send none.
+  - `Critical-CH`: when the final response names a hint its `Accept-CH`
+    asked for and the request lacked, the navigation is sent again once.
+    The first response is dropped; its cookies are kept.
+  - Header order is data in `profiles/headers/chrome_153.json`, captured
+    from the local Chrome for Testing 153 with
+    `tools/header_capture/accept_ch.js` (ADR 0011).
+  - Only the `Sec-CH-UA-*` hints are sent. Device and preference hints
+    (`DPR`, `Viewport-Width`, `Sec-CH-Prefers-Color-Scheme`, ...) are not.
+
 ## Alternatives considered
 
 - **Per-OS persona types or crates.** More code, and every layer would
@@ -107,6 +130,10 @@ capped at 8, one wheel notch is 120 px).
   Chrome uses DejaVu Sans Mono).
 - **Required schema fields.** Would break the existing personas and v1
   files for no gain; defaults cover the common case.
+- **Client hints in lb-page instead of lb-net.** The restart and the
+  redirect hops happen inside `lb_net::fetch`, and the stand-alone `fetch`
+  command needs the same behaviour, so the store and the decision live in
+  lb-net; lb-page only says which document is top-level.
 - **One generated table per OS, or adding gated members at realm setup.**
   Three tables would triple the generated data and the snapshot; adding
   members per realm cannot put them in Chrome's place in the prototype.
@@ -115,10 +142,12 @@ capped at 8, one wheel notch is 120 px).
 
 ## Consequences
 
-- WP-C (layout, fonts, scrollbars) and WP-D (web APIs, input) read these
-  accessors; WP-E (Accept-CH) still has to. Until it lands every reference
-  persona fires `ch_high_entropy` (fp 40, `docs/ROADMAP.md`, "M7 status:
-  WP-D").
+- WP-C (layout, fonts, scrollbars), WP-D (web APIs, input) and WP-E
+  (client hints) read these accessors.
+- A site that asks for hints in `Accept-CH` sees them from the second
+  request on (from the first with `Critical-CH`), as with Chrome. Hint sets
+  we have not captured on subresources use an approximate order (Blink's
+  hash-table order is not modelled), see ADR 0011.
 - Realm setup runs one short deletion script for personas whose OS lacks a
   gated API (Linux): realm creation stays at about 3.2 ms first, 2.5 ms
   next.

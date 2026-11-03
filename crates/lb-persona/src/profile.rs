@@ -793,6 +793,7 @@ impl PersonaProfile {
             sec_ch_ua_platform: hints.map(|h| h.platform.clone()),
             sec_ch_ua_mobile: hints.map(|h| if h.mobile { "?1" } else { "?0" }.to_owned()),
             tls_profile_id: self.tls.profile_id.clone(),
+            high_entropy: hints.and_then(|_| self.high_entropy_hints()),
         }
     }
 }

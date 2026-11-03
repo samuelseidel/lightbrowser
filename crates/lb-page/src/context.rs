@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use lb_net::ClientHelloProfile;
+use lb_net::client_hints::ClientHintsStore;
 use lb_net::cookies::CookieJar;
 use lb_net::fetch::{NetContext, RedirectHop, Request};
 use lb_net::header_profile::{RequestKind, RequestMeta};
@@ -48,6 +49,8 @@ impl std::fmt::Debug for ContextOptions {
 struct Shared {
     opts: ContextOptions,
     cookies: CookieJar,
+    /// Per-origin `Accept-CH` sets (memory only, like the cookie jar).
+    client_hints: ClientHintsStore,
     local_storage: StoragePartition,
     /// Idle network contexts (TLS connector and resolver are reused).
     pool: Mutex<Vec<NetContext>>,
@@ -121,6 +124,7 @@ impl BrowserContext {
         let ctx = BrowserContext(Arc::new(Shared {
             opts,
             cookies,
+            client_hints: ClientHintsStore::new(),
             local_storage: StoragePartition::new(),
             pool: Mutex::new(Vec::new()),
             favicons: Mutex::new(HashSet::new()),
@@ -147,6 +151,11 @@ impl BrowserContext {
         self.0.cookies.clone()
     }
 
+    /// The context's `Accept-CH` store (shared by its pages).
+    pub fn client_hints(&self) -> &ClientHintsStore {
+        &self.0.client_hints
+    }
+
     /// `localStorage` areas of this context.
     pub fn local_storage(&self) -> &StoragePartition {
         &self.0.local_storage
@@ -160,6 +169,7 @@ impl BrowserContext {
                 .map_err(|e| PageError::Setup(e.to_string()))?,
         };
         net.cookies = self.0.cookies.clone();
+        net.client_hints = self.0.client_hints.clone();
         net.danger_accept_invalid_certs = self.0.opts.accept_invalid_certs;
         Ok(net)
     }
@@ -176,6 +186,7 @@ impl BrowserContext {
 
     fn put_back(&self, mut net: NetContext) {
         net.cookies = self.0.cookies.clone();
+        net.client_hints = self.0.client_hints.clone();
         let mut pool = self.0.pool.lock().unwrap_or_else(|e| e.into_inner());
         if pool.len() < 8 {
             pool.push(net);
@@ -189,16 +200,29 @@ impl BrowserContext {
         self.fetch_traced(req).await.map(|(r, _)| r)
     }
 
+    /// [`fetch`](Self::fetch) for a request made inside a page whose
+    /// top-level document is `top_frame`: its origin's `Accept-CH` set
+    /// decides the client hints of frame and subresource requests
+    /// (same-origin only, see `lb_net::client_hints`).
+    pub async fn fetch_in_page(
+        &self,
+        req: NetRequest,
+        top_frame: Option<Url>,
+    ) -> Result<NetResponse, String> {
+        self.fetch_as(req, None, top_frame).await.map(|(r, _)| r)
+    }
+
     /// Like [`fetch`](Self::fetch), also returning the redirect chain and the
     /// request headers that went on the wire.
     pub async fn fetch_traced(&self, req: NetRequest) -> Result<(NetResponse, FetchTrace), String> {
-        self.fetch_as(req, None).await
+        self.fetch_as(req, None, None).await
     }
 
     async fn fetch_as(
         &self,
         req: NetRequest,
         kind: Option<RequestKind>,
+        top_frame: Option<Url>,
     ) -> Result<(NetResponse, FetchTrace), String> {
         // Wait for one of the origin's connection slots (never closed).
         let slot = self.host_slots(&req.url).acquire_owned().await.ok();
@@ -209,7 +233,11 @@ impl BrowserContext {
             url: url.clone(),
             headers: req.headers.clone(),
             body: bytes::Bytes::from(req.body.clone()),
-            meta: Some(request_meta(&req, kind)),
+            meta: Some({
+                let mut m = request_meta(&req, kind);
+                m.top_frame = top_frame;
+                m
+            }),
         };
         let r = lb_net::fetch(&mut net, wire).await;
         drop(slot);
@@ -267,7 +295,7 @@ impl BrowserContext {
         }
         let req = NetRequest::get(icon, Destination::Image, Some(page_url.clone()));
         Some(
-            self.fetch_as(req, Some(RequestKind::Favicon))
+            self.fetch_as(req, Some(RequestKind::Favicon), Some(page_url.clone()))
                 .await
                 .map(|(r, _)| r),
         )

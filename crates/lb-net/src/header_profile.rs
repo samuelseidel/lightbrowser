@@ -20,6 +20,7 @@ use serde::Deserialize;
 use url::{Host, Url};
 
 use crate::HttpVersion;
+use crate::client_hints::UaHint;
 use crate::error::NetError;
 use crate::headers::OrderedHeaders;
 
@@ -96,6 +97,12 @@ pub struct RequestMeta {
     pub priority: Option<String>,
     /// Only for [`RequestKind::Preflight`].
     pub preflight: Option<PreflightInfo>,
+    /// The top-level document of the frame that made the request. Its
+    /// origin's `Accept-CH` set decides which high-entropy client hints a
+    /// subresource or frame request carries ([`crate::client_hints`]).
+    /// `None`: the initiator is the top-level document (a top-level
+    /// navigation uses its own target).
+    pub top_frame: Option<Url>,
 }
 
 impl RequestMeta {
@@ -107,6 +114,7 @@ impl RequestMeta {
             initiator,
             priority: None,
             preflight: None,
+            top_frame: None,
         }
     }
 
@@ -260,6 +268,16 @@ struct RawH1 {
 struct RawGroup {
     base: Vec<String>,
     observed: Vec<RawCombo>,
+    /// Orders seen with high-entropy client hints, per hint set.
+    #[serde(default)]
+    observed_hints: Vec<RawHintCombo>,
+}
+
+#[derive(Deserialize)]
+struct RawHintCombo {
+    hints: Vec<String>,
+    extra: Vec<String>,
+    order: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -284,6 +302,11 @@ pub struct BuildInput<'a> {
     pub hop: usize,
     /// `Sec-Fetch-Site` for this hop (the chain maximum).
     pub site: Site,
+    /// High-entropy client hints this request carries (the origin asked
+    /// for them with `Accept-CH`; see [`crate::client_hints`]).
+    pub hints: &'a [UaHint],
+    /// The `Critical-CH` retry of a navigation (`document_restart` list).
+    pub restart: bool,
 }
 
 /// Header sets for one browser build.
@@ -297,7 +320,11 @@ pub struct HeaderProfile {
     h1_lower_prefixes: Vec<String>,
     group_base: Vec<String>,
     group_observed: Vec<(Vec<String>, Vec<String>)>,
+    /// `(hint header names, sorted; extras; order)`.
+    group_hinted: Vec<HintCombo>,
 }
+
+type HintCombo = (Vec<String>, Vec<String>, Vec<String>);
 
 /// Names whose value the persona decides; a page header of the same name
 /// replaces the value in place.
@@ -330,6 +357,16 @@ impl HeaderProfile {
             .iter()
             .map(|c| (lower(&c.extra), lower(&c.order)))
             .collect();
+        let hinted = raw
+            .renderer_group
+            .observed_hints
+            .iter()
+            .map(|c| {
+                let mut h = lower(&c.hints);
+                h.sort();
+                (h, lower(&c.extra), lower(&c.order))
+            })
+            .collect();
         let p = HeaderProfile {
             profile_id: raw.profile_id,
             family,
@@ -339,6 +376,7 @@ impl HeaderProfile {
             h1_lower_prefixes: lower(&raw.h1.lowercase_prefixes),
             group_base: lower(&raw.renderer_group.base),
             group_observed: observed,
+            group_hinted: hinted,
         };
         for k in [
             RequestKind::Document,
@@ -392,7 +430,12 @@ impl HeaderProfile {
     /// page used (page headers).
     pub fn build(&self, input: &BuildInput<'_>) -> OrderedHeaders {
         let meta = input.meta;
-        let key = if meta.kind == RequestKind::Document && input.hop > 0 {
+        let key = if meta.kind == RequestKind::Document
+            && input.restart
+            && self.kinds.contains_key("document_restart")
+        {
+            "document_restart"
+        } else if meta.kind == RequestKind::Document && input.hop > 0 {
             "document_redirect"
         } else {
             meta.kind.key()
@@ -487,7 +530,7 @@ impl HeaderProfile {
                     if *with_origin && let Some(o) = &origin {
                         group_extras.insert(0, ("Origin".into(), o.clone()));
                     }
-                    for (n, v, page_case) in self.group(&group_extras, &value) {
+                    for (n, v, page_case) in self.group(&group_extras, input.hints, &value) {
                         push(&n, v, page_case.as_deref());
                     }
                 }
@@ -507,18 +550,55 @@ impl HeaderProfile {
     fn group(
         &self,
         extras: &[(String, String)],
+        hints: &[UaHint],
         value: &dyn Fn(&str) -> Option<String>,
     ) -> Vec<(String, String, Option<String>)> {
         let want: HashSet<String> = extras.iter().map(|(n, _)| n.to_ascii_lowercase()).collect();
-        // Largest observed combination contained in the page's set.
+        let mut hint_names: Vec<String> = hints.iter().map(|h| h.header().to_owned()).collect();
+        hint_names.sort();
+        // Largest observed combination contained in the page's set, among
+        // the orders seen with exactly this hint set (or without hints).
         let mut order: Vec<String> = self.group_base.clone();
         let mut best = 0usize;
+        let mut found = hint_names.is_empty();
         let mut covered: HashSet<&str> = HashSet::new();
-        for (set, o) in &self.group_observed {
-            if set.len() > best && set.iter().all(|s| want.contains(s)) {
-                best = set.len();
-                order = o.clone();
-                covered = set.iter().map(String::as_str).collect();
+        if hint_names.is_empty() {
+            for (set, o) in &self.group_observed {
+                if set.len() > best && set.iter().all(|s| want.contains(s)) {
+                    best = set.len();
+                    order = o.clone();
+                    covered = set.iter().map(String::as_str).collect();
+                }
+            }
+        } else {
+            for (h, set, o) in &self.group_hinted {
+                if *h != hint_names || !set.iter().all(|s| want.contains(s)) {
+                    continue;
+                }
+                if !found || set.len() > best {
+                    found = true;
+                    best = set.len();
+                    order = o.clone();
+                    covered = set.iter().map(String::as_str).collect();
+                }
+            }
+        }
+        if !found {
+            // A hint set we never saw: the order without hints, the hints
+            // right after user-agent (Blink's hash order is not modelled).
+            for (set, o) in &self.group_observed {
+                if set.len() > best && set.iter().all(|s| want.contains(s)) {
+                    best = set.len();
+                    order = o.clone();
+                    covered = set.iter().map(String::as_str).collect();
+                }
+            }
+            let at = order
+                .iter()
+                .position(|n| n == "user-agent")
+                .map_or(order.len(), |p| p + 1);
+            for (k, n) in hint_names.iter().enumerate() {
+                order.insert(at + k, n.clone());
             }
         }
         // Unseen page headers go right after user-agent.
@@ -540,7 +620,7 @@ impl HeaderProfile {
         }
         let mut out = Vec::new();
         for name in order {
-            if GROUP_MEMBERS.contains(&name.as_str()) {
+            if GROUP_MEMBERS.contains(&name.as_str()) || UaHint::from_header(&name).is_some() {
                 if let Some(v) = value(&name) {
                     out.push((name, v, None));
                 }
@@ -589,6 +669,13 @@ impl HeaderProfile {
             "sec-fetch-mode" => Some(meta.mode.clone()),
             "sec-fetch-user" => meta.user_activated.then(|| "?1".to_owned()),
             "access-control-request-method" => meta.preflight.as_ref().map(|p| p.method.clone()),
+            n if n.starts_with("sec-ch-ua-") => {
+                let hint = UaHint::from_header(n)?;
+                if !input.hints.contains(&hint) {
+                    return None;
+                }
+                p.high_entropy.as_ref().map(|h| hint.value(h))
+            }
             "access-control-request-headers" => meta
                 .preflight
                 .as_ref()
@@ -671,6 +758,8 @@ mod tests {
             caller: &caller,
             hop: 0,
             site: Site::between(initiator.as_ref(), &target),
+            hints: &[],
+            restart: false,
         })
     }
 
@@ -716,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn document_h2_is_lowercase_with_priority_then_cookie() {
+    fn document_h2_is_lowercase_with_cookie_then_priority() {
         let h = build(
             RequestKind::Document,
             HttpVersion::Http2,
@@ -729,7 +818,9 @@ mod tests {
         );
         assert!(h.iter().all(|(n, _)| *n == n.to_ascii_lowercase()));
         let n = names(&h);
-        assert_eq!(&n[n.len() - 2..], ["priority", "cookie"]);
+        // Captured with a raw h2 decoder (accept_ch capture); the first
+        // capture's decoder moved `cookie` last.
+        assert_eq!(&n[n.len() - 2..], ["cookie", "priority"]);
         assert_eq!(n[0], "sec-ch-ua");
         assert!(!n.contains(&"host"));
     }
@@ -926,6 +1017,8 @@ mod tests {
             caller: &caller,
             hop: 1,
             site: Site::None,
+            hints: &[],
+            restart: false,
         });
         assert_eq!(names(&h)[0], "accept-language");
         let n = names(&h);
@@ -957,6 +1050,9 @@ mod tests {
             caller: &caller,
             hop: 0,
             site: Site::between(Some(&init), &target),
+            // Even when the origin asked for every hint.
+            hints: &UaHint::ALL,
+            restart: false,
         });
         assert_eq!(
             names(&h),

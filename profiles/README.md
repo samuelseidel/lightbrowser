@@ -52,7 +52,8 @@ Persona profiles, TLS/H2 profiles, request-header profiles and font tables. Mile
 ## Request headers (`profiles/headers/`)
 
 - `chrome_153.json`: per request kind, the header slots in h2 order, the HTTP/1.1 rules and Blink's observed subresource orders. Values (UA, `sec-ch-ua*`, language) are never stored here; they come from the persona. Loaded by `lb_net::HeaderProfile` (ADR 0011).
-- `captures/chrome_153_linux.jsonl`: the 69 requests captured from Chrome for Testing 153.0.8010.12 on loopback. Evidence for the profile.
+- `captures/chrome_153_linux.jsonl`: the 69 requests captured from Chrome for Testing 153.0.8010.12 on loopback. Evidence for the profile (its h2 `cookie` position is an artifact of the decoder, ADR 0011).
+- `captures/chrome_153_linux_accept_ch.jsonl`: 88 requests after `Accept-CH` and `Critical-CH` (HTTP/1.1 and h2, loopback, `tools/header_capture/accept_ch.js`). Evidence for the client-hint slots, the `document_restart` list and `renderer_group.observed_hints`; the golden test in `lb-net/tests/accept_ch.rs` replays it.
 
 ## Fonts (`profiles/fonts/`)
 

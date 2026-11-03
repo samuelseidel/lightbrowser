@@ -101,7 +101,7 @@ browser context. Nothing reads a global.
 | TLS | BoringSSL (`boring`, `tokio-boring`, `boring-sys` FFI for unwrapped knobs) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ML-KEM, ML-DSA, trust_anchors, server_padding. Firefox's ciphers, sigalgs, groups and ALPN match by configuration. delegated_credentials, record_size_limit, ffdhe and Firefox's extension order need small BoringSSL patches (M4b, ADR 0003). rustls can do neither. |
 | HTTP | Own HTTP/1.1 writer (exact header-name case and order, `httparse` for responses; ADR 0011). A fork of `h2` (`vendor/h2`) exposes SETTINGS order/values, the initial WINDOW_UPDATE, pseudo-header order and the HEADERS priority block, and writes the preface before reading. h3 via quiche later. | Akamai H2 fingerprint. Pseudo-header order: Chrome `m,a,s,p`, Firefox `m,p,a,s`. |
 | Net misc | hickory-resolver, per-context cookie jar, gzip/br/zstd, at most 6 simultaneous connections per origin like Chrome (`lb_page::BrowserContext`). Planned, not built: in-memory LRU cache, HTTP and SOCKS5 proxies, connection reuse. | No disk use. |
-| Request headers | `profiles/headers/chrome_153.json`: per request kind (document, iframe, script, module script, style, image, favicon, font, fetch/XHR, preflight) the header slots in h2 order, the h1 rules and Blink's observed subresource orders, captured from local Chrome for Testing 153 (69 requests kept in `profiles/headers/captures/`). `lb_net::header_profile` builds the list per hop; UA, client hints and language come from the persona; `Sec-Fetch-Site`, `Referer` and `Origin` are derived along redirect chains. Firefox keeps the navigation set plus a generic per-kind overlay (M4b). | Header names, case and order match Chrome per destination (ADR 0011). |
+| Request headers | `profiles/headers/chrome_153.json`: per request kind (document, iframe, script, module script, style, image, favicon, font, fetch/XHR, preflight) the header slots in h2 order, the h1 rules and Blink's observed subresource orders, captured from local Chrome for Testing 153 (69 requests kept in `profiles/headers/captures/`, plus 88 with `Accept-CH` / `Critical-CH`). `lb_net::header_profile` builds the list per hop, including the high-entropy `Sec-CH-UA-*` slots, the `Critical-CH` retry list and the subresource orders with hints; UA, client hints and language come from the persona; `Sec-Fetch-Site`, `Referer` and `Origin` are derived along redirect chains. Firefox keeps the navigation set plus a generic per-kind overlay (M4b). | Header names, case and order match Chrome per destination (ADR 0011), with and without client hints (golden test against the capture). |
 | HTML | `html5ever` tokenizer/tree builder → our own tree sink | Parses exactly like a browser. |
 | DOM | Arena of compact nodes (u32 ids), interned atoms (`string_cache`). Each document is one arena, freed in one step on navigation. | Low RAM, cache-friendly, cheap teardown. |
 | Selectors | Servo `selectors` + `cssparser` | `querySelector`, `matches`, cascade. |
@@ -158,12 +158,16 @@ persona's own value or the OS default:
 | `wheel` | 100 px, ratio 1.2 / 40 px, ratio 3 / 120 px, ratio 1 | lb-webapi (trusted `wheelDelta`), lb-page `cdp/human.rs` (detent size; macOS acceleration in lb-behavior) |
 | `audio_defaults` | 48 kHz / 44.1 kHz / 48 kHz; base latency 0.01 s; output latency twice the base | lb-webapi (`AudioContext`) |
 | `webgpu`, `codecs`, `os_apis` | from the GPU / same / no adapter, no HEVC, no `share` or `bluetooth` | lb-webapi (`navigator.gpu`, `rt/media.rs`, realm setup deletes the `Table::os_gated` members a gate turns off) |
-| `high_entropy_hints` | from `client_hints`, `formFactors` `["Desktop"]` | lb-net, lb-page (WP-E) |
+| `high_entropy_hints` | from `client_hints`, `formFactors` `["Desktop"]` | lb-webapi (`getHighEntropyValues`), lb-cdp (UA overrides), lb-net (`Persona::high_entropy`: the `Sec-CH-UA-*` headers after `Accept-CH`) |
 
 The interface set is the Linux capture plus an OS overlay
 (`tests/fixtures/chrome_153_os_overlay.json`: Web Share, Web Bluetooth),
 all in the persona-free snapshot; a realm deletes what its persona's OS
-lacks, so member order stays Chrome's. Select-all is Cmd+A on macOS and
+lacks, so member order stays Chrome's. High-entropy client hints go only
+to origins that asked (`Accept-CH`, stored per context and origin in
+memory; `Critical-CH` restarts a navigation once), and only to the
+top-level origin and frames and subresources same-origin with it
+(`lb_net::client_hints`). Select-all is Cmd+A on macOS and
 Ctrl+A elsewhere; WebGL limits default per ANGLE backend (D3D11, Metal,
 OpenGL on Mesa or NVIDIA, Vulkan).
 

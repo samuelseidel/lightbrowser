@@ -66,6 +66,8 @@ pub fn navigation_headers(persona: &Persona, _host: &str) -> OrderedHeaders {
                 caller: &Vec::new(),
                 hop: 0,
                 site: Site::None,
+                hints: &[],
+                restart: false,
             });
         }
         BrowserFamily::Firefox => {
