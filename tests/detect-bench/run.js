@@ -8,8 +8,10 @@
 //   node run.js --scenario T-010 --cdp ws://... --input human --expect 'beh<=30'
 //   node run.js --scenario T-020 --trace trace.json --expect '<=40'
 //
-// --input playwright (default) drives T-010 with Playwright's own input
-// (mouse.wheel, click, fill). --input human drives the same flow through
+// T-010 flow, the same for both inputs: shop, scroll, add a product, search
+// for a three-word query, open "Sign in" and submit the login form (email
+// and password). --input playwright (default) drives it with Playwright's
+// own input (mouse.wheel, click, fill). --input human drives it through
 // LightBrowser.humanScroll/humanClick/humanType on a CDP session, with a
 // reading pause per page from its text length (--seed N makes the pauses
 // reproducible); it needs LightBrowser behind --cdp.
@@ -57,7 +59,7 @@ function parseArgs(argv) {
     } else if (k === '--seed') a.seed = Number(next()) >>> 0;
     else if (k === '--json') a.json = true;
     else if (k === '-h' || k === '--help') {
-      console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 18).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+      console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 20).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
       process.exit(0);
     } else { console.error(`unknown argument ${k}`); process.exit(2); }
   }
@@ -120,13 +122,35 @@ async function center(page, sel) {
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
 
-// The common flow: shop, scroll, click a product, search, submit.
+// What the T-010 flow types. Shoppers search with a few words and sign in
+// with an email and a password; the text also gives the per-page key rules
+// (collector.js beh_key_rhythm / beh_key_dwell) enough keys to judge spread.
+// One six-letter word left them a ~26 % chance of firing on a human-like
+// typist (lb-behavior tests/key_spread.rs). Made-up account, not a real one.
+const FLOW = {
+  query: 'waterproof rain jacket',
+  email: 'jordan.miller84@example.com',
+  password: 'Tr4il-runner!',
+};
+
+// Resolves when the main frame commits its next navigation (a form POST
+// keeps the same URL, so waitForURL cannot tell).
+function nextNavigation(page) {
+  return page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 30000 });
+}
+
+// The common flow: shop, scroll, click a product, search, sign in.
 async function flowInstant(page, base) {
   await page.goto(`${base}/shop`);
   await page.mouse.wheel(0, 900);
   await page.click('#add-3');
-  await page.fill('#q', 'jacket');
+  await page.fill('#q', FLOW.query);
   await Promise.all([page.waitForURL(/\/search/), page.click('#search-btn')]);
+  await Promise.all([page.waitForURL(/\/login/), page.click('nav a[href="/login"]')]);
+  await page.fill('#email', FLOW.email);
+  await page.fill('#password', FLOW.password);
+  await Promise.all([nextNavigation(page), page.click('#login-btn')]);
+  await page.waitForLoadState('load');
 }
 
 async function flowScriptedSlow(page, base) {
@@ -186,10 +210,17 @@ async function flowHuman(page, base, a) {
   await readingPause(page, rnd);
   await human('humanScroll', { deltaY: 900 });
   await human('humanClick', { selector: '#add-3' });
-  await human('humanType', { selector: '#q', text: 'jacket' });
+  await human('humanType', { selector: '#q', text: FLOW.query });
   await Promise.all([page.waitForURL(/\/search/), human('humanClick', { selector: '#search-btn' })]);
   await page.waitForLoadState('load');
   await readingPause(page, rnd);
+  await Promise.all([page.waitForURL(/\/login/), human('humanClick', { selector: 'nav a[href="/login"]' })]);
+  await page.waitForLoadState('load');
+  await readingPause(page, rnd);
+  await human('humanType', { selector: '#email', text: FLOW.email });
+  await human('humanType', { selector: '#password', text: FLOW.password });
+  await Promise.all([nextNavigation(page), human('humanClick', { selector: '#login-btn' })]);
+  await page.waitForLoadState('load');
   await cdp.detach().catch(() => {});
 }
 

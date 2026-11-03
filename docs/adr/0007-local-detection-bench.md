@@ -62,3 +62,8 @@ and a Playwright scenario runner. Stock headless Chromium scores 100 (bot).
   Chrome 153 sends `Accept-Language` right after `sec-ch-ua-platform`, not
   after `Accept-Encoding` as `EXPECTED` had it; stock `--headless=new`
   fired `header_order` as LightBrowser did. T-001/T-003 stay at 100.
+- The scripted flow is part of the target too. On 2026-11-03 T-010 (and
+  T-001) began typing a three-word query and a login form instead of one
+  six-letter word, for both input modes. With six keys the per-page key
+  spread rules fire by chance on human-like typing, about 26 % of the time.
+  No rule changed. Results are in `ROADMAP.md`, "M5 status: human input".

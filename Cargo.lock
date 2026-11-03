@@ -1296,7 +1296,9 @@ name = "lb-js"
 version = "0.0.1"
 dependencies = [
  "lb-persona",
+ "libc",
  "v8",
+ "zstd",
 ]
 
 [[package]]

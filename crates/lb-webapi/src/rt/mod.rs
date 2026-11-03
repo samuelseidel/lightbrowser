@@ -59,6 +59,7 @@ pub mod screenshot;
 pub mod script;
 mod serializer;
 mod style;
+mod table;
 mod tags;
 mod webgl;
 mod webgl_ext;
@@ -309,6 +310,7 @@ impl Runtime {
         fonts::register(reg, &rt);
         navigator::register(reg, &rt);
         frames::register(reg, &rt);
+        table::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }

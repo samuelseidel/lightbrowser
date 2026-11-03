@@ -19,14 +19,16 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | ≤ Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8, whose floor is 42 MB (ADR 0013; was < 40 MB) |
+| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8 (ADR 0013; was < 40 MB). Measured 44.4 MB; V8 plus its ICU data alone is 30.7 MB |
 | Disk writes during a session | none by default |
 | Isolate/realm creation | < 5 ms (startup snapshot, ADR 0013) |
 
 `bench/run.py` measures these (see the "Bench runner" row in the Stack table). Measured on
-2026-11-03: idle RSS 9.9 MB, binary 54.96 MB, first/next realm 2.4/2.1 ms, no
-disk writes. The Lightpanda comparison is not measured yet (no binary on the
-bench machine). Details: `docs/ROADMAP.md`, "M6 status".
+2026-11-03 (`bench/results/2026-11-03-ebe5f36.json`): idle RSS 10.3 MB,
+binary 44.37 MB (the original < 40 MB is missed by 4.4 MB), first/next
+realm 2.4/2.1 ms, no disk writes. The Lightpanda comparison is not
+measured yet (no binary on the bench machine). Details: `docs/ROADMAP.md`,
+"M6 status".
 
 ## Decisions (see `docs/adr/`)
 
@@ -93,7 +95,7 @@ browser context. Nothing reads a global.
 | Bindings | Own WebIDL → Rust codegen with its own tolerant IDL parser (Blink's extended attributes parse as-is), using the Chromium IDL set for Chrome and the Gecko IDL set for Firefox. Members are filtered and ordered by a surface fixture captured from the local Chromium. | Interface list, prototype chains, property order and descriptors all match the claimed browser. This is a large fingerprint surface. |
 | TLS | BoringSSL (`boring`, `tokio-boring`, `boring-sys` FFI for unwrapped knobs) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ML-KEM, ML-DSA, trust_anchors, server_padding. Firefox's ciphers, sigalgs, groups and ALPN match by configuration. delegated_credentials, record_size_limit, ffdhe and Firefox's extension order need small BoringSSL patches (M4b, ADR 0003). rustls can do neither. |
 | HTTP | Own HTTP/1.1 writer (exact header-name case and order, `httparse` for responses; ADR 0011). A fork of `h2` (`vendor/h2`) exposes SETTINGS order/values, the initial WINDOW_UPDATE, pseudo-header order and the HEADERS priority block, and writes the preface before reading. h3 via quiche later. | Akamai H2 fingerprint. Pseudo-header order: Chrome `m,a,s,p`, Firefox `m,p,a,s`. |
-| Net misc | hickory-resolver, per-context cookie jar, gzip/br/zstd. Planned, not built: in-memory LRU cache, HTTP and SOCKS5 proxies, connection reuse. | No disk use. |
+| Net misc | hickory-resolver, per-context cookie jar, gzip/br/zstd, at most 6 simultaneous connections per origin like Chrome (`lb_page::BrowserContext`). Planned, not built: in-memory LRU cache, HTTP and SOCKS5 proxies, connection reuse. | No disk use. |
 | Request headers | `profiles/headers/chrome_153.json`: per request kind (document, iframe, script, module script, style, image, favicon, font, fetch/XHR, preflight) the header slots in h2 order, the h1 rules and Blink's observed subresource orders, captured from local Chrome for Testing 153 (69 requests kept in `profiles/headers/captures/`). `lb_net::header_profile` builds the list per hop; UA, client hints and language come from the persona; `Sec-Fetch-Site`, `Referer` and `Origin` are derived along redirect chains. Firefox keeps the navigation set plus a generic per-kind overlay (M4b). | Header names, case and order match Chrome per destination (ADR 0011). |
 | HTML | `html5ever` tokenizer/tree builder → our own tree sink | Parses exactly like a browser. |
 | DOM | Arena of compact nodes (u32 ids), interned atoms (`string_cache`). Each document is one arena, freed in one step on navigation. | Low RAM, cache-friendly, cheap teardown. |
@@ -111,7 +113,7 @@ browser context. Nothing reads a global.
 | Python SDK | `sdk/python/lightbrowser`: launches `lightbrowser serve --port 0` with a persona, connects stock Playwright over CDP and returns stock `Page` objects with `human_move/click/type/scroll` and `verify_fingerprint()` bound on; sync and async APIs; scenarios T-001 to T-007 against the bench. Loopback only. Needs Python Playwright >= 1.63: older versions put `__pwInitScripts` in the page's main world, which the browser cannot hide. | Replaces the GeckoPhantom SDK; control stays CDP only. |
 | Bench runner | `bench/run.py`: 50-page generated corpus served on loopback; `fetch` and CDP crawls of LightBrowser and headless Chromium (and Lightpanda if on PATH); wall time, p50/p90 page time, peak RSS/PSS, CPU, idle RSS, startup, binary size, realm creation and disk writes, checked against the budgets above. Results in `bench/results/`. | Makes the budgets measurable and repeatable. |
 | Runtime | Thread per core. Each thread runs a tokio `current_thread` runtime and owns its JS engine instances. | JS engines are single-threaded, so there's no locking. |
-| Allocator | glibc malloc (mimalloc measured worse for idle and multi-page RSS, ADR 0013). Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped, `opt-level = "s"` for non-hot crates, linked with `--icf=safe` and packed relative relocations | Speed and size. |
+| Allocator | glibc malloc (mimalloc measured worse for idle and multi-page RSS, ADR 0013). Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped, `opt-level = "s"` for non-hot crates, linked with `--icf=safe`, packed relative relocations and no `.eh_frame`; V8's ICU data is embedded zstd-compressed and decompressed once when the first engine starts (ADR 0013) | Speed and size. |
 | Control | Own CDP server (`tokio-tungstenite`) | Playwright `connectOverCDP` works unchanged for both families. |
 
 ## Browser families

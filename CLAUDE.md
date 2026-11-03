@@ -13,17 +13,18 @@ and Python SDK) and most of M6 are done. `lightbrowser serve` runs real V8
 pages through `lb_page::CdpHost`; stock Playwright `connectOverCDP` passes
 20 tests (including screenshots); the WPT subset passes 2552/2788. On our
 detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for both
-reference Chrome personas. With `--input human` (`LightBrowser.human*`) the
-Windows persona scores beh 0 (pass); the macOS persona scores beh 35
-(`beh_key_dwell` on six keystrokes, fail) and needs a decision, see "M5
-status" in `docs/ROADMAP.md`. M6: V8 startup snapshot (realm 2.1 ms), idle RSS
-9.9 MB, `bench/` runner, release binary 54.96 MB against < 56 MB (ADR 0013;
-the V8 floor is 42 MB, so the old < 40 MB is out of reach). Open: Firefox
-(M4b: no SpiderMonkey backend, TLS gaps in ADR 0003), workers and service
-workers, shader execution in WebGL, the Lightpanda comparison (no binary on
-this machine), slow layout on image grids, and CSS background images in
-screenshots. See "Where we stand" and the status sections in
-`docs/ROADMAP.md`.
+reference Chrome personas. With `--input human` (`LightBrowser.human*`)
+both reference personas score beh 0 on their own seeds (seeds 1-20: 20/20
+Windows, 19/20 macOS), see "M5 status" in `docs/ROADMAP.md`. M6: V8 startup
+snapshot (realm 2.1 ms), idle RSS 10.3 MB, `bench/` runner (every corpus
+page faster than headless Chromium's median), release binary 44.4 MB
+against < 56 MB (ADR 0013; ICU data shipped zstd-compressed, no unwind
+tables; the original < 40 MB is still missed). Open: Firefox (M4b: no
+SpiderMonkey backend, TLS gaps in ADR 0003), workers and service workers,
+shader execution in WebGL, the Lightpanda comparison (no binary on this
+machine), HTTP keep-alive, stylesheets blocking scripts, and CSS
+background images in screenshots. See "Where we stand" and the status
+sections in `docs/ROADMAP.md`.
 
 ## Internal use and legal
 - Internal only. Never push binaries to public repos or registries.
@@ -34,14 +35,14 @@ screenshots. See "Where we stand" and the status sections in
 | Crate | Role | State |
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R16, sfc32 done; optional `preferences`, media devices, battery |
-| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (startup snapshot made in memory, ADR 0013; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
-| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`) | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open |
+| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (startup snapshot made in memory, ADR 0013; ICU data shipped zstd-compressed, `v8_engine/icu_data.rs`; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
+| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`) | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open (`lb-page` caps 6 connections per origin) |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome). WebGL runs no shaders; no workers, crypto or WebSocket |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`). WebGL runs no shaders; no workers, crypto or WebSocket |
 | `lb-css` | Lazy cascade | Done (~75 longhands; no pseudo-elements, animations) |
-| `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); `display_list` for screenshots; slow on image grids |
+| `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); `display_list` for screenshots |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014) | Done (no filters or shaping; screenshots lack background images, radius, shadows, transforms) |
 | `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot` done; no workers or popups |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
@@ -78,7 +79,7 @@ python3 tests/detect-bench/server.py --port 18766 --results-dir "$(mktemp -d)" &
 ./target/debug/lightbrowser serve --port 19222 --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json &
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --expect 'fp<=30'   # <id> from curl 127.0.0.1:19222/json/version
-# Same flow through LightBrowser.human* (M5; use a fresh serve per run; Windows persona passes, macOS fails)
+# Same flow through LightBrowser.human* (M5; use a fresh serve per run; both reference personas pass)
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
 # stop both servers afterwards

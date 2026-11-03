@@ -322,6 +322,8 @@ async fn load_page(
     let until: lb_page::WaitUntil = args.wait_until.parse()?;
     let browser = lb_page::Browser::new(lb_page::BrowserOptions {
         workers: 1,
+        // One page per process: making the snapshot costs more than it saves.
+        startup_snapshot: false,
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;

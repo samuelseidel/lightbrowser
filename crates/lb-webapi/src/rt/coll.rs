@@ -32,6 +32,14 @@ pub(crate) enum Filter {
     Anchors,
     All,
     FormControls,
+    /// `table.rows`: rows of `thead` children, then of the table and its
+    /// `tbody` children, then of `tfoot` children.
+    TableRows,
+    /// HTML element children with this local name (`tBodies`, section
+    /// `rows`).
+    ChildLocal(&'static str),
+    /// `tr.cells`: `td` and `th` children.
+    Cells,
 }
 
 /// A live collection: recomputed when the document generation changes.
@@ -66,8 +74,12 @@ impl Collection {
 }
 
 fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
-    if *f == Filter::Children {
-        return d.element_children(root).collect();
+    match f {
+        Filter::Children => return d.element_children(root).collect(),
+        Filter::TableRows => return super::table::table_rows(d, root),
+        Filter::ChildLocal(l) => return super::table::html_children(d, root, &[l]),
+        Filter::Cells => return super::table::html_children(d, root, &["td", "th"]),
+        _ => {}
     }
     let html_doc = d.is_html();
     let classes: Vec<&str> = match f {
@@ -81,7 +93,9 @@ fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
             let q = d.qual_name(n).expect("element");
             let html = q.ns == ns!(html);
             match f {
-                Filter::Children => unreachable!(),
+                Filter::Children | Filter::TableRows | Filter::ChildLocal(_) | Filter::Cells => {
+                    unreachable!()
+                }
                 Filter::All => true,
                 Filter::TagName(t) => {
                     if t == "*" {

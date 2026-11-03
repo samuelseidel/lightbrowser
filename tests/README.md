@@ -120,11 +120,12 @@ node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
 ```
 
-Results (2026-11-03): the Windows reference persona scores 0 (pass); the
-macOS one scores 35 (`beh_key_dwell` on the six keys of `jacket`, fail),
-see "M5 status" in `docs/ROADMAP.md`. With the default `--input playwright`
-both score 85 to 92 on behaviour rules, and stock Chromium (T-001, T-003)
-scores 100, so the bench still catches naive automation.
+Results (2026-11-03, flow with a three-word query and a login form):
+both reference personas score beh 0 on their own seeds. Seeds 1-20 pass
+20/20 for Windows and 19/20 for macOS (seed 10: `beh_mouse_linear`); see
+"M5 status" in `docs/ROADMAP.md`. With the default `--input playwright`
+both score beh 92.3, and stock Chromium (T-001, T-003) scores 100, so the
+bench still catches naive automation.
 
 ## Python SDK suite (M5)
 

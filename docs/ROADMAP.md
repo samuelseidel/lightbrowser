@@ -10,8 +10,8 @@ Each milestone ends with something we can run and measure.
 | **M3 Layout + CDP core** | Lazy cascade, taffy layout, hit-testing, AX tree, CDP server with the domains in ARCHITECTURE.md | Playwright `connectOverCDP`: goto, evaluate, click, fill, getByRole, content all pass ✅ (Chrome; real V8 page host, 16 Playwright tests, see "M3 status") |
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
-| **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done; Windows reference persona beh 0 (pass), macOS beh 35 (`beh_key_dwell` on six keys, fail; see "M5 status") |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot (realm 2 ms), memory tuning, binary size and screenshots (ADR 0014) done for Chrome; the size budget is now < 56 MB (ADR 0013); `bench/` runner done (`bench/results/`, Lightpanda not yet compared); service workers open. See "M6 status". |
+| **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot (realm 2 ms), memory tuning, binary size and screenshots (ADR 0014) done for Chrome; the size budget is now < 56 MB (ADR 0013), binary 44.4 MB; `bench/` runner done (`bench/results/`, Lightpanda not yet compared); service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
 
@@ -19,16 +19,16 @@ Each milestone ends with something we can run and measure.
 |---|---|---|
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
-| M5 Behavior + SDK | Done, with one failing check: T-010 `--input human` passes for the Windows reference persona (beh 0) and fails for the macOS one (beh 35, `beh_key_dwell`) | A decision on the short-sample keystroke rules (see "M5 status") |
-| M6 Performance | Snapshot, memory, binary size, `bench/` runner and screenshots done | Lightpanda comparison (no binary here), service workers, the original < 40 MB binary budget (now < 56 MB, ADR 0013), slow layout on image grids |
+| M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
+| M6 Performance | Snapshot, memory, binary size, `bench/` runner and screenshots done | Lightpanda comparison (no binary here), service workers, the original < 40 MB binary budget (44.4 MB now, 4.4 MB over; further cuts mean dropping Rust features or building V8 from source, ADR 0013) |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 9.9 MB | `bench/run.py`, "M6 status: bench runner" |
-| Binary < 56 MB (was < 40 MB) | Met: 54.96 MB. The original < 40 MB is missed: the V8 floor alone is 42.0 MB | "M6 status: snapshot, memory and binary size"; "Workspace check" |
-| Realm creation < 5 ms | Met: 2.4 ms first, 2.1 ms next | `realm_bench`; `bench/run.py` |
+| Idle RSS < 15 MB | Met: 10.3 MB (9.9 MB in earlier runs) | `bench/run.py`, "M6 status: bench runner" |
+| Binary < 56 MB (was < 40 MB) | Met: 44.37 MB. The original < 40 MB is missed by 4.4 MB: V8 plus its ICU data alone is 30.7 MB | "M6 status: binary size, second pass" |
+| Realm creation < 5 ms | Met: 2.39 ms first, 2.07 ms next | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
 | Wall time, peak RSS and CPU <= Lightpanda | Not measured: no `lightpanda` binary on this machine. The runner skips these checks | "M6 status: bench runner" |
 
@@ -737,29 +737,67 @@ scenarios need Python Playwright >= 1.63: older versions define
   page from its text length. Default stays `--input playwright`. No rule,
   weight or probe changed.
 
-T-010 (debug build, fresh `serve --persona <file>` per run, bench on
-127.0.0.1):
+T-010 `--input human`, `beh<=30` (fresh `serve --persona <file>` per
+run, release build, bench on 127.0.0.1):
 
-| Persona | Before (`--input playwright`) | After (`--input human`, persona's own seed) |
-|---|---|---|
-| `chrome153_win10_rtx3060_1080p` | 85.4 / fp 0 / beh 85.4: `beh_typing_no_keys`, `beh_click_center`, `beh_click_no_path`, `beh_wheel_pattern`, `page_dwell_short` | 0 / fp 0 / **beh 0**, pass |
-| `chrome153_macos15_apple_m2_retina` | 82.8 / fp 0 / beh 82.8: the same without `page_dwell_short` | 35 / fp 0 / beh 35: `beh_key_dwell` only, fail |
+- **First version (six keys).** The flow typed `jacket` into `#q`.
+  Windows passed (beh 0); macOS failed at beh 35 (`beh_key_dwell`). In a
+  sweep over `behavior.seed` 1-8 plus the own seed, Windows passed 8/9 and
+  macOS 6/9; every failure was `beh_key_rhythm` and/or `beh_key_dwell`.
+  These rules judge a MAD/median spread (< 0.1 and < 0.08) over one page's
+  keys. With 5-6 samples that estimate is noisy:
+  `crates/lb-behavior/tests/key_spread.rs` runs the collector's logic on
+  the model's own output, and gets a 26 % chance of firing on six keys
+  (rhythm 16 %, dwell 13 %).
+- **The model matches human data.** Pooled over sessions, the casual
+  preset has a hold mean of 113 ms (CV 0.32) and an IKI mean of 231 ms
+  (CV 0.57). Dhakal et al. 2018 (136M keystrokes) report a mean hold of
+  116 ms and a mean IKI of 239 ms, both wide and right-skewed. The
+  keyboard model was not changed.
+- **Flow change (`run.js`, no rule touched).** T-010 now types what a
+  shopper types, the same text for both inputs: a three-word query
+  (`waterproof rain jacket`, 22 keys) on `/shop`, then "Sign in" and a
+  made-up email and password on `/login` (40 keys and Shift). T-001
+  shares this flow; T-003 is unchanged. Chance of the key rules firing:
+  0.4 % for the query page and 0 % for the login page (simulation, 4000
+  sessions).
+- **Mouse model fix (`lb-behavior` `mouse.rs`).** The longer flow showed
+  `beh_mouse_velocity` (25) firing on 11 of 42 runs, always on the search
+  page, whose one movement is a long flick to "Sign in". The lateral
+  noise was a first-order Ornstein-Uhlenbeck process (correlation time
+  ~60 ms). Its paths are rough at every scale: at 60 Hz the pointer
+  zigzagged +-10-20 px per frame, with 10-35 direction changes per
+  movement. MacKenzie, Kauppinen & Silfverberg 2001 report a few per
+  trial. The collector cut such movements at the > 25 degree turns into
+  fragments that look flat. Now the noise is smooth: normal knots every
+  110-190 ms with the same SD (`path_noise` x D + 0.4 px), joined by
+  Catmull-Rom curves. `tests/mouse_rules.rs` applies the collector's
+  stroke, velocity and straightness checks to single clicks. It now
+  measures 1-5 direction changes per movement (asserted <= 8) and the
+  velocity rule at 0-3 % (was 4-57 %, asserted < 5 %). The cost: a short
+  move with little bow is now nearly straight, so a page of only such
+  moves can fire `beh_mouse_linear` (simulated three-click page: 0-1 %;
+  single ~430 px move: 4-11 %; it was 0 % when every path zigzagged).
+  The bow (N(0, `curvature` x D)) was not changed.
 
-With `--input playwright` on the new build both personas still score beh
-85.4 (the same five rules), so the bench still catches naive automation
-through LightBrowser. T-001 and T-003 stay at 100 (bot).
+Seed sweeps (`behavior.seed` 1-20 in a persona copy, `run.js --seed` the
+same number; plus the persona's own seed with `--seed 1`):
 
-Seed sweep (`behavior.seed` 1-8 plus the persona's own seed): Windows 8/9
-pass, macOS 6/9. Every failure is `beh_key_rhythm` and/or
-`beh_key_dwell` on the six keystrokes of `jacket`; no mouse, wheel or
-timing rule fired in any run. These two rules test the spread of 5-6
-samples (MAD/median < 0.1 and < 0.08). For log-normal intervals with a CV
-of about 0.4 and holds as above, a simulation gives chance rates of about
-18 % and 13 % (29 % for either) on six keys, so a human typing a short
-word trips them too. The model was not narrowed or widened to dodge them,
-and no persona seed was picked to pass. Options: the bench could require
-more keys before judging spread (a `scoring.py` change, with evidence from
-human traces), or the flow could type more text.
+| Build | Persona | Own seed | Seeds 1-20 | Rules fired |
+|---|---|---|---|---|
+| New flow, old mouse noise | Windows | beh 0, pass | 20/20 | `beh_mouse_velocity` (25) in 5 |
+| New flow, old mouse noise | macOS | beh 0, pass | 20/20 | `beh_mouse_velocity` (25) in 6 |
+| New flow, new mouse noise | Windows | beh 0, pass | **20/20** | none |
+| New flow, new mouse noise | macOS | beh 0, pass | **19/20** | seed 10: `beh_mouse_linear` (35) on `/login` (three moves of 170-250 px, each almost straight) |
+
+No key rule fired in any of the 84 runs. fp was 0 in every run. Controls on
+the new build: T-010 `--input playwright` scores beh 92.3 for both personas
+(`beh_typing_no_keys`, `beh_click_center`, `beh_click_no_path`,
+`beh_click_hold`, `beh_ttfi`, `beh_wheel_pattern`, `page_dwell_short`);
+stock Chromium T-001 and T-003 score 100. No persona seed was picked, and
+neither model was tuned to a threshold. LightBrowser still submits the
+`method="post"` login form as a GET (`lb-webapi` `submit_form`; the
+credentials end up in the URL). The bench does not score this.
 
 Verified: `cargo test -p lb-behavior` (65), `-p lb-cdp`, `-p lb-persona`,
 `-p lb-page` (new `tests/human.rs`: trusted events, Chrome order,
@@ -767,12 +805,24 @@ monotonic timestamps, real-clock duration, typed value, Shift, scrolling
 into view, errors; determinism and clock advance under virtual time),
 clippy `-D warnings` (`--no-deps`) and fmt for the touched crates,
 firefox clippy and tests for `lb-page` and `lightbrowser`, bench
-`run.js` T-001/T-003 (100/100).
+`run.js` T-001/T-003 (100/100). After the flow change and mouse fix:
+`cargo test -p lb-behavior` (65 unit tests, plus `key_spread` and
+`mouse_rules`), clippy `--all-targets -D warnings` and fmt for
+lb-behavior, `cargo test -p lb-page --test human` (2), and
+`python3 -m unittest discover -s tests/detect-bench` (18). The sweeps
+above ran on a release build (`target/release/lightbrowser`, 06:40) with
+`run.js --input human --expect 'beh<=30' --json`.
 
 Open: no drag, hover dwell or idle micro-movements between calls; clicks
 into child frames; touch input; the pointer path ignores scroll
 containers other than the window; the trackpad's mouse movement uses the
-mouse model.
+mouse model. The path bow is zero-mean normal, so some short moves are
+almost straight, and a page with only such moves can fire
+`beh_mouse_linear` (macOS seed 10). Human data on the distribution of path
+curvature would settle whether that is too often. The SDK's T-004
+(`sdk/python/lightbrowser/scenarios.py`) still types one six-letter word,
+so its key rules fire by chance as described above. Form POSTs are sent as
+GETs (lb-webapi).
 
 ## M6 status: snapshot, memory and binary size (2026-11-03)
 
@@ -837,13 +887,51 @@ Binary size (stripped):
 
 - The floor is one isolate, one context, one script: V8 code ~26 MB,
   builtins 2.2 MB, ICU code 1.7 MB and ICU data 10.9 MB. < 40 MB is not
-  reachable with the prebuilt `v8` crate; ADR 0013 sets < 56 MB for the
-  Chrome binary. Further steps: a from-source V8 with filtered ICU data,
-  dropping Rust unwind tables (~1-2 MB, full rebuild), `-no-pie` (~1 MB,
-  loses ASLR).
+  reachable with the prebuilt `v8` crate as linked then; ADR 0013 sets
+  < 56 MB for the Chrome binary. The ICU data and unwind-table steps listed
+  here were done later the same day (next section: 44.37 MB). Still not
+  done: a from-source V8, `-no-pie` (~1 MB, loses ASLR).
 - What we add over the floor (12.9 MB): lb-webapi 1.9 MB of code plus the
   generated table, BoringSSL 1 MB, tokio/hyper/h2/hickory, taffy, image
   codecs, font tables and glyph outlines.
+
+## M6 status: binary size, second pass (2026-11-03)
+
+Goal: the original < 40 MB. Reached 44.37 MB (54.96 before), stripped,
+`cargo build --release -p lightbrowser`. ADR 0013, revision.
+
+| build | size |
+|---|---|
+| before | 54.96 MB |
+| + ICU data zstd-compressed instead of linked raw (`lb-js` `icu_data`) | 47.96 MB |
+| + no `.eh_frame` (linker script in `bin/lightbrowser/build.rs`) | 44.37 MB |
+
+- ICU: `lb-js` defines the archive's `icudt78_dat` symbol as an empty
+  ICU package, so the archive's 10.88 MB copy is not linked; the same
+  bytes ship as `crates/lb-js/icu/icudt78.dat.zst` (3.83 MB, `icu_pack`
+  example) and are installed with `udata_setCommonData` before V8 starts.
+  `tests/v8.rs` `icu_data` checks them against the archive byte for byte.
+  A 47.8 KB Intl probe (all constructors' supported locales, 40 locales x
+  18 formatters and collators, segmentation, calendars, time zones,
+  normalization) printed identical output before and after.
+- Cost, at the first engine only (idle RSS unchanged): ~17 ms and a
+  10.9 MB resident heap copy; peak RSS of a one-script process 15.9 →
+  26.7 MB, of the Intl probe 43.3 → 45.7 MB.
+- Unwind tables are gone: the release binary aborts on panic and links
+  no C++ code that throws. Crash backtraces lose their frames;
+  `LB_KEEP_UNWIND=1` keeps the tables.
+- Unchanged: `realm_bench` 2.41 ms first realm, 2.08 ms next; snapshot
+  113 ms, 2.57 MB. `lightbrowser fingerprint-report`: 113 ok, 0 mismatch
+  for both Chrome reference personas.
+
+Still over 40 MB by 4.4 MB. From the release link map: V8 C++ 26.6 MB,
+ICU data 3.8 MB, Rust std 1.3 MB, our crates and their Rust deps 7.0 MB of
+code plus 2.0 MB of constant data, BoringSSL 1.7 MB, zstd 0.4 MB, the rest
+1.4 MB. The measured further steps (brotli for ICU -0.33 MB but +37 ms,
+root crate at `opt-level = "s"` -0.77 MB, `--icf=all` -0.22 MB, binding
+table as string offsets about -0.5 MB) add up to about -1.8 MB; the rest
+would mean dropping Rust features or building V8 from source. See
+ADR 0013.
 
 ## M6 status: screenshots (2026-11-03)
 
@@ -917,26 +1005,80 @@ Median (min-max):
   realm 2.08 ms. Disk: no files created, `write_bytes` 0.
 - Budgets met: idle RSS, binary size, realm creation, disk writes. The six
   checks against Lightpanda are skipped.
-- Weak spot: LightBrowser wins on median page time, CPU and memory but loses
-  on total time and p90 because 8 of the 50 pages (the product grids) take
+- Weak spot (fixed later the same day, see findings 1-3 and the refreshed
+  run below): LightBrowser won on median page time, CPU and memory but lost
+  on total time and p90 because 8 of the 50 pages (the product grids) took
   about 1 s instead of about 100 ms.
 
-Findings from the run, none fixed yet:
-1. **Slow layout on image grids (lb-layout, lb-css).** On the 8 grid pages,
-   DOMContentLoaded takes about 1 s. Cause: a deferred script calls
-   `document.body.getBoundingClientRect()` on a CSS grid of 18 loaded
-   `<img>` cards under `site.css`; removing the call, the images or the
-   stylesheet brings the page back to about 160 ms. Reproduce with
-   `lightbrowser fetch http://127.0.0.1:P/pages/p01.html --wait-until
-   domcontentloaded` against `python3 bench/serve_corpus.py --port P`.
-2. **`HTMLTableElement.rows` and `HTMLTableSectionElement.rows` are
-   undefined** (and `tBodies`). The corpus uses `children.length` instead.
-3. **`fetch` pays for the snapshot.** Each `fetch` process creates the V8
-   snapshot (about 110 ms, 95 MB peak), which is probably why fetch CPU is
-   10 s for 50 pages against 1.4 s over CDP. `startup_snapshot: false` for
-   the one-shot `fetch` subcommand is the likely fix.
+Findings from the run (1-3 fixed on 2026-11-03, see below):
+1. **Slow image-grid pages (fixed; not layout).** On the 8 grid pages
+   DOMContentLoaded took about 1 s. Layout was never the cost: the body's
+   `getBoundingClientRect()` takes about 1 ms (one layout, one placement).
+   The page waited for its 19 images: LightBrowser opened one connection
+   per request with no limit, the corpus server's listen backlog (5)
+   overflowed (`TcpExt.ListenOverflows`), and the dropped SYNs came back
+   after the 1 s retransmit timeout. `lb_page::BrowserContext` now allows
+   at most 6 simultaneous connections per origin, like Chrome's socket
+   pool; more requests queue (`lb-page` test `connections`). p01 went from
+   1.4 s to 0.18 s with `fetch`.
+2. **Table APIs (done).** `HTMLTableElement` `rows`, `tBodies`, `caption`,
+   `tHead`, `tFoot` (getters and setters), `create*`/`delete*`,
+   `insertRow`/`deleteRow`; `HTMLTableSectionElement` `rows`,
+   `insertRow`/`deleteRow`; `HTMLTableRowElement` `cells`, `rowIndex`,
+   `sectionRowIndex`, `insertCell`/`deleteCell`; the obsolete string
+   attributes (`align`, `vAlign`, `ch`, `chOff`, `border`, ...) reflect,
+   except `bgColor`. Collections are live, cached HTMLCollections
+   (`lb-webapi` `rt/table.rs`, `lb-page` test `tables`). No local WPT copy
+   of `html/semantics/tabular-data`, so none was added.
+3. **`fetch` no longer makes the snapshot** (ADR 0013): median page 167 →
+   128 ms, CPU 9.9 → 8.8 s for 50 pages, peak RSS 97 → 112 MB (paired
+   runs of the same tree).
 4. **The first CDP page takes 151 ms** (the snapshot is made at the first
    engine); later pages take 5.7 ms.
+
+After the fixes (`python3 bench/run.py --runs 2 --no-write`, release
+binary of the shared tree at 06:09, 65.8 MB because another change was in
+flight; medians of the two runs):
+
+| | fetch:lightbrowser | cdp:lightbrowser | cdp:chromium |
+|---|---|---|---|
+| crawl total | 7.1 s | 5.1 s | 10.2 s |
+| page median | 140 ms | 100 ms | 203 ms |
+| page p90 | 150 ms | 104 ms | 221 ms |
+| peak RSS | 122 MB | 110 MB | 2851 MB |
+| CPU | 10.2 s | 1.37 s | 23.6 s |
+| pages verified | 50/50 | 50/50 | 50/50 |
+
+Still open: stylesheets are fetched only after DOMContentLoaded, so a
+deferred script that measures layout sees unstyled boxes (Chrome blocks
+scripts on pending stylesheets); no HTTP keep-alive reuse yet (Chrome
+reuses its 6 connections).
+
+Refreshed run (`python3 bench/run.py`, 5 runs x 50 pages, release binary
+44.37 MB, sha256 `6aa2ebe44ac8b5a2`, tree at `ebe5f36` plus the
+uncommitted fixes above): `bench/results/2026-11-03-ebe5f36.json`. The
+`a060281` file stays as history; `bench/results/README.md` points at the
+new run. Median (min-max):
+
+| | fetch:lightbrowser | cdp:lightbrowser | cdp:chromium |
+|---|---|---|---|
+| crawl total | 7.01 s (6.92-7.12) | 4.94 s (4.80-5.01) | 9.72 s (9.62-10.12) |
+| page median | 140.0 ms | 98.5 ms | 193.1 ms |
+| page p90 | 146.8 ms | 103.9 ms | 206.0 ms |
+| slowest page (any run) | 157 ms | 140 ms | 239 ms |
+| peak RSS | 115.2 MB | 105.9 MB (PSS 55.3) | 2820 MB (PSS 687) |
+| CPU | 10.0 s | 1.33 s | 23.4 s |
+| idle RSS | n/a | 10.3 MB (PSS 7.5) | 1083 MB (PSS 377) |
+| start to listening / CDP connect | n/a | 4.0 / 9.5 ms | 107 / 120 ms |
+| first new page / later pages | n/a | 166 ms / 5.7 ms | 80 ms / 63 ms |
+| pages verified | 50/50 | 50/50 | 50/50 |
+
+Every LightBrowser page, in every run, is faster than Chromium's median
+page. Budgets: idle RSS, binary size, realm creation (2.39 / 2.07 ms) and
+disk writes pass; the six Lightpanda checks are skipped (no binary;
+downloading one is not allowed here). Peak RSS is about 10-20 MB above the
+`a060281` run: `fetch` no longer uses the snapshot, and the CDP peak was
+not isolated.
 
 Not covered: the crawl is sequential, with no HTTPS, iframes or workers.
 Re-run `python3 bench/run.py` after a rebuild to refresh the numbers; the
@@ -944,40 +1086,42 @@ result file is named after HEAD, so identify a run by its binary hash.
 
 ## Workspace check (2026-11-03)
 
-Chrome build unless noted, 4 cores.
+Chrome build unless noted, 4 cores. Re-run after the binary-size,
+grid-page/table and M5 macOS fixes; the earlier check of the same day
+(release binary 54.96 MB, macOS T-010 `--input human` beh 35, fail) is
+replaced by this one.
 
-- `cargo fmt --all --check`, `cargo build --workspace`, `cargo clippy
-  --workspace --all-targets -- -D warnings`: clean. `cargo test
-  --workspace`: 440 pass (including doc tests), 0 fail.
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+  warnings`: clean. Tests for every workspace crate: 449 pass (including
+  doc tests), 0 fail, 3 ignored. They were run per package and per test
+  target, because the disk could not hold every test binary at once.
 - Firefox: clippy `-D warnings` for `lightbrowser`, `lb-js`, `lb-webapi`,
   `lb-page`, `lb-cdp`: clean; tests for `lightbrowser`, `lb-js`,
   `lb-webapi`, `lb-page`: 14 pass, 2 ignored.
 - `lb-net` fingerprint test 2/2; WPT 2552/2788; Playwright 20/20;
-  detect-bench unittest 18 OK; `sdk/python` pytest 93 pass, 4 skipped
-  (bench scenarios, Python Playwright 1.52 is installed).
-- Release: stripped binary 54,964,168 bytes (54.96 MB, budget < 56 MB);
-  `realm_bench`: first realm 2.38 ms, next realm 2.07 ms with the
-  snapshot (28.3 / 35.5 ms without).
+  detect-bench unittest 18 OK; `bench` unittest 10 OK; `sdk/python`
+  pytest 93 pass, 4 skipped (bench scenarios, Python Playwright 1.52 is
+  installed).
+- Release: stripped binary 44,367,736 bytes (44.37 MB, budget < 56 MB);
+  `realm_bench`: first realm 2.39 ms, next realm 2.07 ms with the snapshot
+  (28.2 / 35.1 ms without).
 - `lightbrowser fingerprint-report` (release): 113 ok, 0 mismatch for both
   Chrome reference personas.
-- detect-bench on the release build (`serve --persona`, bench on
-  127.0.0.1):
+- `python3 bench/run.py` (5 runs): see "M6 status: bench runner".
+- detect-bench on the release build (`serve --persona`, a fresh `serve`
+  per run, bench on 127.0.0.1, own persona seeds):
 
 | Run | Windows persona | macOS persona |
 |---|---|---|
-| T-010, Playwright input, `fp<=30` | 89.8, fp 0, pass | 92.3, fp 0, pass |
-| T-010, `--input human`, `beh<=30` | 0, beh 0, pass | 35, beh 35 (`beh_key_dwell`), fail, same on rerun |
+| T-010, Playwright input, `fp<=30` | 92.3, fp 0, pass | 92.3, fp 0, pass |
+| T-010, `--input human`, `beh<=30` | 0, beh 0, pass | 0, beh 0, pass |
 | T-001 stock Chromium, `>=90` | 100, pass | |
 
-With Playwright input on the release build, the Windows run fires
-`page_dwell_short` (15) and the macOS run fires `beh_ttfi` (25) instead.
-The snapshot work attributed the `beh_ttfi` change to faster realm creation
-(the first interaction comes sooner); this was not isolated. fp is
-unaffected.
-
-The macOS failure is the short-sample keystroke issue in "M5 status";
-it still needs a decision (more keys before `scoring.py` judges spread,
-backed by human traces, or a longer typed text in the flow).
+With Playwright input both personas fire the same behaviour rules
+(`beh_typing_no_keys`, `beh_click_center`, `beh_click_no_path`,
+`beh_click_hold`, `beh_ttfi`, `beh_wheel_pattern`); fp is 0. The macOS
+`--input human` failure is fixed by the longer typed text in the flow
+(see "M5 status").
 
 ## Risks
 

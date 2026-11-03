@@ -14,11 +14,13 @@ and most of M6 (snapshot, memory, binary size, `bench/` runner, screenshots).
 `lightbrowser serve` runs real V8 pages, and stock Playwright
 `connectOverCDP` drives them (click, fill, getByRole, frames, network
 routing, screenshots). On our own detection bench, fingerprint rules score 0
-for both reference Chrome personas. With `LightBrowser.human*` input the
-Windows persona scores 0 on behaviour rules; the macOS persona scores 35
-(`beh_key_dwell`, a short-sample keystroke rule) and still needs a decision.
-Idle RSS is 9.9 MB, realm creation 2.1 ms, and the release binary 54.96 MB
-(the prebuilt V8 alone is 42 MB, so the budget is now < 56 MB, ADR 0013).
+for both reference Chrome personas. With `LightBrowser.human*` input both
+personas score 0 on behaviour rules on their own seeds (seed sweeps: 20/20
+Windows, 19/20 macOS).
+Idle RSS is 10.3 MB, realm creation 2.1 ms, and the release binary 44.4 MB
+(budget < 56 MB with the prebuilt V8, ADR 0013; the original < 40 MB is
+still missed). On the `bench/` corpus every LightBrowser page is faster
+than headless Chromium's median (see `bench/results/README.md`).
 Not done: Firefox (M4b, no SpiderMonkey backend yet), workers and service
 workers, and the comparison with Lightpanda (no binary on the bench machine).
 See [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -37,7 +39,7 @@ distribute binaries or push them to public repos or registries.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | <= Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8 (floor 42 MB; was < 40 MB, ADR 0013) |
+| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8 (was < 40 MB, ADR 0013); measured 44.4 MB |
 | Disk writes during a session | none by default |
 | Isolate/realm creation | < 5 ms (startup snapshot) |
 

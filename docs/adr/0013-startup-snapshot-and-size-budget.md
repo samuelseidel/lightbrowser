@@ -35,6 +35,10 @@ JIT tiers, Wasm or ICU data without building V8 from source.
 - **Made in memory, once per process** (`lb_webapi::snapshot::
   startup_snapshot`), the first time an engine starts: 110 ms, 2.57 MB, no
   disk writes. `BrowserOptions::startup_snapshot` (default on) switches it.
+  `lightbrowser fetch` loads one page per process and turns it off: on the
+  50 `bench/` corpus pages (2026-11-03, release, paired runs) the median
+  page went from 167 to 128 ms and CPU from 9.9 to 8.8 s, for 97 → 112 MB
+  peak RSS.
 - **One snapshot per process, made alone.** V8 shares one read-only heap
   between all isolates: `CreateBlob` writes into it, and isolates from
   different snapshots cannot live side by side (crashes in V8 otherwise).
@@ -73,7 +77,76 @@ JIT tiers, Wasm or ICU data without building V8 from source.
 - Release, full registry: realm 34 ms → 2.0 ms; define 9.1 → 5.2 ms; engine
   0.8 → 2.7 ms. `serve`, one local page: 152 → 67 MB RSS.
 - Floor (`lb-js` example `v8_floor`, same profile and link flags): 42.0 MB,
-  of which 10.9 MB is ICU data. < 40 MB needs a from-source V8 with
-  filtered ICU data (Chrome-visible features must stay).
+  of which 10.9 MB is ICU data (shipped compressed since the Revision
+  below). < 40 MB needs a from-source V8 with filtered ICU data
+  (Chrome-visible features must stay).
 - Engines must define the same interfaces in the same order as the
   creator; anything else is detected and only costs speed.
+
+## Revision: ICU data compressed, no unwind tables (2026-11-03)
+
+The < 56 MB budget stays; the binary is now 44.37 MB (54.96 before).
+The original < 40 MB is still missed, by 4.4 MB.
+
+- **ICU data shipped compressed.** The prebuilt archive's ICU package
+  (`icudt78_dat` in `icudtl_dat.o`, 10.88 MB) is only linked because
+  ICU's `udata.o` references the symbol. `lb-js` defines `icudt78_dat`
+  itself as a valid, empty ICU package, so the linker never extracts the
+  archive's copy (a second copy would be a duplicate-symbol error, not a
+  silent fallback). The same bytes are checked in zstd-compressed
+  (`crates/lb-js/icu/icudt78.dat.zst`, level 22, 3.83 MB; the
+  `icu_pack` example rewrites it from the archive) and installed with
+  `udata_setCommonData` in `init_v8`, before V8 starts. A test checks the
+  file against the archive byte for byte. Intl output is identical: a
+  47.8 KB probe (supported locales of every Intl constructor over all
+  two-letter codes, `supportedValuesOf`, 40 locales x 18 formatters and
+  collators, Thai/Khmer/Lao/Burmese/CJK segmentation, 16 calendars, 7
+  time zones, normalization) gave the same bytes with the linked and the
+  installed data. -7.05 MB.
+- **No unwind tables.** `bin/lightbrowser/build.rs` links release
+  binaries with a linker script that discards `.eh_frame` (so lld writes
+  no `.eh_frame_hdr`): -3.6 MB. Nothing unwinds in the release binary
+  (`panic = "abort"`; V8, ICU, libc++ and BoringSSL have no C++
+  exceptions). Crash backtraces (Rust, V8's fatal-error trace, gdb) lose
+  their frames; `LB_KEEP_UNWIND=1` keeps the tables for debugging.
+
+Cost of the compressed ICU data, paid when the first engine starts (not at
+process start, so idle RSS is unchanged): ~17 ms (decompression and page
+faults; a one-script process goes from 4.3 to 22 ms) and one 10.9 MB heap
+allocation, all resident. The linked-in data was paged in only as far as
+ICU read it, so peak RSS of a one-script process grows by 10.8 MB (15.9 →
+26.7 MB), of one that formats a date and a number by 7.6 MB, and of the
+Intl probe above by 2.4 MB. The compressed pages are dropped from RSS
+again (`madvise`) after decompressing. Realm creation is unchanged
+(`realm_bench`: 2.41 ms first, 2.08 ms next).
+
+What is left (link map of the release binary, unwind tables excluded):
+
+| Part | MB |
+|---|---|
+| V8 C++ from the prebuilt archive (incl. ICU code, libc++) | 26.59 |
+| ICU data, zstd | 3.83 |
+| Rust deps of the `v8` crate (Temporal, ICU4X) | 0.26 |
+| Rust std/core/alloc | 1.29 |
+| LightBrowser crates and their Rust deps: code | 7.00 |
+| Rust constant data (binding table, CSS/font/codec tables, strings) | 1.96 |
+| BoringSSL | 1.67 |
+| zstd (C) | 0.38 |
+| merged strings, CRT, PLT/GOT, padding | 1.39 |
+
+V8 plus its ICU data is 30.7 MB, which leaves 9.3 MB under 40 MB for
+everything we add (13.2 MB now). Measured but not applied:
+
+- brotli (quality 11, 16 MiB window) instead of zstd for the ICU data:
+  3.51 MB (-0.33 MB), but 51 ms to decompress instead of 14 ms.
+- `opt-level = "s"` for the root crate, which sets the LTO pipeline for
+  all Rust code: -0.77 MB, and slower DOM, style, layout and bindings.
+- `--icf=all`: -0.22 MB; breaks function-pointer identity.
+- The generated binding table as offsets into one string blob instead of
+  `&'static str` (4,410 attributes, 2,424 operations, 909 interfaces):
+  estimated -0.5 MB of the 1.1 MB of Rust `.data.rel.ro`.
+
+Together these give about -1.8 MB (42.5 MB). Below that, Rust code we
+use would have to go (e.g. the hickory DNS resolver, image codecs), or V8
+itself: only a from-source V8 can drop code, and its ICU data is already
+Chromium's filtered desktop set.

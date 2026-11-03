@@ -20,6 +20,8 @@ use lb_persona::{BrowserFamily, Persona};
 
 pub use v8;
 
+#[doc(hidden)]
+pub mod icu_data;
 mod inspect;
 mod realm_ops;
 mod snapshot;
@@ -51,6 +53,8 @@ pub fn init_v8(flags: &str) -> bool {
         if !flags.is_empty() {
             v8::V8::set_flags_from_string(flags);
         }
+        // ICU's data is not linked in; register our copy first (ADR 0013).
+        icu_data::install();
         let platform = v8::new_default_platform(0, false).make_shared();
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();

@@ -23,13 +23,19 @@
 //   movements have a longer deceleration phase than acceleration phase.
 // - Path shape: a cubic Bezier bowed sideways by N(0, curvature * D)
 //   (arm and wrist rotation; typical maximum deviation 5-10 % of D), plus
-//   lateral motor noise: an Ornstein-Uhlenbeck process (correlation time
-//   ~60 ms, SD `path_noise` * D + 0.4 px) faded in and out with the
-//   movement, so the path wobbles around its arc. Motor noise grows with
-//   the size of the command (Harris & Wolpert 1998); mouse paths in
-//   ISO 9241-9 tasks show a movement variability of several pixels and
-//   a few movement-direction changes per trial (MacKenzie, Kauppinen &
-//   Silfverberg 2001), which a smooth arc alone does not have.
+//   lateral motor noise: a smooth random curve (independent normal knots
+//   every 110-190 ms, SD `path_noise` * D + 0.4 px, Catmull-Rom between
+//   them) faded in and out with the movement, so the path wobbles around
+//   its arc. Motor noise grows with the size of the command (Harris &
+//   Wolpert 1998); mouse paths in ISO 9241-9 tasks show a movement
+//   variability of several pixels and a few movement-direction changes
+//   per trial (MacKenzie, Kauppinen & Silfverberg 2001), which a smooth
+//   arc alone does not have. The hand is a low-pass filter: the wobble
+//   lives at submovement time scales (a few Hz), not frame to frame. (Until
+//   2026-11-03 this was a first-order Ornstein-Uhlenbeck process with a
+//   ~60 ms correlation time: rough at every scale, it gave 10-35 direction
+//   changes per movement at 60 Hz and a zigzag of +-10-20 px per frame on
+//   long moves; see tests/mouse_rules.rs.)
 // - Endpoint scatter: aim points are normal around the target centre with
 //   sigma = W / 4.133 per axis (the "effective width" of ISO 9241-9: 96 %
 //   of hits inside W), truncated to the target, with a small bias toward
@@ -252,12 +258,20 @@ struct Submovement {
     lut: Vec<(f64, f64)>,
     /// Unit vector across the movement.
     perp: (f64, f64),
-    /// Lateral noise every [`WOBBLE_STEP_MS`] over the movement (px).
+    /// Lateral noise knots over the movement (px), `wobble_step_ms` apart.
     wobble: Vec<f64>,
+    wobble_step_ms: f64,
 }
 
-/// Time step of the lateral noise process.
-const WOBBLE_STEP_MS: f64 = 4.0;
+/// Catmull-Rom interpolation between `p1` and `p2` (smooth, through the
+/// knots).
+fn catmull_rom(p0: f64, p1: f64, p2: f64, p3: f64, f: f64) -> f64 {
+    let (f2, f3) = (f * f, f * f * f);
+    0.5 * (2.0 * p1
+        + (p2 - p0) * f
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * f2
+        + (3.0 * p1 - p0 - 3.0 * p2 + p3) * f3)
+}
 
 fn bezier(p0: Point, p1: Point, p2: Point, p3: Point, t: f64) -> Point {
     let u = 1.0 - t;
@@ -311,20 +325,12 @@ impl Submovement {
             lut.push((t, len));
             prev = p;
         }
-        // Lateral noise: Ornstein-Uhlenbeck with correlation time tau.
+        // Lateral noise: smooth knots at submovement time scales.
         let duration_ms = duration_ms.max(1.0);
         let sd = noise * d + 0.4;
-        let tau = uniform(rng, 45.0, 80.0);
-        let a = (-WOBBLE_STEP_MS / tau).exp();
-        let n = (duration_ms / WOBBLE_STEP_MS).ceil() as usize + 2;
-        let mut e = normal_sample(rng, 0.0, sd);
-        let wobble = (0..n)
-            .map(|_| {
-                let v = e;
-                e = e * a + normal_sample(rng, 0.0, sd * (1.0 - a * a).sqrt());
-                v
-            })
-            .collect();
+        let wobble_step_ms = uniform(rng, 110.0, 190.0);
+        let n = (duration_ms / wobble_step_ms).ceil() as usize + 3;
+        let wobble = (0..n).map(|_| normal_sample(rng, 0.0, sd)).collect();
         Self {
             start_ms,
             duration_ms,
@@ -336,6 +342,7 @@ impl Submovement {
             lut,
             perp: (px, py),
             wobble,
+            wobble_step_ms,
         }
     }
 
@@ -365,11 +372,12 @@ impl Submovement {
         };
         let p = bezier(self.p0, self.c1, self.c2, self.p3, t_param);
         // Lateral noise, zero at both ends so the endpoints stay exact.
-        let k = ((t - self.start_ms) / WOBBLE_STEP_MS).clamp(0.0, (self.wobble.len() - 1) as f64);
+        let last = self.wobble.len() - 1;
+        let k = (1.0 + (t - self.start_ms) / self.wobble_step_ms).clamp(1.0, (last - 1) as f64);
         let (i, f) = (k.floor() as usize, k.fract());
-        let w0 = self.wobble[i];
-        let w1 = self.wobble[(i + 1).min(self.wobble.len() - 1)];
-        let off = (w0 + (w1 - w0) * f) * (std::f64::consts::PI * tau).sin();
+        let w = |j: usize| self.wobble[j.min(last)];
+        let off =
+            catmull_rom(w(i - 1), w(i), w(i + 1), w(i + 2), f) * (std::f64::consts::PI * tau).sin();
         Point::new(p.x + self.perp.0 * off, p.y + self.perp.1 * off)
     }
 }

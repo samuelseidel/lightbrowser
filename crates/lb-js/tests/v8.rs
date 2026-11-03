@@ -997,3 +997,72 @@ fn realm_ops_inside_a_callback() {
         .unwrap();
     assert_eq!(v, JsValue::String("TypeError".into()));
 }
+
+// ICU data shipped compressed (ADR 0013): the prebuilt V8 archive's data,
+// byte for byte, and ICU uses it.
+mod icu_data {
+    use super::*;
+    use lb_js::icu_data;
+    #[test]
+    fn compressed_data_is_the_archives_data() {
+        let exe = std::env::current_exe().unwrap();
+        let archive = icu_data::find_archive(&exe).unwrap_or_else(|| {
+            panic!(
+                "librusty_v8.a not found above {} (set RUSTY_V8_ARCHIVE to its path)",
+                exe.display()
+            )
+        });
+        let ar = std::fs::read(&archive).unwrap();
+        let expected = icu_data::extract_from_archive(&ar).unwrap();
+        let data = icu_data::data();
+        assert_eq!(
+            data.len(),
+            expected.len(),
+            "length vs {}",
+            archive.display()
+        );
+        assert!(
+            data == &expected[..],
+            "icu/icudt78.dat.zst is stale; run `cargo run --release -p lb-js --example icu_pack`"
+        );
+        assert_eq!(
+            data.as_ptr() as usize % 16,
+            0,
+            "ICU wants 16-byte alignment"
+        );
+    }
+
+    #[test]
+    fn empty_package_matches_the_real_header() {
+        let data = icu_data::data();
+        let stub = icu_data::empty_package_bytes();
+        // magic, then UDataInfo (size, endianness, charset, UChar size, format
+        // "CmnD" and its versions).
+        assert_eq!(&stub[2..24], &data[2..24]);
+        // An empty table of contents right after the 32-byte header.
+        assert_eq!(u16::from_le_bytes([stub[0], stub[1]]), 32);
+        assert_eq!(&stub[32..36], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn intl_uses_the_installed_data() {
+        let mut e = engine();
+        let r = plain_realm(&mut e);
+        let v = e
+            .evaluate(
+                r,
+                "[new Intl.DateTimeFormat('de-DE', {timeZone: 'UTC'}).format(0), \
+                  (1234.5).toLocaleString('fr'), \
+                  ['ä', 'z', 'a'].sort(new Intl.Collator('sv').compare).join(''), \
+                  new Intl.DisplayNames(['ja'], {type: 'region'}).of('US'), \
+                  Intl.DateTimeFormat.supportedLocalesOf(['th', 'xx-YY', 'zh-Hant']).join(), \
+                  [...new Intl.Segmenter('en', {granularity: 'word'}).segment('a b')].length].join('|')",
+                ScriptOrigin::new("x.js"),
+            )
+            .unwrap();
+        assert_eq!(
+            v,
+            JsValue::String("1.1.1970|1\u{202f}234,5|azä|アメリカ合衆国|th,zh-Hant|3".into())
+        );
+    }
+}

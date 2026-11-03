@@ -118,12 +118,18 @@ password characters become `x`), `dx,dy,dm` (wheel), `sy` (scrollY), `it`
 |---|---|---|
 | `T-001 stock-chromium-headless` | `chromium.launch()`, instant `click`/`fill`, one big wheel. | `>=90` |
 | `T-003 scripted-slow` | Same browser; `mouse.move` with steps, wheel ticks, `pressSequentially` with delay. | `>=70&fp>=70`: still caught by fingerprint rules |
-| `T-010 cdp-endpoint` | `chromium.connectOverCDP(--cdp ws://...)`, context with `viewport: null` (ADR 0009), T-001 flow. For LightBrowser. `--input human` runs the same flow (scroll 900 px, click `#add-3`, type `jacket` into `#q`, click `#search-btn`) through `LightBrowser.humanScroll/humanClick/humanType` on the page's CDP session, with a reading pause per page (skimming at 600-700 words per minute, a third to two thirds of the page's words, 1.2-6 s; `--seed N` fixes the pauses). Default `--input playwright`. | set with `--expect` |
+| `T-010 cdp-endpoint` | `chromium.connectOverCDP(--cdp ws://...)`, context with `viewport: null` (ADR 0009), the T-001 flow. For LightBrowser. `--input human` runs the same flow (scroll 900 px, click `#add-3`, type `waterproof rain jacket` into `#q`, click `#search-btn`, click "Sign in", type an email and a password, click `#login-btn`) through `LightBrowser.humanScroll/humanClick/humanType` on the page's CDP session, with a reading pause per page (skimming at 600-700 words per minute, a third to two thirds of the page's words, 1.2-6 s; `--seed N` fixes the pauses). Default `--input playwright`. | set with `--expect` |
 | `T-020 human-replay` | Replays a trace file (`--trace`) with its timing. Placeholder. | set with `--expect`, e.g. `beh<=30` |
 
-Every scenario opens `/shop`, scrolls, adds a product to the cart, types
-`jacket` in the search box, submits, waits 3.5 s for beacons and fetches the
-score.
+Every scenario opens `/shop`, scrolls, adds a product to the cart, types a
+query in the search box (`jacket` in T-003, `waterproof rain jacket` in
+T-001 and T-010) and submits. T-001 and T-010 then open `/login`, fill in
+a made-up email and password and submit. Each run waits 3.5 s for beacons
+and fetches the score. The key rules judge the spread of one page's
+keystrokes, so the flow types enough keys per page for that to mean
+something: a single six-letter word gives a human-like typist about a 26 %
+chance of firing `beh_key_rhythm` or `beh_key_dwell`
+(`crates/lb-behavior/tests/key_spread.rs`).
 
 ```bash
 node run.js --scenario T-001 --save-fixtures fixtures
