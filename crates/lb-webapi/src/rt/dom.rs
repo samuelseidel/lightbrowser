@@ -6,12 +6,12 @@ use std::rc::Rc;
 use lb_dom::{
     Document, DomError, LocalName, Namespace, NodeFlags, NodeId, NodeType, QualName, local_name, ns,
 };
-use lb_js::{Arg, CallCtx, HostError, ValueKind};
+use lb_js::{Arg, CallCtx, HostError, HostRef, ValueKind};
 
 use super::tags::{REFLECTED, Reflect};
 use super::{
     K_OBJ, Obj, Runtime, Window, arg_node, ctor, getter, illegal, is_elem, method, need_args,
-    node_ref, opt_string, setter, this_node,
+    opt_string, setter, this_node,
 };
 use crate::registry::Registry;
 
@@ -43,22 +43,41 @@ fn selector_err(w: &Window, op: &str, iface: &str, sel: &str) -> HostError {
     )
 }
 
-/// Move `node` of document `from` into document `to` (adopt). Nodes are
-/// copied across arenas, so the old wrapper keeps pointing at the original.
-pub(crate) fn bring(w: &Window, from: u32, node: NodeId, to: u32) -> NodeId {
+/// Move `node` of document `from` into document `to` (adopt). Each
+/// document is its own arena, so the subtree is copied into `to` and
+/// detached from `from`; the copies take over the originals' JS wrappers
+/// (in every realm), event listeners, inline handlers, form values and
+/// selections, so the moved nodes keep their identity, as in Chrome.
+pub(crate) fn bring(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    from: u32,
+    node: NodeId,
+    to: u32,
+) -> NodeId {
     if from == to {
         return node;
     }
-    let mut docs = w.docs.borrow_mut();
-    let (a, b) = (from as usize, to as usize);
-    let copy = if a < b {
-        let (l, r) = docs.split_at_mut(b);
-        r[0].import_node(&l[a], node, true)
-    } else {
-        let (l, r) = docs.split_at_mut(a);
-        l[b].import_node(&r[0], node, true)
-    };
-    docs[a].detach(node);
+    let (src, dst) = (w.doc_rc(from), w.doc_rc(to));
+    if Rc::ptr_eq(&src, &dst) {
+        src.borrow_mut().detach(node);
+        return node;
+    }
+    let (copy, map) = dst.borrow_mut().import_node_mapped(&src.borrow(), node);
+    src.borrow_mut().detach(node);
+    let pairs: Vec<(HostRef, HostRef)> = map
+        .iter()
+        .map(|&(o, n)| (w.node_ref(from, o), w.node_ref(to, n)))
+        .collect();
+    cx.rehost(&pairs);
+    super::move_node_state(w, from, to, &map, &pairs);
+    // The source document's window sees the removal now (observers,
+    // frames inside the moved subtree), not on its next turn.
+    if let Some((src_w, _)) = w.rt.doc_owner(w.doc_key(from))
+        && !std::ptr::eq(&*src_w, w)
+    {
+        src_w.after_mutation(cx);
+    }
     copy
 }
 
@@ -71,8 +90,8 @@ fn convert_nodes(
 ) -> Result<Option<NodeId>, HostError> {
     let mut nodes = Vec::with_capacity(cx.len());
     for i in 0..cx.len() {
-        match cx.arg_host(i).and_then(super::decode_node) {
-            Some((s, n)) => nodes.push(bring(w, s, n, slot)),
+        match cx.arg_host(i).and_then(|h| w.decode_node(h)) {
+            Some((s, n)) => nodes.push(bring(cx, w, s, n, slot)),
             None => {
                 let t = cx.arg_string(i)?;
                 nodes.push(w.doc_slot_mut(slot, |d| d.create_text(&t)));
@@ -97,7 +116,7 @@ fn ret_node(cx: &mut CallCtx<'_, '_, '_>, w: &Window, slot: u32, n: Option<NodeI
 }
 
 fn this_elem(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(u32, NodeId), HostError> {
-    let (slot, n) = this_node(cx)?;
+    let (slot, n) = this_node(cx, w)?;
     if w.doc_slot(slot, |d| is_elem(d, n)) {
         Ok((slot, n))
     } else {
@@ -303,49 +322,49 @@ fn register_attr_node(reg: &mut Registry, rt: &Runtime) {
 
 fn register_node(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Node", "nodeType", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| d.node_type(n) as u32))
     });
     getter(reg, rt, "Node", "nodeName", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| d.node_name(n)))
     });
     getter(reg, rt, "Node", "baseURI", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         cx.ret(w.base_url().to_string())
     });
     getter(reg, rt, "Node", "isConnected", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| d.is_connected(n)))
     });
     getter(reg, rt, "Node", "ownerDocument", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         if n == Document::DOCUMENT {
             return cx.ret(Arg::Null);
         }
         cx.ret(w.node_arg(slot, Document::DOCUMENT))
     });
     method(reg, rt, "Node", "getRootNode", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let r = w.doc_slot(slot, |d| d.root(n));
         cx.ret(w.node_arg(slot, r))
     });
     getter(reg, rt, "Node", "parentNode", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let p = w.doc_slot(slot, |d| d.parent(n));
         ret_node(cx, w, slot, p)
     });
     getter(reg, rt, "Node", "parentElement", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let p = w.doc_slot(slot, |d| d.parent_element(n));
         ret_node(cx, w, slot, p)
     });
     method(reg, rt, "Node", "hasChildNodes", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| d.first_child(n).is_some()))
     });
     getter(reg, rt, "Node", "childNodes", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let id = w.cached_obj((slot, n.0, "childNodes", String::new()), || {
             Obj::NodeList(super::coll::NodeListSrc::Children(slot, n))
         });
@@ -354,7 +373,7 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     macro_rules! nav {
         ($name:literal, $f:ident) => {
             getter(reg, rt, "Node", $name, |cx, w| {
-                let (slot, n) = this_node(cx)?;
+                let (slot, n) = this_node(cx, w)?;
                 let r = w.doc_slot(slot, |d| d.$f(n));
                 ret_node(cx, w, slot, r)
             });
@@ -365,14 +384,14 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     nav!("previousSibling", prev_sibling);
     nav!("nextSibling", next_sibling);
     getter(reg, rt, "Node", "nodeValue", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         match w.doc_slot(slot, |d| d.character_data(n).map(str::to_owned)) {
             Some(s) => cx.ret(s),
             None => cx.ret(Arg::Null),
         }
     });
     setter(reg, rt, "Node", "nodeValue", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let v = if matches!(cx.arg_kind(0), ValueKind::Null | ValueKind::Undefined) {
             String::new()
         } else {
@@ -383,14 +402,14 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
         Ok(())
     });
     getter(reg, rt, "Node", "textContent", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         match w.doc_slot(slot, |d| d.text_content(n)) {
             Some(s) => cx.ret(s),
             None => cx.ret(Arg::Null),
         }
     });
     setter(reg, rt, "Node", "textContent", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let v = if matches!(cx.arg_kind(0), ValueKind::Null | ValueKind::Undefined) {
             None
         } else {
@@ -401,13 +420,13 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
         Ok(())
     });
     method(reg, rt, "Node", "normalize", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         w.doc_slot_mut(slot, |d| normalize(d, n));
         w.after_mutation(cx);
         Ok(())
     });
     method(reg, rt, "Node", "cloneNode", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let deep = cx.arg_bool(0);
         let c = w.doc_slot_mut(slot, |d| {
             if n == Document::DOCUMENT {
@@ -432,8 +451,8 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
         }
     });
     method(reg, rt, "Node", "isEqualNode", |cx, w| {
-        let (slot, n) = this_node(cx)?;
-        let Some((s2, m)) = cx.arg_host(0).and_then(super::decode_node) else {
+        let (slot, n) = this_node(cx, w)?;
+        let Some((s2, m)) = cx.arg_host(0).and_then(|h| w.decode_node(h)) else {
             return cx.ret(false);
         };
         if s2 != slot {
@@ -443,28 +462,31 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
         }
         cx.ret(w.doc_slot(slot, |d| nodes_equal(d, n, m)))
     });
-    method(reg, rt, "Node", "isSameNode", |cx, _w| {
-        let a = this_node(cx)?;
-        let b = cx.arg_host(0).and_then(super::decode_node);
+    method(reg, rt, "Node", "isSameNode", |cx, w| {
+        let a = this_node(cx, w)?;
+        let b = cx.arg_host(0).and_then(|h| w.decode_node(h));
         cx.ret(Some(a) == b)
     });
     method(reg, rt, "Node", "contains", |cx, w| {
-        let (slot, n) = this_node(cx)?;
-        match cx.arg_host(0).and_then(super::decode_node) {
+        let (slot, n) = this_node(cx, w)?;
+        match cx.arg_host(0).and_then(|h| w.decode_node(h)) {
             Some((s2, m)) if s2 == slot => cx.ret(w.doc_slot(slot, |d| d.contains(n, m))),
             _ => cx.ret(false),
         }
     });
     method(reg, rt, "Node", "compareDocumentPosition", |cx, w| {
-        let (slot, n) = this_node(cx)?;
-        let (s2, m) = arg_node(cx, 0, "compareDocumentPosition", "Node")?;
+        let (slot, n) = this_node(cx, w)?;
+        let (s2, m) = arg_node(cx, w, 0, "compareDocumentPosition", "Node")?;
         if s2 != slot {
-            return cx.ret(1 + 32 + 2);
+            // Disconnected: implementation-specific but consistent order.
+            // Chrome orders by allocation; documents made later follow.
+            let later = w.doc_key(s2) > w.doc_key(slot);
+            return cx.ret(1 + 32 + if later { 4 } else { 2 });
         }
         cx.ret(w.doc_slot(slot, |d| compare_position(d, n, m)))
     });
     method(reg, rt, "Node", "lookupNamespaceURI", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let prefix = opt_string(cx, 0)?.filter(|p| !p.is_empty());
         let ns = w.doc_slot(slot, |d| {
             let el = if is_elem(d, n) {
@@ -488,12 +510,12 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
         });
         cx.ret(ns.map_or(Arg::Null, Arg::String))
     });
-    method(reg, rt, "Node", "lookupPrefix", |cx, _w| {
-        this_node(cx)?;
+    method(reg, rt, "Node", "lookupPrefix", |cx, w| {
+        this_node(cx, w)?;
         cx.ret(Arg::Null)
     });
     method(reg, rt, "Node", "isDefaultNamespace", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let ns = opt_string(cx, 0)?.unwrap_or_default();
         let r = w.doc_slot(slot, |d| {
             let el = if is_elem(d, n) {
@@ -508,9 +530,9 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Node", "appendChild", |cx, w| {
         need_args(cx, 1, "appendChild", "Node")?;
-        let (slot, p) = this_node(cx)?;
-        let (s2, c) = arg_node(cx, 0, "appendChild", "Node")?;
-        let c = bring(w, s2, c, slot);
+        let (slot, p) = this_node(cx, w)?;
+        let (s2, c) = arg_node(cx, w, 0, "appendChild", "Node")?;
+        let c = bring(cx, w, s2, c, slot);
         let r = w.doc_slot_mut(slot, |d| d.append_child(p, c));
         w.after_mutation(cx);
         match r {
@@ -520,19 +542,19 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Node", "insertBefore", |cx, w| {
         need_args(cx, 2, "insertBefore", "Node")?;
-        let (slot, p) = this_node(cx)?;
-        let (s2, c) = arg_node(cx, 0, "insertBefore", "Node")?;
+        let (slot, p) = this_node(cx, w)?;
+        let (s2, c) = arg_node(cx, w, 0, "insertBefore", "Node")?;
         let before = match cx.arg_kind(1) {
             ValueKind::Null | ValueKind::Undefined => None,
             _ => {
-                let (s3, b) = arg_node(cx, 1, "insertBefore", "Node")?;
+                let (s3, b) = arg_node(cx, w, 1, "insertBefore", "Node")?;
                 if s3 != slot {
                     return Err(dom_err(w, "insertBefore", "Node", DomError::NotFound));
                 }
                 Some(b)
             }
         };
-        let c = bring(w, s2, c, slot);
+        let c = bring(cx, w, s2, c, slot);
         let r = w.doc_slot_mut(slot, |d| d.insert_before(p, c, before));
         w.after_mutation(cx);
         match r {
@@ -542,16 +564,16 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Node", "replaceChild", |cx, w| {
         need_args(cx, 2, "replaceChild", "Node")?;
-        let (slot, p) = this_node(cx)?;
-        let (s2, node) = arg_node(cx, 0, "replaceChild", "Node")?;
-        let (s3, child) = arg_node(cx, 1, "replaceChild", "Node")?;
+        let (slot, p) = this_node(cx, w)?;
+        let (s2, node) = arg_node(cx, w, 0, "replaceChild", "Node")?;
+        let (s3, child) = arg_node(cx, w, 1, "replaceChild", "Node")?;
         if s3 != slot {
             return Err(w.rt.err(
                 "NotFoundError",
                 "Failed to execute 'replaceChild' on 'Node': The node to be replaced is not a child of this node.",
             ));
         }
-        let node = bring(w, s2, node, slot);
+        let node = bring(cx, w, s2, node, slot);
         let r = w.doc_slot_mut(slot, |d| d.replace_child(p, node, child));
         w.after_mutation(cx);
         match r {
@@ -565,8 +587,8 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Node", "removeChild", |cx, w| {
         need_args(cx, 1, "removeChild", "Node")?;
-        let (slot, p) = this_node(cx)?;
-        let (s2, c) = arg_node(cx, 0, "removeChild", "Node")?;
+        let (slot, p) = this_node(cx, w)?;
+        let (s2, c) = arg_node(cx, w, 0, "removeChild", "Node")?;
         if s2 != slot {
             return Err(w.rt.err(
                 "NotFoundError",
@@ -704,27 +726,27 @@ fn compare_position(d: &Document, a: NodeId, b: NodeId) -> u32 {
 fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
     for iface in ["Document", "DocumentFragment", "Element"] {
         getter(reg, rt, iface, "children", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let id = super::coll::collection(w, slot, n, super::coll::Filter::Children);
             cx.ret(w.obj_arg(id))
         });
         getter(reg, rt, iface, "firstElementChild", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let r = w.doc_slot(slot, |d| d.first_element_child(n));
             ret_node(cx, w, slot, r)
         });
         getter(reg, rt, iface, "lastElementChild", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let r = w.doc_slot(slot, |d| d.last_element_child(n));
             ret_node(cx, w, slot, r)
         });
         getter(reg, rt, iface, "childElementCount", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             cx.ret(w.doc_slot(slot, |d| d.element_children(n).count() as u32))
         });
         method(reg, rt, iface, "querySelector", move |cx, w| {
             need_args(cx, 1, "querySelector", iface)?;
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let sel = cx.arg_string(0)?;
             let r = w.doc_slot(slot, |d| d.query_selector(n, &sel));
             match r {
@@ -734,7 +756,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
         });
         method(reg, rt, iface, "querySelectorAll", move |cx, w| {
             need_args(cx, 1, "querySelectorAll", iface)?;
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let sel = cx.arg_string(0)?;
             let r = w.doc_slot(slot, |d| d.query_selector_all(n, &sel));
             match r {
@@ -746,7 +768,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
             }
         });
         method(reg, rt, iface, "append", |cx, w| {
-            let (slot, p) = this_node(cx)?;
+            let (slot, p) = this_node(cx, w)?;
             if let Some(n) = convert_nodes(cx, w, slot)? {
                 let r = w.doc_slot_mut(slot, |d| d.append_child(p, n));
                 w.after_mutation(cx);
@@ -755,7 +777,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
             Ok(())
         });
         method(reg, rt, iface, "prepend", |cx, w| {
-            let (slot, p) = this_node(cx)?;
+            let (slot, p) = this_node(cx, w)?;
             if let Some(n) = convert_nodes(cx, w, slot)? {
                 let r = w.doc_slot_mut(slot, |d| {
                     let first = d.first_child(p);
@@ -767,7 +789,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
             Ok(())
         });
         method(reg, rt, iface, "replaceChildren", |cx, w| {
-            let (slot, p) = this_node(cx)?;
+            let (slot, p) = this_node(cx, w)?;
             let n = convert_nodes(cx, w, slot)?;
             w.doc_slot_mut(slot, |d| {
                 d.remove_all_children(p);
@@ -779,7 +801,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
             Ok(())
         });
         method(reg, rt, iface, "getElementById", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let id = cx.arg_string(0)?;
             let r = w.doc_slot(slot, |d| d.get_element_by_id_in(n, &id));
             ret_node(cx, w, slot, r)
@@ -787,20 +809,20 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
     }
     for iface in ["Document", "Element"] {
         method(reg, rt, iface, "getElementsByTagName", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let name = cx.arg_string(0)?;
             let id = super::coll::collection(w, slot, n, super::coll::Filter::TagName(name));
             cx.ret(w.obj_arg(id))
         });
         method(reg, rt, iface, "getElementsByTagNameNS", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let ns = opt_string(cx, 0)?.unwrap_or_default();
             let name = cx.arg_string(1)?;
             let id = super::coll::collection(w, slot, n, super::coll::Filter::TagNameNs(ns, name));
             cx.ret(w.obj_arg(id))
         });
         method(reg, rt, iface, "getElementsByClassName", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let names = cx.arg_string(0)?;
             let id = super::coll::collection(w, slot, n, super::coll::Filter::ClassName(names));
             cx.ret(w.obj_arg(id))
@@ -808,13 +830,13 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
     }
     for iface in ["Element", "CharacterData", "DocumentType"] {
         method(reg, rt, iface, "remove", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             w.doc_slot_mut(slot, |d| d.detach(n));
             w.after_mutation(cx);
             Ok(())
         });
         method(reg, rt, iface, "before", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let Some(p) = w.doc_slot(slot, |d| d.parent(n)) else {
                 return Ok(());
             };
@@ -834,7 +856,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
             Ok(())
         });
         method(reg, rt, iface, "after", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let Some(p) = w.doc_slot(slot, |d| d.parent(n)) else {
                 return Ok(());
             };
@@ -850,7 +872,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
             Ok(())
         });
         method(reg, rt, iface, "replaceWith", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let Some(p) = w.doc_slot(slot, |d| d.parent(n)) else {
                 return Ok(());
             };
@@ -873,24 +895,24 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
     }
     for iface in ["Element", "CharacterData"] {
         getter(reg, rt, iface, "previousElementSibling", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let r = w.doc_slot(slot, |d| d.prev_element_sibling(n));
             ret_node(cx, w, slot, r)
         });
         getter(reg, rt, iface, "nextElementSibling", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let r = w.doc_slot(slot, |d| d.next_element_sibling(n));
             ret_node(cx, w, slot, r)
         });
     }
     getter(reg, rt, "DocumentType", "name", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| {
             d.doctype(n).map(|t| t.name.to_string()).unwrap_or_default()
         }))
     });
     getter(reg, rt, "DocumentType", "publicId", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| {
             d.doctype(n)
                 .map(|t| t.public_id.to_string())
@@ -898,7 +920,7 @@ fn register_parent_child(reg: &mut Registry, rt: &Runtime) {
         }))
     });
     getter(reg, rt, "DocumentType", "systemId", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| {
             d.doctype(n)
                 .map(|t| t.system_id.to_string())
@@ -1178,8 +1200,8 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
                 let t = cx.arg_string(1)?;
                 w.doc_slot_mut(slot, |d| d.create_text(&t))
             } else {
-                let (s2, e) = arg_node(cx, 1, name, "Element")?;
-                bring(w, s2, e, slot)
+                let (s2, e) = arg_node(cx, w, 1, name, "Element")?;
+                bring(cx, w, s2, e, slot)
             };
             let r = w.doc_slot_mut(slot, |d| {
                 let parent = d.parent(n);
@@ -1271,24 +1293,24 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
 
 fn register_document(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Document", "documentElement", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let r = w.doc_slot(slot, |d| d.document_element());
         ret_node(cx, w, slot, r)
     });
     getter(reg, rt, "Document", "head", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let r = w.doc_slot(slot, |d| d.head());
         ret_node(cx, w, slot, r)
     });
     getter(reg, rt, "Document", "body", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let r = w.doc_slot(slot, |d| d.body());
         ret_node(cx, w, slot, r)
     });
     setter(reg, rt, "Document", "body", |cx, w| {
-        let (slot, _) = this_node(cx)?;
-        let (s2, b) = arg_node(cx, 0, "body", "Document")?;
-        let b = bring(w, s2, b, slot);
+        let (slot, _) = this_node(cx, w)?;
+        let (s2, b) = arg_node(cx, w, 0, "body", "Document")?;
+        let b = bring(cx, w, s2, b, slot);
         let r = w.doc_slot_mut(slot, |d| {
             let Some(html) = d.document_element() else {
                 return Err(DomError::HierarchyRequest);
@@ -1302,11 +1324,11 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         r.map_err(|e| dom_err(w, "body", "Document", e))
     });
     getter(reg, rt, "Document", "title", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| d.title()))
     });
     setter(reg, rt, "Document", "title", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let v = cx.arg_string(0)?;
         w.doc_slot_mut(slot, |d| {
             let title = d
@@ -1332,7 +1354,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     for name in ["URL", "documentURI"] {
         getter(reg, rt, "Document", name, |cx, w| {
-            let (slot, _) = this_node(cx)?;
+            let (slot, _) = this_node(cx, w)?;
             cx.ret(if slot == 0 {
                 w.url().to_string()
             } else {
@@ -1341,7 +1363,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         });
     }
     getter(reg, rt, "Document", "readyState", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         cx.ret(if slot == 0 {
             w.ready_state().as_str()
         } else {
@@ -1350,12 +1372,12 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     for name in ["characterSet", "charset", "inputEncoding"] {
         getter(reg, rt, "Document", name, |cx, w| {
-            let (slot, _) = this_node(cx)?;
+            let (slot, _) = this_node(cx, w)?;
             cx.ret(if slot == 0 { w.charset.get() } else { "UTF-8" })
         });
     }
     getter(reg, rt, "Document", "contentType", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         cx.ret(if slot == 0 {
             w.content_type.clone()
         } else if w.doc_slot(slot, |d| d.is_html()) {
@@ -1365,7 +1387,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         })
     });
     getter(reg, rt, "Document", "compatMode", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let q = w.doc_slot(slot, |d| d.quirks_mode());
         cx.ret(if q == lb_dom::QuirksMode::Quirks {
             "BackCompat"
@@ -1374,12 +1396,12 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         })
     });
     getter(reg, rt, "Document", "doctype", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let r = w.doc_slot(slot, |d| d.doctype_node());
         ret_node(cx, w, slot, r)
     });
     getter(reg, rt, "Document", "defaultView", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         if slot == 0 {
             cx.ret(w.host_arg(super::WINDOW_REF))
         } else {
@@ -1387,39 +1409,39 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         }
     });
     getter(reg, rt, "Document", "referrer", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         cx.ret(w.referrer.clone())
     });
     getter(reg, rt, "Document", "domain", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         cx.ret(w.url().host_str().unwrap_or("").to_owned())
     });
-    getter(reg, rt, "Document", "lastModified", |cx, _w| {
-        this_node(cx)?;
+    getter(reg, rt, "Document", "lastModified", |cx, w| {
+        this_node(cx, w)?;
         cx.ret(super::window::last_modified_now())
     });
     getter(reg, rt, "Document", "visibilityState", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         cx.ret(if w.hidden.get() { "hidden" } else { "visible" })
     });
     getter(reg, rt, "Document", "webkitVisibilityState", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         cx.ret(if w.hidden.get() { "hidden" } else { "visible" })
     });
     getter(reg, rt, "Document", "hidden", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         cx.ret(w.hidden.get())
     });
     getter(reg, rt, "Document", "webkitHidden", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         cx.ret(w.hidden.get())
     });
-    method(reg, rt, "Document", "hasFocus", |cx, _w| {
-        this_node(cx)?;
+    method(reg, rt, "Document", "hasFocus", |cx, w| {
+        this_node(cx, w)?;
         cx.ret(true)
     });
     getter(reg, rt, "Document", "activeElement", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let f = if slot == 0 {
             w.focused
                 .get()
@@ -1431,7 +1453,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         ret_node(cx, w, slot, r)
     });
     getter(reg, rt, "Document", "currentScript", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let r = if slot == 0 {
             w.current_script.get()
         } else {
@@ -1440,14 +1462,14 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         ret_node(cx, w, slot, r)
     });
     getter(reg, rt, "Document", "cookie", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         if slot != 0 {
             return cx.ret("");
         }
         cx.ret(w.net.cookie_string(&w.url()))
     });
     setter(reg, rt, "Document", "cookie", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let v = cx.arg_string(0)?;
         if slot == 0 {
             w.net.set_cookie_string(&w.url(), &v);
@@ -1456,7 +1478,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Document", "createElement", |cx, w| {
         need_args(cx, 1, "createElement", "Document")?;
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let name = cx.arg_string(0)?;
         match w.doc_slot_mut(slot, |d| d.create_element_by_name(&name)) {
             Ok(n) => ret_node(cx, w, slot, Some(n)),
@@ -1468,7 +1490,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Document", "createElementNS", |cx, w| {
         need_args(cx, 2, "createElementNS", "Document")?;
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let ns = Namespace::from(opt_string(cx, 0)?.unwrap_or_default());
         let name = cx.arg_string(1)?;
         match w.doc_slot_mut(slot, |d| d.create_element_ns(ns, &name)) {
@@ -1478,20 +1500,20 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Document", "createTextNode", |cx, w| {
         need_args(cx, 1, "createTextNode", "Document")?;
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let t = cx.arg_string(0)?;
         let n = w.doc_slot_mut(slot, |d| d.create_text(&t));
         ret_node(cx, w, slot, Some(n))
     });
     method(reg, rt, "Document", "createComment", |cx, w| {
         need_args(cx, 1, "createComment", "Document")?;
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let t = cx.arg_string(0)?;
         let n = w.doc_slot_mut(slot, |d| d.create_comment(&t));
         ret_node(cx, w, slot, Some(n))
     });
     method(reg, rt, "Document", "createDocumentFragment", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let n = w.doc_slot_mut(slot, |d| d.create_document_fragment());
         ret_node(cx, w, slot, Some(n))
     });
@@ -1502,7 +1524,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         "createProcessingInstruction",
         |cx, w| {
             need_args(cx, 2, "createProcessingInstruction", "Document")?;
-            let (slot, _) = this_node(cx)?;
+            let (slot, _) = this_node(cx, w)?;
             let t = cx.arg_string(0)?;
             let data = cx.arg_string(1)?;
             let n = w.doc_slot_mut(slot, |d| d.create_processing_instruction(&t, &data));
@@ -1511,7 +1533,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     );
     method(reg, rt, "Document", "createAttribute", |cx, w| {
         need_args(cx, 1, "createAttribute", "Document")?;
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let name = cx.arg_string(0)?;
         let local = if w.doc_slot(slot, |d| d.is_html()) {
             name.to_ascii_lowercase()
@@ -1528,7 +1550,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Document", "createEvent", |cx, w| {
         need_args(cx, 1, "createEvent", "Document")?;
-        this_node(cx)?;
+        this_node(cx, w)?;
         let kind = cx.arg_string(0)?;
         match super::events::create_event(w, &kind) {
             Some(id) => cx.ret(w.obj_arg(id)),
@@ -1539,7 +1561,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         }
     });
     method(reg, rt, "Document", "getElementsByName", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let name = cx.arg_string(0)?;
         let id = super::coll::collection_nodelist(w, slot, n, super::coll::Filter::Name(name));
         cx.ret(w.obj_arg(id))
@@ -1555,50 +1577,43 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         ("all", super::coll::Filter::All),
     ] {
         getter(reg, rt, "Document", prop, move |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let id = super::coll::collection(w, slot, n, f.clone());
             cx.ret(w.obj_arg(id))
         });
     }
     method(reg, rt, "Document", "importNode", |cx, w| {
         need_args(cx, 1, "importNode", "Document")?;
-        let (slot, _) = this_node(cx)?;
-        let (s2, n) = arg_node(cx, 0, "importNode", "Document")?;
+        let (slot, _) = this_node(cx, w)?;
+        let (s2, n) = arg_node(cx, w, 0, "importNode", "Document")?;
         let deep = cx.arg_bool(1);
-        let c = if s2 == slot {
-            w.doc_slot_mut(slot, |d| d.clone_node(n, deep))
+        let (src, dst) = (w.doc_rc(s2), w.doc_rc(slot));
+        let c = if Rc::ptr_eq(&src, &dst) {
+            dst.borrow_mut().clone_node(n, deep)
         } else {
-            let mut docs = w.docs.borrow_mut();
-            let (a, b) = (s2 as usize, slot as usize);
-            if a < b {
-                let (l, r) = docs.split_at_mut(b);
-                r[0].import_node(&l[a], n, deep)
-            } else {
-                let (l, r) = docs.split_at_mut(a);
-                l[b].import_node(&r[0], n, deep)
-            }
+            dst.borrow_mut().import_node(&src.borrow(), n, deep)
         };
         ret_node(cx, w, slot, Some(c))
     });
     method(reg, rt, "Document", "adoptNode", |cx, w| {
         need_args(cx, 1, "adoptNode", "Document")?;
-        let (slot, _) = this_node(cx)?;
-        let (s2, n) = arg_node(cx, 0, "adoptNode", "Document")?;
+        let (slot, _) = this_node(cx, w)?;
+        let (s2, n) = arg_node(cx, w, 0, "adoptNode", "Document")?;
         if n == Document::DOCUMENT {
-            return Err(w.rt.err("NotSupportedError", "Failed to execute 'adoptNode' on 'Document': The node provided is a document, which may not be adopted."));
+            return Err(w.rt.err("NotSupportedError", "Failed to execute 'adoptNode' on 'Document': The node provided is of type '#document', which may not be adopted."));
         }
         let c = if s2 == slot {
             w.doc_slot_mut(slot, |d| d.detach(n));
             n
         } else {
-            bring(w, s2, n, slot)
+            bring(cx, w, s2, n, slot)
         };
         w.after_mutation(cx);
         ret_node(cx, w, slot, Some(c))
     });
     for (name, newline) in [("write", false), ("writeln", true)] {
         method(reg, rt, "Document", name, move |cx, w| {
-            let (slot, _) = this_node(cx)?;
+            let (slot, _) = this_node(cx, w)?;
             let mut text = String::new();
             for i in 0..cx.len() {
                 text.push_str(&cx.arg_string(i)?);
@@ -1614,7 +1629,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Document", "open", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         if slot == 0 && w.parser.borrow().is_none() {
             super::script::document_open(w);
             w.after_mutation(cx);
@@ -1622,21 +1637,21 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         cx.ret(w.node_arg(slot, Document::DOCUMENT))
     });
     method(reg, rt, "Document", "close", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         if slot == 0 {
             super::script::document_close(cx, w);
         }
         Ok(())
     });
     getter(reg, rt, "Document", "implementation", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let id = w.cached_obj((slot, 0, "implementation", String::new()), || {
             Obj::DomImplementation { slot }
         });
         cx.ret(w.obj_arg(id))
     });
     getter(reg, rt, "Document", "location", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         if slot != 0 {
             return cx.ret(Arg::Null);
         }
@@ -1644,7 +1659,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         cx.ret(w.obj_arg(id))
     });
     setter(reg, rt, "Document", "location", |cx, w| {
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let v = cx.arg_string(0)?;
         if slot == 0
             && let Some(u) = w.resolve_url(&v)
@@ -1656,19 +1671,19 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         }
         Ok(())
     });
-    method(reg, rt, "Document", "getSelection", |cx, _w| {
-        this_node(cx)?;
+    method(reg, rt, "Document", "getSelection", |cx, w| {
+        this_node(cx, w)?;
         cx.ret(Arg::Null)
     });
-    method(reg, rt, "Document", "execCommand", |cx, _w| {
-        this_node(cx)?;
+    method(reg, rt, "Document", "execCommand", |cx, w| {
+        this_node(cx, w)?;
         cx.ret(false)
     });
     ctor(reg, rt, "Document", |cx, w| {
         let mut d = Document::with_kind(false);
         d.set_quirks_mode(lb_dom::QuirksMode::NoQuirks);
         let slot = w.add_doc(d);
-        cx.init_this(node_ref(slot, Document::DOCUMENT))
+        cx.init_this(w.node_ref(slot, Document::DOCUMENT))
     });
     method(
         reg,
@@ -1745,7 +1760,7 @@ fn this_obj_slot(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<u32, HostEr
 
 fn register_chardata(reg: &mut Registry, rt: &Runtime) {
     fn data(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(u32, NodeId, String), HostError> {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let s = w
             .doc_slot(slot, |d| d.character_data(n).map(str::to_owned))
             .ok_or_else(illegal)?;
@@ -1839,7 +1854,7 @@ fn register_chardata(reg: &mut Registry, rt: &Runtime) {
         ret_node(cx, w, slot, Some(new))
     });
     getter(reg, rt, "Text", "wholeText", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let s = w.doc_slot(slot, |d| {
             let mut first = n;
             while let Some(p) = d
@@ -1868,15 +1883,15 @@ fn register_chardata(reg: &mut Registry, rt: &Runtime) {
                     d.create_comment(&t)
                 }
             });
-            cx.init_this(node_ref(0, n))
+            cx.init_this(w.node_ref(0, n))
         });
     }
     ctor(reg, rt, "DocumentFragment", |cx, w| {
         let n = w.doc_slot_mut(0, |d| d.create_document_fragment());
-        cx.init_this(node_ref(0, n))
+        cx.init_this(w.node_ref(0, n))
     });
     getter(reg, rt, "ProcessingInstruction", "target", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| {
             d.processing_instruction(n)
                 .map(|p| p.target.to_string())

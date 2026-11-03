@@ -20,8 +20,8 @@ use lb_js::{Arg, CallCtx, HostError, HostRef, ValueKind};
 
 use super::events::{EventData, EventExtra, dispatch, new_event};
 use super::{
-    Dict, Js, K_OBJ, NavRequest, Obj, Runtime, WINDOW_REF, Window, ctor, decode_node, getter,
-    method, node_ref, setter, this_node,
+    Dict, Js, K_OBJ, NavRequest, Obj, Runtime, WINDOW_REF, Window, ctor, getter, method, setter,
+    this_node,
 };
 use crate::registry::Registry;
 
@@ -446,7 +446,7 @@ fn mouse_extra(
         button,
         buttons,
         modifiers,
-        related: related.map(|r| node_ref(0, r)),
+        related: related.map(|r| w.node_ref(0, r)),
         detail,
         pointer: pointer.then(|| PointerData {
             id: 1,
@@ -557,17 +557,17 @@ fn update_hover(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput, target: NodeId
         };
         if let Some(o) = old {
             let e = mouse_extra(w, x, y, 0, buttons, m, 0, Some(target), pointer);
-            fire(js, w, node_ref(0, o), iface, out, true, true, e);
+            fire(js, w, w.node_ref(0, o), iface, out, true, true, e);
             for &n in &leaving {
                 let e = mouse_extra(w, x, y, 0, buttons, m, 0, Some(target), pointer);
-                fire(js, w, node_ref(0, n), iface, leave, false, false, e);
+                fire(js, w, w.node_ref(0, n), iface, leave, false, false, e);
             }
         }
         let e = mouse_extra(w, x, y, 0, buttons, m, 0, old, pointer);
-        fire(js, w, node_ref(0, target), iface, over, true, true, e);
+        fire(js, w, w.node_ref(0, target), iface, over, true, true, e);
         for &n in &entering {
             let e = mouse_extra(w, x, y, 0, buttons, m, 0, old, pointer);
-            fire(js, w, node_ref(0, n), iface, enter, false, false, e);
+            fire(js, w, w.node_ref(0, n), iface, enter, false, false, e);
         }
     }
     w.input.borrow_mut().hover = Some(target);
@@ -579,7 +579,7 @@ fn mouse_move(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     };
     update_hover(js, w, ev, target);
     let buttons = held(w, ev);
-    let t = node_ref(0, target);
+    let t = w.node_ref(0, target);
     let e = mouse_extra(w, ev.x, ev.y, -1, buttons, ev.modifiers, 0, None, true);
     fire(js, w, t, "PointerEvent", "pointermove", true, true, e);
     let e = mouse_extra(w, ev.x, ev.y, 0, buttons, ev.modifiers, 0, None, false);
@@ -597,7 +597,7 @@ fn mouse_press(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
         .unwrap_or(w.input.borrow().buttons | ev.button.bit());
     w.input.borrow_mut().buttons = buttons;
     activate_user(w);
-    let t = node_ref(0, target);
+    let t = w.node_ref(0, target);
     let b = ev.button.index();
     let detail = ev.click_count as i32;
     let ok = if first {
@@ -640,7 +640,7 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
         .buttons
         .unwrap_or(w.input.borrow().buttons & !ev.button.bit());
     w.input.borrow_mut().buttons = buttons;
-    let t = node_ref(0, target);
+    let t = w.node_ref(0, target);
     let b = ev.button.index();
     let detail = ev.click_count as i32;
     let e = mouse_extra(w, ev.x, ev.y, b, buttons, ev.modifiers, 0, None, true);
@@ -673,7 +673,7 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
                 fire(
                     js,
                     w,
-                    node_ref(0, click_target),
+                    w.node_ref(0, click_target),
                     "MouseEvent",
                     "dblclick",
                     true,
@@ -687,7 +687,7 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
             fire(
                 js,
                 w,
-                node_ref(0, click_target),
+                w.node_ref(0, click_target),
                 "PointerEvent",
                 "auxclick",
                 true,
@@ -726,7 +726,7 @@ fn mouse_wheel(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     if fire(
         js,
         w,
-        node_ref(0, target),
+        w.node_ref(0, target),
         "WheelEvent",
         "wheel",
         true,
@@ -742,7 +742,7 @@ fn mouse_wheel(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
             super::events::fire_event(
                 js,
                 w,
-                node_ref(0, Document::DOCUMENT),
+                w.node_ref(0, Document::DOCUMENT),
                 "scroll",
                 true,
                 false,
@@ -841,7 +841,7 @@ pub(crate) fn activate(js: &mut dyn Js, w: &Rc<Window>, slot: u32, n: NodeId, ev
             }
         });
     }
-    let ok = dispatch(js, w, node_ref(slot, n), ev);
+    let ok = dispatch(js, w, w.node_ref(slot, n), ev);
     if toggles {
         if !ok {
             w.doc_slot_mut(slot, |d| {
@@ -873,7 +873,7 @@ fn fire_simple(js: &mut dyn Js, w: &Rc<Window>, slot: u32, n: NodeId, type_: &st
             e.trusted = trusted;
         }
     });
-    dispatch(js, w, node_ref(slot, n), ev);
+    dispatch(js, w, w.node_ref(slot, n), ev);
 }
 
 fn default_action(
@@ -978,7 +978,7 @@ fn submit(js: &mut dyn Js, w: &Rc<Window>, form: NodeId, submitter: Option<NodeI
         }
     });
     let _ = submitter;
-    if dispatch(js, w, node_ref(0, form), ev) {
+    if dispatch(js, w, w.node_ref(0, form), ev) {
         super::window::submit_form(w, form);
     }
 }
@@ -1059,11 +1059,11 @@ pub(crate) fn after_focus(w: &Window, n: NodeId) {
 fn key_target(w: &Window) -> HostRef {
     let f = w.focused.get().filter(|&f| connected(w, f));
     match f {
-        Some(n) => node_ref(0, n),
+        Some(n) => w.node_ref(0, n),
         None => w.with_doc(|d| {
             d.body()
                 .or_else(|| d.document_element())
-                .map_or(node_ref(0, Document::DOCUMENT), |b| node_ref(0, b))
+                .map_or(w.node_ref(0, Document::DOCUMENT), |b| w.node_ref(0, b))
         }),
     }
 }
@@ -1446,7 +1446,7 @@ fn edit_range(
     if !fire(
         js,
         w,
-        node_ref(0, n),
+        w.node_ref(0, n),
         "InputEvent",
         "beforeinput",
         true,
@@ -1474,7 +1474,7 @@ fn edit_range(
     fire(
         js,
         w,
-        node_ref(0, n),
+        w.node_ref(0, n),
         "InputEvent",
         "input",
         true,
@@ -1503,7 +1503,7 @@ fn edit_editable(
     if !fire(
         js,
         w,
-        node_ref(0, host),
+        w.node_ref(0, host),
         "InputEvent",
         "beforeinput",
         true,
@@ -1551,7 +1551,7 @@ fn edit_editable(
     fire(
         js,
         w,
-        node_ref(0, host),
+        w.node_ref(0, host),
         "InputEvent",
         "input",
         true,
@@ -2008,7 +2008,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
 
 /// Top-left of the event target's padding box (for `offsetX/Y`).
 fn target_origin(w: &Window, e: &EventData) -> (f64, f64) {
-    let Some((slot, n)) = e.target.and_then(decode_node) else {
+    let Some((slot, n)) = e.target.and_then(|h| w.decode_node(h)) else {
         return (0.0, 0.0);
     };
     w.with_layout(slot, |l, d| {
@@ -2019,7 +2019,7 @@ fn target_origin(w: &Window, e: &EventData) -> (f64, f64) {
 }
 
 fn this_control(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(u32, NodeId), HostError> {
-    let (slot, n) = this_node(cx)?;
+    let (slot, n) = this_node(cx, w)?;
     if w.doc_slot(slot, |d| is_element(d, n)) {
         Ok((slot, n))
     } else {
@@ -2049,7 +2049,14 @@ fn register_controls(reg: &mut Registry, rt: &Runtime) {
                 w.queue_task(
                     super::TaskSource::UserInteraction,
                     Box::new(move |js, _| {
-                        super::events::fire_event(js, &w2, node_ref(0, n), "select", true, false);
+                        super::events::fire_event(
+                            js,
+                            &w2,
+                            w2.node_ref(0, n),
+                            "select",
+                            true,
+                            false,
+                        );
                     }),
                 );
             }

@@ -7,9 +7,7 @@ use lb_dom::{Document, NodeFlags, NodeId, ParseStep, local_name};
 use lb_js::{JsErrorKind, ScriptOrigin};
 use lb_webapi::host::{Destination, NetRequest, NetResponse, decode_text};
 use lb_webapi::rt::script::{self, ScriptKind};
-use lb_webapi::rt::{
-    EngineJs, ReadyState, TaskSource, WINDOW_REF, Window, WindowInit, fire_event, node_ref,
-};
+use lb_webapi::rt::{EngineJs, ReadyState, TaskSource, WINDOW_REF, Window, WindowInit, fire_event};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -348,7 +346,7 @@ pub(crate) async fn load(
         fire_event(
             js,
             w,
-            node_ref(0, Document::DOCUMENT),
+            w.node_ref(0, Document::DOCUMENT),
             "readystatechange",
             false,
             false,
@@ -384,7 +382,7 @@ pub(crate) async fn load(
         fire_event(
             js,
             w,
-            node_ref(0, Document::DOCUMENT),
+            w.node_ref(0, Document::DOCUMENT),
             "DOMContentLoaded",
             true,
             false,
@@ -419,7 +417,7 @@ pub(crate) async fn load(
                 TaskSource::Networking,
                 Box::new(move |js, w| {
                     let ev = if found { "load" } else { "error" };
-                    fire_event(js, w, node_ref(0, link), ev, false, false);
+                    fire_event(js, w, w.node_ref(0, link), ev, false, false);
                     w.pending_loads.set(w.pending_loads.get().saturating_sub(1));
                     w.wake();
                 }),
@@ -446,7 +444,7 @@ pub(crate) async fn load(
         fire_event(
             js,
             w,
-            node_ref(0, Document::DOCUMENT),
+            w.node_ref(0, Document::DOCUMENT),
             "readystatechange",
             false,
             false,

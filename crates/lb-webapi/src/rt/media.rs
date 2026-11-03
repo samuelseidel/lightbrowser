@@ -447,7 +447,7 @@ fn track_support(
 
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "HTMLMediaElement", "canPlayType", |cx, w| {
-        this_node(cx)?;
+        this_node(cx, w)?;
         need_args(cx, 1, "canPlayType", "HTMLMediaElement")?;
         let t = cx.arg_string(0)?;
         cx.ret(can_play_type(&t, &persona_codecs(w)).as_str())

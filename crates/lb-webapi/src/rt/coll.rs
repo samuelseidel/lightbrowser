@@ -182,14 +182,13 @@ pub(crate) fn collection_nodelist(w: &Window, slot: u32, root: NodeId, filter: F
 
 /// Current items of a NodeList or HTMLCollection object: `(slot, nodes)`.
 pub(crate) fn items(w: &Window, id: u32) -> Option<(u32, Vec<NodeId>)> {
-    let docs = w.docs.borrow();
     w.with_obj(id, |o| match o {
         Obj::NodeList(NodeListSrc::Static(slot, v)) => Some((*slot, v.clone())),
         Obj::NodeList(NodeListSrc::Children(slot, n)) => {
-            Some((*slot, docs[*slot as usize].children(*n).collect()))
+            Some((*slot, w.doc_slot(*slot, |d| d.children(*n).collect())))
         }
         Obj::NodeList(NodeListSrc::Live(c)) | Obj::Collection(c) => {
-            c.refresh(&docs[c.slot as usize]);
+            w.doc_slot(c.slot, |d| c.refresh(d));
             Some((c.slot, c.items.clone()))
         }
         _ => None,
@@ -198,14 +197,13 @@ pub(crate) fn items(w: &Window, id: u32) -> Option<(u32, Vec<NodeId>)> {
 }
 
 fn item_at(w: &Window, id: u32, i: u32) -> Option<(u32, Option<NodeId>)> {
-    let docs = w.docs.borrow();
     w.with_obj(id, |o| match o {
         Obj::NodeList(NodeListSrc::Static(slot, v)) => Some((*slot, v.get(i as usize).copied())),
         Obj::NodeList(NodeListSrc::Children(slot, n)) => {
-            Some((*slot, docs[*slot as usize].children(*n).nth(i as usize)))
+            Some((*slot, w.doc_slot(*slot, |d| d.children(*n).nth(i as usize))))
         }
         Obj::NodeList(NodeListSrc::Live(c)) | Obj::Collection(c) => {
-            c.refresh(&docs[c.slot as usize]);
+            w.doc_slot(c.slot, |d| c.refresh(d));
             Some((c.slot, c.items.get(i as usize).copied()))
         }
         _ => None,
@@ -760,7 +758,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         Ok(())
     });
     method(reg, rt, "Element", "setAttributeNode", |cx, w| {
-        let (slot, n) = super::this_node(cx)?;
+        let (slot, n) = super::this_node(cx, w)?;
         let Some(h) = cx.arg_host(0).filter(|h| h.kind == K_OBJ) else {
             return Err(HostError::type_error(
                 "Failed to execute 'setAttributeNode' on 'Element': parameter 1 is not of type 'Attr'.",

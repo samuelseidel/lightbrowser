@@ -11,7 +11,7 @@ use url::Url;
 use super::events::{body_forwards_to_window, set_handler};
 use super::{
     Dict, HandlerValue, Js, K_OBJ, Obj, Runtime, WINDOW_REF, Window, ctor, getter, illegal, method,
-    need_args, node_ref, opt_string, setter, this_obj,
+    need_args, opt_string, setter, this_obj,
 };
 use crate::registry::{ImplKind, Registry};
 
@@ -342,7 +342,7 @@ fn content_handler(w: &Window, n: NodeId, name: &str, value: Option<String>) {
     let target = if is_body && body_forwards_to_window(name) {
         WINDOW_REF
     } else {
-        node_ref(0, n)
+        w.node_ref(0, n)
     };
     set_handler(w, target, name, value.map(HandlerValue::Uncompiled));
 }
@@ -1141,7 +1141,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "MutationObserver", "observe", |cx, w| {
         need_args(cx, 1, "observe", "MutationObserver")?;
         let id = this_obj(cx)?;
-        let Some((slot, node)) = cx.arg_host(0).and_then(super::decode_node) else {
+        let Some((slot, node)) = cx.arg_host(0).and_then(|h| w.decode_node(h)) else {
             return Err(HostError::type_error(
                 "Failed to execute 'observe' on 'MutationObserver': parameter 1 is not of type 'Node'.",
             ));

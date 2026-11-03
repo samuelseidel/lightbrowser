@@ -76,7 +76,7 @@ fn this_of(
     w: &Window,
     names: &[&str],
 ) -> Result<(u32, NodeId), HostError> {
-    let (slot, n) = this_node(cx)?;
+    let (slot, n) = this_node(cx, w)?;
     let ok = w.doc_slot(slot, |d| {
         is_elem(d, n) && names.iter().any(|l| is_html(d, n, l))
     });
@@ -128,12 +128,12 @@ fn setter_value(
     };
     let (s2, v) = cx
         .arg_host(0)
-        .and_then(super::decode_node)
+        .and_then(|h| w.decode_node(h))
         .ok_or_else(bad)?;
     if !w.doc_slot(s2, |d| ok.iter().any(|l| is_html(d, v, l))) {
         return Err(bad());
     }
-    Ok(Some(super::dom::bring(w, s2, v, slot)))
+    Ok(Some(super::dom::bring(cx, w, s2, v, slot)))
 }
 
 fn remove_first(d: &mut Document, parent: NodeId, local: &str) {

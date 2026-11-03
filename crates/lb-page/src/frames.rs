@@ -22,7 +22,7 @@ use std::rc::{Rc, Weak};
 use lb_js::RealmOps;
 use lb_webapi::host::{Destination, NetRequest, NetResponse, decode_text};
 use lb_webapi::rt::frames::{self as wf, FrameHooks, FrameNavigation};
-use lb_webapi::rt::{TaskSource, Window, fire_event, node_ref};
+use lb_webapi::rt::{TaskSource, Window, fire_event};
 
 use crate::browser::WorkerState;
 use crate::page::PageState;
@@ -233,7 +233,7 @@ impl FrameLoad {
                     .find(|c| c.id == id)
                     .map(|c| c.element);
                 if let Some(el) = el {
-                    fire_event(js, p, node_ref(0, el), "load", false, false);
+                    fire_event(js, p, p.node_ref(0, el), "load", false, false);
                 }
                 p.pending_loads.set(p.pending_loads.get().saturating_sub(1));
                 p.wake();

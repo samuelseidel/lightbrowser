@@ -1183,10 +1183,38 @@ impl Document {
         self.build_copy(plan)
     }
 
+    /// Move a subtree of another document into this arena (adoption across
+    /// arenas): the copy plus, for every copied node in pre-order, `(source
+    /// node, copy)`, so callers can carry per-node state over. The source
+    /// subtree is left in place (detach it there).
+    pub fn import_node_mapped(
+        &mut self,
+        src: &Document,
+        id: NodeId,
+    ) -> (NodeId, Vec<(NodeId, NodeId)>) {
+        let mut sources = Vec::new();
+        let plan = Self::plan_copy_from(src, id, true, Some(&mut sources));
+        let ids = self.build_copy_ids(plan);
+        (ids[0], sources.into_iter().zip(ids).collect())
+    }
+
     /// Pre-order list of (copy, parent index in the plan, goes into the
     /// parent's template contents).
     fn plan_copy(src: &Document, id: NodeId, deep: bool) -> Vec<(ShallowCopy, usize, bool)> {
+        Self::plan_copy_from(src, id, deep, None)
+    }
+
+    /// [`Document::plan_copy`], also listing the source node of each entry.
+    fn plan_copy_from(
+        src: &Document,
+        id: NodeId,
+        deep: bool,
+        mut sources: Option<&mut Vec<NodeId>>,
+    ) -> Vec<(ShallowCopy, usize, bool)> {
         let mut plan = vec![(src.shallow_copy(id), usize::MAX, false)];
+        if let Some(s) = sources.as_deref_mut() {
+            s.push(id);
+        }
         if !deep {
             return plan;
         }
@@ -1208,12 +1236,20 @@ impl Document {
         while let Some((n, parent, into_tc)) = stack.pop() {
             let idx = plan.len();
             plan.push((src.shallow_copy(n), parent, into_tc));
+            if let Some(s) = sources.as_deref_mut() {
+                s.push(n);
+            }
             push_children(&mut stack, n, idx);
         }
         plan
     }
 
     fn build_copy(&mut self, plan: Vec<(ShallowCopy, usize, bool)>) -> NodeId {
+        self.build_copy_ids(plan)[0]
+    }
+
+    /// The copies, one per plan entry, in plan order.
+    fn build_copy_ids(&mut self, plan: Vec<(ShallowCopy, usize, bool)>) -> Vec<NodeId> {
         let mut ids: Vec<NodeId> = Vec::with_capacity(plan.len());
         for (copy, parent, into_tc) in plan {
             let id = match copy {
@@ -1235,7 +1271,7 @@ impl Document {
             ids.push(id);
         }
         self.generation += 1;
-        ids[0]
+        ids
     }
 }
 

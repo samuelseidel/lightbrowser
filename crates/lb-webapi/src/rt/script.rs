@@ -12,7 +12,7 @@ use lb_js::ScriptOrigin;
 use url::Url;
 
 use super::events::fire_event;
-use super::{Js, Window, node_ref};
+use super::{Js, Window};
 use crate::host::{Destination, NetRequest, decode_text};
 
 /// Set on scripts whose `async` IDL attribute was set by script (clears
@@ -111,12 +111,12 @@ pub fn execute_classic(
 
 /// Fire `load` at a script element.
 pub fn fire_load(js: &mut dyn Js, w: &Rc<Window>, n: NodeId) {
-    fire_event(js, w, node_ref(0, n), "load", false, false);
+    fire_event(js, w, w.node_ref(0, n), "load", false, false);
 }
 
 /// Fire `error` at a script element.
 pub fn fire_error(js: &mut dyn Js, w: &Rc<Window>, n: NodeId) {
-    fire_event(js, w, node_ref(0, n), "error", false, false);
+    fire_event(js, w, w.node_ref(0, n), "error", false, false);
 }
 
 /// Decode a fetched script body (`charset` attribute / header, else
@@ -196,8 +196,9 @@ pub(crate) fn document_write(js: &mut dyn Js, w: &Rc<Window>, text: &str) {
         let mut p = w.parser.borrow_mut();
         match p.as_mut() {
             Some(parser) => {
-                let mut docs = w.docs.borrow_mut();
-                Some(parser.write(&mut docs[0], text))
+                let doc = w.doc_rc(0);
+                let r = parser.write(&mut doc.borrow_mut(), text);
+                Some(r)
             }
             None => None,
         }
@@ -251,8 +252,9 @@ fn run_script_parser(js: &mut dyn Js, w: &Rc<Window>, to_end: bool) {
         let step = {
             let mut p = w.parser.borrow_mut();
             let Some(parser) = p.as_mut() else { return };
-            let mut docs = w.docs.borrow_mut();
-            parser.run(&mut docs[0])
+            let doc = w.doc_rc(0);
+            let r = parser.run(&mut doc.borrow_mut());
+            r
         };
         match step {
             ParseStep::Script(n) => {

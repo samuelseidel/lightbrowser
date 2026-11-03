@@ -11,9 +11,15 @@
 //!   `DOMParser` / `createHTMLDocument` documents), host objects, event
 //!   listeners, task queues, timers, animation frame callbacks, the
 //!   console log, history and the lazily created layout engine.
-//! - Host refs: [`K_NODE`] (`kind = K_NODE | slot << 8`, `id` = node id),
-//!   [`K_WINDOW`] (the global) and [`K_OBJ`] (`id` indexes the window's
-//!   object table).
+//! - Host refs: [`K_NODE`] (`kind = K_NODE | document key << 8`, `id` =
+//!   node id), [`K_WINDOW`] (the global) and [`K_OBJ`] (`id` indexes the
+//!   window's object table). Document keys are unique per [`Runtime`], so
+//!   a node ref names its document in every realm; inside a window, code
+//!   works with slots (0 = the main document) and [`Window::node_ref`] /
+//!   [`Window::decode_node`] translate. A node of another window's
+//!   document gets a slot in the window that sees it (the same shared
+//!   document), and a method called on such a node runs with the node's
+//!   own window ([`wf`]).
 //! - [`input`]: trusted user input for CDP `Input.*` (pointer, mouse and
 //!   keyboard events in Chrome's order, focus, activation, text editing)
 //!   and the UI event interfaces.
@@ -93,7 +99,7 @@ pub use image::load_visible_lazy_images;
 pub use script::ScriptKind;
 pub(crate) use webgl::{extension_names, extension_spec};
 
-/// Host ref kind of DOM nodes (`kind = K_NODE | document_slot << 8`).
+/// Host ref kind of DOM nodes (`kind = K_NODE | document_key << 8`).
 pub const K_NODE: u32 = 1;
 /// Host ref kind of the window global.
 pub const K_WINDOW: u32 = 2;
@@ -102,14 +108,29 @@ pub const K_OBJ: u32 = 3;
 /// The window global's host ref.
 pub const WINDOW_REF: HostRef = HostRef::new(K_WINDOW, 0);
 
-/// Host ref of node `id` in document `slot`.
-pub fn node_ref(slot: u32, id: NodeId) -> HostRef {
-    HostRef::new(K_NODE | (slot << 8), id.0)
+/// `(document key, node)` of a node host ref, unchecked. Use
+/// [`Window::decode_node`] for a slot of a window.
+pub fn node_key(h: HostRef) -> Option<(u32, NodeId)> {
+    (h.kind & 0xff == K_NODE).then_some((h.kind >> 8, NodeId(h.id)))
 }
 
-/// `(slot, node)` of a node host ref.
-pub fn decode_node(h: HostRef) -> Option<(u32, NodeId)> {
-    (h.kind & 0xff == K_NODE).then_some((h.kind >> 8, NodeId(h.id)))
+/// Largest document key (24 bits of the host ref's kind).
+const MAX_DOC_KEY: u32 = (1 << 24) - 1;
+
+/// A document as a window reaches it: its own (slot 0 is the main
+/// document, then `DOMParser` / `createHTMLDocument` ones) or another
+/// window's, seen through a node passed in (the same shared document).
+pub(crate) struct DocSlot {
+    key: u32,
+    pub(crate) doc: Rc<RefCell<Document>>,
+}
+
+/// The runtime's record of a document key.
+struct DocEntry {
+    /// The window that made the document, and its slot there.
+    owner: std::rc::Weak<Window>,
+    slot: u32,
+    doc: std::rc::Weak<RefCell<Document>>,
 }
 
 fn obj_ref(id: u32) -> HostRef {
@@ -274,6 +295,12 @@ struct RtInner {
     /// Font tables and UA stylesheet per OS, shared by the layout engines
     /// of this engine's documents (parsed once, not per document).
     layout_bases: RefCell<Vec<lb_layout::LayoutBase>>,
+    /// Every document by key (see [`node_key`]); entries of dropped
+    /// documents are pruned as new ones are added.
+    docs: RefCell<HashMap<u32, DocEntry>>,
+    next_doc_key: Cell<u32>,
+    /// Live entries after the last prune.
+    docs_live: Cell<usize>,
 }
 
 /// The implementations of one engine. Cheap to clone.
@@ -310,6 +337,9 @@ impl Runtime {
             dom: reg.dom_exceptions(),
             canvas_factories: canvas::Factories::default(),
             layout_bases: RefCell::new(Vec::new()),
+            docs: RefCell::new(HashMap::new()),
+            next_doc_key: Cell::new(1),
+            docs_live: Cell::new(0),
         }));
         dom::register(reg, &rt);
         coll::register(reg, &rt);
@@ -356,6 +386,52 @@ impl Runtime {
 
     pub fn window(&self, realm: RealmId) -> Option<Rc<Window>> {
         self.0.windows.borrow().get(&realm).cloned()
+    }
+
+    /// A fresh document key (unused by any live document).
+    fn new_doc_key(&self) -> u32 {
+        let docs = self.0.docs.borrow();
+        loop {
+            let k = self.0.next_doc_key.get();
+            self.0
+                .next_doc_key
+                .set(if k >= MAX_DOC_KEY { 1 } else { k + 1 });
+            if !docs.contains_key(&k) {
+                return k;
+            }
+        }
+    }
+
+    /// Record document `key` of `owner` (slot `slot` there).
+    fn register_doc(&self, key: u32, owner: &Rc<Window>, slot: u32, doc: &Rc<RefCell<Document>>) {
+        let mut docs = self.0.docs.borrow_mut();
+        // Prune dropped documents once the table doubled since the last
+        // prune (amortized O(1) per document).
+        if docs.len() >= 2 * self.0.docs_live.get().max(16) {
+            docs.retain(|_, e| e.doc.strong_count() > 0);
+            self.0.docs_live.set(docs.len());
+        }
+        docs.insert(
+            key,
+            DocEntry {
+                owner: Rc::downgrade(owner),
+                slot,
+                doc: Rc::downgrade(doc),
+            },
+        );
+    }
+
+    /// The document of `key`, while it lives.
+    fn doc_by_key(&self, key: u32) -> Option<Rc<RefCell<Document>>> {
+        self.0.docs.borrow().get(&key)?.doc.upgrade()
+    }
+
+    /// The window that made document `key` and the document's slot there,
+    /// while that window lives.
+    pub(crate) fn doc_owner(&self, key: u32) -> Option<(Rc<Window>, u32)> {
+        let docs = self.0.docs.borrow();
+        let e = docs.get(&key)?;
+        Some((e.owner.upgrade()?, e.slot))
     }
 
     /// Not inlined: every binding closure made by [`wf`] calls it, and
@@ -578,7 +654,10 @@ pub struct Window {
     pub(crate) local_storage: StorageArea,
     pub(crate) session_storage: StorageArea,
     wake: Rc<dyn Fn()>,
-    pub(crate) docs: RefCell<Vec<Document>>,
+    /// Documents by slot (see [`DocSlot`]).
+    pub(crate) docs: RefCell<Vec<DocSlot>>,
+    /// Slot by document key, for the slots after 0.
+    doc_slots: RefCell<HashMap<u32, u32>>,
     pub(crate) url: RefCell<Url>,
     pub(crate) referrer: String,
     pub(crate) content_type: String,
@@ -663,8 +742,10 @@ impl Window {
         doc.set_mutation_hook(Some(Box::new(move |m: &Mutation| {
             sink.borrow_mut().push((0, m.clone()));
         })));
+        let doc = Rc::new(RefCell::new(doc));
+        let key = rt.new_doc_key();
         let url = init.url.clone();
-        Rc::new(Window {
+        let w = Rc::new(Window {
             rt: rt.clone(),
             realm: Cell::new(RealmId(0)),
             persona: init.persona,
@@ -673,7 +754,11 @@ impl Window {
             local_storage: init.local_storage,
             session_storage: init.session_storage,
             wake: init.wake,
-            docs: RefCell::new(vec![doc]),
+            docs: RefCell::new(vec![DocSlot {
+                key,
+                doc: doc.clone(),
+            }]),
+            doc_slots: RefCell::new(HashMap::new()),
             url: RefCell::new(url.clone()),
             referrer: init.referrer,
             content_type: init.content_type,
@@ -725,7 +810,9 @@ impl Window {
             load_info: RefCell::new(LoadInfo::default()),
             frames: frames::FrameState::default(),
             hidden: Cell::new(false),
-        })
+        });
+        rt.register_doc(key, &w, 0, &doc);
+        w
     }
 
     /// Create the main-world realm for this window, attach it and set up
@@ -859,31 +946,110 @@ impl Window {
 
     /// Borrow the main document.
     pub fn with_doc<R>(&self, f: impl FnOnce(&Document) -> R) -> R {
-        f(&self.docs.borrow()[0])
+        self.doc_slot(0, f)
     }
 
     /// Borrow the main document mutably. Do not call JS inside.
     pub fn with_doc_mut<R>(&self, f: impl FnOnce(&mut Document) -> R) -> R {
-        f(&mut self.docs.borrow_mut()[0])
+        self.doc_slot_mut(0, f)
+    }
+
+    /// The document in `slot` (a slot from [`Window::decode_node`] or 0).
+    pub(crate) fn doc_rc(&self, slot: u32) -> Rc<RefCell<Document>> {
+        self.docs.borrow()[slot as usize].doc.clone()
     }
 
     pub(crate) fn doc_slot<R>(&self, slot: u32, f: impl FnOnce(&Document) -> R) -> R {
-        f(&self.docs.borrow()[slot as usize])
+        let d = self.doc_rc(slot);
+        let r = f(&d.borrow());
+        r
     }
 
     pub(crate) fn doc_slot_mut<R>(&self, slot: u32, f: impl FnOnce(&mut Document) -> R) -> R {
-        f(&mut self.docs.borrow_mut()[slot as usize])
+        let d = self.doc_rc(slot);
+        let r = f(&mut d.borrow_mut());
+        r
     }
 
     /// Add a document (DOMParser, createHTMLDocument); returns its slot.
-    pub(crate) fn add_doc(&self, mut doc: Document) -> u32 {
+    pub(crate) fn add_doc(self: &Rc<Self>, mut doc: Document) -> u32 {
         let slot = self.docs.borrow().len() as u32;
         let sink = self.mutations.clone();
         doc.set_mutation_hook(Some(Box::new(move |m: &Mutation| {
             sink.borrow_mut().push((slot, m.clone()));
         })));
-        self.docs.borrow_mut().push(doc);
+        let doc = Rc::new(RefCell::new(doc));
+        let key = self.rt.new_doc_key();
+        self.rt.register_doc(key, self, slot, &doc);
+        self.docs.borrow_mut().push(DocSlot { key, doc });
+        self.doc_slots.borrow_mut().insert(key, slot);
         slot
+    }
+
+    /// Whether `slot` is a document this window made (not another
+    /// window's document seen through a node).
+    pub(crate) fn owns_slot(&self, slot: u32) -> bool {
+        if slot == 0 {
+            return true;
+        }
+        let key = self.docs.borrow()[slot as usize].key;
+        self.rt
+            .doc_owner(key)
+            .is_none_or(|(o, _)| std::ptr::eq(&*o, self))
+    }
+
+    /// The runtime-wide key of the document in `slot`.
+    pub(crate) fn doc_key(&self, slot: u32) -> u32 {
+        self.docs.borrow()[slot as usize].key
+    }
+
+    /// The host ref of node `id` of the document in `slot`.
+    pub fn node_ref(&self, slot: u32, id: NodeId) -> HostRef {
+        let key = self.docs.borrow()[slot as usize].key;
+        HostRef::new(K_NODE | (key << 8), id.0)
+    }
+
+    /// The slot of a node host ref's document in this window and the
+    /// node, or `None` when `h` is no node, its document is gone or the
+    /// node does not exist. A document of another window gets a slot here
+    /// on first use.
+    pub fn decode_node(&self, h: HostRef) -> Option<(u32, NodeId)> {
+        let (key, id) = node_key(h)?;
+        let slot = self.slot_of_key(key)?;
+        let exists = self.docs.borrow()[slot as usize]
+            .doc
+            .try_borrow()
+            .map_or(true, |d| (id.0 as usize) < d.node_count());
+        exists.then_some((slot, id))
+    }
+
+    /// The slot of document `key` here (added if it is another window's).
+    fn slot_of_key(&self, key: u32) -> Option<u32> {
+        if self.docs.borrow()[0].key == key {
+            return Some(0);
+        }
+        if let Some(s) = self.doc_slots.borrow().get(&key) {
+            return Some(*s);
+        }
+        let doc = self.rt.doc_by_key(key)?;
+        let mut docs = self.docs.borrow_mut();
+        let slot = docs.len() as u32;
+        docs.push(DocSlot { key, doc });
+        self.doc_slots.borrow_mut().insert(key, slot);
+        Some(slot)
+    }
+
+    /// Whether document `key` was made by this window (its main document
+    /// or one of its `DOMParser` documents), not another window's.
+    fn owns_key(&self, key: u32) -> bool {
+        if self.docs.borrow()[0].key == key {
+            return true;
+        }
+        self.doc_slots.borrow().contains_key(&key)
+            && self
+                .rt
+                .doc_owner(key)
+                .is_none_or(|(o, _)| std::ptr::eq(&*o, self))
     }
 
     /// Mutations are queued; they are processed by the next
@@ -920,8 +1086,9 @@ impl Window {
     pub fn parser_run(&self) -> Option<lb_dom::ParseStep> {
         let mut p = self.parser.borrow_mut();
         let parser = p.as_mut()?;
-        let mut docs = self.docs.borrow_mut();
-        Some(parser.run(&mut docs[0]))
+        let doc = self.doc_rc(0);
+        let r = parser.run(&mut doc.borrow_mut());
+        Some(r)
     }
 
     /// 1-based source line where a parser-inserted script started.
@@ -1155,7 +1322,7 @@ impl Window {
     /// The JS value for node `id` of document `slot`.
     pub fn node_arg(&self, slot: u32, id: NodeId) -> Arg {
         let name = self.doc_slot(slot, |d| tags::node_interface(d, id, slot));
-        Arg::Host(self.rt.iface(name), node_ref(slot, id))
+        Arg::Host(self.rt.iface(name), self.node_ref(slot, id))
     }
 
     pub(crate) fn opt_node_arg(&self, slot: u32, id: Option<NodeId>) -> Arg {
@@ -1164,7 +1331,7 @@ impl Window {
 
     /// The JS value for any host ref this window owns.
     pub fn host_arg(&self, h: HostRef) -> Arg {
-        if let Some((slot, n)) = decode_node(h) {
+        if let Some((slot, n)) = self.decode_node(h) {
             return self.node_arg(slot, n);
         }
         match h.kind {
@@ -1186,6 +1353,14 @@ impl Window {
         slot: u32,
         f: impl FnOnce(&mut lb_layout::LayoutEngine, &Document) -> R,
     ) -> R {
+        // Another window's document: its own layout engine (its viewport,
+        // style sheets and caches).
+        if slot != 0 && !self.owns_slot(slot) {
+            let key = self.docs.borrow()[slot as usize].key;
+            if let Some((owner, s)) = self.rt.doc_owner(key) {
+                return owner.with_layout(s, f);
+            }
+        }
         let mut l = self.layout.borrow_mut();
         let created = l.is_none();
         let engine = l.get_or_insert_with(|| match &self.profile {
@@ -1202,8 +1377,9 @@ impl Window {
         for (link, text) in sheets {
             engine.styles().set_external_sheet(link, Some(&text));
         }
-        let docs = self.docs.borrow();
-        f(engine, &docs[slot as usize])
+        let doc = self.doc_rc(slot);
+        let r = f(engine, &doc.borrow());
+        r
     }
 
     /// The main document's layout engine (created on first use), for the
@@ -1222,8 +1398,8 @@ impl Window {
 
     /// Nodes of `<link rel=stylesheet>` elements whose sheet is not loaded.
     pub fn pending_stylesheets(&self) -> Vec<NodeId> {
-        let docs = self.docs.borrow();
-        let doc = &docs[0];
+        let doc = self.doc_rc(0);
+        let doc = doc.borrow();
         doc.descendants(Document::DOCUMENT)
             .filter(|&n| {
                 doc.is_html_element_named(n, &lb_dom::local_name!("link"))
@@ -1276,7 +1452,7 @@ impl Window {
             fire_event(
                 js,
                 self,
-                node_ref(0, lb_dom::Document::DOCUMENT),
+                self.node_ref(0, lb_dom::Document::DOCUMENT),
                 "visibilitychange",
                 true,
                 false,
@@ -1491,6 +1667,61 @@ impl Obj {
 // Small helpers shared by the implementation modules
 // ---------------------------------------------------------------------------
 
+/// Carry per-node state of adopted nodes (see `dom::bring`) from the
+/// windows that hold it to the window of the target document: listeners
+/// and inline handlers (by host ref), form values and selections (by slot
+/// and node). `map` is (old node, new node), `pairs` their host refs.
+pub(crate) fn move_node_state(
+    w: &Window,
+    from: u32,
+    to: u32,
+    map: &[(NodeId, NodeId)],
+    pairs: &[(HostRef, HostRef)],
+) {
+    let key_of = |slot: u32| w.docs.borrow()[slot as usize].key;
+    // (window, its slot) of a document as `w` sees it.
+    let place = |slot: u32| -> Option<(Rc<Window>, u32)> { w.rt.doc_owner(key_of(slot)) };
+    let (Some((src, sslot)), Some((dst, dslot))) = (place(from), place(to)) else {
+        return;
+    };
+    for &(old, new) in pairs {
+        let ls = src.listeners.borrow_mut().remove(&old);
+        if let Some(ls) = ls {
+            dst.listeners
+                .borrow_mut()
+                .entry(new)
+                .or_default()
+                .extend(ls);
+        }
+    }
+    let moved: Vec<((HostRef, String), HandlerValue)> = {
+        let mut hs = src.handlers.borrow_mut();
+        let keys: Vec<(HostRef, String)> = hs
+            .keys()
+            .filter(|(h, _)| pairs.iter().any(|(o, _)| o == h))
+            .cloned()
+            .collect();
+        keys.into_iter()
+            .filter_map(|k| hs.remove(&k).map(|v| (k, v)))
+            .collect()
+    };
+    for ((h, ty), v) in moved {
+        if let Some(&(_, new)) = pairs.iter().find(|(o, _)| *o == h) {
+            dst.handlers.borrow_mut().insert((new, ty), v);
+        }
+    }
+    for &(o, n) in map {
+        let v = src.values.borrow_mut().remove(&(sslot, o));
+        if let Some(v) = v {
+            dst.values.borrow_mut().insert((dslot, n), v);
+        }
+        let s = src.selections.borrow_mut().remove(&(sslot, o));
+        if let Some(s) = s {
+            dst.selections.borrow_mut().insert((dslot, n), s);
+        }
+    }
+}
+
 /// `Illegal invocation` (wrong `this`).
 pub(crate) fn illegal() -> HostError {
     HostError::type_error("Illegal invocation")
@@ -1536,15 +1767,43 @@ pub(crate) fn ctor(
     reg.constructor(iface, wf(rt, f));
 }
 
-/// Wrap `f` so it receives the calling realm's window.
+/// Wrap `f` so it receives the window it acts for: the calling realm's,
+/// or, when `this` belongs to another window (a node of its document, one
+/// of its objects or its global), that window. Host objects returned by a
+/// main-world call on another realm's object are wrapped in that object's
+/// realm (Blink's "creation context of the holder"), so a method of one
+/// frame called on another frame's node acts on, and returns objects of,
+/// that node's document, as in Chrome.
 pub(crate) fn wf(
     rt: &Runtime,
     f: impl Fn(&mut CallCtx<'_, '_, '_>, &Rc<Window>) -> Result<(), HostError> + 'static,
 ) -> lb_js::HostFn {
     let rt = rt.clone();
     host_fn(move |cx| {
-        let w = rt.win(cx.realm())?;
-        f(cx, &w)
+        let caller = rt.win(cx.realm())?;
+        let Some(h) = cx.this_host() else {
+            return f(cx, &caller);
+        };
+        // The receiver's realm, when it is not the calling one.
+        let recv = cx.this_realm();
+        let w = if h.kind & 0xff == K_NODE {
+            node_key(h)
+                .filter(|&(key, _)| !caller.owns_key(key))
+                .and_then(|(key, _)| rt.doc_owner(key))
+                .map(|(o, _)| o)
+        } else {
+            recv.and_then(|r| rt.window(r))
+        };
+        if let Some(r) = recv
+            && cx.realm() == caller.realm()
+            && rt.window(r).is_some_and(|x| x.realm() == r)
+        {
+            cx.set_wrap_realm(r);
+        }
+        match w {
+            Some(w) if !Rc::ptr_eq(&w, &caller) => f(cx, &w),
+            _ => f(cx, &caller),
+        }
     })
 }
 
@@ -1556,24 +1815,33 @@ pub(crate) fn this_obj(cx: &mut CallCtx<'_, '_, '_>) -> Result<u32, HostError> {
     }
 }
 
-/// `this` as a node.
-pub(crate) fn this_node(cx: &mut CallCtx<'_, '_, '_>) -> Result<(u32, NodeId), HostError> {
-    cx.this_host().and_then(decode_node).ok_or_else(illegal)
+/// `this` as a node of `w` (slot, node).
+pub(crate) fn this_node(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+) -> Result<(u32, NodeId), HostError> {
+    cx.this_host()
+        .and_then(|h| w.decode_node(h))
+        .ok_or_else(illegal)
 }
 
-/// Argument `i` as a node, or a TypeError naming the parameter.
+/// Argument `i` as a node (slot in `w`, node), or a TypeError naming the
+/// parameter.
 pub(crate) fn arg_node(
     cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
     i: usize,
     op: &str,
     iface: &str,
 ) -> Result<(u32, NodeId), HostError> {
-    cx.arg_host(i).and_then(decode_node).ok_or_else(|| {
-        HostError::type_error(format!(
-            "Failed to execute '{op}' on '{iface}': parameter {} is not of type 'Node'.",
-            i + 1
-        ))
-    })
+    cx.arg_host(i)
+        .and_then(|h| w.decode_node(h))
+        .ok_or_else(|| {
+            HostError::type_error(format!(
+                "Failed to execute '{op}' on '{iface}': parameter {} is not of type 'Node'.",
+                i + 1
+            ))
+        })
 }
 
 /// "Not enough arguments" TypeError, Chrome's wording.

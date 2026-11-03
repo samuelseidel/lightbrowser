@@ -438,7 +438,7 @@ fn rect_obj(w: &Window, r: lb_layout::Rect) -> u32 {
 }
 
 fn elem(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(u32, NodeId), HostError> {
-    let (slot, n) = this_node(cx)?;
+    let (slot, n) = this_node(cx, w)?;
     if !w.doc_slot(slot, |d| d.is_element(n)) {
         return Err(illegal());
     }
@@ -449,7 +449,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     debug_assert!(PROPERTIES.windows(2).all(|p| p[0] < p[1]));
     for iface in ["HTMLElement", "SVGElement", "MathMLElement"] {
         getter(reg, rt, iface, "style", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let id = w.cached_obj((slot, n.0, "style", String::new()), || Obj::Style {
                 slot,
                 node: n,
@@ -458,7 +458,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             cx.ret(w.obj_arg(id))
         });
         setter(reg, rt, iface, "style", |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let v = cx.arg_string(0)?;
             let _ = w.doc_slot_mut(slot, |d| d.set_attribute(n, "style", &v));
             w.after_mutation(cx);
@@ -467,7 +467,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }
     method(reg, rt, "Window", "getComputedStyle", |cx, w| {
         need_args(cx, 1, "getComputedStyle", "Window")?;
-        let Some((slot, n)) = cx.arg_host(0).and_then(super::decode_node) else {
+        let Some((slot, n)) = cx.arg_host(0).and_then(|h| w.decode_node(h)) else {
             return Err(HostError::type_error(
                 "Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'.",
             ));
@@ -777,14 +777,14 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }
     method(reg, rt, "Document", "elementFromPoint", |cx, w| {
         need_args(cx, 2, "elementFromPoint", "Document")?;
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let (x, y) = (cx.arg_f64(0)? as f32, cx.arg_f64(1)? as f32);
         let r = w.with_layout(slot, |l, d| l.element_from_point(d, x, y));
         cx.ret(w.opt_node_arg(slot, r))
     });
     method(reg, rt, "Document", "elementsFromPoint", |cx, w| {
         need_args(cx, 2, "elementsFromPoint", "Document")?;
-        let (slot, _) = this_node(cx)?;
+        let (slot, _) = this_node(cx, w)?;
         let (x, y) = (cx.arg_f64(0)? as f32, cx.arg_f64(1)? as f32);
         let r = w.with_layout(slot, |l, d| l.elements_from_point(d, x, y));
         cx.ret(Arg::Array(

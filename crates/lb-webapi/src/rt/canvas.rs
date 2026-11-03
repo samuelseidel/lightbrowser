@@ -25,8 +25,8 @@ use lb_paint::{
 };
 
 use super::{
-    Dict, K_OBJ, Obj, Runtime, TaskSource, Window, decode_node, getter, illegal, method, need_args,
-    setter, this_obj,
+    Dict, K_OBJ, Obj, Runtime, TaskSource, Window, getter, illegal, method, need_args, setter,
+    this_obj,
 };
 use crate::registry::Registry;
 
@@ -431,7 +431,7 @@ pub(crate) fn image_source(
         ))
     };
     let h = cx.arg_host(i).ok_or_else(bad)?;
-    if let Some((slot, n)) = decode_node(h) {
+    if let Some((slot, n)) = w.decode_node(h) {
         let local = w.doc_slot(slot, |d| {
             d.element(n)
                 .filter(|e| e.is_html() || &*e.name.local == "image")
@@ -748,7 +748,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
     const I: &str = "HTMLCanvasElement";
     method(reg, rt, I, "getContext", |cx, w| {
         need_args(cx, 1, "getContext", I)?;
-        let (slot, node) = super::this_node(cx)?;
+        let (slot, node) = super::this_node(cx, w)?;
         let target = CanvasTarget::Element { slot, node };
         sync_element(w, slot, node);
         let existing = element_ctx(w, slot, node);
@@ -767,7 +767,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
         }
     });
     method(reg, rt, I, "toDataURL", |cx, w| {
-        let (slot, node) = super::this_node(cx)?;
+        let (slot, node) = super::this_node(cx, w)?;
         sync_element(w, slot, node);
         let ctx = element_ctx(w, slot, node);
         if is_tainted(&ctx) {
@@ -796,7 +796,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, I, "toBlob", |cx, w| {
         need_args(cx, 1, "toBlob", I)?;
-        let (slot, node) = super::this_node(cx)?;
+        let (slot, node) = super::this_node(cx, w)?;
         if cx.arg_kind(0) != ValueKind::Function {
             return Err(HostError::type_error(
                 "Failed to execute 'toBlob' on 'HTMLCanvasElement': The callback provided as parameter 1 is not a function.",
@@ -845,7 +845,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
     });
     for (attr, def) in [("width", 300u32), ("height", 150u32)] {
         setter(reg, rt, I, attr, move |cx, w| {
-            let (slot, node) = super::this_node(cx)?;
+            let (slot, node) = super::this_node(cx, w)?;
             let v = cx.arg_u32(0)?;
             let v = if v > i32::MAX as u32 { def } else { v };
             let _ = w.doc_slot_mut(slot, |d| d.set_attribute(node, attr, &v.to_string()));

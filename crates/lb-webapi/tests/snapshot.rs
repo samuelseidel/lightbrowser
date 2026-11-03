@@ -141,10 +141,12 @@ fn snapshot_realms_work() {
     let r2 = b
         .new_window_realm(&mut e, WindowRealmOptions::default())
         .unwrap();
-    // Wrappers use the realm's own interface objects.
+    // Wrappers use the realm's own interface objects. Each realm gets a
+    // node of its own document: main-world realms share the wrapper of
+    // the same node (`Engine::set_shared_hosts`).
     let div = b.interface_id("HTMLDivElement").unwrap();
-    for r in [r1, r2] {
-        let h = e.wrap(r, div, HostRef::new(1, 7)).unwrap();
+    for (doc, r) in [(1, r1), (2, r2)] {
+        let h = e.wrap(r, div, HostRef::new(1 | (doc << 8), 7)).unwrap();
         let g = e.global(r).unwrap();
         e.set_property(r, g, "__x", lb_js::Arg::Handle(h)).unwrap();
         assert_eq!(

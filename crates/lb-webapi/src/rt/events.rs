@@ -9,7 +9,7 @@ use lb_js::{Arg, CallCtx, Handle, HostError, HostRef, JsError, JsValue, RealmId,
 
 use super::{
     Dict, HandlerValue, Js, K_NODE, K_OBJ, K_WINDOW, Obj, Runtime, WINDOW_REF, Window, ctor,
-    decode_node, getter, illegal, method, need_args, setter, this_obj,
+    getter, illegal, method, need_args, setter, this_obj,
 };
 use crate::desc::AttrType;
 use crate::registry::Registry;
@@ -193,10 +193,10 @@ fn with_ev<R>(w: &Window, ev: u32, f: impl FnOnce(&mut EventData) -> R) -> Optio
 /// The propagation path, target first.
 fn event_path(w: &Window, target: HostRef, type_: &str) -> Vec<HostRef> {
     let mut path = vec![target];
-    if let Some((slot, node)) = decode_node(target) {
+    if let Some((slot, node)) = w.decode_node(target) {
         let root = w.doc_slot(slot, |d| {
             for a in d.ancestors(node) {
-                path.push(super::node_ref(slot, a));
+                path.push(w.node_ref(slot, a));
             }
             d.root(node)
         });
@@ -576,7 +576,7 @@ fn default_passive(w: &Window, t: HostRef, type_: &str) -> bool {
     if !matches!(type_, "touchstart" | "touchmove" | "wheel" | "mousewheel") {
         return false;
     }
-    match decode_node(t) {
+    match w.decode_node(t) {
         None => t.kind == K_WINDOW,
         Some((slot, n)) => w.doc_slot(slot, |d| {
             n == lb_dom::Document::DOCUMENT

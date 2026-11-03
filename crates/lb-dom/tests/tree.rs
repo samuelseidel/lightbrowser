@@ -241,6 +241,19 @@ fn clone_and_import() {
     let mut other = Document::new();
     let imported = other.import_node(&doc, d, true);
     assert_eq!(other.outer_html(imported), doc.outer_html(d));
+
+    // Adoption across arenas: every copied node with its source, in
+    // pre-order, template contents included.
+    let mut third = Document::new();
+    let (root, map) = third.import_node_mapped(&doc, d);
+    assert_eq!(third.outer_html(root), doc.outer_html(d));
+    assert_eq!(map[0], (d, root));
+    // div, p, "x", b, "y", template, and in its contents i, "t".
+    assert_eq!(map.len(), 8, "{map:?}");
+    for (src, copy) in &map {
+        assert_eq!(doc.node_type(*src), third.node_type(*copy));
+        assert_eq!(doc.node_name(*src), third.node_name(*copy));
+    }
 }
 
 #[test]

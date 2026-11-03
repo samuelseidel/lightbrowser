@@ -24,7 +24,7 @@ use lb_js::{
 };
 use lb_webapi::host::ConsoleMessage;
 use lb_webapi::rt::frames;
-use lb_webapi::rt::{EngineJs, K_NODE, K_WINDOW, Window, decode_node, node_ref};
+use lb_webapi::rt::{EngineJs, K_NODE, K_WINDOW, Window};
 
 use super::Shared;
 use crate::browser::WorkerState;
@@ -922,7 +922,7 @@ impl Agent {
                     .with_engine(|e| e.unwrap_host(obj.realm, obj.handle))
                     .ok_or_else(|| HostError::new("Page is closed"))?
                     .map_err(|e| HostError::new(e.message))?;
-                match host.and_then(decode_node) {
+                match host.and_then(|h| w.decode_node(h)) {
                     Some((0, n)) => Ok(n),
                     _ => Err(HostError::new(
                         "Node with given id does not belong to the document",
@@ -987,7 +987,7 @@ pub(crate) fn to_cdp(v: &Inspected, w: &Window) -> CdpValue {
             if let Some(h) = o.host {
                 if h.kind & 0xff == K_NODE {
                     info.subtype = Some("node".into());
-                    if let Some((0, n)) = decode_node(h) {
+                    if let Some((0, n)) = w.decode_node(h) {
                         info.description =
                             Some(w.with_doc(|d| lb_cdp::convert::node_description(d, n)));
                     }
@@ -1051,12 +1051,6 @@ pub(crate) fn settle(ws: &WorkerState, w: &Rc<Window>) {
         let mut js = EngineJs { engine, realm };
         w.after_mutation(&mut js);
     });
-}
-
-/// The main-world remote node for a node ref (for `DOM.*` helpers).
-#[allow(dead_code)]
-pub(crate) fn node_ref_of(n: NodeId) -> lb_js::HostRef {
-    node_ref(0, n)
 }
 
 /// Evaluate a script or call a function in a world, await its promise if

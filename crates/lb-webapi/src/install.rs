@@ -183,6 +183,10 @@ impl Bindings {
         table: &'static Table,
     ) -> Result<Bindings, InstallError> {
         let mut registry = registry.clone();
+        // DOM node refs carry their document (`rt::node_key`): one wrapper
+        // per node in the main world, whichever frame's realm reaches it.
+        #[cfg(feature = "chrome")]
+        engine.set_shared_hosts(0xff, crate::rt::K_NODE);
         register_defaults(&mut registry);
         register_window_defaults(&mut registry);
         registry.freeze();

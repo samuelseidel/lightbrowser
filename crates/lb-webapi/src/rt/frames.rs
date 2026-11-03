@@ -41,8 +41,7 @@ use url::Url;
 
 use super::events::{EventExtra, fire_event, fire_event_with};
 use super::{
-    K_NODE, Runtime, TaskSource, WINDOW_REF, Window, WindowInit, decode_node, getter, method,
-    need_args, node_ref,
+    K_NODE, Runtime, TaskSource, WINDOW_REF, Window, WindowInit, getter, method, need_args,
 };
 use crate::registry::Registry;
 
@@ -279,7 +278,7 @@ pub fn fire_frame_load(parent: &Rc<Window>, frame: u64) {
         Box::new(move |js, p| {
             if let Some(c) = p.frames.children.borrow().iter().find(|c| c.id == frame) {
                 let el = c.element;
-                fire_event(js, p, node_ref(0, el), "load", false, false);
+                fire_event(js, p, p.node_ref(0, el), "load", false, false);
             }
         }),
     );
@@ -387,7 +386,7 @@ pub(crate) fn on_mutations(js: &mut dyn super::Js, w: &Rc<Window>, batch: &[(u32
                     }
                 }
                 None => {
-                    fire_event(js, w, node_ref(0, el), "load", false, false);
+                    fire_event(js, w, w.node_ref(0, el), "load", false, false);
                 }
             }
         }
@@ -469,7 +468,7 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
         // Chrome fires `load` for the initial empty document while the
         // element is being inserted.
         None => {
-            fire_event(js, parent, node_ref(0, el), "load", false, false);
+            fire_event(js, parent, parent.node_ref(0, el), "load", false, false);
         }
     }
 }
@@ -692,7 +691,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             return cx.ret(Arg::Null);
         }
         let iface = p.rt.iface("HTMLIFrameElement");
-        let h = RealmOps::wrap(cx, p.realm(), iface, node_ref(0, el)).map_err(js_err)?;
+        let h = RealmOps::wrap(cx, p.realm(), iface, p.node_ref(0, el)).map_err(js_err)?;
         cx.ret(Arg::Handle(h))
     });
     getter(reg, rt, "Window", "length", |cx, w| {
@@ -844,7 +843,7 @@ fn this_child(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Option<Child> {
     if h.kind & 0xff != K_NODE {
         return None;
     }
-    let (slot, n) = decode_node(h)?;
+    let (slot, n) = w.decode_node(h)?;
     if slot != 0 {
         return None;
     }
@@ -864,7 +863,7 @@ fn document_handle(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<Handle, H
     let name = w.with_doc(|d| super::tags::node_interface(d, Document::DOCUMENT, 0));
     let iface = w.rt.iface(name);
     let h =
-        RealmOps::wrap(cx, w.realm(), iface, node_ref(0, Document::DOCUMENT)).map_err(js_err)?;
+        RealmOps::wrap(cx, w.realm(), iface, w.node_ref(0, Document::DOCUMENT)).map_err(js_err)?;
     w.frames.document.set(Some(h));
     Ok(h)
 }

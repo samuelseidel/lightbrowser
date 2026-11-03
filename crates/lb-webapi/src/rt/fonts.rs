@@ -150,7 +150,7 @@ fn arg_face(cx: &mut CallCtx<'_, '_, '_>, w: &Window, i: usize) -> Option<u32> {
 
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Document", "fonts", |cx, w| {
-        let (slot, _) = super::this_node(cx)?;
+        let (slot, _) = super::this_node(cx, w)?;
         let id = w.cached_obj((slot, 0, "FontFaceSet", String::new()), || {
             Obj::Font(Box::new(FontObj::Set {
                 faces: Vec::new(),

@@ -29,9 +29,7 @@ use lb_paint::decode::{self, ImageInfo};
 use url::Url;
 
 use super::canvas::Source;
-use super::{
-    Js, Runtime, TaskSource, Window, fire_event, getter, method, node_ref, setter, this_node,
-};
+use super::{Js, Runtime, TaskSource, Window, fire_event, getter, method, setter, this_node};
 use crate::host::{Destination, NetRequest, NetResponse};
 use crate::registry::Registry;
 
@@ -438,7 +436,7 @@ fn settle(js: &mut dyn Js, w: &Rc<Window>, n: NodeId, seq: u32, ok: bool, counte
         fire_event(
             js,
             w,
-            node_ref(0, n),
+            w.node_ref(0, n),
             if ok { "load" } else { "error" },
             false,
             false,
@@ -520,13 +518,13 @@ fn state_of(w: &Window, slot: u32, n: NodeId) -> (Status, Option<ImageInfo>, Opt
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     const I: &str = "HTMLImageElement";
     getter(reg, rt, I, "complete", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let (status, _, _, lazy) = state_of(w, slot, n);
         cx.ret(!lazy && status != Status::Loading)
     });
     for (k, name) in ["naturalWidth", "naturalHeight"].into_iter().enumerate() {
         getter(reg, rt, I, name, move |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let (status, info, _, _) = state_of(w, slot, n);
             let v = match (status, info) {
                 (Status::Loaded, Some(i)) => {
@@ -543,7 +541,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }
     for (k, name) in ["width", "height"].into_iter().enumerate() {
         getter(reg, rt, I, name, move |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let rendered = (slot == 0 && w.with_doc(|d| d.is_connected(n)))
                 .then(|| {
                     w.with_layout(0, |le, d| {
@@ -585,12 +583,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     getter(reg, rt, I, "currentSrc", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let (_, _, url, _) = state_of(w, slot, n);
         cx.ret(url.map(|u| u.to_string()).unwrap_or_default())
     });
     method(reg, rt, I, "decode", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let r = cx.ret_new_promise()?;
         let (status, _, _, _) = state_of(w, slot, n);
         match status {
@@ -613,7 +611,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         ),
     ] {
         getter(reg, rt, I, name, move |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let v = w.doc_slot(slot, |d| {
                 d.get_attribute(n, attr).map(str::to_ascii_lowercase)
             });
@@ -623,7 +621,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             })
         });
         setter(reg, rt, I, name, move |cx, w| {
-            let (slot, n) = this_node(cx)?;
+            let (slot, n) = this_node(cx, w)?;
             let v = cx.arg_string(0)?;
             let _ = w.doc_slot_mut(slot, |d| d.set_attribute(n, attr, &v));
             w.after_mutation(cx);
@@ -631,7 +629,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     getter(reg, rt, I, "crossOrigin", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         let v = w.doc_slot(slot, |d| {
             d.get_attribute(n, "crossorigin")
                 .map(str::to_ascii_lowercase)
@@ -643,7 +641,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         })
     });
     setter(reg, rt, I, "crossOrigin", |cx, w| {
-        let (slot, n) = this_node(cx)?;
+        let (slot, n) = this_node(cx, w)?;
         if cx.arg_kind(0) == lb_js::ValueKind::Null {
             w.doc_slot_mut(slot, |d| d.remove_attribute(n, "crossorigin"));
         } else {

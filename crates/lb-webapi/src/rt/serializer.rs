@@ -33,7 +33,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "XMLSerializer", "serializeToString", |cx, w| {
         need_args(cx, 1, "serializeToString", "XMLSerializer")?;
-        let (slot, n) = arg_node(cx, 0, "serializeToString", "XMLSerializer")?;
+        let (slot, n) = arg_node(cx, w, 0, "serializeToString", "XMLSerializer")?;
         let s = w.doc_slot(slot, |d| match d.node_type(n) {
             NodeType::DocumentType => doctype_markup(d, n),
             NodeType::Document => {

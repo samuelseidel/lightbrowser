@@ -6,6 +6,8 @@ use lb_page::WaitUntil;
 
 use super::common::{Resource, browser, context, open, serve};
 
+mod cross_realm;
+
 async fn eval(page: &lb_page::Page, src: &str) -> JsValue {
     page.evaluate(src).await.unwrap()
 }

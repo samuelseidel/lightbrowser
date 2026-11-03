@@ -11,7 +11,7 @@ use url::Url;
 use super::events::{EventExtra, coarse_now, fire_event_with};
 use super::{
     HistEntry, Js, K_OBJ, NavRequest, Obj, Runtime, TaskSource, TimerCallback, WINDOW_REF, Window,
-    getter, illegal, method, need_args, node_ref, setter, this_obj,
+    getter, illegal, method, need_args, setter, this_obj,
 };
 use crate::host::ConsoleMessage;
 use crate::registry::{Registry, host_fn};
@@ -304,7 +304,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
         return;
     }
     let focus_extra = |related: Option<NodeId>| EventExtra::Focus {
-        related: related.map(|r| node_ref(0, r)),
+        related: related.map(|r| w.node_ref(0, r)),
     };
     if let Some(o) = old {
         super::input::before_blur(js, w, o);
@@ -313,7 +313,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
         fire_event_with(
             js,
             w,
-            node_ref(0, o),
+            w.node_ref(0, o),
             "FocusEvent",
             "blur",
             false,
@@ -323,7 +323,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
         fire_event_with(
             js,
             w,
-            node_ref(0, o),
+            w.node_ref(0, o),
             "FocusEvent",
             "focusout",
             true,
@@ -338,7 +338,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
         fire_event_with(
             js,
             w,
-            node_ref(0, n),
+            w.node_ref(0, n),
             "FocusEvent",
             "focus",
             false,
@@ -348,7 +348,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
         fire_event_with(
             js,
             w,
-            node_ref(0, n),
+            w.node_ref(0, n),
             "FocusEvent",
             "focusin",
             true,

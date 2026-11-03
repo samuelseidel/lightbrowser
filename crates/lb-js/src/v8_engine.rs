@@ -871,7 +871,12 @@ struct State {
     next_realm: u32,
     handles: Slab<(RealmId, v8::Global<v8::Value>)>,
     resolvers: Slab<(RealmId, v8::Global<v8::PromiseResolver>)>,
-    wrappers: HashMap<(RealmId, HostRef), v8::Global<v8::Object>>,
+    /// Wrapper cache: `(wrapper_key world or realm, host)` to (the realm
+    /// that made the wrapper, the wrapper). See [`Engine::set_shared_hosts`].
+    wrappers: HashMap<(RealmId, HostRef), (RealmId, v8::Global<v8::Object>)>,
+    /// `(mask, value)`: host refs with `kind & mask == value` have one
+    /// wrapper per world, not per realm.
+    shared_hosts: Option<(u32, u32)>,
     heap: Option<Rc<HeapGuard>>,
     snap: SnapState,
     /// The snapshot context while it is being made (it is no realm).
@@ -916,7 +921,28 @@ impl State {
     fn mat(&self, realm: RealmId) -> Option<Rc<RealmMat>> {
         self.realms.get(&realm).map(|r| r.mat.clone())
     }
+
+    /// The wrapper cache key of `host` wrapped for `realm`: shared by all
+    /// main-world realms for shared hosts, else per realm.
+    fn wrapper_key(&self, realm: RealmId, host: HostRef) -> (RealmId, HostRef) {
+        match self.shared_hosts {
+            Some((mask, value))
+                if host.kind & mask == value
+                    && self
+                        .realms
+                        .get(&realm)
+                        .is_some_and(|r| r.world == World::Main) =>
+            {
+                (MAIN_WORLD, host)
+            }
+            _ => (realm, host),
+        }
+    }
 }
+
+/// Wrapper cache key of the main world's shared wrappers (no realm has
+/// id 0).
+const MAIN_WORLD: RealmId = RealmId(0);
 
 /// Internal fields of every wrapper: kind, id.
 const HOST_FIELDS: usize = 2;
@@ -1100,6 +1126,7 @@ impl Engine {
             handles: Slab::new(),
             resolvers: Slab::new(),
             wrappers: HashMap::new(),
+            shared_hosts: None,
             heap: heap.clone(),
             snap,
             creating: None,
@@ -1400,6 +1427,16 @@ impl Engine {
                 .ok()
                 .and_then(|o| read_host(scope, o)))
         })
+    }
+
+    /// Host refs with `kind & mask == value` name the same object in every
+    /// realm (DOM nodes, whose refs carry their document): like Blink's
+    /// per-world wrapper map, all main-world realms then share one wrapper
+    /// per such object, made in the realm that first wraps it, so a node
+    /// keeps its identity when another frame's code reaches it. Isolated
+    /// worlds keep their own wrappers.
+    pub fn set_shared_hosts(&mut self, mask: u32, value: u32) {
+        self.state.borrow_mut().shared_hosts = Some((mask, value));
     }
 
     /// Drop the cached wrappers of a host object in every realm (the host
@@ -1982,7 +2019,7 @@ fn new_realm_in(
                 set_host(scope, global, host);
             }
             st.wrappers
-                .insert((id, host), v8::Global::new(scope, global));
+                .insert((id, host), (id, v8::Global::new(scope, global)));
         }
         st.realms.insert(
             id,
@@ -2418,7 +2455,7 @@ fn drop_realm_state(isolate: &mut v8::Isolate, state: &SharedState, realm: Realm
         ids.retain(|r| *r != realm);
         !ids.is_empty()
     });
-    st.wrappers.retain(|(r, _), _| *r != realm);
+    st.wrappers.retain(|_, (r, _)| *r != realm);
     st.handles.retain(|(r, _)| *r != realm);
     st.resolvers.retain(|(r, _)| *r != realm);
 }
@@ -2501,6 +2538,9 @@ pub struct CallCtx<'a, 's, 'i> {
     rv: v8::ReturnValue<'s, v8::Value>,
     state: SharedState,
     realm: RealmId,
+    /// Realm host objects are wrapped in by [`CallCtx::ret`] and
+    /// [`CallCtx::wrap`] (see [`CallCtx::set_wrap_realm`]).
+    wrap_realm: Option<RealmId>,
 }
 
 impl<'s, 'i> CallCtx<'_, 's, 'i> {
@@ -2586,10 +2626,9 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         }
         set_host(self.scope, this, host);
         let global = v8::Global::new(self.scope, this);
-        self.state
-            .borrow_mut()
-            .wrappers
-            .insert((self.realm, host), global);
+        let mut st = self.state.borrow_mut();
+        let key = st.wrapper_key(self.realm, host);
+        st.wrappers.insert(key, (self.realm, global));
         Ok(())
     }
 
@@ -2598,7 +2637,7 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
     /// `this` another prototype (`Reflect.construct(Image, [], F)`, a
     /// subclass), the returned object gets that prototype, as in Chrome.
     pub fn ret_constructed(&mut self, value: impl Into<Arg>) -> Result<(), HostError> {
-        let v = arg_to_v8(self.scope, &self.state, self.realm, &value.into())?;
+        let v = self.to_v8(&value.into())?;
         if self.args.is_construct_call()
             && let Ok(obj) = v8::Local::<v8::Object>::try_from(v)
             && let Some(want) = self.args.this().get_prototype(self.scope)
@@ -2612,9 +2651,69 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
 
     /// Set the return value.
     pub fn ret(&mut self, value: impl Into<Arg>) -> Result<(), HostError> {
-        let v = arg_to_v8(self.scope, &self.state, self.realm, &value.into())?;
+        let v = self.to_v8(&value.into())?;
         self.rv.set(v);
         Ok(())
+    }
+
+    /// Wrap host objects returned from now on in `realm` (another realm of
+    /// this engine) instead of the calling one: a method of one frame
+    /// called on a node of another frame's document returns that
+    /// document's objects with their own realm's prototypes, as in Chrome.
+    /// Other values and exceptions stay in the calling realm.
+    pub fn set_wrap_realm(&mut self, realm: RealmId) {
+        self.wrap_realm = (realm != self.realm).then_some(realm);
+    }
+
+    /// The realm whose context created `this` (an object of another realm
+    /// passed as the receiver); `None` when it is the calling realm or not
+    /// one of this engine's.
+    pub fn this_realm(&mut self) -> Option<RealmId> {
+        let this = self.args.this();
+        let ctx = this.get_creation_context(self.scope)?;
+        if ctx == self.scope.get_current_context() {
+            return None;
+        }
+        realm_of_context(self.scope, ctx)
+    }
+
+    /// Point the wrappers of host objects at other host objects: for each
+    /// `(old, new)`, every realm's wrapper of `old` now stands for `new`
+    /// (a node moved to another document's arena keeps its JS identity).
+    pub fn rehost(&mut self, pairs: &[(HostRef, HostRef)]) {
+        let state = self.state.clone();
+        let mut st = state.borrow_mut();
+        let mut keys: Vec<RealmId> = st.realms.keys().copied().collect();
+        keys.push(MAIN_WORLD);
+        for &(old, new) in pairs {
+            for &r in &keys {
+                if let Some((by, g)) = st.wrappers.remove(&(r, old)) {
+                    let obj = v8::Local::new(self.scope, &g);
+                    set_host(self.scope, obj, new);
+                    st.wrappers.insert((r, new), (by, g));
+                }
+            }
+        }
+    }
+
+    /// A value for this call's return or a handle: host objects in the
+    /// wrap realm (if set), everything else in the calling realm.
+    fn to_v8(&mut self, arg: &Arg) -> Result<v8::Local<'s, v8::Value>, HostError> {
+        match (self.wrap_realm, arg) {
+            (Some(r), Arg::Host(iface, host)) => {
+                Ok(wrap_host(self.scope, &self.state, r, *iface, *host)
+                    .map_err(|e| HostError::Error(e.message))?
+                    .into())
+            }
+            (Some(_), Arg::Array(items)) => {
+                let mut elems = Vec::with_capacity(items.len());
+                for a in items {
+                    elems.push(self.to_v8(a)?);
+                }
+                Ok(v8::Array::new_with_elements(self.scope, &elems).into())
+            }
+            _ => arg_to_v8(self.scope, &self.state, self.realm, arg),
+        }
     }
 
     /// Return a new pending promise; settle it later through the resolver.
@@ -2663,7 +2762,8 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
 
     /// Wrap a host object without returning it (e.g. to store a handle).
     pub fn wrap(&mut self, iface: InterfaceId, host: HostRef) -> Result<Handle, HostError> {
-        let obj = wrap_host(self.scope, &self.state, self.realm, iface, host)
+        let realm = self.wrap_realm.unwrap_or(self.realm);
+        let obj = wrap_host(self.scope, &self.state, realm, iface, host)
             .map_err(|e| HostError::Error(e.message))?;
         Ok(store_handle(
             self.scope,
@@ -3031,6 +3131,7 @@ fn invoke<'s>(
         rv,
         state,
         realm,
+        wrap_realm: None,
     };
     // A panic must not unwind into V8 (that aborts the process): report it
     // as a JS error instead (builds with `panic = abort` still abort).
@@ -3612,13 +3713,39 @@ fn wrap_host<'s>(
     iface: InterfaceId,
     host: HostRef,
 ) -> Result<v8::Local<'s, v8::Object>, JsError> {
-    let mat = {
+    let (key, mat, context) = {
         let st = state.borrow();
-        if let Some(g) = st.wrappers.get(&(realm, host)) {
+        let key = st.wrapper_key(realm, host);
+        if let Some((_, g)) = st.wrappers.get(&key) {
             return Ok(v8::Local::new(scope, g));
         }
-        st.mat(realm)
+        let context = st
+            .realms
+            .get(&realm)
+            .map(|r| v8::Local::new(scope, &r.context));
+        (key, st.mat(realm), context)
     };
+    // A wrapper for another realm than the running one (a node of another
+    // frame's document): made in that realm's context, so it gets that
+    // realm's prototypes.
+    if let Some(context) = context
+        && context != scope.get_current_context()
+    {
+        let scope = &mut v8::ContextScope::new(scope, context);
+        return new_wrapper(scope, state, (realm, key), mat, iface, host);
+    }
+    new_wrapper(scope, state, (realm, key), mat, iface, host)
+}
+
+/// The body of [`wrap_host`] on a cache miss, in the realm's context.
+fn new_wrapper<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    (realm, key): (RealmId, (RealmId, HostRef)),
+    mat: Option<Rc<RealmMat>>,
+    iface: InterfaceId,
+    host: HostRef,
+) -> Result<v8::Local<'s, v8::Object>, JsError> {
     // The interface object first, so the wrapper's prototype chain is the
     // realm's fixed one.
     if let Some(mat) = &mat {
@@ -3633,7 +3760,7 @@ fn wrap_host<'s>(
     set_host(scope, obj, host);
     apply_overflow(scope, state, iface, obj);
     let global = v8::Global::new(scope, obj);
-    state.borrow_mut().wrappers.insert((realm, host), global);
+    state.borrow_mut().wrappers.insert(key, (realm, global));
     Ok(obj)
 }
 
