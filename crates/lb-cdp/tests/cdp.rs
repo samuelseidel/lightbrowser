@@ -1108,12 +1108,18 @@ fn targets_sessions_and_personas() {
             )
             .await;
         assert!(e.is_err());
-        for m in [
-            "humanClick",
-            "humanType",
-            "humanScroll",
-            "fingerprintReport",
-        ] {
+        // A browser session must name the page; the mock host has no report.
+        let e = c
+            .call("LightBrowser.fingerprintReport", json!({}), None)
+            .await
+            .unwrap_err();
+        assert!(e["data"].as_str().unwrap().contains("targetId"), "{e}");
+        let e = c
+            .call("LightBrowser.fingerprintReport", json!({}), Some(&s3))
+            .await
+            .unwrap_err();
+        assert!(e["message"].as_str().unwrap().contains("not supported"));
+        for m in ["humanClick", "humanType", "humanScroll"] {
             let e = c
                 .call(&format!("LightBrowser.{m}"), json!({}), None)
                 .await

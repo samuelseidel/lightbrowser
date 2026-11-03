@@ -383,6 +383,11 @@
               "maxLength": 256
             }
           }
+        },
+        "js_heap_size_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "performance.memory.jsHeapSizeLimit in bytes (Chrome only). Optional; default 4395630592 (Chrome 153, 64-bit desktop)."
         }
       }
     },
@@ -1117,7 +1122,7 @@
     "media_devices": {
       "type": "object",
       "additionalProperties": false,
-      "description": "navigator.mediaDevices.enumerateDevices() labels (empty until permission is granted in real browsers). Optional.",
+      "description": "navigator.mediaDevices.enumerateDevices(): labels (exposed only after permission is granted) and device counts per kind. Without permission Chrome lists at most one device per kind, with empty ids and labels. Optional.",
       "properties": {
         "webcam_label": {
           "type": "string"
@@ -1127,13 +1132,31 @@
         },
         "speaker_label": {
           "type": "string"
+        },
+        "audioinput": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16,
+          "description": "Number of microphones. Default: 1 if the matching label is set, else 0."
+        },
+        "videoinput": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16,
+          "description": "Number of cameras. Default: 1 if the matching label is set, else 0."
+        },
+        "audiooutput": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16,
+          "description": "Number of speakers. Default: 1 if the matching label is set, else 0."
         }
       }
     },
     "battery": {
       "type": "object",
       "additionalProperties": false,
-      "description": "navigator.getBattery() values. Optional; absent on desktops without a battery.",
+      "description": "navigator.getBattery() values. Optional; absent means Chrome's desktop answer (charging, level 1, chargingTime 0, dischargingTime Infinity).",
       "properties": {
         "level": {
           "type": "number",
@@ -1142,6 +1165,85 @@
         },
         "charging": {
           "type": "boolean"
+        },
+        "charging_time": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "BatteryManager.chargingTime in seconds; absent or null is Infinity."
+        },
+        "discharging_time": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "BatteryManager.dischargingTime in seconds; absent or null is Infinity."
+        }
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "User preferences behind media queries, plus the classic scrollbar width. Optional; every field has a default (a light sRGB desktop).",
+      "properties": {
+        "color_scheme": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "default": "light",
+          "description": "prefers-color-scheme."
+        },
+        "reduced_motion": {
+          "type": "boolean",
+          "default": false,
+          "description": "prefers-reduced-motion: reduce."
+        },
+        "reduced_transparency": {
+          "type": "boolean",
+          "default": false,
+          "description": "prefers-reduced-transparency: reduce."
+        },
+        "contrast": {
+          "type": "string",
+          "enum": [
+            "no-preference",
+            "more",
+            "less",
+            "custom"
+          ],
+          "default": "no-preference",
+          "description": "prefers-contrast."
+        },
+        "forced_colors": {
+          "type": "boolean",
+          "default": false,
+          "description": "forced-colors: active."
+        },
+        "color_gamut": {
+          "type": "string",
+          "enum": [
+            "srgb",
+            "p3",
+            "rec2020"
+          ],
+          "default": "srgb",
+          "description": "Widest color-gamut the screen matches."
+        },
+        "high_dynamic_range": {
+          "type": "boolean",
+          "default": false,
+          "description": "dynamic-range: high."
+        },
+        "scrollbar_width": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 40,
+          "description": "Classic scrollbar width in CSS px. Default: 17 on Windows, 15 on Linux, 0 on macOS (overlay)."
         }
       }
     }

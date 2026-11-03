@@ -322,6 +322,13 @@ pub trait PageHost {
 
     fn frame_tree(&self, target_id: &str) -> HostResult<FrameTree>;
 
+    /// `LightBrowser.fingerprintReport`: the live fingerprint surface of the
+    /// page's current document compared with its persona (JSON report with
+    /// `ok`, `summary` and `checks`). Collected in an isolated world only.
+    async fn fingerprint_report(&self, _target_id: &str) -> HostResult<Value> {
+        Err(HostError::unsupported("LightBrowser.fingerprintReport"))
+    }
+
     /// Creates an isolated world in `frame_id` and returns its realm. The
     /// realm is also reported with `ExecutionContextCreated`.
     fn create_isolated_world(

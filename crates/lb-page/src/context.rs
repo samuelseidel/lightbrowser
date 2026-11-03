@@ -1,11 +1,13 @@
 //! Browser contexts: persona, cookie jar, storage partitions and the
 //! network pool shared by every page of the context. Engine-neutral.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use lb_net::ClientHelloProfile;
 use lb_net::cookies::CookieJar;
-use lb_net::fetch::{NetContext, Request};
+use lb_net::fetch::{NetContext, RedirectHop, Request};
+use lb_net::header_profile::{RequestKind, RequestMeta};
 use lb_persona::{Persona, PersonaProfile};
 use lb_webapi::host::{Destination, NetRequest, NetResponse, StoragePartition};
 use url::Url;
@@ -42,6 +44,22 @@ struct Shared {
     local_storage: StoragePartition,
     /// Idle network contexts (TLS connector and resolver are reused).
     pool: Mutex<Vec<NetContext>>,
+    /// Favicon URLs already requested by this context (Chrome asks once).
+    favicons: Mutex<HashSet<String>>,
+}
+
+/// What happened on the wire for one [`BrowserContext::fetch_traced`] call,
+/// for CDP `Network` events.
+#[derive(Debug, Clone)]
+pub struct FetchTrace {
+    /// Redirects followed, in order (status, `Location`, headers sent and
+    /// received on each hop). Empty when there were none.
+    pub redirects: Vec<RedirectHop>,
+    /// Method of the final request.
+    pub method: String,
+    /// Request headers as sent on the final hop (wire case and order).
+    pub request_headers: Vec<(String, String)>,
+    pub http_version: lb_net::HttpVersion,
 }
 
 /// A browsing context group: one persona, one cookie jar, one storage
@@ -96,6 +114,7 @@ impl BrowserContext {
             cookies,
             local_storage: StoragePartition::new(),
             pool: Mutex::new(Vec::new()),
+            favicons: Mutex::new(HashSet::new()),
         }));
         ctx.put_back(probe);
         Ok(ctx)
@@ -143,107 +162,115 @@ impl BrowserContext {
         }
     }
 
-    /// Perform a request for a page: persona headers adjusted for the
-    /// destination, the context's cookies, redirects.
+    /// Perform a request for a page: the browser's header set for the
+    /// request's destination (persona values, `Sec-Fetch-*`, `Referer`,
+    /// `Origin`, cookies), then redirects. See `lb_net::header_profile`.
     pub async fn fetch(&self, req: NetRequest) -> Result<NetResponse, String> {
+        self.fetch_traced(req).await.map(|(r, _)| r)
+    }
+
+    /// Like [`fetch`](Self::fetch), also returning the redirect chain and the
+    /// request headers that went on the wire.
+    pub async fn fetch_traced(&self, req: NetRequest) -> Result<(NetResponse, FetchTrace), String> {
+        self.fetch_as(req, None).await
+    }
+
+    async fn fetch_as(
+        &self,
+        req: NetRequest,
+        kind: Option<RequestKind>,
+    ) -> Result<(NetResponse, FetchTrace), String> {
         let mut net = self.take_net().map_err(|e| e.to_string())?;
         let url = req.url.clone();
         let wire = Request {
             method: http::Method::from_bytes(req.method.as_bytes()).map_err(|e| e.to_string())?,
             url: url.clone(),
-            headers: request_headers(&req),
-            body: bytes::Bytes::from(req.body),
+            headers: req.headers.clone(),
+            body: bytes::Bytes::from(req.body.clone()),
+            meta: Some(request_meta(&req, kind)),
         };
         let r = lb_net::fetch(&mut net, wire).await;
         self.put_back(net);
         let resp = r.map_err(|e| e.to_string())?;
-        Ok(NetResponse {
-            status: resp.status.as_u16(),
-            status_text: resp.status.canonical_reason().unwrap_or("").to_owned(),
-            headers: resp.headers,
-            body: resp.body.to_vec(),
-            redirected: resp.final_url != url,
-            url: resp.final_url,
-        })
+        let trace = FetchTrace {
+            redirects: resp.redirects,
+            method: resp.method.to_string(),
+            request_headers: resp.request_headers,
+            http_version: resp.version,
+        };
+        Ok((
+            NetResponse {
+                status: resp.status.as_u16(),
+                status_text: resp.status.canonical_reason().unwrap_or("").to_owned(),
+                headers: resp.headers,
+                body: resp.body.to_vec(),
+                redirected: resp.final_url != url,
+                url: resp.final_url,
+            },
+            trace,
+        ))
     }
+
+    /// Request the favicon of a loaded top-level document, the way Chrome
+    /// does: `icon` (the `<link rel=icon>` href, already resolved) or else
+    /// `/favicon.ico` on the page's origin, with the image header set,
+    /// `Referer` = the page and the context's cookies.
+    ///
+    /// Call it once after the document's `load` event, from the page's
+    /// worker (fire and forget; the load does not wait for it). Chrome
+    /// asks once per icon URL, so repeated calls for the same URL return
+    /// `None`, and so do pages that are not http(s). The response is only
+    /// returned for tests and tracing; the body is not used.
+    pub async fn request_favicon(
+        &self,
+        page_url: &Url,
+        icon: Option<Url>,
+    ) -> Option<Result<NetResponse, String>> {
+        if !matches!(page_url.scheme(), "http" | "https") {
+            return None;
+        }
+        let icon = icon.or_else(|| page_url.join("/favicon.ico").ok())?;
+        if !matches!(icon.scheme(), "http" | "https") {
+            return None;
+        }
+        let first = self
+            .0
+            .favicons
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(icon.to_string());
+        if !first {
+            return None;
+        }
+        let req = NetRequest::get(icon, Destination::Image, Some(page_url.clone()));
+        Some(
+            self.fetch_as(req, Some(RequestKind::Favicon))
+                .await
+                .map(|(r, _)| r),
+        )
+    }
+}
+
+/// The header-set selector for a page request.
+fn request_meta(req: &NetRequest, kind: Option<RequestKind>) -> RequestMeta {
+    let kind = kind.unwrap_or(match req.destination {
+        Destination::Document => RequestKind::Document,
+        Destination::Iframe => RequestKind::Iframe,
+        Destination::Script if req.mode == "cors" => RequestKind::ModuleScript,
+        Destination::Script => RequestKind::Script,
+        Destination::Style => RequestKind::Style,
+        Destination::Image => RequestKind::Image,
+        Destination::Empty => RequestKind::Fetch,
+    });
+    let mut meta = RequestMeta::new(kind, req.initiator.clone());
+    meta.mode = req.mode.to_owned();
+    meta
 }
 
 /// `Sec-Fetch-Site` for a request made by `initiator`.
+#[cfg(test)]
 pub(crate) fn fetch_site(initiator: Option<&Url>, target: &Url) -> &'static str {
-    let Some(i) = initiator else { return "none" };
-    if i.origin() == target.origin() {
-        return "same-origin";
-    }
-    let site = |u: &Url| {
-        let h = u.host_str().unwrap_or("");
-        let labels: Vec<&str> = h.rsplit('.').take(2).collect();
-        (u.scheme().to_owned(), labels.join("."))
-    };
-    if site(i) == site(target) {
-        "same-site"
-    } else {
-        "cross-site"
-    }
-}
-
-/// Caller headers for lb-net: they replace the persona's navigation
-/// defaults in place (`Accept`, `Sec-Fetch-*`), then script headers and
-/// `Referer` / `Origin` follow.
-///
-/// Known gap: lb-net always starts from the navigation header set, so
-/// subresource requests still carry `Upgrade-Insecure-Requests` and
-/// `Sec-Fetch-User`; per-destination header sets belong in lb-net.
-fn request_headers(req: &NetRequest) -> Vec<(String, String)> {
-    let mut h: Vec<(String, String)> = Vec::new();
-    let mut put = |k: &str, v: &str| h.push((k.to_owned(), v.to_owned()));
-    let site = fetch_site(req.initiator.as_ref(), &req.url);
-    match req.destination {
-        Destination::Document | Destination::Iframe => {
-            put("sec-fetch-site", site);
-            if req.destination == Destination::Iframe {
-                put("sec-fetch-dest", "iframe");
-            }
-        }
-        d => {
-            let accept = match d {
-                Destination::Style => "text/css,*/*;q=0.1",
-                Destination::Image => {
-                    "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
-                }
-                _ => "*/*",
-            };
-            put("accept", accept);
-            put("sec-fetch-site", site);
-            put("sec-fetch-mode", req.mode);
-            put("sec-fetch-dest", d.as_str());
-        }
-    }
-    let mut out = h;
-    for (k, v) in &req.headers {
-        if let Some(e) = out.iter_mut().find(|(n, _)| n.eq_ignore_ascii_case(k)) {
-            e.1 = v.clone();
-        } else {
-            out.push((k.to_ascii_lowercase(), v.clone()));
-        }
-    }
-    if let Some(i) = &req.initiator {
-        let cross = i.origin() != req.url.origin();
-        if req.destination == Destination::Empty && (cross || req.method != "GET") {
-            out.push(("origin".into(), i.origin().ascii_serialization()));
-        }
-        // Default referrer policy strict-origin-when-cross-origin.
-        let referer = if cross {
-            format!("{}/", i.origin().ascii_serialization())
-        } else {
-            let mut r = i.clone();
-            r.set_fragment(None);
-            r.to_string()
-        };
-        if !(i.scheme() == "https" && req.url.scheme() == "http") {
-            out.push(("referer".into(), referer));
-        }
-    }
-    out
+    lb_net::header_profile::Site::between(initiator, target).as_str()
 }
 
 #[cfg(test)]
@@ -269,19 +296,20 @@ mod tests {
     }
 
     #[test]
-    fn subresource_headers() {
-        let init = Url::parse("http://127.0.0.1:1/page#frag").unwrap();
-        let req = NetRequest::get(
-            Url::parse("http://127.0.0.1:1/a.js").unwrap(),
-            Destination::Script,
-            Some(init),
-        );
-        let h = request_headers(&req);
-        let get = |n: &str| h.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
-        assert_eq!(get("accept"), Some("*/*"));
-        assert_eq!(get("sec-fetch-dest"), Some("script"));
-        assert_eq!(get("sec-fetch-mode"), Some("no-cors"));
-        assert_eq!(get("sec-fetch-site"), Some("same-origin"));
-        assert_eq!(get("referer"), Some("http://127.0.0.1:1/page"));
+    fn meta_follows_destination_and_mode() {
+        let init = Url::parse("http://127.0.0.1:1/page").unwrap();
+        let u = |p: &str| Url::parse(&format!("http://127.0.0.1:1/{p}")).unwrap();
+        let mut req = NetRequest::get(u("a.js"), Destination::Script, Some(init.clone()));
+        assert_eq!(request_meta(&req, None).kind, RequestKind::Script);
+        req.mode = "cors";
+        assert_eq!(request_meta(&req, None).kind, RequestKind::ModuleScript);
+        let req = NetRequest::get(u("x"), Destination::Empty, Some(init.clone()));
+        let m = request_meta(&req, None);
+        assert_eq!((m.kind, m.mode.as_str()), (RequestKind::Fetch, "cors"));
+        let nav = NetRequest::get(u("p"), Destination::Document, None);
+        let m = request_meta(&nav, None);
+        assert!(m.user_activated && m.initiator.is_none());
+        let scripted = NetRequest::get(u("p"), Destination::Document, Some(init));
+        assert!(!request_meta(&scripted, None).user_activated);
     }
 }

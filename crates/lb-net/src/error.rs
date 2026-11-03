@@ -40,12 +40,6 @@ impl From<http::Error> for NetError {
     }
 }
 
-impl From<hyper::Error> for NetError {
-    fn from(e: hyper::Error) -> Self {
-        NetError::Http(e.to_string())
-    }
-}
-
 impl From<::h2::Error> for NetError {
     fn from(e: ::h2::Error) -> Self {
         NetError::Http(e.to_string())

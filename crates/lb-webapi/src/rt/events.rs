@@ -41,9 +41,28 @@ pub enum EventExtra {
     Message {
         data: Option<Handle>,
         origin: String,
+        /// `MessageEvent.source` (the sender's window), if any.
+        source: Option<Handle>,
     },
     PageTransition {
         persisted: bool,
+    },
+    /// `MouseEvent`, `PointerEvent`, `WheelEvent` (see `input`).
+    Mouse(Box<super::input::MouseData>),
+    /// `KeyboardEvent`.
+    Keyboard(Box<super::input::KeyData>),
+    /// `InputEvent`.
+    Input {
+        data: Option<String>,
+        input_type: String,
+    },
+    /// `FocusEvent`.
+    Focus {
+        related: Option<HostRef>,
+    },
+    /// `UIEvent` with a `detail`.
+    Ui {
+        detail: i32,
     },
 }
 
@@ -835,6 +854,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         e.extra = EventExtra::Message {
             data: d.get(cx, "data")?,
             origin: d.string(cx, "origin")?.unwrap_or_default(),
+            source: d.get(cx, "source")?,
         };
         d.release(cx);
         e.time = coarse_now(w);
@@ -1056,6 +1076,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     extra_get!("MessageEvent", "origin", |cx, x| cx.ret(match x {
         EventExtra::Message { origin, .. } => origin,
         _ => String::new(),
+    }));
+    extra_get!("MessageEvent", "source", |cx, x| cx.ret(match x {
+        EventExtra::Message {
+            source: Some(h), ..
+        } => Arg::Handle(h),
+        _ => Arg::Null,
     }));
 
     register_handlers(reg, rt);

@@ -7,14 +7,17 @@ driven over CDP, so stock Playwright `connectOverCDP` works. Presents a Chrome
 or Firefox persona.
 
 `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` are the source of truth. Read them
-first and do not contradict them. Current state: M1 (network) done for
-Chrome; Firefox TLS gaps are listed in ADR 0003. M2 (DOM + V8) is done for
-Chrome: `fetch --dump html` runs scripts and the WPT subset passes 2540/2788.
-M3 is in progress: `lb-css`, `lb-layout` and `lb-cdp` have landed, and
-`serve` runs on a mock page host until `lb-page` implements
-`lb_cdp::PageHost`. `lb-paint` is still an empty skeleton. See "M2 status"
-and "M3 status" in `docs/ROADMAP.md`. Our detection engine for M4/M5 is
-`tests/detect-bench` on loopback (ADR 0007).
+first and do not contradict them. Current state (Chrome build): M1 (network),
+M2 (DOM + V8), M3 (layout + CDP) and M4 (Chrome fingerprints) are done.
+`lightbrowser serve` runs real V8 pages through `lb_page::CdpHost`; stock
+Playwright `connectOverCDP` passes 16 tests; the WPT subset passes
+2552/2788. On our detection engine (`tests/detect-bench`, ADR 0007) T-010
+over CDP scores fp 0 for both reference Chrome personas (target `fp<=30`);
+only behaviour rules fire (M5, target `beh<=30`). Open: Firefox (M4b: no
+SpiderMonkey backend, TLS gaps in ADR 0003), workers, shader execution in
+WebGL, behaviour replay and the Python SDK (M5), and size/snapshot budgets
+(M6: release binary 62.1 MB vs < 40 MB). See "M4 status: summary" in
+`docs/ROADMAP.md` for surfaces and gaps.
 
 ## Internal use and legal
 - Internal only. Never push binaries to public repos or registries.
@@ -24,20 +27,20 @@ and "M3 status" in `docs/ROADMAP.md`. Our detection engine for M4/M5 is
 ## Crate map
 | Crate | Role | State |
 |---|---|---|
-| `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R16, sfc32 done |
-| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (no snapshot); SpiderMonkey M4b |
-| `lb-net` | BoringSSL, hyper h1, forked h2 (`vendor/h2`), cookies, decoding, `fetch` | M1 done; cookies shared across clones; cache, proxies, connection reuse open |
+| `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R16, sfc32 done; optional `preferences`, media devices, battery |
+| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (no snapshot; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
+| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`) | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs; canvas/WebGL/audio later | Installer + core APIs done (chrome); canvas/WebGL/audio M4 |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome). WebGL runs no shaders; no workers, crypto or WebSocket |
 | `lb-css` | Lazy cascade | Done (~75 longhands; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout) |
-| `lb-paint` | tiny-skia canvas | M4 |
-| `lb-page` | Event loop, navigation, frames, workers | Event loop + navigation done; no iframes/workers; `PageHost` for CDP M3 |
-| `lb-cdp` | CDP server | Done against `MockHost`; real page host pending |
+| `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise | Done (no filters or shaping) |
+| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report` done; no workers or popups |
+| `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input simulation (vendored from stealth-browser) | Vendored + `cdp` event conversion; replay M5 |
-| `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate`, `serve` | `fetch` (runs scripts), `validate` done; `serve` on mock host |
+| `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate`, `serve`, `fingerprint-report` | All done for chrome; the firefox build's `serve` uses `MockHost` and `fingerprint-report` needs the JS engine |
 
 ## Commands
 ```bash
@@ -58,7 +61,16 @@ cargo test -p lb-net --test fingerprint -- --nocapture
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
 # WPT subset (loopback) and the Playwright CDP smoke test
 cargo test -p lb-page --test wpt -- --nocapture
-cargo build -p lightbrowser && node --test tests/playwright/
+cargo build -p lightbrowser && node --test tests/playwright/   # 16 tests; LIGHTBROWSER_BIN overrides
+# Live surface vs persona (JSON on stdout, exit 1 on any mismatch)
+./target/debug/lightbrowser fingerprint-report --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json
+cargo test -p lb-page --test pages report     # same check as a CI gate, all reference Chrome personas
+# Detection bench T-010 over CDP (loopback only; see tests/detect-bench/README.md)
+python3 tests/detect-bench/server.py --port 18766 --results-dir "$(mktemp -d)" &
+./target/debug/lightbrowser serve --port 19222 --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json &
+node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
+    --cdp ws://127.0.0.1:19222/devtools/browser/<id> --expect 'fp<=30'   # <id> from curl 127.0.0.1:19222/json/version
+# stop both servers afterwards
 # Regenerate the Chrome bindings table (--check: fail if stale)
 cargo run -p lb-webidl-gen -- --family chrome
 ```

@@ -9,7 +9,7 @@ publish = false
 # Same family features as lb-js. The firefox build has only the descriptor
 # tables (no installer, no implementations) until SpiderMonkey lands in M4b.
 default = ["chrome"]
-chrome = ["lb-js/chrome"]
+chrome = ["lb-js/chrome", "dep:lb-paint"]
 firefox = ["lb-js/firefox"]
 
 [dependencies]
@@ -18,6 +18,8 @@ lb-persona = { path = "../lb-persona" }
 lb-dom = { path = "../lb-dom" }
 lb-css = { path = "../lb-css" }
 lb-layout = { path = "../lb-layout" }
+# Canvas 2D raster and image codecs (chrome build only for now).
+lb-paint = { path = "../lb-paint", optional = true }
 url = "2"
 encoding_rs = "0.8"
 serde_json = "1"

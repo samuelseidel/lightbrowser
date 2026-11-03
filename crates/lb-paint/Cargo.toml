@@ -6,3 +6,13 @@ license.workspace = true
 publish = false
 
 [dependencies]
+lb-css = { path = "../lb-css" }
+lb-layout = { path = "../lb-layout" }
+lb-persona = { path = "../lb-persona" }
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "ico"] }
+
+[dev-dependencies]
+# Only the glyph pack generator example uses skrifa; it never runs in the
+# browser.
+skrifa = "0.49"

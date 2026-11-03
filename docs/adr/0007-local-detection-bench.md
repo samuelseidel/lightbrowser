@@ -30,12 +30,17 @@ and a Playwright scenario runner. Stock headless Chromium scores 100 (bot).
     LightBrowser is scored.
   - T-020: replay of a human-like input trace.
 - M4 target: `node run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`
-  (non-behaviour rules only).
+  (non-behaviour rules only). For `--cdp`, `run.js` creates the context
+  with `viewport: null` (ADR 0009), so the browser keeps its own window
+  size. Met for the Chrome reference personas on 2026-11-03 (fp 0; see
+  `ROADMAP.md`, "M4 status: detect-bench target and determinism").
 - M5 target: the same scenario with `--expect 'beh<=30'` (behaviour rules
   only), with input from `LightBrowser.human*`.
-- Until `lb-page` implements `lb_cdp::PageHost`, the baseline is taken
-  with `lightbrowser fetch http://127.0.0.1:<port>/shop` and read from
-  `GET /api/score/<sid>`. The baseline is recorded in `ROADMAP.md`.
+- The M2 baseline was taken with `lightbrowser fetch
+  http://127.0.0.1:<port>/shop` and read from `GET /api/score/<sid>`,
+  before `lb-page` implemented `lb_cdp::PageHost`. Since M3, T-010 runs
+  against `lightbrowser serve` over CDP. Baselines are recorded in
+  `ROADMAP.md`.
 
 ## Alternatives considered
 
@@ -52,3 +57,8 @@ and a Playwright scenario runner. Stock headless Chromium scores 100 (bot).
   production engine agrees; new rules go into `scoring.py` with tests.
 - Rule changes move the target, so a change to `scoring.py` should note
   the effect on the LightBrowser baseline.
+- A rule may only be corrected when stock Chromium on loopback is misjudged
+  the same way, with the stock evidence recorded. Example (2026-11-03):
+  Chrome 153 sends `Accept-Language` right after `sec-ch-ua-platform`, not
+  after `Accept-Encoding` as `EXPECTED` had it; stock `--headless=new`
+  fired `header_order` as LightBrowser did. T-001/T-003 stay at 100.

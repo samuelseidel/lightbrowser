@@ -114,6 +114,10 @@ pub struct PersonaProfile {
     pub media_devices: Option<MediaDevices>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub battery: Option<BatteryInfo>,
+    /// User preferences behind media queries (`prefers-color-scheme`, ...)
+    /// and the scrollbar width. Optional; defaults are a light desktop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferences: Option<Preferences>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -231,6 +235,19 @@ pub struct HardwareInfo {
     pub device_memory: f64,
     pub max_touch_points: u32,
     pub gpu: GpuInfo,
+    /// `performance.memory.jsHeapSizeLimit` in bytes (Chrome only).
+    /// Optional; see [`HardwareInfo::js_heap_size_limit`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub js_heap_size_limit: Option<u64>,
+}
+
+impl HardwareInfo {
+    /// `performance.memory.jsHeapSizeLimit`: the persona's value, else
+    /// what Chrome 153 reports on a 64-bit desktop (4,395,630,592, seen on
+    /// the local Chromium 153 on Linux).
+    pub fn js_heap_size_limit(&self) -> u64 {
+        self.js_heap_size_limit.unwrap_or(4_395_630_592)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -404,6 +421,8 @@ fn yes() -> bool {
     true
 }
 
+/// Media devices. Labels are only exposed once permission is granted;
+/// counts default to one device per kind that has a label field.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub struct MediaDevices {
     #[serde(default)]
@@ -412,12 +431,116 @@ pub struct MediaDevices {
     pub mic_label: Option<String>,
     #[serde(default)]
     pub speaker_label: Option<String>,
+    /// Number of microphones. Default: 1 if `mic_label` is set, else 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audioinput: Option<u32>,
+    /// Number of cameras. Default: 1 if `webcam_label` is set, else 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub videoinput: Option<u32>,
+    /// Number of speakers. Default: 1 if `speaker_label` is set, else 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audiooutput: Option<u32>,
 }
 
+impl MediaDevices {
+    /// Device counts as `(audioinput, videoinput, audiooutput)`.
+    pub fn counts(&self) -> (u32, u32, u32) {
+        let n = |c: Option<u32>, l: &Option<String>| c.unwrap_or(u32::from(l.is_some()));
+        (
+            n(self.audioinput, &self.mic_label),
+            n(self.videoinput, &self.webcam_label),
+            n(self.audiooutput, &self.speaker_label),
+        )
+    }
+}
+
+/// `navigator.getBattery()` values.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct BatteryInfo {
     pub level: f64,
     pub charging: bool,
+    /// Seconds until full; `None` is `Infinity` (0 when full and charging).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charging_time: Option<f64>,
+    /// Seconds until empty; `None` is `Infinity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discharging_time: Option<f64>,
+}
+
+impl BatteryInfo {
+    /// What Chrome reports on a desktop without a battery: charging, full,
+    /// `chargingTime` 0, `dischargingTime` Infinity.
+    pub fn desktop() -> BatteryInfo {
+        BatteryInfo {
+            level: 1.0,
+            charging: true,
+            charging_time: Some(0.0),
+            discharging_time: None,
+        }
+    }
+}
+
+/// User preferences seen through media queries, plus the classic
+/// scrollbar width. Every field has a default, so `{}` is a light desktop.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Preferences {
+    /// `prefers-color-scheme`: `light` or `dark`.
+    #[serde(default = "pref_light")]
+    pub color_scheme: String,
+    /// `prefers-reduced-motion: reduce`.
+    #[serde(default)]
+    pub reduced_motion: bool,
+    /// `prefers-reduced-transparency: reduce`.
+    #[serde(default)]
+    pub reduced_transparency: bool,
+    /// `prefers-contrast`: `no-preference`, `more`, `less` or `custom`.
+    #[serde(default = "pref_no_preference")]
+    pub contrast: String,
+    /// `forced-colors: active` (Windows high contrast).
+    #[serde(default)]
+    pub forced_colors: bool,
+    /// `color-gamut`: `srgb`, `p3` or `rec2020` (the widest it matches).
+    #[serde(default = "pref_srgb")]
+    pub color_gamut: String,
+    /// `dynamic-range: high`.
+    #[serde(default)]
+    pub high_dynamic_range: bool,
+    /// Width of classic (non-overlay) scrollbars in CSS px. Default: 17 on
+    /// Windows, 15 on Linux, 0 on macOS (overlay scrollbars).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scrollbar_width: Option<u32>,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Preferences {
+            color_scheme: pref_light(),
+            reduced_motion: false,
+            reduced_transparency: false,
+            contrast: pref_no_preference(),
+            forced_colors: false,
+            color_gamut: pref_srgb(),
+            high_dynamic_range: false,
+            scrollbar_width: None,
+        }
+    }
+}
+
+fn pref_light() -> String {
+    "light".into()
+}
+fn pref_no_preference() -> String {
+    "no-preference".into()
+}
+fn pref_srgb() -> String {
+    "srgb".into()
+}
+
+impl Preferences {
+    /// True for `prefers-color-scheme: dark`.
+    pub fn dark(&self) -> bool {
+        self.color_scheme.eq_ignore_ascii_case("dark")
+    }
 }
 
 impl PersonaProfile {
@@ -472,6 +595,34 @@ impl PersonaProfile {
 
     pub fn family(&self) -> BrowserFamily {
         self.browser.family
+    }
+
+    /// The persona's preferences, or the defaults (light, no motion
+    /// reduction, sRGB).
+    pub fn preferences(&self) -> Preferences {
+        self.preferences.clone().unwrap_or_default()
+    }
+
+    /// Scrollbar width in CSS px: the persona's value, else 17 on Windows,
+    /// 0 on macOS (overlay scrollbars) and 15 elsewhere.
+    pub fn scrollbar_width(&self) -> u32 {
+        let os = self.os.name.to_ascii_lowercase();
+        self.preferences
+            .as_ref()
+            .and_then(|p| p.scrollbar_width)
+            .unwrap_or(if os.contains("windows") {
+                17
+            } else if os.contains("mac") {
+                0
+            } else {
+                15
+            })
+    }
+
+    /// `navigator.getBattery()` values: the persona's, else Chrome's
+    /// desktop answer ([`BatteryInfo::desktop`]).
+    pub fn battery_info(&self) -> BatteryInfo {
+        self.battery.clone().unwrap_or_else(BatteryInfo::desktop)
     }
 
     /// `performance.now()` granularity in microseconds: the persona's value,

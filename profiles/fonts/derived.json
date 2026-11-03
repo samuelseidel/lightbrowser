@@ -1,0 +1,843 @@
+{
+ "format": 1,
+ "note": "Approximate tables for persona fonts without a metric table: the base table's advances times scale, vertical metrics in em. Values are estimates (no proprietary font files were used); they make installed fonts measurably different from the fallbacks, as on a real system.",
+ "families": [
+  {
+   "family": "Arial Black",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.196,
+   "ascent": 1.1006,
+   "descent": 0.3096,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Bahnschrift",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 0.927,
+   "ascent": 1.0,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Cambria",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 1.052,
+   "ascent": 0.9502,
+   "descent": 0.2222,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Cambria Math",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 1.053,
+   "ascent": 3.0249,
+   "descent": 2.5205,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Candara",
+   "os": "windows",
+   "base": "Calibri",
+   "scale": 1.034,
+   "ascent": 0.75,
+   "descent": 0.25,
+   "line_gap": 0.2207
+  },
+  {
+   "family": "Comic Sans MS",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.083,
+   "ascent": 1.1021,
+   "descent": 0.2915,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Consolas",
+   "os": "windows",
+   "base": "Courier New",
+   "scale": 0.9162,
+   "ascent": 0.7427,
+   "descent": 0.2573,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Constantia",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 1.041,
+   "ascent": 0.75,
+   "descent": 0.25,
+   "line_gap": 0.2207
+  },
+  {
+   "family": "Corbel",
+   "os": "windows",
+   "base": "Calibri",
+   "scale": 0.987,
+   "ascent": 0.75,
+   "descent": 0.25,
+   "line_gap": 0.2207
+  },
+  {
+   "family": "Ebrima",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.012,
+   "ascent": 1.0767,
+   "descent": 0.2954,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Franklin Gothic Medium",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 0.938,
+   "ascent": 0.8916,
+   "descent": 0.2104,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Gabriola",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 0.836,
+   "ascent": 1.0835,
+   "descent": 0.6372,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Gadugi",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.008,
+   "ascent": 1.0767,
+   "descent": 0.2954,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Impact",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 0.873,
+   "ascent": 1.0088,
+   "descent": 0.2109,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Ink Free",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.017,
+   "ascent": 1.1035,
+   "descent": 0.4,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Javanese Text",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.004,
+   "ascent": 1.4482,
+   "descent": 1.0273,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Leelawadee UI",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 0.996,
+   "ascent": 1.0767,
+   "descent": 0.2954,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Lucida Console",
+   "os": "windows",
+   "base": "Courier New",
+   "scale": 1.0041,
+   "ascent": 0.7886,
+   "descent": 0.2109,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Lucida Sans Unicode",
+   "os": "windows",
+   "base": "Verdana",
+   "scale": 0.931,
+   "ascent": 1.0981,
+   "descent": 0.4385,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Malgun Gothic",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.021,
+   "ascent": 1.0,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Marlett",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.316,
+   "ascent": 1.0,
+   "descent": 0.0,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft Himalaya",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 0.792,
+   "ascent": 0.6582,
+   "descent": 0.3418,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft JhengHei",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.031,
+   "ascent": 1.0,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft New Tai Lue",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.002,
+   "ascent": 1.0767,
+   "descent": 0.4,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft PhagsPa",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 0.998,
+   "ascent": 1.0767,
+   "descent": 0.354,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft Sans Serif",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 0.989,
+   "ascent": 0.9214,
+   "descent": 0.2104,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft Tai Le",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.006,
+   "ascent": 1.0767,
+   "descent": 0.3311,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft YaHei",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.027,
+   "ascent": 1.0,
+   "descent": 0.32,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Microsoft Yi Baiti",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 0.912,
+   "ascent": 0.815,
+   "descent": 0.18,
+   "line_gap": 0.0
+  },
+  {
+   "family": "MingLiU-ExtB",
+   "os": "windows",
+   "base": "Courier New",
+   "scale": 0.8332,
+   "ascent": 0.8,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Mongolian Baiti",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 0.921,
+   "ascent": 0.8,
+   "descent": 0.26,
+   "line_gap": 0.0
+  },
+  {
+   "family": "MS Gothic",
+   "os": "windows",
+   "base": "Courier New",
+   "scale": 0.8331,
+   "ascent": 0.859,
+   "descent": 0.141,
+   "line_gap": 0.0
+  },
+  {
+   "family": "MV Boli",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.094,
+   "ascent": 1.0889,
+   "descent": 0.4727,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Myanmar Text",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.003,
+   "ascent": 1.2578,
+   "descent": 0.9,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Nirmala UI",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 0.993,
+   "ascent": 1.0767,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Palatino Linotype",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 1.081,
+   "ascent": 1.0259,
+   "descent": 0.2969,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe MDL2 Assets",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.452,
+   "ascent": 1.0,
+   "descent": 0.0,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe Print",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.218,
+   "ascent": 1.1543,
+   "descent": 0.5332,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe Script",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.253,
+   "ascent": 1.1543,
+   "descent": 0.5332,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe UI Emoji",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.061,
+   "ascent": 1.0767,
+   "descent": 0.2954,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe UI Historic",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.001,
+   "ascent": 1.0767,
+   "descent": 0.2954,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe UI Symbol",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.023,
+   "ascent": 1.0767,
+   "descent": 0.2954,
+   "line_gap": 0.0
+  },
+  {
+   "family": "SimSun",
+   "os": "windows",
+   "base": "Courier New",
+   "scale": 0.8333,
+   "ascent": 0.859,
+   "descent": 0.141,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Sitka Text",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 1.118,
+   "ascent": 1.2,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Sylfaen",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 1.016,
+   "ascent": 0.9189,
+   "descent": 0.3164,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Symbol",
+   "os": "windows",
+   "base": "Times New Roman",
+   "scale": 1.027,
+   "ascent": 1.0049,
+   "descent": 0.2158,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Trebuchet MS",
+   "os": "windows",
+   "base": "Verdana",
+   "scale": 0.886,
+   "ascent": 0.939,
+   "descent": 0.2222,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Webdings",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.531,
+   "ascent": 0.8,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Wingdings",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.564,
+   "ascent": 0.8984,
+   "descent": 0.2104,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Yu Gothic",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 0.957,
+   "ascent": 1.0,
+   "descent": 0.32,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Andale Mono",
+   "os": "macos",
+   "base": "Courier",
+   "scale": 1.0013,
+   "ascent": 0.8657,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Apple Chancery",
+   "os": "macos",
+   "base": "Times",
+   "scale": 0.973,
+   "ascent": 1.0,
+   "descent": 0.5,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Apple Color Emoji",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.048,
+   "ascent": 0.95,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Apple SD Gothic Neo",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.982,
+   "ascent": 1.0,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Apple Symbols",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.958,
+   "ascent": 0.8,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "AppleGothic",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.967,
+   "ascent": 0.9,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Arial Black",
+   "os": "macos",
+   "base": "Arial",
+   "scale": 1.196,
+   "ascent": 1.1006,
+   "descent": 0.3096,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Arial Narrow",
+   "os": "macos",
+   "base": "Arial",
+   "scale": 0.82,
+   "ascent": 0.9358,
+   "descent": 0.2109,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Arial Rounded MT Bold",
+   "os": "macos",
+   "base": "Arial",
+   "scale": 1.074,
+   "ascent": 0.9468,
+   "descent": 0.2104,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Avenir",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.977,
+   "ascent": 1.0,
+   "descent": 0.366,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Avenir Next",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.012,
+   "ascent": 1.0,
+   "descent": 0.366,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Baskerville",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.047,
+   "ascent": 0.8999,
+   "descent": 0.2471,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Big Caslon",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.006,
+   "ascent": 0.9,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Bradley Hand",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.042,
+   "ascent": 0.9,
+   "descent": 0.4,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Brush Script MT",
+   "os": "macos",
+   "base": "Times",
+   "scale": 0.822,
+   "ascent": 0.8,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Chalkboard",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.054,
+   "ascent": 0.98,
+   "descent": 0.28,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Chalkduster",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.248,
+   "ascent": 1.0,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Charter",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.081,
+   "ascent": 0.98,
+   "descent": 0.24,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Cochin",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.019,
+   "ascent": 0.9,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Comic Sans MS",
+   "os": "macos",
+   "base": "Arial",
+   "scale": 1.083,
+   "ascent": 1.1021,
+   "descent": 0.2915,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Copperplate",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.302,
+   "ascent": 0.76,
+   "descent": 0.24,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Didot",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.032,
+   "ascent": 0.9,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Futura",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.968,
+   "ascent": 1.0386,
+   "descent": 0.2588,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Geneva",
+   "os": "macos",
+   "base": "Verdana",
+   "scale": 0.971,
+   "ascent": 1.0,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Gill Sans",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.918,
+   "ascent": 0.9,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Hoefler Text",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.041,
+   "ascent": 0.95,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Impact",
+   "os": "macos",
+   "base": "Arial",
+   "scale": 0.873,
+   "ascent": 1.0088,
+   "descent": 0.2109,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Lucida Grande",
+   "os": "macos",
+   "base": "Verdana",
+   "scale": 0.931,
+   "ascent": 0.9668,
+   "descent": 0.2109,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Marker Felt",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.903,
+   "ascent": 0.9,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Menlo",
+   "os": "macos",
+   "base": "Courier",
+   "scale": 1.0034,
+   "ascent": 0.928,
+   "descent": 0.236,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Monaco",
+   "os": "macos",
+   "base": "Courier",
+   "scale": 1.0007,
+   "ascent": 1.0,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Noteworthy",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.934,
+   "ascent": 1.2,
+   "descent": 0.4,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Optima",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.962,
+   "ascent": 0.92,
+   "descent": 0.27,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Palatino",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.081,
+   "ascent": 1.0259,
+   "descent": 0.2969,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Papyrus",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.061,
+   "ascent": 0.96,
+   "descent": 0.42,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Phosphate",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.861,
+   "ascent": 0.95,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Rockwell",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.103,
+   "ascent": 0.92,
+   "descent": 0.24,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Savoye LET",
+   "os": "macos",
+   "base": "Times",
+   "scale": 0.702,
+   "ascent": 0.8,
+   "descent": 0.4,
+   "line_gap": 0.0
+  },
+  {
+   "family": "SignPainter",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 0.721,
+   "ascent": 0.9,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Skia",
+   "os": "macos",
+   "base": "Helvetica",
+   "scale": 1.021,
+   "ascent": 0.95,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Snell Roundhand",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.012,
+   "ascent": 0.9,
+   "descent": 0.4,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Trebuchet MS",
+   "os": "macos",
+   "base": "Verdana",
+   "scale": 0.886,
+   "ascent": 0.939,
+   "descent": 0.2222,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Zapfino",
+   "os": "macos",
+   "base": "Times",
+   "scale": 1.597,
+   "ascent": 1.9,
+   "descent": 1.2,
+   "line_gap": 0.0
+  }
+ ]
+}

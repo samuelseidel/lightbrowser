@@ -16,6 +16,7 @@ use url::Url;
 use crate::HttpVersion;
 use crate::cookies::CookieJar;
 use crate::error::NetError;
+use crate::header_profile::{BuildInput, HeaderProfile, RequestMeta, Site};
 use crate::headers::{self, OrderedHeaders};
 use crate::profile::ClientHelloProfile;
 use crate::tls::TlsConnector;
@@ -31,8 +32,13 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct Request {
     pub method: Method,
     pub url: Url,
+    /// Headers the page set (`fetch` init, `setRequestHeader`), in order.
+    /// They are merged into the browser's own header set for the request
+    /// kind (see [`crate::header_profile`]).
     pub headers: OrderedHeaders,
     pub body: Bytes,
+    /// What the request is for. `None` means a typed top-level navigation.
+    pub meta: Option<RequestMeta>,
 }
 
 impl Request {
@@ -42,6 +48,16 @@ impl Request {
             url,
             headers: Vec::new(),
             body: Bytes::new(),
+            meta: None,
+        }
+    }
+
+    /// A request of the given kind (script, image, `fetch`, ...) made by
+    /// `initiator`.
+    pub fn for_kind(url: Url, meta: RequestMeta) -> Self {
+        Self {
+            meta: Some(meta),
+            ..Self::get(url)
         }
     }
 }
@@ -56,6 +72,24 @@ pub struct RawResponse {
     pub version: HttpVersion,
 }
 
+/// One redirect that was followed on the way to a [`Response`].
+#[derive(Debug, Clone)]
+pub struct RedirectHop {
+    /// The URL that was requested and answered with a redirect.
+    pub url: Url,
+    pub method: Method,
+    /// Request headers as sent on this hop.
+    pub request_headers: OrderedHeaders,
+    pub status: StatusCode,
+    /// Response headers of the redirect, as received.
+    pub response_headers: OrderedHeaders,
+    /// The `Location` value as received.
+    pub location: String,
+    /// `location` resolved against `url`: the next hop's URL.
+    pub target: Url,
+    pub version: HttpVersion,
+}
+
 /// A decoded response.
 #[derive(Debug, Clone)]
 pub struct Response {
@@ -64,6 +98,12 @@ pub struct Response {
     pub body: Bytes,
     pub version: HttpVersion,
     pub final_url: Url,
+    /// Method of the final request (a redirect can turn `POST` into `GET`).
+    pub method: Method,
+    /// Request headers as sent on the final hop.
+    pub request_headers: OrderedHeaders,
+    /// Redirects followed, in order. Empty when there were none.
+    pub redirects: Vec<RedirectHop>,
 }
 
 impl Response {
@@ -79,6 +119,9 @@ impl Response {
 pub struct NetContext {
     pub persona: Arc<Persona>,
     pub profile: Arc<ClientHelloProfile>,
+    /// Per-request-kind header sets. `None` (Firefox until M4b) falls back to
+    /// the navigation set with a small per-kind overlay.
+    pub header_profile: Option<Arc<HeaderProfile>>,
     pub cookies: CookieJar,
     /// Maximum body size, enforced on the wire and again after decoding.
     /// Default 32 MiB.
@@ -104,9 +147,11 @@ impl NetContext {
                 profile: profile.profile_id.clone(),
             });
         }
+        let header_profile = HeaderProfile::builtin(persona.family).map(Arc::new);
         Ok(Self {
             persona,
             profile,
+            header_profile,
             cookies: CookieJar::new(),
             max_body: 32 << 20,
             danger_accept_invalid_certs: false,
@@ -195,61 +240,89 @@ impl NetContext {
 /// Per hop: resolve, connect, TLS (https only, profile-driven, ALPN picks
 /// h1 or h2), send, store `Set-Cookie`, then follow `301/302/303/307/308`.
 ///
-/// Request headers are the persona's navigation headers, then the `Cookie`
-/// from the jar, then `req.headers`. A caller header replaces a default of the
-/// same name in place (keeping the family's order); other caller headers are
-/// appended.
+/// Request headers are the browser's header set for the request kind
+/// (`req.meta`, a typed navigation by default), built per hop once the HTTP
+/// version is known: persona values, `Referer`/`Origin`/`Sec-Fetch-Site`
+/// derived from the initiator and the hop's URL, the jar's `Cookie`, then the
+/// page's own `req.headers`. A page header replaces a persona-owned or
+/// profile header of the same name in place; other page headers join the
+/// browser's header group (see [`crate::header_profile`]).
 ///
 /// Redirect rules: `303` becomes `GET` (`HEAD` stays `HEAD`), `301`/`302` on
 /// `POST` become `GET`, `307`/`308` keep method and body. When the body is
-/// dropped, the caller's `Content-*` headers go too. Caller-supplied
+/// dropped, the page's `Content-*` headers go too. Page-supplied
 /// `Authorization`, `Proxy-Authorization` and `Cookie` are dropped on a
 /// cross-origin hop (the jar supplies cookies per hop anyway).
-///
-/// Known gap: `Sec-Fetch-Site` stays at the persona default (`none`) on
-/// every hop. A browser would send `same-origin` or `cross-site` on redirects;
-/// that needs the initiator and is left for the navigation layer (M3). The
-/// caller can override it per request through `req.headers`.
+/// `Sec-Fetch-Site` is the largest distance seen on any URL of the chain.
 ///
 /// The returned body is decoded (`Content-Encoding`); the response headers are
 /// returned as received, so `content-encoding` and `content-length` still
-/// describe the wire form. `max_body` limits both sizes.
+/// describe the wire form. `max_body` limits both sizes. Every redirect that
+/// was followed is in [`Response::redirects`].
 pub async fn fetch(ctx: &mut NetContext, req: Request) -> Result<Response, NetError> {
     let mut req = req;
-    let mut hops = 0;
+    let mut redirects: Vec<RedirectHop> = Vec::new();
+    let initiator = req.meta.as_ref().and_then(|m| m.initiator.clone());
+    let mut site = Site::None;
     loop {
-        let (status, resp_headers, body, version) = fetch_once(ctx, &req).await?;
+        // Distance of the chain so far, including this hop's URL.
+        site = site.max(Site::between(initiator.as_ref(), &req.url));
+        let hop = fetch_once(ctx, &req, redirects.len(), site).await?;
 
-        if let Some(location) = redirect_location(status, &resp_headers) {
-            if hops >= MAX_REDIRECTS {
+        if let Some(location) = redirect_location(hop.status, &hop.headers) {
+            if redirects.len() >= MAX_REDIRECTS {
                 return Err(NetError::Http(format!(
                     "too many redirects (more than {MAX_REDIRECTS})"
                 )));
             }
-            hops += 1;
             let next = req.url.join(&location)?;
             if !matches!(next.scheme(), "http" | "https") {
                 return Err(NetError::UnsupportedScheme(next.scheme().to_owned()));
             }
-            req = redirected_request(&req, status, next);
+            redirects.push(RedirectHop {
+                url: req.url.clone(),
+                method: req.method.clone(),
+                request_headers: hop.sent,
+                status: hop.status,
+                response_headers: hop.headers,
+                location,
+                target: next.clone(),
+                version: hop.version,
+            });
+            req = redirected_request(&req, hop.status, next);
             continue;
         }
 
         return Ok(Response {
-            status,
-            headers: resp_headers,
-            body,
-            version,
+            status: hop.status,
+            headers: hop.headers,
+            body: hop.body,
+            version: hop.version,
             final_url: req.url,
+            method: req.method,
+            request_headers: hop.sent,
+            redirects,
         });
     }
+}
+
+/// What one hop returned.
+struct Hop {
+    status: StatusCode,
+    headers: OrderedHeaders,
+    body: Bytes,
+    version: HttpVersion,
+    /// Request headers as sent.
+    sent: OrderedHeaders,
 }
 
 /// One hop: send `req`, store cookies, decode the body.
 async fn fetch_once(
     ctx: &mut NetContext,
     req: &Request,
-) -> Result<(StatusCode, OrderedHeaders, Bytes, HttpVersion), NetError> {
+    hop: usize,
+    site: Site,
+) -> Result<Hop, NetError> {
     let https = match req.url.scheme() {
         "https" => true,
         "http" => false,
@@ -267,23 +340,35 @@ async fn fetch_once(
     // `host_str` brackets IPv6 literals; resolution wants them bare.
     let bare_host = host.trim_start_matches('[').trim_end_matches(']');
 
-    // Final headers for this hop. The defaults depend on the HTTP version
-    // (ALPN), so they are built once it is known.
+    // Final headers for this hop. The set depends on the HTTP version
+    // (ALPN), so it is built once the version is known.
     let cookie = ctx.cookies.header_for(&req.url);
     let persona = Arc::clone(&ctx.persona);
+    let header_profile = ctx.header_profile.clone();
+    let meta = req.meta.clone().unwrap_or_default();
     let wire = |version: HttpVersion| {
-        let mut base = headers::navigation_headers(&persona, &host);
-        if version == HttpVersion::Http1 {
-            base = headers::for_http1(&persona, base);
-        }
-        if let Some(cookie) = &cookie {
-            base = headers::with_cookie(base, cookie);
-        }
+        let input = BuildInput {
+            persona: &persona,
+            version,
+            meta: &meta,
+            url: &req.url,
+            method: &req.method,
+            body_len: req.body.len(),
+            cookie: cookie.as_deref(),
+            caller: &req.headers,
+            hop,
+            site,
+        };
+        let headers = match &header_profile {
+            Some(p) => p.build(&input),
+            None => headers::generic_request_headers(&input),
+        };
         Request {
             method: req.method.clone(),
             url: req.url.clone(),
-            headers: merge_headers(base, &req.headers),
+            headers,
             body: req.body.clone(),
+            meta: None,
         }
     };
 
@@ -294,17 +379,22 @@ async fn fetch_once(
     };
     let tcp = ctx.connect_tcp(bare_host, port).await?;
 
-    let raw = match connector {
-        None => h1::send_with_limit(tcp, &wire(HttpVersion::Http1), ctx.max_body).await?,
+    let (raw, sent) = match connector {
+        None => {
+            let wire = wire(HttpVersion::Http1);
+            let raw = h1::send_with_limit(tcp, &wire, ctx.max_body).await?;
+            (raw, wire.headers)
+        }
         Some(connector) => {
             let (stream, version) = connector.connect(bare_host, tcp).await?;
             let wire = wire(version);
-            match version {
+            let raw = match version {
                 HttpVersion::Http2 => {
                     h2::send_with_limit(stream, &wire, &ctx.profile, ctx.max_body).await?
                 }
                 HttpVersion::Http1 => h1::send_with_limit(stream, &wire, ctx.max_body).await?,
-            }
+            };
+            (raw, wire.headers)
         }
     };
 
@@ -324,7 +414,13 @@ async fn fetch_once(
             limit: ctx.max_body,
         });
     }
-    Ok((raw.status, raw.headers, body, raw.version))
+    Ok(Hop {
+        status: raw.status,
+        headers: raw.headers,
+        body,
+        version: raw.version,
+        sent,
+    })
 }
 
 /// All values of header `name` (case-insensitive), in arrival order.
@@ -346,43 +442,6 @@ fn redirect_location(status: StatusCode, headers: &OrderedHeaders) -> Option<Str
         .find(|(n, _)| n.eq_ignore_ascii_case("location"))
         .map(|(_, v)| v.trim().to_owned())
         .filter(|v| !v.is_empty())
-}
-
-/// Overlay the caller's headers on the defaults. A caller header replaces the
-/// first default of the same name (case-insensitive) in place and removes any
-/// further defaults of that name. Repeats of a name within the caller's list,
-/// and names without a default, are appended in order.
-fn merge_headers(base: OrderedHeaders, caller: &OrderedHeaders) -> OrderedHeaders {
-    let mut out = base;
-    let default_len = out.len();
-    let mut replaced: Vec<String> = Vec::new();
-    for (name, value) in caller {
-        let lname = name.to_ascii_lowercase();
-        if replaced.contains(&lname) {
-            out.push((name.clone(), value.clone()));
-            continue;
-        }
-        let pos = out[..default_len.min(out.len())]
-            .iter()
-            .position(|(n, _)| n.eq_ignore_ascii_case(&lname));
-        match pos {
-            Some(i) => {
-                out[i].1 = value.clone();
-                // Drop later defaults of the same name (only below `default_len`).
-                let mut j = i + 1;
-                while j < default_len.min(out.len()) {
-                    if out[j].0.eq_ignore_ascii_case(&lname) {
-                        out.remove(j);
-                    } else {
-                        j += 1;
-                    }
-                }
-            }
-            None => out.push((name.clone(), value.clone())),
-        }
-        replaced.push(lname);
-    }
-    out
 }
 
 /// The request for the next hop after a redirect with `status` to `next`.
@@ -427,6 +486,7 @@ fn redirected_request(prev: &Request, status: StatusCode, next: Url) -> Request 
         } else {
             prev.body.clone()
         },
+        meta: prev.meta.clone(),
     }
 }
 
@@ -452,29 +512,6 @@ mod tests {
     }
 
     // ---- pure parts ----
-
-    #[test]
-    fn merge_replaces_in_place_and_appends() {
-        let base = h(&[("user-agent", "A"), ("accept", "x"), ("priority", "u=0")]);
-        let caller = h(&[("Accept", "y"), ("X-Test", "1"), ("x-test", "2")]);
-        let got = merge_headers(base, &caller);
-        assert_eq!(
-            got,
-            h(&[
-                ("user-agent", "A"),
-                ("accept", "y"),
-                ("priority", "u=0"),
-                ("X-Test", "1"),
-                ("x-test", "2"),
-            ])
-        );
-    }
-
-    #[test]
-    fn merge_with_empty_caller_is_identity() {
-        let base = h(&[("a", "1"), ("b", "2")]);
-        assert_eq!(merge_headers(base.clone(), &Vec::new()), base);
-    }
 
     #[test]
     fn redirect_location_only_for_redirect_statuses() {

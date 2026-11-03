@@ -15,13 +15,17 @@
 //!   page's main world never sees automation bindings.
 //! - `Emulation.*` is checked against the context's persona ([`emulation`]):
 //!   matching values are accepted, contradicting ones are rejected.
-//! - `LightBrowser.*`: `setPersona` works; `fingerprintReport` and
-//!   `human*` answer "not implemented yet".
+//! - `LightBrowser.*`: `setPersona` works; `fingerprintReport` asks the
+//!   host for the page's report ([`PageHost::fingerprint_report`]; on a
+//!   browser session it takes `targetId`); `human*` answer "not
+//!   implemented yet".
 //! - [`remote`]: V8-style `RemoteObject`s and limited previews from a
 //!   [`remote::JsValue`] snapshot. [`convert`]: `lb-dom` / `lb-layout` data
 //!   as CDP types.
 //! - [`mock::MockHost`]: a small host on `lb-dom` + `lb-layout` without a JS
-//!   engine, for tests and for `lightbrowser serve` until `lb-page` lands.
+//!   engine, for tests and for the firefox build's `serve` (no JS engine
+//!   there yet). The chrome build serves real pages with
+//!   `lb_page::CdpHost`.
 //!
 //! The method list is in [`methods::COMMANDS`]; anything else answers
 //! `{code: -32601, message: "'X.y' wasn't found"}`.

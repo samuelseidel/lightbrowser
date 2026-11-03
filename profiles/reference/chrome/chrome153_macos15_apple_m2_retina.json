@@ -322,14 +322,440 @@
     "max_channel_count": 2
   },
   "media_devices": {
-    "webcam_label": "",
-    "mic_label": "",
-    "speaker_label": ""
+    "webcam_label": "FaceTime HD Camera",
+    "mic_label": "MacBook Air Microphone (Built-in)",
+    "speaker_label": "MacBook Air Speakers (Built-in)",
+    "audioinput": 1,
+    "videoinput": 1,
+    "audiooutput": 1
   },
   "permissions": {
     "geolocation": "prompt",
     "notifications": "prompt",
     "camera": "prompt",
     "microphone": "prompt"
-  }
+  },
+  "preferences": {
+    "color_scheme": "light",
+    "color_gamut": "p3",
+    "scrollbar_width": 0
+  },
+  "speech_voices": [
+    {
+      "name": "Albert",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Alice",
+      "lang": "it-IT",
+      "local_service": true
+    },
+    {
+      "name": "Alva",
+      "lang": "sv-SE",
+      "local_service": true
+    },
+    {
+      "name": "Amélie",
+      "lang": "fr-CA",
+      "local_service": true
+    },
+    {
+      "name": "Amira",
+      "lang": "ms-MY",
+      "local_service": true
+    },
+    {
+      "name": "Anna",
+      "lang": "de-DE",
+      "local_service": true
+    },
+    {
+      "name": "Bad News",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Bahh",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Bells",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Boing",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Bubbles",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Carmit",
+      "lang": "he-IL",
+      "local_service": true
+    },
+    {
+      "name": "Cellos",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Damayanti",
+      "lang": "id-ID",
+      "local_service": true
+    },
+    {
+      "name": "Daniel",
+      "lang": "en-GB",
+      "local_service": true
+    },
+    {
+      "name": "Daria",
+      "lang": "bg-BG",
+      "local_service": true
+    },
+    {
+      "name": "Ellen",
+      "lang": "nl-BE",
+      "local_service": true
+    },
+    {
+      "name": "Fred",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Good News",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Ioana",
+      "lang": "ro-RO",
+      "local_service": true
+    },
+    {
+      "name": "Jacques",
+      "lang": "fr-FR",
+      "local_service": true
+    },
+    {
+      "name": "Jester",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Joana",
+      "lang": "pt-PT",
+      "local_service": true
+    },
+    {
+      "name": "Junior",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Kanya",
+      "lang": "th-TH",
+      "local_service": true
+    },
+    {
+      "name": "Karen",
+      "lang": "en-AU",
+      "local_service": true
+    },
+    {
+      "name": "Kathy",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Kyoko",
+      "lang": "ja-JP",
+      "local_service": true
+    },
+    {
+      "name": "Lana",
+      "lang": "hr-HR",
+      "local_service": true
+    },
+    {
+      "name": "Laura",
+      "lang": "sk-SK",
+      "local_service": true
+    },
+    {
+      "name": "Lekha",
+      "lang": "hi-IN",
+      "local_service": true
+    },
+    {
+      "name": "Lesya",
+      "lang": "uk-UA",
+      "local_service": true
+    },
+    {
+      "name": "Linh",
+      "lang": "vi-VN",
+      "local_service": true
+    },
+    {
+      "name": "Luciana",
+      "lang": "pt-BR",
+      "local_service": true
+    },
+    {
+      "name": "Majed",
+      "lang": "ar-001",
+      "local_service": true
+    },
+    {
+      "name": "Meijia",
+      "lang": "zh-TW",
+      "local_service": true
+    },
+    {
+      "name": "Melina",
+      "lang": "el-GR",
+      "local_service": true
+    },
+    {
+      "name": "Milena",
+      "lang": "ru-RU",
+      "local_service": true
+    },
+    {
+      "name": "Moira",
+      "lang": "en-IE",
+      "local_service": true
+    },
+    {
+      "name": "Montse",
+      "lang": "ca-ES",
+      "local_service": true
+    },
+    {
+      "name": "Mónica",
+      "lang": "es-ES",
+      "local_service": true
+    },
+    {
+      "name": "Nora",
+      "lang": "nb-NO",
+      "local_service": true
+    },
+    {
+      "name": "Organ",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Paulina",
+      "lang": "es-MX",
+      "local_service": true
+    },
+    {
+      "name": "Ralph",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Rishi",
+      "lang": "en-IN",
+      "local_service": true
+    },
+    {
+      "name": "Samantha",
+      "lang": "en-US",
+      "local_service": true,
+      "default": true
+    },
+    {
+      "name": "Sara",
+      "lang": "da-DK",
+      "local_service": true
+    },
+    {
+      "name": "Satu",
+      "lang": "fi-FI",
+      "local_service": true
+    },
+    {
+      "name": "Sinji",
+      "lang": "zh-HK",
+      "local_service": true
+    },
+    {
+      "name": "Superstar",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Tessa",
+      "lang": "en-ZA",
+      "local_service": true
+    },
+    {
+      "name": "Thomas",
+      "lang": "fr-FR",
+      "local_service": true
+    },
+    {
+      "name": "Tingting",
+      "lang": "zh-CN",
+      "local_service": true
+    },
+    {
+      "name": "Trinoids",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Tünde",
+      "lang": "hu-HU",
+      "local_service": true
+    },
+    {
+      "name": "Whisper",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Wobble",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Xander",
+      "lang": "nl-NL",
+      "local_service": true
+    },
+    {
+      "name": "Yelda",
+      "lang": "tr-TR",
+      "local_service": true
+    },
+    {
+      "name": "Yuna",
+      "lang": "ko-KR",
+      "local_service": true
+    },
+    {
+      "name": "Zarvox",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Zosia",
+      "lang": "pl-PL",
+      "local_service": true
+    },
+    {
+      "name": "Zuzana",
+      "lang": "cs-CZ",
+      "local_service": true
+    },
+    {
+      "name": "Google Deutsch",
+      "lang": "de-DE",
+      "local_service": false
+    },
+    {
+      "name": "Google US English",
+      "lang": "en-US",
+      "local_service": false
+    },
+    {
+      "name": "Google UK English Female",
+      "lang": "en-GB",
+      "local_service": false
+    },
+    {
+      "name": "Google UK English Male",
+      "lang": "en-GB",
+      "local_service": false
+    },
+    {
+      "name": "Google español",
+      "lang": "es-ES",
+      "local_service": false
+    },
+    {
+      "name": "Google español de Estados Unidos",
+      "lang": "es-US",
+      "local_service": false
+    },
+    {
+      "name": "Google français",
+      "lang": "fr-FR",
+      "local_service": false
+    },
+    {
+      "name": "Google हिन्दी",
+      "lang": "hi-IN",
+      "local_service": false
+    },
+    {
+      "name": "Google Bahasa Indonesia",
+      "lang": "id-ID",
+      "local_service": false
+    },
+    {
+      "name": "Google italiano",
+      "lang": "it-IT",
+      "local_service": false
+    },
+    {
+      "name": "Google 日本語",
+      "lang": "ja-JP",
+      "local_service": false
+    },
+    {
+      "name": "Google 한국의",
+      "lang": "ko-KR",
+      "local_service": false
+    },
+    {
+      "name": "Google Nederlands",
+      "lang": "nl-NL",
+      "local_service": false
+    },
+    {
+      "name": "Google polski",
+      "lang": "pl-PL",
+      "local_service": false
+    },
+    {
+      "name": "Google português do Brasil",
+      "lang": "pt-BR",
+      "local_service": false
+    },
+    {
+      "name": "Google русский",
+      "lang": "ru-RU",
+      "local_service": false
+    },
+    {
+      "name": "Google 普通话（中国大陆）",
+      "lang": "zh-CN",
+      "local_service": false
+    },
+    {
+      "name": "Google 粤語（香港）",
+      "lang": "zh-HK",
+      "local_service": false
+    },
+    {
+      "name": "Google 國語（臺灣）",
+      "lang": "zh-TW",
+      "local_service": false
+    }
+  ]
 }

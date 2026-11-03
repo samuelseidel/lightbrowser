@@ -10,7 +10,8 @@
 //! - [`profile`]: the TLS/H2 profile JSON (`profiles/tls/*.json`)
 //! - [`tls`]: builds a BoringSSL connector from a profile
 //! - [`h1`], [`h2`]: HTTP transports over the TLS stream, picked by ALPN
-//! - [`headers`]: per-family default request headers, in order
+//! - [`header_profile`]: per-request-kind header sets (`profiles/headers`)
+//! - [`headers`]: per-family navigation headers, cookie placement
 //! - [`cookies`]: in-memory cookie jar
 //! - [`decompress`]: gzip / brotli / zstd body decoding
 //! - [`fetch`]: the pipeline that ties the above together
@@ -21,12 +22,14 @@ pub mod error;
 pub mod fetch;
 pub mod h1;
 pub mod h2;
+pub mod header_profile;
 pub mod headers;
 pub mod profile;
 pub mod tls;
 
 pub use error::NetError;
-pub use fetch::{Request, Response, fetch};
+pub use fetch::{RedirectHop, Request, Response, fetch};
+pub use header_profile::{HeaderProfile, RequestKind, RequestMeta};
 pub use profile::ClientHelloProfile;
 
 /// Which HTTP version a connection negotiated (via ALPN).

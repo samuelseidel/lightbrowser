@@ -1,7 +1,8 @@
 # Plan to finish LightBrowser
 
 Status: Proposed (2026-11-02). `ROADMAP.md` stays the source of truth for
-milestone definitions. This plan breaks M2–M6 into concrete tasks, orders
+milestone definitions. Live status is in `ROADMAP.md` ("M2 status" to "M4
+status"); section 1 below is the dated starting point and is not updated. This plan breaks M2–M6 into concrete tasks, orders
 them, names what blocks what, and lists the gaps found in the current tree.
 
 ## 1. Where things stand

@@ -189,7 +189,10 @@ async function runScenario(id, a) {
     if (!a.cdp) return { id, name: sc.name, skipped: 'needs --cdp <ws url>' };
     assertLoopback(a.cdp, 'CDP URL');
     browser = await chromium.connectOverCDP(a.cdp);
-    context = await browser.newContext({ ignoreHTTPSErrors: true }).catch(() => browser.contexts()[0]);
+    // viewport: null keeps the browser's own window size. Playwright's default
+    // 1280x720 override would change screen and window sizes, and LightBrowser
+    // refuses overrides that contradict its persona (ADR 0009).
+    context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: null }).catch(() => browser.contexts()[0]);
     owned = false;
   } else {
     if (id === 'T-020' && !a.trace) return { id, name: sc.name, skipped: 'needs --trace <file>' };

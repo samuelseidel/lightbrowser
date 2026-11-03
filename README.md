@@ -8,10 +8,15 @@ fingerprint (TLS, HTTP/2, header order), JavaScript surface, and device
 fingerprints (canvas, WebGL, audio, fonts, screen). It aims to use less CPU,
 RAM and disk than Lightpanda.
 
-**Status:** M1 (network) and M2 (DOM + V8) done for Chrome: `lightbrowser
-fetch --dump html` prints the DOM after scripts ran. M3 in progress: the
-cascade, layout and the CDP server have landed; `lightbrowser serve` still
-runs on a mock page host without JS. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status:** M1 (network), M2 (DOM + V8), M3 (layout + CDP) and M4 (Chrome
+fingerprints) are done for the Chrome build. `lightbrowser serve` runs real
+V8 pages, and stock Playwright `connectOverCDP` drives them (click, fill,
+getByRole, frames, network routing). On our own detection bench, fingerprint
+rules score 0 for both reference Chrome personas; only behaviour rules fire
+(M5). Not done: Firefox (M4b, no SpiderMonkey backend yet), workers,
+behaviour replay and the Python SDK (M5), size and startup budgets (M6; the
+release binary is 62.1 MB against < 40 MB). See
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only
 
@@ -43,7 +48,8 @@ One binary per family, chosen at build time with a cargo feature.
 
 A binary refuses a persona whose family does not match its engine. The V8
 backend has landed; SpiderMonkey arrives in M4b. Until then the firefox build
-loads and parses pages but runs no scripts.
+loads and parses pages but runs no scripts, and its `serve` uses a mock page
+host.
 
 ## Build
 
@@ -74,8 +80,12 @@ cargo clippy -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-featu
 ```
 
 Subcommands: `fetch <url> --dump html|text` (runs scripts), `validate
-<persona.json>`, and `serve --port 9222` (CDP for Playwright
-`connectOverCDP`, mock page host for now). Point them only at loopback test
+<persona.json>`, `serve --port 9222` (CDP for Playwright `connectOverCDP`;
+use `viewport: null`, because viewports that contradict the persona are
+rejected), and `fingerprint-report [--persona FILE] [--url URL]` (compares the
+live JS surface with the persona; JSON on stdout, exit 1 on a mismatch).
+`fetch`, `serve` and `fingerprint-report` take `--persona FILE` and default to
+the Windows Chrome 153 reference persona. Point them only at loopback test
 servers.
 
 ## Layout

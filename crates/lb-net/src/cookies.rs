@@ -70,6 +70,120 @@ impl CookieJar {
     }
 }
 
+/// One cookie with its attributes (the CDP `Network.Cookie` view).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CookieInfo {
+    pub name: String,
+    pub value: String,
+    /// The host for host-only cookies, `.example.com` for domain cookies.
+    pub domain: String,
+    pub path: String,
+    /// Expiry in seconds since the epoch; `None` for session cookies.
+    pub expires: Option<f64>,
+    pub http_only: bool,
+    pub secure: bool,
+    /// `Strict`, `Lax` or `None`.
+    pub same_site: Option<String>,
+}
+
+fn cookie_info(c: &cookie_store::Cookie<'_>) -> CookieInfo {
+    let domain = match &c.domain {
+        cookie_store::CookieDomain::HostOnly(h) => h.clone(),
+        cookie_store::CookieDomain::Suffix(d) => format!(".{}", d.trim_start_matches('.')),
+        _ => String::new(),
+    };
+    let expires = match &c.expires {
+        cookie_store::CookieExpiration::AtUtc(t) => Some(t.unix_timestamp() as f64),
+        _ => None,
+    };
+    CookieInfo {
+        name: c.name().to_owned(),
+        value: c.value().to_owned(),
+        domain,
+        path: String::from(&c.path),
+        expires,
+        http_only: c.http_only().unwrap_or(false),
+        secure: c.secure().unwrap_or(false),
+        same_site: c.same_site().map(|s| s.to_string()),
+    }
+}
+
+impl CookieJar {
+    /// Every unexpired cookie, with attributes.
+    pub fn all(&self) -> Vec<CookieInfo> {
+        self.lock().iter_unexpired().map(cookie_info).collect()
+    }
+
+    /// The cookies a request to `url` would send, with attributes.
+    pub fn for_url(&self, url: &Url) -> Vec<CookieInfo> {
+        self.lock()
+            .matches(url)
+            .into_iter()
+            .map(cookie_info)
+            .collect()
+    }
+
+    /// Store a cookie as if `url` had set it (`domain` with a leading dot
+    /// makes a domain cookie, otherwise it is host-only).
+    pub fn set(&self, url: &Url, c: &CookieInfo) -> Result<(), String> {
+        let mut b = cookie::Cookie::build((c.name.clone(), c.value.clone()))
+            .path(c.path.clone())
+            .secure(c.secure)
+            .http_only(c.http_only);
+        if let Some(d) = c.domain.strip_prefix('.') {
+            b = b.domain(d.to_owned());
+        }
+        if let Some(e) = c.expires
+            && let Ok(t) = cookie::time::OffsetDateTime::from_unix_timestamp(e as i64)
+        {
+            b = b.expires(t);
+        }
+        if let Some(s) = &c.same_site {
+            b = b.same_site(match s.to_ascii_lowercase().as_str() {
+                "strict" => cookie::SameSite::Strict,
+                "lax" => cookie::SameSite::Lax,
+                _ => cookie::SameSite::None,
+            });
+        }
+        let raw = b.build();
+        self.lock()
+            .insert_raw(&raw, url)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Remove cookies named `name` whose domain and path match (`None`
+    /// matches any). Returns how many went.
+    pub fn remove(&self, name: &str, domain: Option<&str>, path: Option<&str>) -> usize {
+        let hits: Vec<(String, String)> = self
+            .lock()
+            .iter_any()
+            .filter(|c| c.name() == name)
+            .map(|c| {
+                let d = match &c.domain {
+                    cookie_store::CookieDomain::HostOnly(h) => h.clone(),
+                    cookie_store::CookieDomain::Suffix(d) => d.clone(),
+                    _ => String::new(),
+                };
+                (d, String::from(&c.path))
+            })
+            .filter(|(d, p)| {
+                domain.is_none_or(|x| x.trim_start_matches('.') == d.trim_start_matches('.'))
+                    && path.is_none_or(|x| x == p)
+            })
+            .collect();
+        let mut store = self.lock();
+        hits.iter()
+            .filter(|(d, p)| store.remove(d, p, name).is_some())
+            .count()
+    }
+
+    /// Drop every cookie.
+    pub fn clear(&self) {
+        self.lock().clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

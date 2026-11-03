@@ -146,6 +146,8 @@ pub struct LayoutEngine {
     viewport_scroll: (f32, f32),
     stats: LayoutStats,
     persona: Option<Arc<PersonaProfile>>,
+    /// Natural sizes of loaded images (`<img>`), in CSS px.
+    intrinsic: HashMap<NodeId, (f32, f32)>,
 }
 
 impl std::fmt::Debug for LayoutEngine {
@@ -185,6 +187,7 @@ impl LayoutEngine {
             viewport_scroll: (0.0, 0.0),
             stats: LayoutStats::default(),
             persona: None,
+            intrinsic: HashMap::new(),
         }
     }
 
@@ -215,6 +218,18 @@ impl LayoutEngine {
         self.viewport
     }
 
+    /// Sets (or clears) the natural size of an image element, e.g. once
+    /// it loaded. Invalidates the layout when it changes.
+    pub fn set_intrinsic_size(&mut self, node: NodeId, size: Option<(f32, f32)>) {
+        let old = match size {
+            Some(s) => self.intrinsic.insert(node, s),
+            None => self.intrinsic.remove(&node),
+        };
+        if old != size {
+            self.state = None;
+        }
+    }
+
     /// Frees layout data (memory pressure). The next query lays out again.
     pub fn drop_layout(&mut self) {
         self.state = None;
@@ -241,6 +256,7 @@ impl LayoutEngine {
         if !fresh {
             // Styles may refresh (and bump nothing): re-read the key after.
             let built = Builder::new(doc, &mut self.styles, &self.fonts, &self.available)
+                .with_intrinsic(&self.intrinsic)
                 .build(self.viewport.0, self.viewport.1);
             let mut built = built;
             built

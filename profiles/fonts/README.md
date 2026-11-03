@@ -37,3 +37,31 @@ Covered characters: U+0020-007E, U+00A0-00FF and common punctuation
   (similar designs with the real fonts' documented vertical metrics),
   Helvetica, Helvetica Neue, Times, Courier and macOS `system-ui` (Inter).
   Replace these with tables generated from the real fonts when available.
+
+## Derived tables (`derived.json`)
+
+Persona fonts without a table of their own (for example Consolas, Cambria,
+MS Gothic, Menlo, Avenir) get an approximate one at load time: the `base`
+table's advances times `scale`, with `ascent`, `descent` and `line_gap` in
+em. The numbers are estimates (no proprietary font files were used); they
+make installed fonts measurably different from the fallbacks, so width
+probes detect exactly the persona's fonts. A real table in `<os>/` wins over
+a derived one. `lb-layout` checks that every font in the reference personas
+has a table or a derived entry.
+
+## Glyph outlines (`outlines/`)
+
+Canvas text draws glyph shapes from small outline packs (`*.lbgp`, format
+in `crates/lb-paint/examples/gen_glyph_pack.rs`), one per style class and
+weight: `sans`, `serif`, `mono` x `regular`, `bold`, about 205 KB in all.
+They are derived from Liberation Sans/Serif/Mono 2.1.5 (SIL OFL 1.1, see
+`outlines/LICENSE`; the packs do not use the reserved names) and cover the
+same characters as the metric tables. Widths still come from the metric
+tables above; italic is a synthetic skew. Regenerate with:
+
+```bash
+cargo run -p lb-paint --example gen_glyph_pack -- \
+    /usr/share/fonts/truetype/liberation profiles/fonts/outlines
+```
+
+Only the `*.json` tables count for `BUNDLED`.

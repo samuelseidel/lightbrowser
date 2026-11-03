@@ -1,77 +1,61 @@
-// Playwright smoke test against `lightbrowser serve` (loopback only).
+// connectOverCDP smoke test against `lightbrowser serve` (loopback only).
 //
 //   cargo build -p lightbrowser
 //   node --test tests/playwright/
-//
-// Uses the globally installed `playwright` package (`npm root -g`), stock
-// `chromium.connectOverCDP`. Set LIGHTBROWSER_BIN to test another binary.
-// Until lb-page is wired in, `serve` runs the mock page host: it serves
-// built-in pages for loopback URLs and never touches the network.
 
-import { test, before, after } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, execSync } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { env, newPage, pages, html, chromium } from './harness.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const require = createRequire(import.meta.url);
-const globalRoot = execSync('npm root -g').toString().trim();
-const { chromium } = require(path.join(globalRoot, 'playwright'));
-
-const bin = process.env.LIGHTBROWSER_BIN || path.join(repo, 'target/debug/lightbrowser');
-let server;
-let endpoint;
-
-before(async () => {
-  assert.ok(existsSync(bin), `${bin} not found; run cargo build -p lightbrowser first`);
-  server = spawn(bin, ['serve', '--port', '0'], { cwd: repo, stdio: ['ignore', 'ignore', 'pipe'] });
-  endpoint = await new Promise((resolve, reject) => {
-    let log = '';
-    const timer = setTimeout(() => reject(new Error(`no DevTools line:\n${log}`)), 15000);
-    server.stderr.on('data', (chunk) => {
-      log += chunk;
-      const m = log.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (m) {
-        clearTimeout(timer);
-        resolve(m[1]);
-      }
-    });
-    server.on('exit', (code) => reject(new Error(`serve exited with ${code}:\n${log}`)));
-  });
-});
-
-after(() => {
-  server?.kill();
-});
+pages['/smoke'] = html(
+  'LightBrowser smoke',
+  '<h1>Smoke</h1><button id="go" type="button">Log in</button><script>document.body.dataset.ran = "yes"</script>',
+);
 
 test('connectOverCDP, newContext, newPage, goto, evaluate, content', async () => {
-  // The http endpoint, like a user would pass it; Playwright reads
-  // /json/version to find the WebSocket.
-  const http = endpoint.replace(/^ws:\/\/([^/]+)\/.*$/, 'http://$1');
-  const browser = await chromium.connectOverCDP(http);
-  try {
-    assert.match(browser.version(), /^153\./);
-    // viewport: null keeps the persona's own window size; Playwright's
-    // default 1280x720 screen would contradict the persona and be refused.
-    const context = await browser.newContext({ viewport: null });
-    const page = await context.newPage();
-    const response = await page.goto('http://127.0.0.1:9/smoke');
-    assert.equal(response.status(), 200);
-    assert.equal(page.url(), 'http://127.0.0.1:9/smoke');
-    assert.equal(await page.evaluate('1+1'), 2);
-    assert.equal(await page.evaluate(() => 1 + 1), 2);
-    assert.equal(await page.evaluate((a) => a * 2, 21), 42);
-    assert.equal(await page.title(), 'LightBrowser mock');
-    const html = await page.content();
-    assert.match(html, /^<!DOCTYPE html><html><head><title>LightBrowser mock<\/title>/);
-    assert.match(html, /<button id="go" type="button">Log in<\/button>/);
-    // The persona is enforced: a contradicting viewport is an error.
-    await assert.rejects(page.setViewportSize({ width: 5000, height: 5000 }), /contradicts the persona/);
-    await context.close();
-  } finally {
-    await browser.close();
-  }
+  const { browser, base } = await env();
+  assert.match(browser.version(), /^153\./);
+  const { context, page } = await newPage();
+  const response = await page.goto(`${base}/smoke`);
+  assert.equal(response.status(), 200);
+  assert.equal(page.url(), `${base}/smoke`);
+  assert.equal(await page.evaluate('1+1'), 2);
+  assert.equal(await page.evaluate(() => 1 + 1), 2);
+  assert.equal(await page.evaluate((a) => a * 2, 21), 42);
+  assert.deepEqual(await page.evaluate(() => ({ a: [1, 'x', null], b: { c: true } })), {
+    a: [1, 'x', null],
+    b: { c: true },
+  });
+  assert.equal(await page.evaluate(async () => { await new Promise((r) => setTimeout(r, 10)); return 'later'; }), 'later');
+  await assert.rejects(page.evaluate(() => { throw new TypeError('boom'); }), /TypeError: boom/);
+  // Scripts ran.
+  assert.equal(await page.evaluate(() => document.body.dataset.ran), 'yes');
+  assert.equal(await page.title(), 'LightBrowser smoke');
+  const html = await page.content();
+  assert.match(html, /^<!DOCTYPE html><html><head><meta charset="utf-8"><title>LightBrowser smoke<\/title>/);
+  assert.match(html, /<button id="go" type="button">Log in<\/button>/);
+  // Handles: element handles and JS handles.
+  const h1 = await page.$('h1');
+  assert.equal(await h1.evaluate((e) => e.tagName), 'H1');
+  const obj = await page.evaluateHandle(() => ({ x: 1, y: 'two' }));
+  const props = await obj.getProperties();
+  assert.deepEqual([...props.keys()].sort(), ['x', 'y']);
+  assert.equal(await (await obj.getProperty('y')).jsonValue(), 'two');
+  // The persona is enforced: a contradicting viewport is an error.
+  await assert.rejects(page.setViewportSize({ width: 5000, height: 5000 }), /contradicts the persona/);
+  await context.close();
+});
+
+test('serve + connectOverCDP + newPage + goto wall time', async () => {
+  const { ws, base, startedMs } = await env();
+  // A second, cold connection: connect, new context and page, goto.
+  const t0 = performance.now();
+  const browser = await chromium.connectOverCDP(ws);
+  const context = await browser.newContext({ viewport: null });
+  const page = await context.newPage();
+  await page.goto(`${base}/smoke`);
+  const warm = performance.now() - t0;
+  await context.close();
+  console.log(`# serve start + connect: ${startedMs.toFixed(0)} ms; connect + newPage + goto: ${warm.toFixed(0)} ms`);
+  assert.ok(warm < 10000);
 });

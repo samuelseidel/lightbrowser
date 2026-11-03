@@ -118,7 +118,7 @@ password characters become `x`), `dx,dy,dm` (wheel), `sy` (scrollY), `it`
 |---|---|---|
 | `T-001 stock-chromium-headless` | `chromium.launch()`, instant `click`/`fill`, one big wheel. | `>=90` |
 | `T-003 scripted-slow` | Same browser; `mouse.move` with steps, wheel ticks, `pressSequentially` with delay. | `>=70&fp>=70`: still caught by fingerprint rules |
-| `T-010 cdp-endpoint` | `chromium.connectOverCDP(--cdp ws://...)`, T-001 flow. For LightBrowser. | set with `--expect` |
+| `T-010 cdp-endpoint` | `chromium.connectOverCDP(--cdp ws://...)`, context with `viewport: null` (ADR 0009), T-001 flow. For LightBrowser. | set with `--expect` |
 | `T-020 human-replay` | Replays a trace file (`--trace`) with its timing. Placeholder. | set with `--expect`, e.g. `beh<=30` |
 
 Every scenario opens `/shop`, scrolls, adds a product to the cart, types
@@ -127,7 +127,7 @@ score.
 
 ```bash
 node run.js --scenario T-001 --save-fixtures fixtures
-node run.js --scenario T-010 --cdp ws://127.0.0.1:9222/devtools/browser/<id> --expect '<=30'
+node run.js --scenario T-010 --cdp ws://127.0.0.1:9222/devtools/browser/<id> --expect 'fp<=30'   # M4 target (ADR 0007)
 node run.js --scenario T-020 --trace fixtures/synthetic-human-trace.json --expect 'beh<=30'
 node run.js --base https://localhost:8766      # against server.py --tls
 ```

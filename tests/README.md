@@ -1,7 +1,8 @@
 # tests
 
-Test suites arrive with the milestones that need them. Unit tests stay
-inside each crate.
+Unit tests stay inside each crate. This file lists the cross-crate suites.
+Run everything with `cargo test --workspace` plus `node --test
+tests/playwright/` (build `lightbrowser` first).
 
 ## Network fingerprint test (M1, in place)
 
@@ -33,7 +34,7 @@ cargo test -p lb-net --test fingerprint -- --nocapture   # prints measured JA3/J
 `tests/wpt/` holds testharness.js and 83 upstream WPT files (dom/nodes,
 dom/events, html/dom, url, encoding); see `tests/wpt/README.md`.
 `crates/lb-page/tests/wpt.rs` serves them on loopback and fails below 2520
-passing subtests (2540/2788 today).
+passing subtests (2552/2788 today).
 
 ```bash
 cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
@@ -42,23 +43,87 @@ cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
 ## Playwright CDP suite (M3, in place)
 
 `tests/playwright/` runs stock Playwright `connectOverCDP` against
-`lightbrowser serve` (mock page host for now): goto, evaluate, title,
-content. click, fill and getByRole follow once `lb-page` implements
-`lb_cdp::PageHost`.
+`lightbrowser serve` (the real V8 page host) with `viewport: null` in every
+context (ADR 0009). 16 tests, all passing; `harness.mjs` starts `serve` and a
+local site.
+
+| Spec | Covers |
+|---|---|
+| `smoke.spec.mjs` | goto, evaluate, title, content, start-up wall time |
+| `actions.spec.mjs` | click/dblclick event order and coordinates, fill/type/press, check/radio/selectOption, labels, getByRole/Text/Label, locator reads, waitForSelector/Function, link navigation, form submit |
+| `network.spec.mjs` | `page.route` fulfill/abort (fetch and navigation), cookies, two pages in one context, two contexts |
+| `stealth.spec.mjs` | no added or suspicious main-world globals, `navigator.webdriver` false, trusted events |
+| `cdp.spec.mjs` | raw CDP: DOM, Accessibility, Emulation, console, page errors |
+| `frames.spec.mjs` | `frameLocator`, `page.frame`, frame attach/detach events, `LightBrowser.fingerprintReport` leaves no trace in the main world |
 
 ```bash
 cargo build -p lightbrowser && node --test tests/playwright/   # LIGHTBROWSER_BIN overrides
 ```
 
+## Page-level Rust tests (lb-page, M2 to M4)
+
+`crates/lb-page/tests/` drive real V8 pages against loopback servers (chrome
+build only). Run one with `cargo test -p lb-page --test <name>`.
+
+| Test | Covers |
+|---|---|
+| `pages` | scripts and DOM after load, errors, `unload_events_beacon_and_favicon`; includes `frames/` (iframes, `postMessage`, cross-origin `SecurityError`) and `report/` (fingerprint-report gate) |
+| `cdp_host` | `CdpHost` through `lb_cdp::PageHost` |
+| `canvas` | canvas 2D API, image loading, same seed gives the same `toDataURL` hash, another seed a different one |
+| `navigator` | plugins, UA-CH, permissions, battery, devices, voices, time zone, `window.chrome`, screen, media queries, RTC, for both reference personas |
+| `fingerprint_surfaces` | WebGL strings and pixels, fonts, Web Audio sum (about 124.043), determinism per seed |
+| `wpt` | the WPT subset above |
+
+Fingerprint report gate: `cargo test -p lb-page --test pages report` checks
+every `profiles/reference/chrome` persona (on `about:blank` and on a loopback
+page) for zero mismatches and zero unimplemented surfaces. The same check
+from the command line:
+
+```bash
+./target/debug/lightbrowser fingerprint-report \
+    --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json   # exit 1 on mismatch
+```
+
+Other new suites: `cargo test -p lb-paint` (paths, compositing, gradients,
+codecs, noise), `cargo test -p lb-webapi` (`tests/install.rs`: interface
+surface vs Chrome 153), `cargo test -p lb-net` (74 unit tests, including the
+header profile in `header_profile.rs`, and `--test fingerprint`).
+
 ## Detection bench (ADR 0007)
 
 `tests/detect-bench` is our detection engine for M4/M5, loopback only. See
-its README.
+its README. M4 target (met for both reference Chrome personas, fp 0):
+
+```bash
+python3 tests/detect-bench/server.py --port 18766 --results-dir "$(mktemp -d)" &
+./target/debug/lightbrowser serve --port 19222 \
+    --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json &
+curl -s http://127.0.0.1:19222/json/version      # webSocketDebuggerUrl
+node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
+    --cdp ws://127.0.0.1:19222/devtools/browser/<id> --expect 'fp<=30'
+# stop both servers afterwards
+python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (18)
+```
+
+Use a fresh `serve` per run. M5 target: `--expect 'beh<=30'`.
 
 ## Planned suites
 
-- **Fingerprint tests** (M4, M4b): run against OUR detection engine only. Same seed must give the same fingerprint; Chrome personas must score as consistent.
+- **Header golden test** (M4): replay `profiles/headers/captures/chrome_153_linux.jsonl` through `lb_net::HeaderProfile::build` and compare names, case and order. Not written yet.
+- **Fingerprint tests for Firefox** (M4b): same checks as the Chrome personas, against OUR detection engine only.
 - **Firefox network fingerprint** (M4b): close the ADR 0003 gaps and re-capture Firefox 128 with `lb-fptest`.
+
+## Re-capturing Chrome request headers (`profiles/headers`)
+
+`profiles/headers/chrome_153.json` was built from a capture of Chrome for
+Testing 153.0.8010.12 (`--headless=new`) against a local logging server on
+loopback: HTTP/1.1 raw bytes, and HTTPS h2 decoded. The 69 requests are in
+`profiles/headers/captures/chrome_153_linux.jsonl` (document, iframe, scripts,
+style, image, font, fetch/XHR, preflight, favicon, redirect). The capture
+server script is not in the repo yet (it was a throwaway Python script using
+the `h2` package and an `openssl` cert), so a re-capture for a new Chrome
+major is manual: record the same request kinds from a local Chromium, compare
+with the existing JSONL, and update the slot lists (ADR 0011).
 
 ## Re-capturing a Chrome TLS/H2 profile (`lb-fptest`)
 

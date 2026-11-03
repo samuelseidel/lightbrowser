@@ -334,14 +334,135 @@
     "max_channel_count": 2
   },
   "media_devices": {
-    "webcam_label": "",
-    "mic_label": "",
-    "speaker_label": ""
+    "webcam_label": "HD Webcam (0c45:6366)",
+    "mic_label": "Microphone (Realtek(R) Audio)",
+    "speaker_label": "Speakers (Realtek(R) Audio)",
+    "audioinput": 1,
+    "videoinput": 1,
+    "audiooutput": 1
   },
   "permissions": {
     "geolocation": "prompt",
     "notifications": "prompt",
     "camera": "prompt",
     "microphone": "prompt"
-  }
+  },
+  "preferences": {
+    "color_scheme": "light",
+    "color_gamut": "srgb",
+    "scrollbar_width": 17
+  },
+  "speech_voices": [
+    {
+      "name": "Microsoft David - English (United States)",
+      "lang": "en-US",
+      "local_service": true,
+      "default": true
+    },
+    {
+      "name": "Microsoft Mark - English (United States)",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Microsoft Zira - English (United States)",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Google Deutsch",
+      "lang": "de-DE",
+      "local_service": false
+    },
+    {
+      "name": "Google US English",
+      "lang": "en-US",
+      "local_service": false
+    },
+    {
+      "name": "Google UK English Female",
+      "lang": "en-GB",
+      "local_service": false
+    },
+    {
+      "name": "Google UK English Male",
+      "lang": "en-GB",
+      "local_service": false
+    },
+    {
+      "name": "Google español",
+      "lang": "es-ES",
+      "local_service": false
+    },
+    {
+      "name": "Google español de Estados Unidos",
+      "lang": "es-US",
+      "local_service": false
+    },
+    {
+      "name": "Google français",
+      "lang": "fr-FR",
+      "local_service": false
+    },
+    {
+      "name": "Google हिन्दी",
+      "lang": "hi-IN",
+      "local_service": false
+    },
+    {
+      "name": "Google Bahasa Indonesia",
+      "lang": "id-ID",
+      "local_service": false
+    },
+    {
+      "name": "Google italiano",
+      "lang": "it-IT",
+      "local_service": false
+    },
+    {
+      "name": "Google 日本語",
+      "lang": "ja-JP",
+      "local_service": false
+    },
+    {
+      "name": "Google 한국의",
+      "lang": "ko-KR",
+      "local_service": false
+    },
+    {
+      "name": "Google Nederlands",
+      "lang": "nl-NL",
+      "local_service": false
+    },
+    {
+      "name": "Google polski",
+      "lang": "pl-PL",
+      "local_service": false
+    },
+    {
+      "name": "Google português do Brasil",
+      "lang": "pt-BR",
+      "local_service": false
+    },
+    {
+      "name": "Google русский",
+      "lang": "ru-RU",
+      "local_service": false
+    },
+    {
+      "name": "Google 普通话（中国大陆）",
+      "lang": "zh-CN",
+      "local_service": false
+    },
+    {
+      "name": "Google 粤語（香港）",
+      "lang": "zh-HK",
+      "local_service": false
+    },
+    {
+      "name": "Google 國語（臺灣）",
+      "lang": "zh-TW",
+      "local_service": false
+    }
+  ]
 }

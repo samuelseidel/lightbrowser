@@ -69,6 +69,16 @@ pub struct MediaEnv {
     pub hover: bool,
     pub pointer: PointerKind,
     pub os: OsKind,
+    /// `prefers-reduced-transparency: reduce`.
+    pub prefers_reduced_transparency: bool,
+    /// `prefers-contrast`: `no-preference`, `more`, `less` or `custom`.
+    pub prefers_contrast: &'static str,
+    /// `forced-colors: active`.
+    pub forced_colors: bool,
+    /// Widest `color-gamut` matched: 0 sRGB, 1 P3, 2 Rec. 2020.
+    pub color_gamut: u8,
+    /// `dynamic-range: high`.
+    pub high_dynamic_range: bool,
 }
 
 impl Default for MediaEnv {
@@ -86,6 +96,11 @@ impl Default for MediaEnv {
             hover: true,
             pointer: PointerKind::Fine,
             os: OsKind::Windows,
+            prefers_reduced_transparency: false,
+            prefers_contrast: "no-preference",
+            forced_colors: false,
+            color_gamut: 0,
+            high_dynamic_range: false,
         }
     }
 }
@@ -95,6 +110,7 @@ impl MediaEnv {
     /// device size and DPR from `screen`, pointer from `client_hints.mobile`.
     pub fn from_persona(p: &PersonaProfile) -> MediaEnv {
         let mobile = p.client_hints.as_ref().is_some_and(|h| h.mobile);
+        let prefs = p.preferences();
         MediaEnv {
             viewport_width: p.screen.inner_width as f32,
             viewport_height: p.screen.inner_height as f32,
@@ -102,8 +118,8 @@ impl MediaEnv {
             device_height: p.screen.height as f32,
             device_pixel_ratio: p.screen.device_pixel_ratio as f32,
             color_bits: (p.screen.color_depth / 3).clamp(1, 16),
-            prefers_dark: false,
-            prefers_reduced_motion: false,
+            prefers_dark: prefs.dark(),
+            prefers_reduced_motion: prefs.reduced_motion,
             hover: !mobile,
             pointer: if mobile {
                 PointerKind::Coarse
@@ -111,6 +127,20 @@ impl MediaEnv {
                 PointerKind::Fine
             },
             os: OsKind::from_name(&p.os.name),
+            prefers_reduced_transparency: prefs.reduced_transparency,
+            prefers_contrast: match prefs.contrast.as_str() {
+                "more" => "more",
+                "less" => "less",
+                "custom" => "custom",
+                _ => "no-preference",
+            },
+            forced_colors: prefs.forced_colors,
+            color_gamut: match prefs.color_gamut.as_str() {
+                "rec2020" => 2,
+                "p3" => 1,
+                _ => 0,
+            },
+            high_dynamic_range: prefs.high_dynamic_range,
         }
     }
 }
@@ -400,17 +430,39 @@ fn env_ident(name: &str, env: &MediaEnv) -> Option<&'static str> {
             PointerKind::Fine => "fine",
         },
         "display-mode" => "browser",
-        "forced-colors" => "none",
-        "inverted-colors" => "none",
-        "prefers-contrast" => "no-preference",
-        "prefers-reduced-transparency" => "no-preference",
-        "prefers-reduced-data" => "no-preference",
+        "forced-colors" => {
+            if env.forced_colors {
+                "active"
+            } else {
+                "none"
+            }
+        }
+        // Chrome 153 does not support `inverted-colors`,
+        // `prefers-reduced-data` or `video-dynamic-range` (never match).
+        "prefers-contrast" => env.prefers_contrast,
+        "prefers-reduced-transparency" => {
+            if env.prefers_reduced_transparency {
+                "reduce"
+            } else {
+                "no-preference"
+            }
+        }
         "scripting" => "enabled",
         "update" => "fast",
         "overflow-block" => "scroll",
         "overflow-inline" => "scroll",
-        "color-gamut" => "srgb",
-        "dynamic-range" | "video-dynamic-range" => "standard",
+        "color-gamut" => match env.color_gamut {
+            0 => "srgb",
+            1 => "p3",
+            _ => "rec2020",
+        },
+        "dynamic-range" => {
+            if env.high_dynamic_range {
+                "high"
+            } else {
+                "standard"
+            }
+        }
         "-webkit-transform-3d" => "1",
         _ => return None,
     })
@@ -435,6 +487,15 @@ impl Feature {
                 {
                     match value {
                         None => !matches!(cur, "none" | "no-preference"),
+                        // A wider gamut / range also matches the narrower ones.
+                        Some(MfValue::Ident(v)) if base == "color-gamut" => {
+                            let rank =
+                                |g: &str| ["srgb", "p3", "rec2020"].iter().position(|x| *x == g);
+                            matches!((rank(v), rank(cur)), (Some(a), Some(b)) if a <= b)
+                        }
+                        Some(MfValue::Ident(v)) if base == "dynamic-range" => {
+                            v == "standard" || v == cur
+                        }
                         Some(MfValue::Ident(v)) => v == cur,
                         Some(MfValue::Num(n)) => cur == fmt_num(*n),
                         _ => false,

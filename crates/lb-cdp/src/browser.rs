@@ -884,7 +884,7 @@ pub(crate) async fn dispatch<H: PageHost + 'static>(
         "Emulation" => emulation_domain(&c),
         "Accessibility" => accessibility_domain(&c),
         "Security" | "Log" | "Performance" => misc_domain(&c),
-        "LightBrowser" => lightbrowser_domain(&c),
+        "LightBrowser" => lightbrowser_domain(&c).await,
         _ => Err(CdpError::method_not_found(&cmd.method)),
     }
 }
@@ -1807,7 +1807,7 @@ fn misc_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError
     }
 }
 
-fn lightbrowser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError> {
+async fn lightbrowser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError> {
     match c.method {
         "LightBrowser.setPersona" => {
             let raw =
@@ -1848,9 +1848,19 @@ fn lightbrowser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, 
                 .map_err(host_err)?;
             Ok(json!({ "browserContextId": ctx, "profileId": id }))
         }
-        "LightBrowser.fingerprintReport" => Err(CdpError::server(
-            "LightBrowser.fingerprintReport is not implemented yet (M4)",
-        )),
+        "LightBrowser.fingerprintReport" => {
+            // The session's page, or `targetId` from a browser session.
+            let target = match c.p.get("targetId").and_then(Value::as_str) {
+                Some(t) => t.to_string(),
+                None => c.target.clone().ok_or_else(|| {
+                    CdpError::invalid_params("targetId is required on a browser session")
+                })?,
+            };
+            c.sh.host
+                .fingerprint_report(&target)
+                .await
+                .map_err(host_err)
+        }
         "LightBrowser.humanClick" | "LightBrowser.humanType" | "LightBrowser.humanScroll" => Err(
             CdpError::server(format!("{} is not implemented yet (M5)", c.method)),
         ),

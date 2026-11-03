@@ -926,3 +926,74 @@ fn installer_support() {
         assert_eq!(eval(&mut e, r, src), want, "{src}");
     }
 }
+
+/// A host function builds a realm on the spot (an iframe's `about:blank`)
+/// and hands its global back; same-origin realms share a security token.
+#[test]
+fn realm_ops_inside_a_callback() {
+    use lb_js::RealmOps;
+    let mut e = engine();
+    let main = e.new_realm(RealmOptions::default()).unwrap();
+    e.set_security_token(main, "https://a.test").unwrap();
+    let f = e
+        .new_function(
+            main,
+            "makeFrame",
+            0,
+            host_fn(|cx| {
+                let child = cx
+                    .new_realm(RealmOptions::default())
+                    .map_err(|e| HostError::Error(e.message))?;
+                cx.set_security_token(child, "https://a.test")
+                    .map_err(|e| HostError::Error(e.message))?;
+                RealmOps::evaluate(
+                    cx,
+                    child,
+                    "var inner = 41 + 1;",
+                    ScriptOrigin::new("about:blank"),
+                )
+                .map_err(|e| HostError::Error(e.message))?;
+                let g = RealmOps::global(cx, child).map_err(|e| HostError::Error(e.message))?;
+                cx.ret(Arg::Handle(g))
+            }),
+        )
+        .unwrap();
+    let g = e.global(main).unwrap();
+    e.set_property(main, g, "makeFrame", Arg::Handle(f))
+        .unwrap();
+    let v = e
+        .evaluate(
+            main,
+            "const w = makeFrame(); [w.inner, w !== globalThis, typeof w.Object, w.Object !== Object].join()",
+            ScriptOrigin::new("https://a.test/"),
+        )
+        .unwrap();
+    assert_eq!(v, JsValue::String("42,true,function,true".into()));
+    // Another origin's global is out of reach.
+    let f2 = e
+        .new_function(
+            main,
+            "makeOther",
+            0,
+            host_fn(|cx| {
+                let child = cx
+                    .new_realm(RealmOptions::default())
+                    .map_err(|e| HostError::Error(e.message))?;
+                cx.set_security_token(child, "https://b.test")
+                    .map_err(|e| HostError::Error(e.message))?;
+                let g = RealmOps::global(cx, child).map_err(|e| HostError::Error(e.message))?;
+                cx.ret(Arg::Handle(g))
+            }),
+        )
+        .unwrap();
+    e.set_property(main, g, "makeOther", Arg::Handle(f2))
+        .unwrap();
+    let v = e
+        .evaluate(
+            main,
+            "try { makeOther().Object; 'reached' } catch (e) { e.constructor.name }",
+            ScriptOrigin::new("https://a.test/"),
+        )
+        .unwrap();
+    assert_eq!(v, JsValue::String("TypeError".into()));
+}

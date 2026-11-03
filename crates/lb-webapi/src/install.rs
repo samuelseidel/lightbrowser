@@ -160,11 +160,21 @@ impl Bindings {
                 global_desc = Some(desc);
                 continue;
             }
-            let spec = interface_spec(desc, &registry, &stubs, &ids)?;
+            let spec = interface_spec(table, desc, &registry, &stubs, &ids)?;
             let id = engine.define_interface(spec);
             ids.insert(desc.name, id);
             if desc.name == "DOMException" {
                 dom.set_interface(id);
+            }
+        }
+
+        // Interfaces the table does not carry because they have no
+        // interface object: WebGL extension objects. Only reachable through
+        // `getExtension`.
+        if table.interface("WebGLRenderingContext").is_some() {
+            for (name, spec) in crate::rt::extension_specs(&registry) {
+                ids.entry(name)
+                    .or_insert_with(|| engine.define_interface(spec));
             }
         }
 
@@ -187,7 +197,7 @@ impl Bindings {
 
         let window_desc = global_desc.ok_or(InstallError::Unknown("Window"))?;
         ids.insert(window_desc.name, engine.next_interface_id());
-        let mut spec = interface_spec(window_desc, &registry, &stubs, &ids)?;
+        let mut spec = interface_spec(table, window_desc, &registry, &stubs, &ids)?;
         spec.instance = global_members(table, window_desc, &registry, &stubs, &ids, &factories)?;
         spec.immutable_proto = true;
         let window = engine.define_interface(spec);
@@ -238,7 +248,7 @@ impl Bindings {
     /// alias, namespace and window member in Chrome's order.
     pub fn new_window_realm(
         &self,
-        engine: &mut Engine,
+        engine: &mut dyn lb_js::RealmOps,
         options: WindowRealmOptions,
     ) -> Result<RealmId, JsError> {
         let realm = engine.new_realm(RealmOptions {
@@ -520,6 +530,7 @@ fn symbol_members(d: &InterfaceDesc, out: &mut Vec<Member>) {
 }
 
 fn interface_spec(
+    table: &'static Table,
     d: &'static InterfaceDesc,
     registry: &Registry,
     stubs: &Stubs,
@@ -549,10 +560,19 @@ fn interface_spec(
     symbol_members(d, &mut proto);
     spec.prototype = proto;
     if !d.is_global {
-        spec.instance = d
-            .instance_order
+        // Instance members (`[LegacyUnforgeable]`) of ancestors are own
+        // properties of every instance too (`isTrusted` on a MouseEvent).
+        let mut chain = vec![d];
+        let mut parent = d.parent;
+        while let Some(p) = parent.and_then(|p| table.interface(p)) {
+            chain.push(p);
+            parent = p.parent;
+        }
+        spec.instance = chain
             .iter()
-            .map(|s| slot_member(d, *s, registry, stubs, false))
+            .rev()
+            .flat_map(|a| a.instance_order.iter().map(move |s| (*a, s)))
+            .map(|(a, s)| slot_member(a, *s, registry, stubs, false))
             .collect();
     }
     if let Some(f) = registry.named_getter_for(d.name) {
@@ -566,9 +586,13 @@ fn interface_spec(
         if let Some(f) = registry.named_enumerator_for(d.name) {
             spec = spec.named_enumerator(f.clone());
         }
+        spec.named_unenumerable = registry.is_named_unenumerable(d.name);
     }
     if let Some(f) = registry.indexed_getter_for(d.name) {
         spec = spec.indexed_getter(f.clone());
+        if let Some(f) = registry.indexed_length_for(d.name) {
+            spec = spec.indexed_length(f.clone());
+        }
     }
     Ok(spec)
 }

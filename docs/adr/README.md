@@ -13,6 +13,11 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0005](0005-cdp.md) | CDP as the control API for both families | Accepted (2026-11-02) |
 | [0006](0006-browser-families.md) | Two browser families, one binary per family | Accepted (2026-11-02) |
 | [0007](0007-local-detection-bench.md) | Our own local detection bench is "our detection engine" | Accepted (2026-11-03) |
+| [0008](0008-host-object-model.md) | Host objects are `(kind, id)` pairs with a per-realm wrapper cache | Accepted (2026-11-03) |
+| [0009](0009-cdp-isolated-worlds-and-emulation.md) | CDP bindings only in isolated worlds; Emulation must match the persona | Accepted (2026-11-03) |
+| [0010](0010-own-box-tree-and-font-tables.md) | Our own box tree over taffy, and font metric tables compiled in | Accepted (2026-11-03) |
+| [0011](0011-per-destination-headers.md) | Request headers per destination, captured from local Chromium | Accepted (2026-11-03) |
+| [0012](0012-frames-as-realms.md) | Frames are realms in the page's engine, built on the spot (`RealmOps`) | Accepted (2026-11-03) |
 
 ## Adding an ADR
 

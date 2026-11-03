@@ -2,6 +2,8 @@
 #![cfg(feature = "chrome")]
 
 mod common;
+mod frames;
+mod report;
 
 use std::time::Duration;
 
@@ -436,4 +438,63 @@ async fn script_navigation_replaces_document() {
         html.contains("<body data-x=\"undefined\"><p>next</p>"),
         "{html}"
     );
+}
+
+#[tokio::test]
+async fn unload_events_beacon_and_favicon() {
+    let s = serve(vec![
+        (
+            "/",
+            Resource::html(
+                "<body><script>var log = [];\
+                 addEventListener('pagehide', function (e) { log.push('pagehide:' + e.persisted + ':' + document.visibilityState); });\
+                 document.addEventListener('visibilitychange', function () { log.push('visibilitychange:' + document.visibilityState); });\
+                 addEventListener('unload', function () { log.push('unload');\
+                   log.push(String(navigator.sendBeacon('/beacon', log.join(',')))); });\
+                 </script></body>",
+            ),
+        ),
+        (
+            "/next",
+            Resource::html("<head><link rel=icon href=/i.png></head><body>next</body>"),
+        ),
+        ("/beacon", Resource::new("text/plain", "")),
+        ("/favicon.ico", Resource::new("image/x-icon", "")),
+        ("/i.png", Resource::new("image/png", "")),
+    ])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    page.goto(&s.url("/next"), WaitUntil::Load, Duration::from_secs(5))
+        .await
+        .unwrap();
+    let start = std::time::Instant::now();
+    let find = |path: &str| s.requests().into_iter().find(|r| r.1 == path);
+    while find("/beacon").is_none() || find("/i.png").is_none() {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            s.requests()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let beacon = find("/beacon").unwrap();
+    assert_eq!(beacon.0, "POST");
+    assert_eq!(
+        String::from_utf8_lossy(&beacon.3),
+        "pagehide:false:visible,visibilitychange:hidden,unload"
+    );
+    let has = |r: &(String, String, Vec<(String, String)>, Vec<u8>), k: &str, v: &str| {
+        r.2.iter().any(|(a, b)| a == k && b == v)
+    };
+    assert!(
+        has(&beacon, "content-type", "text/plain;charset=UTF-8"),
+        "{beacon:?}"
+    );
+    assert!(has(&beacon, "sec-fetch-mode", "no-cors"), "{beacon:?}");
+    let icon = find("/favicon.ico").expect("favicon of the first page");
+    assert!(has(&icon, "sec-fetch-dest", "image"), "{icon:?}");
+    assert!(has(&icon, "referer", &s.url("/")), "{icon:?}");
+    let link = find("/i.png").unwrap();
+    assert!(has(&link, "referer", &s.url("/next")), "{link:?}");
 }

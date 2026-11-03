@@ -18,6 +18,9 @@ lb-webapi = { path = "../lb-webapi", default-features = false }
 lb-dom = { path = "../lb-dom" }
 lb-net = { path = "../lb-net" }
 lb-persona = { path = "../lb-persona" }
+lb-cdp = { path = "../lb-cdp" }
+lb-layout = { path = "../lb-layout" }
+serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 url = "2"
 http = "1"

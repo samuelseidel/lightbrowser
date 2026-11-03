@@ -50,7 +50,7 @@ def clean_session() -> dict:
         h["sec-ch-ua"] = '"Chromium";v="153", "Google Chrome";v="153", "Not_A Brand";v="99"'
         h["accept-language"] = "en-US,en;q=0.9"
         names = [n for n in d["header_names"] if n not in ("Accept-Language", "Cookie")]
-        names.append("Accept-Language")
+        names.insert(names.index("sec-ch-ua-platform") + 1, "Accept-Language")
         if i:
             names.append("Cookie")
         d["header_names"] = names

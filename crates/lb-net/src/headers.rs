@@ -1,21 +1,25 @@
 //! Default request headers per browser family, in the order the browser
 //! sends them. Order is part of the fingerprint, so this is a `Vec`, not a map.
 //!
-//! Sources: the header sets and orders below are the observed order for the
-//! given version (Chrome 131 and Firefox 128, as sent over HTTP/2 on a
-//! top-level GET navigation). Values are not invented beyond those lists.
-//!
-//! Owner: M1 task 4.
+//! Chrome: the per-kind sets in [`crate::header_profile`] (captured from
+//! Chrome 153); [`navigation_headers`] is its top-level navigation set.
+//! Firefox: the observed Firefox 128 order for a top-level GET over HTTP/2,
+//! plus the small per-kind overlay in [`generic_request_headers`] until the
+//! real Firefox sets are captured (M4b).
 
+use http::Method;
 use lb_persona::{BrowserFamily, Persona};
+use url::Url;
+
+use crate::HttpVersion;
+use crate::header_profile::{
+    BuildInput, HeaderProfile, RequestKind, RequestMeta, Site, referrer_for, title_case,
+};
 
 /// `(name, value)` pairs in wire order. Names are lowercase for HTTP/2 and
 /// are re-cased by the h1 transport.
 pub type OrderedHeaders = Vec<(String, String)>;
 
-/// Chrome 131 `Accept` for a document navigation.
-const CHROME_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,\
-image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
 /// Firefox 128 `Accept` for a document navigation.
 const FIREFOX_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,\
 image/avif,image/webp,image/png,image/svg+xml,*/*;q=0.8";
@@ -26,16 +30,18 @@ fn push(h: &mut OrderedHeaders, name: &str, value: &str) {
     h.push((name.to_owned(), value.to_owned()));
 }
 
-/// Headers for a top-level document navigation. `sec-ch-ua*` only for Chrome.
+/// Headers for a top-level document navigation over HTTP/2 (lowercase
+/// names). `sec-ch-ua*` only for Chrome.
 ///
 /// `host` is not emitted: over HTTP/2 it travels as `:authority`, and the h1
 /// transport adds `Host` itself where the browser sends it. The parameter is
 /// kept so callers need not change when a header depends on it.
 ///
-/// Observed order, Chrome 131 (h2):
-/// sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, upgrade-insecure-requests,
-/// user-agent, accept, sec-fetch-site, sec-fetch-mode, sec-fetch-user,
-/// sec-fetch-dest, accept-encoding, accept-language, [cookie], priority.
+/// Order, Chrome 153 (from `profiles/headers/chrome_153.json`):
+/// sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, accept-language,
+/// upgrade-insecure-requests, user-agent, accept, sec-fetch-site,
+/// sec-fetch-mode, sec-fetch-user, sec-fetch-dest, accept-encoding, priority,
+/// [cookie].
 ///
 /// Observed order, Firefox 128 (h2):
 /// user-agent, accept, accept-language, accept-encoding,
@@ -45,27 +51,22 @@ pub fn navigation_headers(persona: &Persona, _host: &str) -> OrderedHeaders {
     let mut h = OrderedHeaders::new();
     match persona.family {
         BrowserFamily::Chrome => {
-            if let Some(v) = &persona.sec_ch_ua {
-                push(&mut h, "sec-ch-ua", v);
-            }
-            if let Some(v) = &persona.sec_ch_ua_mobile {
-                push(&mut h, "sec-ch-ua-mobile", v);
-            }
-            if let Some(v) = &persona.sec_ch_ua_platform {
-                // The persona stores the platform unquoted; the header value
-                // is a quoted structured-header string.
-                push(&mut h, "sec-ch-ua-platform", &format!("\"{v}\""));
-            }
-            push(&mut h, "upgrade-insecure-requests", "1");
-            push(&mut h, "user-agent", &persona.user_agent);
-            push(&mut h, "accept", CHROME_ACCEPT);
-            push(&mut h, "sec-fetch-site", "none");
-            push(&mut h, "sec-fetch-mode", "navigate");
-            push(&mut h, "sec-fetch-user", "?1");
-            push(&mut h, "sec-fetch-dest", "document");
-            push(&mut h, "accept-encoding", ACCEPT_ENCODING);
-            push(&mut h, "accept-language", &persona.accept_language);
-            push(&mut h, "priority", PRIORITY);
+            let profile = HeaderProfile::builtin(BrowserFamily::Chrome)
+                .expect("chrome header profile is built in");
+            let meta = RequestMeta::navigation();
+            let url = Url::parse("https://example.invalid/").expect("static url");
+            return profile.build(&BuildInput {
+                persona,
+                version: HttpVersion::Http2,
+                meta: &meta,
+                url: &url,
+                method: &Method::GET,
+                body_len: 0,
+                cookie: None,
+                caller: &Vec::new(),
+                hop: 0,
+                site: Site::None,
+            });
         }
         BrowserFamily::Firefox => {
             push(&mut h, "user-agent", &persona.user_agent);
@@ -87,7 +88,7 @@ pub fn navigation_headers(persona: &Persona, _host: &str) -> OrderedHeaders {
 /// Insert the `cookie` header where the browser puts it, for headers built by
 /// [`navigation_headers`]. Any existing `cookie` header is replaced.
 ///
-/// - Chrome: right before `priority`.
+/// - Chrome (153): last, after `priority`.
 /// - Firefox: right after `accept-encoding`, i.e. before
 ///   `upgrade-insecure-requests`.
 ///
@@ -96,15 +97,14 @@ pub fn navigation_headers(persona: &Persona, _host: &str) -> OrderedHeaders {
 pub fn with_cookie(mut headers: OrderedHeaders, value: &str) -> OrderedHeaders {
     headers.retain(|(n, _)| n != "cookie");
     let firefox = headers.iter().any(|(n, _)| n == "te");
-    let anchor = if firefox {
-        "upgrade-insecure-requests"
+    let pos = if firefox {
+        headers
+            .iter()
+            .position(|(n, _)| n == "upgrade-insecure-requests")
+            .unwrap_or(headers.len())
     } else {
-        "priority"
+        headers.len()
     };
-    let pos = headers
-        .iter()
-        .position(|(n, _)| n == anchor)
-        .unwrap_or(headers.len());
     headers.insert(pos, ("cookie".to_owned(), value.to_owned()));
     headers
 }
@@ -122,6 +122,119 @@ pub fn for_http1(persona: &Persona, mut headers: OrderedHeaders) -> OrderedHeade
         headers.insert(0, ("connection".into(), "keep-alive".into()));
     }
     headers
+}
+
+/// Overlay the page's headers on the defaults. A page header replaces the
+/// first default of the same name (case-insensitive) in place and removes any
+/// further defaults of that name. Repeats of a name within the page's list,
+/// and names without a default, are appended in order.
+pub fn merge_headers(base: OrderedHeaders, caller: &OrderedHeaders) -> OrderedHeaders {
+    let mut out = base;
+    let default_len = out.len();
+    let mut replaced: Vec<String> = Vec::new();
+    for (name, value) in caller {
+        let lname = name.to_ascii_lowercase();
+        if replaced.contains(&lname) {
+            out.push((name.clone(), value.clone()));
+            continue;
+        }
+        let pos = out[..default_len.min(out.len())]
+            .iter()
+            .position(|(n, _)| n.eq_ignore_ascii_case(&lname));
+        match pos {
+            Some(i) => {
+                out[i].1 = value.clone();
+                // Drop later defaults of the same name (only below `default_len`).
+                let mut j = i + 1;
+                while j < default_len.min(out.len()) {
+                    if out[j].0.eq_ignore_ascii_case(&lname) {
+                        out.remove(j);
+                    } else {
+                        j += 1;
+                    }
+                }
+            }
+            None => out.push((name.clone(), value.clone())),
+        }
+        replaced.push(lname);
+    }
+    out
+}
+
+/// `Accept` of non-navigation requests for a family without a captured
+/// per-kind profile (Firefox 128 values, not yet verified against a capture).
+fn generic_accept(kind: RequestKind) -> &'static str {
+    match kind {
+        RequestKind::Style => "text/css,*/*;q=0.1",
+        RequestKind::Image | RequestKind::Favicon => {
+            "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
+        }
+        _ => "*/*",
+    }
+}
+
+/// Request headers for a family without a per-kind profile (Firefox): the
+/// navigation set with `Sec-Fetch-*`, `Accept` and `Upgrade-Insecure-Requests`
+/// adjusted to the request kind, then the page's headers, `Referer` and
+/// `Origin`. Names are Title-Case on HTTP/1.1.
+pub fn generic_request_headers(input: &BuildInput<'_>) -> OrderedHeaders {
+    let persona = input.persona;
+    let meta = input.meta;
+    let mut base = navigation_headers(persona, "");
+    if input.version == HttpVersion::Http1 {
+        base = for_http1(persona, base);
+    }
+    if let Some(c) = input.cookie {
+        base = with_cookie(base, c);
+    }
+    let set = |h: &mut OrderedHeaders, name: &str, value: &str| {
+        if let Some(e) = h.iter_mut().find(|(n, _)| n == name) {
+            e.1 = value.to_owned();
+        }
+    };
+    set(&mut base, "sec-fetch-site", input.site.as_str());
+    match meta.kind {
+        RequestKind::Document => {}
+        RequestKind::Iframe => set(&mut base, "sec-fetch-dest", "iframe"),
+        kind => {
+            base.retain(|(n, _)| n != "upgrade-insecure-requests");
+            set(&mut base, "accept", generic_accept(kind));
+            let (mode, dest) = match kind {
+                RequestKind::Style => ("no-cors", "style"),
+                RequestKind::Image | RequestKind::Favicon => ("no-cors", "image"),
+                RequestKind::Script => ("no-cors", "script"),
+                RequestKind::ModuleScript => ("cors", "script"),
+                RequestKind::Font => ("cors", "font"),
+                _ => (meta.mode.as_str(), "empty"),
+            };
+            set(&mut base, "sec-fetch-mode", mode);
+            set(&mut base, "sec-fetch-dest", dest);
+        }
+    }
+    if !(meta.kind == RequestKind::Document && meta.user_activated) {
+        base.retain(|(n, _)| n != "sec-fetch-user");
+    }
+    let mut out = merge_headers(base, input.caller);
+    if let Some(r) = referrer_for(meta.initiator.as_ref(), input.url) {
+        out.push(("referer".into(), r));
+    }
+    if let Some(i) = &meta.initiator {
+        let safe = matches!(*input.method, Method::GET | Method::HEAD);
+        let cross = i.origin() != input.url.origin();
+        if meta.kind == RequestKind::Fetch && (!safe || cross) {
+            out.push(("origin".into(), i.origin().ascii_serialization()));
+        }
+    }
+    if input.version == HttpVersion::Http1 {
+        for (n, _) in &mut out {
+            if n == "te" {
+                *n = "TE".into();
+            } else if *n == n.to_ascii_lowercase() {
+                *n = title_case(n);
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -146,6 +259,7 @@ mod tests {
                 "sec-ch-ua",
                 "sec-ch-ua-mobile",
                 "sec-ch-ua-platform",
+                "accept-language",
                 "upgrade-insecure-requests",
                 "user-agent",
                 "accept",
@@ -154,7 +268,6 @@ mod tests {
                 "sec-fetch-user",
                 "sec-fetch-dest",
                 "accept-encoding",
-                "accept-language",
                 "priority",
             ]
         );
@@ -227,12 +340,12 @@ mod tests {
     }
 
     #[test]
-    fn chrome_cookie_goes_before_priority() {
+    fn chrome_cookie_goes_last() {
         let h = with_cookie(navigation_headers(&Persona::default_chrome(), "h"), "a=1");
         let n = names(&h);
         let i = n.iter().position(|x| *x == "cookie").unwrap();
-        assert_eq!(n[i - 1], "accept-language");
-        assert_eq!(n[i + 1], "priority");
+        assert_eq!(n[i - 1], "priority");
+        assert_eq!(i, n.len() - 1);
         assert_eq!(n.len(), 14);
     }
 
@@ -271,5 +384,35 @@ mod tests {
             for_http1(&f, navigation_headers(&f, "example.test")),
             navigation_headers(&f, "example.test")
         );
+    }
+
+    fn h(pairs: &[(&str, &str)]) -> OrderedHeaders {
+        pairs
+            .iter()
+            .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn merge_replaces_in_place_and_appends() {
+        let base = h(&[("user-agent", "A"), ("accept", "x"), ("priority", "u=0")]);
+        let caller = h(&[("Accept", "y"), ("X-Test", "1"), ("x-test", "2")]);
+        let got = merge_headers(base, &caller);
+        assert_eq!(
+            got,
+            h(&[
+                ("user-agent", "A"),
+                ("accept", "y"),
+                ("priority", "u=0"),
+                ("X-Test", "1"),
+                ("x-test", "2"),
+            ])
+        );
+    }
+
+    #[test]
+    fn merge_with_empty_caller_is_identity() {
+        let base = h(&[("a", "1"), ("b", "2")]);
+        assert_eq!(merge_headers(base.clone(), &Vec::new()), base);
     }
 }

@@ -93,8 +93,8 @@ both a regression and a fix make it fail.
 HTTP/1.1 (no fingerprint hash, checked by hand against Chromium 153): Chrome
 gets `Connection: keep-alive` after `Host` and no `Priority` header. hyper
 title-cases names, so `sec-ch-ua*` goes out as `Sec-Ch-Ua*`, where Chrome
-sends lowercase. Fixing that needs hyper's private header-case map; it is
-open.
+sends lowercase. Fixing that needs hyper's private header-case map. Fixed
+later by our own HTTP/1.1 writer (ADR 0011).
 
 ## Alternatives considered
 

@@ -27,12 +27,19 @@ const CHUNK: usize = 32 * 1024;
 /// stack on the page's worker.
 struct PageNet {
     ctx: crate::BrowserContext,
+    page: std::rc::Weak<PageState>,
 }
 
 impl lb_webapi::host::NetHost for PageNet {
     fn fetch(&self, req: NetRequest) -> lb_webapi::host::LocalFuture<Result<NetResponse, String>> {
         let ctx = self.ctx.clone();
-        Box::pin(async move { ctx.fetch(req).await })
+        let page = self.page.upgrade();
+        Box::pin(async move {
+            match page {
+                Some(p) => crate::cdp::net::page_fetch(&p, req, None).await,
+                None => ctx.fetch(req).await,
+            }
+        })
     }
     fn spawn(&self, fut: lb_webapi::host::LocalFuture<()>) {
         tokio::task::spawn_local(fut);
@@ -70,6 +77,8 @@ pub(crate) async fn navigate_committed(
     let seq = page.nav_seq.get() + 1;
     page.nav_seq.set(seq);
     page.loading.set(true);
+    let agent = page.agent();
+    let loader = agent.as_ref().map(|a| a.nav_started(seq));
 
     // Fetch (about:blank needs none).
     let resp = if url.scheme() == "about" {
@@ -84,7 +93,7 @@ pub(crate) async fn navigate_committed(
     } else {
         let mut req = NetRequest::get(url.clone(), Destination::Document, initiator.clone());
         req.mode = "navigate";
-        page.ctx.fetch(req).await
+        crate::cdp::net::page_fetch(&page, req, loader.clone()).await
     };
     if page.nav_seq.get() != seq || page.closed.get() {
         let _ = committed.send(Err(PageError::Aborted));
@@ -94,6 +103,9 @@ pub(crate) async fn navigate_committed(
         Ok(r) => r,
         Err(e) => {
             page.loading.set(false);
+            if let Some(a) = &agent {
+                a.nav_failed();
+            }
             page.update_life(|l| {
                 *l = Life {
                     loader: seq,
@@ -138,6 +150,7 @@ pub(crate) async fn navigate_committed(
             profile: page.ctx.profile().cloned(),
             net: Rc::new(PageNet {
                 ctx: page.ctx.clone(),
+                page: Rc::downgrade(&page),
             }),
             local_storage: page
                 .ctx
@@ -169,6 +182,7 @@ pub(crate) async fn navigate_committed(
         }
     };
     let _ = realm;
+    crate::frames::install(&ws, &page, &w);
     w.start_parser();
     *page.window.borrow_mut() = Some(w.clone());
     page.update_life(|l| {
@@ -180,6 +194,9 @@ pub(crate) async fn navigate_committed(
             ..Life::default()
         }
     });
+    if let Some(a) = &agent {
+        a.committed(&ws, &page, &w, seq);
+    }
     page.notify.notify_one();
     let result = NavResult {
         status: resp.status,
@@ -191,7 +208,7 @@ pub(crate) async fn navigate_committed(
     page.emit("init");
     page.emit("commit");
 
-    let r = load(&ws, &page, &w, seq, &text).await;
+    let r = load(&ws, &page, &w, Doc::Main(seq), &text).await;
     page.loading.set(false);
     page.notify.notify_one();
     r.map(|()| result)
@@ -209,17 +226,17 @@ enum Source {
 }
 
 fn spawn_fetch(
-    page: &PageState,
+    page: &Rc<PageState>,
     w: &Rc<Window>,
     url: Url,
     dest: Destination,
 ) -> JoinHandle<Result<NetResponse, String>> {
-    let ctx = page.ctx.clone();
+    let page = page.clone();
     let req = NetRequest::get(url, dest, Some(w.url()));
     w.in_flight.set(w.in_flight.get() + 1);
     let w2 = Rc::downgrade(w);
     tokio::task::spawn_local(async move {
-        let r = ctx.fetch(req).await;
+        let r = crate::cdp::net::page_fetch(&page, req, None).await;
         if let Some(w) = w2.upgrade() {
             w.in_flight.set(w.in_flight.get().saturating_sub(1));
             w.wake();
@@ -251,16 +268,43 @@ fn with_js<R>(
     })
 }
 
-fn current(page: &PageState, w: &Rc<Window>, seq: u64) -> bool {
-    page.nav_seq.get() == seq && !w.is_closed() && !page.closed.get()
+/// Which document [`load`] runs: the page's (navigation sequence) or a
+/// child frame's (frame id).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Doc {
+    Main(u64),
+    Frame(u64),
+}
+
+fn current(page: &PageState, w: &Rc<Window>, doc: Doc) -> bool {
+    let seq_ok = match doc {
+        Doc::Main(seq) => page.nav_seq.get() == seq,
+        Doc::Frame(_) => true,
+    };
+    seq_ok && !w.is_closed() && !page.closed.get()
+}
+
+/// A lifecycle point of `doc`.
+fn doc_event(page: &PageState, doc: Doc, name: &str) {
+    match doc {
+        Doc::Main(_) => {
+            match name {
+                "DOMContentLoaded" => page.update_life(|l| l.dcl = true),
+                "load" => page.update_life(|l| l.load = true),
+                _ => {}
+            }
+            page.emit(name);
+        }
+        Doc::Frame(id) => crate::frames::lifecycle(page, id, name),
+    }
 }
 
 /// Parse the document, run its scripts and fire the load events.
-async fn load(
+pub(crate) async fn load(
     ws: &Rc<WorkerState>,
     page: &Rc<PageState>,
     w: &Rc<Window>,
-    seq: u64,
+    doc: Doc,
     text: &str,
 ) -> Result<(), PageError> {
     let chunks = split_chunks(text);
@@ -270,7 +314,7 @@ async fn load(
         w.parser_end();
     }
     loop {
-        if !current(page, w, seq) {
+        if !current(page, w, doc) {
             return Err(PageError::Aborted);
         }
         let Some(step) = w.parser_run() else { break };
@@ -294,7 +338,7 @@ async fn load(
         }
     }
     w.finish_parser();
-    if !current(page, w, seq) {
+    if !current(page, w, doc) {
         return Err(PageError::Aborted);
     }
 
@@ -311,7 +355,7 @@ async fn load(
         )
     });
     for d in deferred {
-        if !current(page, w, seq) {
+        if !current(page, w, doc) {
             return Err(PageError::Aborted);
         }
         match d {
@@ -346,8 +390,7 @@ async fn load(
             false,
         )
     });
-    page.update_life(|l| l.dcl = true);
-    page.emit("DOMContentLoaded");
+    doc_event(page, doc, "DOMContentLoaded");
 
     // Stylesheets (handed to lb-css; applied lazily on first style query).
     for link in w.pending_stylesheets() {
@@ -386,7 +429,7 @@ async fn load(
 
     // Wait for async scripts, stylesheets and script-inserted scripts.
     loop {
-        if !current(page, w, seq) {
+        if !current(page, w, doc) {
             return Err(PageError::Aborted);
         }
         let notified = page.loads.notified();
@@ -420,10 +463,37 @@ async fn load(
             lb_webapi::rt::EventExtra::PageTransition { persisted: false },
         );
     });
-    page.update_life(|l| l.load = true);
-    page.emit("load");
+    doc_event(page, doc, "load");
+    if let Doc::Main(_) = doc {
+        request_favicon(page, w);
+    }
     page.notify.notify_one();
     Ok(())
+}
+
+/// Chrome asks for a top-level document's icon after `load`: the last
+/// `<link rel=icon>` href, or `/favicon.ico` on the page's origin. The
+/// browser process makes that request, so it is not reported to CDP and
+/// nothing waits for it.
+fn request_favicon(page: &Rc<PageState>, w: &Rc<Window>) {
+    let href = w.with_doc(|d| {
+        d.descendants(Document::DOCUMENT)
+            .filter(|&n| {
+                d.is_html_element_named(n, &local_name!("link"))
+                    && d.get_attribute(n, "rel").is_some_and(|r| {
+                        r.split_ascii_whitespace()
+                            .any(|t| t.eq_ignore_ascii_case("icon"))
+                    })
+            })
+            .filter_map(|n| d.get_attribute(n, "href").map(str::to_owned))
+            .last()
+    });
+    let icon = href.and_then(|h| w.resolve_url(&h));
+    let page_url = w.url();
+    let ctx = page.ctx.clone();
+    tokio::task::spawn_local(async move {
+        let _ = ctx.request_favicon(&page_url, icon).await;
+    });
 }
 
 fn split_chunks(text: &str) -> Vec<&str> {

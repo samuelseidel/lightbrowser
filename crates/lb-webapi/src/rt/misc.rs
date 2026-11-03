@@ -259,13 +259,16 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
             return;
         }
         let mut scripts = Vec::new();
+        let mut images = Vec::new();
         for (slot, m) in coalesce(w, &batch) {
             observe_record(js, w, slot, &m);
         }
+        super::frames::on_mutations(js, w, &batch);
         for (slot, m) in batch {
             if slot != 0 {
                 continue;
             }
+            super::image::candidates(w, &m, &mut images);
             match m {
                 Mutation::ChildInserted { node, .. } => {
                     let (handlers, found) = w.with_doc(|d| {
@@ -321,6 +324,9 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
                 }
                 _ => {}
             }
+        }
+        if !images.is_empty() {
+            super::image::process(js, w, images);
         }
         for s in scripts {
             super::script::prepare_dynamic(js, w, s);

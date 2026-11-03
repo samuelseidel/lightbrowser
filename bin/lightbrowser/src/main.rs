@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use lb_net::ClientHelloProfile;
-use lb_persona::Persona;
+use lb_persona::{Persona, PersonaProfile};
 
 const USAGE: &str = "\
 lightbrowser - headless browser for detection testing
@@ -16,13 +16,19 @@ lightbrowser - headless browser for detection testing
 USAGE:
   lightbrowser --version
   lightbrowser serve [--port 9222] [--persona FILE] [--remote-allow-origins O]
+                    [--profiles-dir DIR] [--insecure] [--workers N]
                                             CDP server on 127.0.0.1 for Playwright
-                                            connectOverCDP (mock page host until
-                                            lb-page implements lb_cdp::PageHost)
+                                            connectOverCDP
   lightbrowser fetch <url> [OPTIONS]
   lightbrowser validate <persona.json>...   check v1/v2 personas against the
                                             consistency rules (exit 1 on any
                                             violation or load error)
+  lightbrowser fingerprint-report [--persona P] [--url URL] [--profiles-dir DIR]
+                    [--insecure] [--timeout SECS]
+                                            load URL (default about:blank),
+                                            compare the live fingerprint
+                                            surface with the persona, print
+                                            JSON (exit 1 on any mismatch)
 
 FETCH OPTIONS:
   --dump html|text       print the DOM after scripts ran (html) or its text;
@@ -30,8 +36,9 @@ FETCH OPTIONS:
   --wait-until W         load (default) | networkidle | domcontentloaded |
                          commit | <ms> (load, then that many ms more)
   --timeout SECS         give up waiting after SECS (default 30)
-  --persona NAME         chrome | firefox (default: the compiled family)
-                         PATH.json personas are not supported yet (M4)
+  --persona P            a persona file (PATH.json), or chrome | firefox for
+                         that family's reference persona (default: the
+                         compiled family's reference persona)
   --profiles-dir DIR     TLS profiles (default: nearest profiles/tls above
                          the current directory or the executable)
   --insecure             accept invalid certificates (local test servers only)
@@ -126,34 +133,94 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
     Ok(out)
 }
 
-/// Pick the persona. Named personas must match the compiled engine family.
-fn select_persona(name: Option<&str>) -> Result<Persona, String> {
-    let compiled = lb_js::COMPILED_FAMILY;
-    let persona = match name {
-        Some("chrome") => Persona::default_chrome(),
-        Some("firefox") => Persona::default_firefox(),
-        Some(path) => {
-            return Err(format!(
-                "persona files are not supported yet (M4): {path:?}; use chrome or firefox"
-            ));
-        }
-        None => match compiled {
-            Some(lb_persona::BrowserFamily::Firefox) => Persona::default_firefox(),
-            _ => Persona::default_chrome(),
-        },
+/// The reference persona of a family.
+fn reference_persona_path(family: lb_persona::BrowserFamily) -> Result<PathBuf, String> {
+    let dir = find_reference_dir().ok_or("no profiles/reference directory found")?;
+    Ok(match family {
+        lb_persona::BrowserFamily::Firefox => dir.join("firefox/win10_rtx3060_1080p.json"),
+        lb_persona::BrowserFamily::Chrome => dir.join("chrome/chrome153_win10_rtx3060_1080p.json"),
+    })
+}
+
+/// Load the full persona: a file, or `chrome` / `firefox` for that family's
+/// reference persona (default: the compiled family). It is checked against
+/// the consistency rules and must match the compiled engine family.
+fn select_persona(name: Option<&str>) -> Result<PersonaProfile, String> {
+    let compiled = lb_js::COMPILED_FAMILY.ok_or("this build has no JS engine family enabled")?;
+    let path = match name {
+        Some("chrome") => reference_persona_path(lb_persona::BrowserFamily::Chrome)?,
+        Some("firefox") => reference_persona_path(lb_persona::BrowserFamily::Firefox)?,
+        Some(path) => PathBuf::from(path),
+        None => reference_persona_path(compiled)?,
     };
-    match compiled {
-        Some(f) if f == persona.family => Ok(persona),
-        Some(f) => Err(format!(
-            "persona family {} does not match this build ({f}); rebuild with {}",
-            persona.family,
-            match persona.family {
+    let p = PersonaProfile::from_path_checked(&path)
+        .map_err(|e| format!("loading {}: {e}", path.display()))?;
+    if p.browser.family != compiled {
+        return Err(format!(
+            "persona family {} does not match this build ({compiled}); rebuild with {}",
+            p.browser.family,
+            match p.browser.family {
                 lb_persona::BrowserFamily::Chrome => "the default features",
                 lb_persona::BrowserFamily::Firefox => "--no-default-features --features firefox",
             }
-        )),
-        None => Err("this build has no JS engine family enabled".into()),
+        ));
     }
+    Ok(p)
+}
+
+/// The network persona of `profile` and the TLS/H2 profile it names, after
+/// checking that they agree: same family, and the TLS profile's browser
+/// major is the User-Agent's major. Fails fast otherwise.
+fn network_for(
+    profile: &PersonaProfile,
+    tls_dir: &Path,
+) -> Result<(Persona, ClientHelloProfile), String> {
+    let net = profile.to_network();
+    let path = tls_dir.join(format!("{}.json", net.tls_profile_id));
+    let tls =
+        ClientHelloProfile::load(&path).map_err(|e| format!("loading {}: {e}", path.display()))?;
+    check_network(&net, &tls)?;
+    Ok((net, tls))
+}
+
+fn check_network(net: &Persona, tls: &ClientHelloProfile) -> Result<(), String> {
+    if net.family != lb_js::COMPILED_FAMILY.unwrap_or(net.family) {
+        return Err(format!(
+            "network persona family {} does not match this build",
+            net.family
+        ));
+    }
+    if tls.family() != Some(net.family) {
+        return Err(format!(
+            "TLS profile {} does not belong to the persona family {}",
+            tls.profile_id, net.family
+        ));
+    }
+    if tls.profile_id != net.tls_profile_id {
+        return Err(format!(
+            "TLS profile {} is not the persona's ({})",
+            tls.profile_id, net.tls_profile_id
+        ));
+    }
+    let tls_major = tls
+        .profile_id
+        .split('_')
+        .nth(1)
+        .and_then(|v| v.parse::<u32>().ok());
+    let token = match net.family {
+        lb_persona::BrowserFamily::Chrome => "Chrome/",
+        lb_persona::BrowserFamily::Firefox => "Firefox/",
+    };
+    let ua_major = lb_persona::uach::ua_major(&net.user_agent, token);
+    if let (Some(t), Some(u)) = (tls_major, ua_major)
+        && t != u
+    {
+        return Err(format!(
+            "TLS profile {} was captured from major {t}, but the User-Agent claims {u}",
+            tls.profile_id
+        ));
+    }
+    Ok(())
 }
 
 /// Nearest `profiles/tls` directory at or above `start`.
@@ -175,7 +242,7 @@ fn find_profiles_dir() -> Option<PathBuf> {
 }
 
 fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
-    let persona = Arc::new(select_persona(args.persona.as_deref())?);
+    let full = Arc::new(select_persona(args.persona.as_deref())?);
     let url = url::Url::parse(&args.url).map_err(|e| format!("invalid url {:?}: {e}", args.url))?;
 
     let dir = match &args.profiles_dir {
@@ -185,13 +252,11 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
              pass --profiles-dir",
         )?,
     };
-    let profile_path = dir.join(format!("{}.json", persona.tls_profile_id));
-    let profile = ClientHelloProfile::load(&profile_path)
-        .map_err(|e| format!("loading {}: {e}", profile_path.display()))?;
+    let (persona, profile) = network_for(&full, &dir)?;
 
     let ctx = lb_page::BrowserContext::new(lb_page::ContextOptions {
-        persona,
-        profile: None,
+        persona: Arc::new(persona),
+        profile: Some(full),
         tls_profile: Arc::new(profile),
         accept_invalid_certs: args.insecure,
         virtual_time: false,
@@ -313,12 +378,122 @@ async fn load_page(
     })
 }
 
+/// `fingerprint-report` options.
+#[derive(Debug, Default)]
+struct ReportArgs {
+    persona: Option<String>,
+    url: Option<String>,
+    profiles_dir: Option<PathBuf>,
+    insecure: bool,
+    timeout: u64,
+}
+
+fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
+    let mut out = ReportArgs {
+        timeout: 30,
+        ..Default::default()
+    };
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let (flag, inline) = match arg.split_once('=') {
+            Some((f, v)) if f.starts_with("--") => (f, Some(v.to_string())),
+            _ => (arg.as_str(), None),
+        };
+        let mut value = |name: &str| -> Result<String, String> {
+            inline
+                .clone()
+                .or_else(|| it.next().cloned())
+                .ok_or_else(|| format!("{name} needs a value"))
+        };
+        match flag {
+            "--persona" => out.persona = Some(value("--persona")?),
+            "--url" => out.url = Some(value("--url")?),
+            "--profiles-dir" => out.profiles_dir = Some(PathBuf::from(value("--profiles-dir")?)),
+            "--timeout" => {
+                out.timeout = value("--timeout")?
+                    .parse()
+                    .map_err(|_| "--timeout takes whole seconds".to_string())?
+            }
+            "--insecure" => out.insecure = true,
+            other => return Err(format!("unknown option {other}")),
+        }
+    }
+    Ok(out)
+}
+
+/// Load the page and print its fingerprint report; `Ok(false)` when a
+/// surface contradicts the persona.
+#[cfg(feature = "chrome")]
+fn run_report(args: &ReportArgs) -> Result<bool, String> {
+    use std::time::Duration;
+    let full = Arc::new(select_persona(args.persona.as_deref())?);
+    let url = args.url.clone().unwrap_or_else(|| "about:blank".into());
+    let url = url::Url::parse(&url).map_err(|e| format!("invalid url {url:?}: {e}"))?;
+    let dir = match &args.profiles_dir {
+        Some(d) => d.clone(),
+        None => find_profiles_dir().ok_or(
+            "no profiles/tls directory found above the current directory or the executable; \
+             pass --profiles-dir",
+        )?,
+    };
+    let (persona, tls) = network_for(&full, &dir)?;
+    let ctx = lb_page::BrowserContext::new(lb_page::ContextOptions {
+        persona: Arc::new(persona),
+        profile: Some(full),
+        tls_profile: Arc::new(tls),
+        accept_invalid_certs: args.insecure,
+        virtual_time: false,
+    })
+    .map_err(|e| e.to_string())?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("starting runtime: {e}"))?;
+    let report = rt.block_on(async {
+        let browser = lb_page::Browser::new(lb_page::BrowserOptions {
+            workers: 1,
+            ..Default::default()
+        })
+        .map_err(|e| e.to_string())?;
+        let page = browser.new_page(&ctx).await.map_err(|e| e.to_string())?;
+        page.goto(
+            url.as_str(),
+            lb_page::WaitUntil::Load,
+            Duration::from_secs(args.timeout),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        let r = page.fingerprint_report().await.map_err(|e| e.to_string());
+        let _ = page.close().await;
+        r
+    })?;
+    let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
+    println!("{text}");
+    let s = &report["summary"];
+    eprintln!(
+        "fingerprint report for {}: {} ok, {} mismatch, {} unimplemented",
+        report["persona"].as_str().unwrap_or("?"),
+        s["ok"],
+        s["mismatch"],
+        s["unimplemented"]
+    );
+    Ok(report["ok"] == serde_json::Value::Bool(true))
+}
+
+#[cfg(not(feature = "chrome"))]
+fn run_report(_args: &ReportArgs) -> Result<bool, String> {
+    Err("fingerprint-report needs a JS engine; the firefox build has none yet (M4b)".into())
+}
+
 /// `serve` options.
 #[derive(Debug)]
 struct ServeArgs {
     port: u16,
     persona: Option<PathBuf>,
     allow_origins: Vec<String>,
+    profiles_dir: Option<PathBuf>,
+    insecure: bool,
+    workers: Option<usize>,
 }
 
 fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
@@ -326,6 +501,9 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
         port: 9222,
         persona: None,
         allow_origins: Vec::new(),
+        profiles_dir: None,
+        insecure: false,
+        workers: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -346,6 +524,15 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
                     .map_err(|_| "--port needs a port number".to_owned())?
             }
             "--persona" => out.persona = Some(PathBuf::from(value("--persona")?)),
+            "--profiles-dir" => out.profiles_dir = Some(PathBuf::from(value("--profiles-dir")?)),
+            "--insecure" => out.insecure = true,
+            "--workers" => {
+                out.workers = Some(
+                    value("--workers")?
+                        .parse()
+                        .map_err(|_| "--workers needs a number".to_owned())?,
+                )
+            }
             "--remote-allow-origins" => {
                 out.allow_origins = value("--remote-allow-origins")?
                     .split(',')
@@ -378,46 +565,68 @@ fn find_reference_dir() -> Option<PathBuf> {
 /// The persona for `serve`: the given file (checked against the
 /// consistency rules and the compiled family) or the family's reference
 /// persona.
-fn serve_persona(path: Option<&Path>) -> Result<lb_persona::PersonaProfile, String> {
-    let path = match path {
-        Some(p) => p.to_path_buf(),
-        None => {
-            let dir = find_reference_dir().ok_or("no profiles/reference directory found")?;
-            match lb_js::COMPILED_FAMILY {
-                Some(lb_persona::BrowserFamily::Firefox) => {
-                    dir.join("firefox/win10_rtx3060_1080p.json")
-                }
-                _ => dir.join("chrome/chrome153_win10_rtx3060_1080p.json"),
-            }
-        }
-    };
-    let p = lb_persona::PersonaProfile::from_path_checked(&path)
-        .map_err(|e| format!("loading {}: {e}", path.display()))?;
-    if Some(p.browser.family) != lb_js::COMPILED_FAMILY {
-        return Err(format!(
-            "persona family {} does not match this build ({})",
-            p.browser.family,
-            lb_js::COMPILED_FAMILY.map_or("none", |f| f.as_str())
-        ));
-    }
-    Ok(p)
+fn serve_persona(path: Option<&Path>) -> Result<PersonaProfile, String> {
+    select_persona(path.map(|p| p.to_str().unwrap_or_default()))
 }
 
 fn run_serve(args: &ServeArgs) -> Result<(), String> {
     let persona = serve_persona(args.persona.as_deref())?;
-    let persona_label = persona.profile_id.clone();
-    let host = std::rc::Rc::new(lb_cdp::mock::MockHost::new(persona));
+    let tls_dir = match &args.profiles_dir {
+        Some(d) => d.clone(),
+        None => find_profiles_dir().ok_or(
+            "no profiles/tls directory found above the current directory or the executable; \
+             pass --profiles-dir",
+        )?,
+    };
+    // Fail fast when the persona and its TLS/H2 profile disagree.
+    network_for(&persona, &tls_dir)?;
     let config = lb_cdp::ServerConfig {
         addr: std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
         allow_origins: args.allow_origins.clone(),
     };
-    eprintln!(
-        "page host: MOCK (lb-dom + lb-layout, no JS engine, loopback URLs only); persona {}",
-        persona_label
-    );
+    serve_with(persona, tls_dir, args, config)
+}
+
+/// Chrome build: real pages (lb-page, V8).
+#[cfg(feature = "chrome")]
+fn serve_with(
+    persona: PersonaProfile,
+    tls_dir: PathBuf,
+    args: &ServeArgs,
+    config: lb_cdp::ServerConfig,
+) -> Result<(), String> {
+    let label = persona.profile_id.clone();
+    let mut opts = lb_page::CdpHostOptions::new(Arc::new(persona), tls_dir);
+    opts.accept_invalid_certs = args.insecure;
+    if let Some(n) = args.workers {
+        opts.workers = n.max(1);
+    }
+    let host = std::rc::Rc::new(lb_page::CdpHost::new(opts)?);
+    eprintln!("persona {label}");
     lb_cdp::block_on_local(async move {
         let server = lb_cdp::Server::bind(config, host).await?;
         // Same line Chrome prints; launchers wait for it.
+        eprintln!("\nDevTools listening on {}", server.browser_ws_url());
+        server.run().await
+    })
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+/// Firefox build: no SpiderMonkey yet (M4b), so `serve` runs the mock page
+/// host (lb-dom + lb-layout, no JS engine, loopback URLs only).
+#[cfg(not(feature = "chrome"))]
+fn serve_with(
+    persona: PersonaProfile,
+    _tls_dir: PathBuf,
+    _args: &ServeArgs,
+    config: lb_cdp::ServerConfig,
+) -> Result<(), String> {
+    let label = persona.profile_id.clone();
+    let host = std::rc::Rc::new(lb_cdp::mock::MockHost::new(persona));
+    eprintln!("page host: MOCK (no JS engine in the firefox build yet); persona {label}");
+    lb_cdp::block_on_local(async move {
+        let server = lb_cdp::Server::bind(config, host).await?;
         eprintln!("\nDevTools listening on {}", server.browser_ws_url());
         server.run().await
     })
@@ -498,6 +707,28 @@ fn main() -> ExitCode {
             };
             match run_serve(&parsed) {
                 Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        Some("fingerprint-report") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            let parsed = match parse_report_args(&args[1..]) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("error: {e}\n");
+                    eprint!("{USAGE}");
+                    return ExitCode::from(2);
+                }
+            };
+            match run_report(&parsed) {
+                Ok(true) => ExitCode::SUCCESS,
+                Ok(false) => ExitCode::from(1),
                 Err(e) => {
                     eprintln!("error: {e}");
                     ExitCode::from(1)
@@ -585,7 +816,11 @@ mod tests {
 
     #[test]
     fn persona_files_and_wrong_family_are_refused() {
-        assert!(select_persona(Some("p.json")).unwrap_err().contains("M4"));
+        assert!(
+            select_persona(Some("p.json"))
+                .unwrap_err()
+                .contains("p.json")
+        );
         let other = match lb_js::COMPILED_FAMILY {
             Some(lb_persona::BrowserFamily::Chrome) => "firefox",
             _ => "chrome",
@@ -596,5 +831,19 @@ mod tests {
                 .contains("does not match")
         );
         assert!(select_persona(None).is_ok());
+    }
+
+    #[test]
+    fn network_persona_agrees_with_tls_profile() {
+        let tls_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles/tls");
+        let p = select_persona(None).unwrap();
+        let (net, tls) = network_for(&p, &tls_dir).unwrap();
+        assert_eq!(net.tls_profile_id, tls.profile_id);
+        let mut bad = net.clone();
+        bad.user_agent = bad
+            .user_agent
+            .replace("Chrome/153", "Chrome/120")
+            .replace("Firefox/128", "Firefox/115");
+        assert!(check_network(&bad, &tls).unwrap_err().contains("major"));
     }
 }

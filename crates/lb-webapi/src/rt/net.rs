@@ -971,7 +971,73 @@ fn xhr_text(x: &XhrState) -> String {
 // Registration
 // ---------------------------------------------------------------------------
 
+/// Chrome's keepalive quota for one beacon (bytes).
+const BEACON_QUOTA: usize = 64 * 1024;
+
+/// `navigator.sendBeacon(url, data)`: a keepalive POST that outlives the
+/// document (it is sent even from `pagehide`). Returns `false` when the
+/// body is over the quota, like Chrome; the response is never exposed.
+fn send_beacon(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostError> {
+    need_args(cx, 1, "sendBeacon", "Navigator")?;
+    let s = cx.arg_string(0)?;
+    let url = w.resolve_url(&s).ok_or_else(|| {
+        HostError::type_error(
+            "Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported.",
+        )
+    })?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(HostError::type_error(
+            "Failed to execute 'sendBeacon' on 'Navigator': Beacons are only supported over HTTP(S).",
+        ));
+    }
+    let body = if cx.len() > 1 {
+        let h = cx.arg_handle(1);
+        let b = body_from_handle(cx, w, h)?;
+        cx.release(h);
+        b
+    } else {
+        None
+    };
+    let (body, ct) = body.unwrap_or_default();
+    if body.len() > BEACON_QUOTA {
+        return cx.ret(false);
+    }
+    // A content type outside the CORS-safelisted ones makes it a cors request.
+    let safelisted = ct.as_deref().is_none_or(|t| {
+        let mime = t
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        matches!(
+            mime.as_str(),
+            "text/plain" | "application/x-www-form-urlencoded" | "multipart/form-data"
+        )
+    });
+    let req = NetRequest {
+        method: "POST".to_owned(),
+        url,
+        headers: ct
+            .map(|t| vec![("Content-Type".to_owned(), t)])
+            .unwrap_or_default(),
+        body,
+        destination: Destination::Empty,
+        initiator: Some(w.url()),
+        mode: if safelisted { "no-cors" } else { "cors" },
+    };
+    // Not tied to the window: the request survives the document's unload.
+    let fut = w.net.fetch(req);
+    w.net.spawn(Box::pin(async move {
+        let _ = fut.await;
+    }));
+    cx.ret(true)
+}
+
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
+    method(reg, rt, "Navigator", "sendBeacon", |cx, w| {
+        send_beacon(cx, w)
+    });
     // AbortController / AbortSignal
     ctor(reg, rt, "AbortController", |cx, w| {
         let sig = new_signal(w);

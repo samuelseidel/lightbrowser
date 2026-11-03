@@ -141,6 +141,16 @@ impl Browser {
 
     /// Open a page in `ctx`, pinned to the least loaded worker.
     pub async fn new_page(&self, ctx: &BrowserContext) -> Result<Page, PageError> {
+        self.new_page_with(ctx, None).await
+    }
+
+    /// Like [`Browser::new_page`], running `setup` on the worker before the
+    /// first navigation.
+    pub(crate) async fn new_page_with(
+        &self,
+        ctx: &BrowserContext,
+        setup: Option<crate::page::PageSetup>,
+    ) -> Result<Page, PageError> {
         let worker = self
             .workers
             .iter()
@@ -149,7 +159,7 @@ impl Browser {
             .clone();
         let id = self.next_page.fetch_add(1, Ordering::Relaxed);
         worker.pages.fetch_add(1, Ordering::Relaxed);
-        Page::open(worker, id, ctx.clone()).await
+        Page::open(worker, id, ctx.clone(), setup).await
     }
 
     /// Stop the workers; their pages are closed.

@@ -20,6 +20,11 @@ use lb_persona::{BrowserFamily, Persona};
 
 pub use v8;
 
+mod inspect;
+mod realm_ops;
+pub use inspect::{Caught, Inspected, InspectedObject, PromiseOutcome, PropertyEntry};
+pub use realm_ops::RealmOps;
+
 use crate::{
     EngineError, HeapStats, HostRef, InterfaceId, JsEngine, JsError, JsErrorKind, JsValue,
     ModuleLoader, PropAttrs, Realm, RealmId, RealmOptions, ScriptOrigin, ValueKind, World,
@@ -71,6 +76,11 @@ pub type NamedDeleter =
     Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, &str) -> Result<Option<bool>, HostError>>;
 /// Names the named getter supports, for `Object.keys` / `for in`.
 pub type NamedEnumerator = Rc<dyn Fn(&mut PropCtx<'_, '_, '_>) -> Vec<String>>;
+/// Number of supported property indices (`list.length`). With it, indexed
+/// properties enumerate (`Object.keys`, `for in`, `JSON.stringify`) and
+/// have Blink's read-only descriptor; assigning or deleting them is a
+/// no-op (`delete` returns false).
+pub type IndexedLength = Rc<dyn Fn(&mut PropCtx<'_, '_, '_>) -> u32>;
 
 /// Box a closure as a [`HostFn`].
 pub fn host_fn(f: impl Fn(&mut CallCtx<'_, '_, '_>) -> Result<(), HostError> + 'static) -> HostFn {
@@ -115,6 +125,16 @@ pub enum Arg {
     ArrayBuffer(Vec<u8>),
     /// A new `Uint8Array` (over a fresh `ArrayBuffer`) holding these bytes.
     Uint8Array(Vec<u8>),
+    /// A new `Uint8ClampedArray` (over a fresh `ArrayBuffer`), e.g.
+    /// `ImageData.data`.
+    Uint8ClampedArray(Vec<u8>),
+    /// A new `Float32Array` (WebGL parameters, Web Audio channel data).
+    Float32Array(Vec<f32>),
+    /// A new `Int32Array` (WebGL parameters such as `VIEWPORT`).
+    Int32Array(Vec<i32>),
+    /// A new `Uint32Array` (WebGL parameters such as
+    /// `COMPRESSED_TEXTURE_FORMATS`).
+    Uint32Array(Vec<u32>),
 }
 
 impl From<JsValue> for Arg {
@@ -381,6 +401,12 @@ pub struct InterfaceSpec {
     pub named_setter: Option<NamedSetter>,
     pub named_deleter: Option<NamedDeleter>,
     pub named_enumerator: Option<NamedEnumerator>,
+    /// See [`IndexedLength`]; needs an indexed getter.
+    pub indexed_length: Option<IndexedLength>,
+    /// `[LegacyUnenumerableNamedProperties]`: named properties are
+    /// read-only and not enumerable (`Object.keys` skips them,
+    /// `getOwnPropertyNames` lists them). Needs a named getter.
+    pub named_unenumerable: bool,
 }
 
 impl InterfaceSpec {
@@ -400,6 +426,8 @@ impl InterfaceSpec {
             named_setter: None,
             named_deleter: None,
             named_enumerator: None,
+            indexed_length: None,
+            named_unenumerable: false,
         }
     }
     pub fn parent(mut self, parent: InterfaceId) -> Self {
@@ -444,6 +472,11 @@ impl InterfaceSpec {
     /// Needs a named getter too; ignored without one.
     pub fn named_enumerator(mut self, f: NamedEnumerator) -> Self {
         self.named_enumerator = Some(f);
+        self
+    }
+    /// Needs an indexed getter too; ignored without one.
+    pub fn indexed_length(mut self, f: IndexedLength) -> Self {
+        self.indexed_length = Some(f);
         self
     }
 }
@@ -536,6 +569,7 @@ enum Callback {
     NamedSet(NamedSetter),
     NamedDelete(NamedDeleter),
     NamedEnum(NamedEnumerator),
+    IndexedLen(IndexedLength),
     /// Placeholder keeping named callbacks at consecutive indexes.
     Empty,
 }
@@ -874,16 +908,26 @@ impl Engine {
             if has.2 {
                 config = config.enumerator(named_enum_trampoline);
             }
+            if spec.named_unenumerable {
+                config = config.query(named_query_trampoline);
+            }
             inst.set_named_property_handler(config);
         }
         if let Some(getter) = spec.indexed_getter {
+            // The length callback, if any, sits right after the getter.
             let idx = st.push_callback(Callback::Indexed(getter));
+            let mut config =
+                v8::IndexedPropertyHandlerConfiguration::new().getter(indexed_trampoline);
+            if let Some(len) = spec.indexed_length {
+                st.push_callback(Callback::IndexedLen(len));
+                config = config
+                    .query(indexed_query_trampoline)
+                    .enumerator(indexed_enum_trampoline)
+                    .setter(indexed_set_trampoline)
+                    .deleter(indexed_delete_trampoline);
+            }
             let data = v8::Integer::new_from_unsigned(scope, idx);
-            inst.set_indexed_property_handler(
-                v8::IndexedPropertyHandlerConfiguration::new()
-                    .getter(indexed_trampoline)
-                    .data(data.into()),
-            );
+            inst.set_indexed_property_handler(config.data(data.into()));
         }
 
         let template = v8::Global::new(scope, ft);
@@ -899,72 +943,7 @@ impl Engine {
     pub fn new_realm(&mut self, options: RealmOptions) -> Result<RealmId, JsError> {
         let mut iso = Entered::new(&mut self.isolate);
         v8::scope!(let scope, &mut **iso);
-        let global_template = match options.global {
-            Some(id) => {
-                let st = self.state.borrow();
-                let entry = st
-                    .interfaces
-                    .get(id.0 as usize)
-                    .ok_or_else(|| JsError::host(format!("unknown interface {id:?}")))?;
-                let ft = v8::Local::new(scope, &entry.template);
-                Some(ft.instance_template(scope))
-            }
-            None => None,
-        };
-        let context = v8::Context::new(
-            scope,
-            v8::ContextOptions {
-                global_template,
-                ..Default::default()
-            },
-        );
-        let id = {
-            let mut st = self.state.borrow_mut();
-            let id = RealmId(st.next_realm);
-            st.next_realm += 1;
-            id
-        };
-        context.set_slot(Rc::new(RealmTag(id)));
-        let scope = &mut v8::ContextScope::new(scope, context);
-
-        // WebIDL: an interface object's [[Prototype]] is its parent's
-        // interface object. V8 templates only link the prototype objects, so
-        // this instantiates every interface object now. The M6 startup
-        // snapshot removes that cost.
-        {
-            let st = self.state.borrow();
-            for entry in &st.interfaces {
-                let Some(parent) = entry.parent else { continue };
-                let ft = v8::Local::new(scope, &entry.template);
-                let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
-                if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
-                    f.set_prototype(scope, pf.into());
-                }
-            }
-        }
-
-        let global = context.global(scope);
-        if let Some(id) = options.global {
-            apply_overflow(scope, &self.state, id, global);
-        }
-        let mut st = self.state.borrow_mut();
-        if let Some(host) = options.global_host {
-            if global.internal_field_count() >= HOST_FIELDS {
-                set_host(scope, global, host);
-            }
-            st.wrappers
-                .insert((id, host), v8::Global::new(scope, global));
-        }
-        st.realms.insert(
-            id,
-            RealmEntry {
-                context: v8::Global::new(scope, context),
-                world: options.world,
-                loader: options.module_loader,
-                modules: Vec::new(),
-            },
-        );
-        Ok(id)
+        new_realm_in(scope, &self.state, options)
     }
 
     /// The world a realm belongs to.
@@ -978,11 +957,7 @@ impl Engine {
 
     /// Drop a realm, its wrappers, handles and resolvers.
     pub fn drop_realm(&mut self, realm: RealmId) {
-        let mut st = self.state.borrow_mut();
-        st.realms.remove(&realm);
-        st.wrappers.retain(|(r, _), _| *r != realm);
-        st.handles.retain(|(r, _)| *r != realm);
-        st.resolvers.retain(|(r, _)| *r != realm);
+        drop_realm_state(&self.state, realm);
     }
 
     /// Run `f` inside `realm`'s context, then clean up termination state.
@@ -1254,6 +1229,62 @@ impl Engine {
         })
     }
 
+    /// Like [`Engine::new_function`], but `new f()` works and `f` has a
+    /// `prototype` (V8 extension functions such as Chrome's
+    /// `chrome.loadTimes`). A construct call runs `f` with a fresh `this`.
+    pub fn new_constructible_function(
+        &mut self,
+        realm: RealmId,
+        name: &str,
+        length: u32,
+        f: HostFn,
+    ) -> Result<Handle, JsError> {
+        let idx = self.state.borrow_mut().push_callback(Callback::Fn(f));
+        self.run(realm, |scope, state| {
+            let data = v8::Integer::new_from_unsigned(scope, idx);
+            let func = v8::Function::builder(host_trampoline)
+                .data(data.into())
+                .length(length as i32)
+                .constructor_behavior(v8::ConstructorBehavior::Allow)
+                .build(scope)
+                .ok_or_else(|| JsError::host("function creation failed"))?;
+            let n = v8_str(scope, name);
+            func.set_name(n);
+            Ok(store_handle(scope, state, realm, func.into()))
+        })
+    }
+
+    /// Make `time_zone` (an IANA id such as `America/New_York`) the zone
+    /// of `Date` and `Intl` in this engine. Returns false for an id ICU
+    /// does not know.
+    ///
+    /// ICU's default zone is process-wide. This sets it (when it differs)
+    /// and resets this isolate's date cache. `Date` keeps the zone it
+    /// cached until the next reset of its own isolate, but `Intl` reads the
+    /// process default on every new formatter, so engines on other threads
+    /// see the new zone in `Intl` immediately. Call it before running a
+    /// page whose persona has a different zone than the last one.
+    pub fn set_time_zone(&mut self, time_zone: &str) -> bool {
+        if v8::icu::get_default_time_zone() != time_zone
+            && !v8::icu::set_default_time_zone(time_zone)
+        {
+            return false;
+        }
+        let mut iso = Entered::new(&mut self.isolate);
+        iso.date_time_configuration_change_notification(v8::TimeZoneDetection::Skip);
+        true
+    }
+
+    /// Set ICU's default locale (`Intl` default, e.g. `en-US`). Process
+    /// wide; an isolate caches its default locale on first `Intl` use, so
+    /// call it before the first page script of the engine.
+    pub fn set_default_locale(&mut self, locale: &str) {
+        if !locale.is_empty() && !locale.contains('\0') && v8::icu::get_language_tag() != locale {
+            // ICU locale ids use `_` (`en_US`).
+            v8::icu::set_default_locale(&locale.replace('-', "_"));
+        }
+    }
+
     /// Materialize an [`Arg`] as a held value in `realm`.
     pub fn make_handle(&mut self, realm: RealmId, value: Arg) -> Result<Handle, JsError> {
         self.run(realm, |scope, state| {
@@ -1368,6 +1399,88 @@ impl Drop for Engine {
         }
         self.isolate.remove_slot::<SharedState>();
     }
+}
+
+/// Body of [`Engine::new_realm`], shared with [`RealmOps`] for `CallCtx`.
+fn new_realm_in(
+    scope: &mut v8::PinScope<'_, '_, ()>,
+    state: &SharedState,
+    options: RealmOptions,
+) -> Result<RealmId, JsError> {
+    let global_template = match options.global {
+        Some(id) => {
+            let st = state.borrow();
+            let entry = st
+                .interfaces
+                .get(id.0 as usize)
+                .ok_or_else(|| JsError::host(format!("unknown interface {id:?}")))?;
+            let ft = v8::Local::new(scope, &entry.template);
+            Some(ft.instance_template(scope))
+        }
+        None => None,
+    };
+    let context = v8::Context::new(
+        scope,
+        v8::ContextOptions {
+            global_template,
+            ..Default::default()
+        },
+    );
+    let id = {
+        let mut st = state.borrow_mut();
+        let id = RealmId(st.next_realm);
+        st.next_realm += 1;
+        id
+    };
+    context.set_slot(Rc::new(RealmTag(id)));
+    let scope = &mut v8::ContextScope::new(scope, context);
+
+    // WebIDL: an interface object's [[Prototype]] is its parent's
+    // interface object. V8 templates only link the prototype objects, so
+    // this instantiates every interface object now. The M6 startup
+    // snapshot removes that cost.
+    {
+        let st = state.borrow();
+        for entry in &st.interfaces {
+            let Some(parent) = entry.parent else { continue };
+            let ft = v8::Local::new(scope, &entry.template);
+            let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
+            if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
+                f.set_prototype(scope, pf.into());
+            }
+        }
+    }
+
+    let global = context.global(scope);
+    if let Some(id) = options.global {
+        apply_overflow(scope, state, id, global);
+    }
+    let mut st = state.borrow_mut();
+    if let Some(host) = options.global_host {
+        if global.internal_field_count() >= HOST_FIELDS {
+            set_host(scope, global, host);
+        }
+        st.wrappers
+            .insert((id, host), v8::Global::new(scope, global));
+    }
+    st.realms.insert(
+        id,
+        RealmEntry {
+            context: v8::Global::new(scope, context),
+            world: options.world,
+            loader: options.module_loader,
+            modules: Vec::new(),
+        },
+    );
+    Ok(id)
+}
+
+fn drop_realm_state(state: &SharedState, realm: RealmId) {
+    let mut st = state.borrow_mut();
+    st.realms.remove(&realm);
+    st.wrappers.retain(|(r, _), _| *r != realm);
+    st.handles.retain(|(r, _)| *r != realm);
+    st.resolvers.retain(|(r, _)| *r != realm);
 }
 
 /// After JS ran: clear a pending termination and restore the heap limit if
@@ -1553,6 +1666,17 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
             new_promise(self.scope, &self.state, self.realm).ok_or(HostError::Thrown)?;
         self.rv.set(promise.into());
         Ok(resolver)
+    }
+
+    /// A new pending promise held by the host (e.g. a cached `ready`
+    /// promise), with its resolver.
+    pub fn new_promise(&mut self) -> Result<(Handle, Resolver), HostError> {
+        let (promise, resolver) =
+            new_promise(self.scope, &self.state, self.realm).ok_or(HostError::Thrown)?;
+        Ok((
+            store_handle(self.scope, &self.state, self.realm, promise.into()),
+            resolver,
+        ))
     }
 
     /// Settle a promise from inside a callback.
@@ -1765,6 +1889,33 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         read_bytes(self.scope, v)
     }
 
+    /// Element type of an `ArrayBufferView` argument, `None` for anything
+    /// else.
+    pub fn arg_view_kind(&mut self, i: usize) -> Option<ViewKind> {
+        view_kind(self.arg(i))
+    }
+
+    /// Element type of a held `ArrayBufferView`.
+    pub fn handle_view_kind(&mut self, h: Handle) -> Option<ViewKind> {
+        let v = load_handle(self.scope, &self.state, h).ok()?;
+        view_kind(v)
+    }
+
+    /// Copy `bytes` into the `ArrayBufferView` argument `i`, starting
+    /// `offset` bytes into the view and stopping at its end (typed-array
+    /// out-parameters such as `readPixels` or `getFloatFrequencyData`).
+    /// Returns the number of bytes written; `None` if the argument is not
+    /// a view.
+    pub fn write_arg_bytes(&mut self, i: usize, offset: usize, bytes: &[u8]) -> Option<usize> {
+        write_view(self.arg(i), offset, bytes)
+    }
+
+    /// Like [`CallCtx::write_arg_bytes`] for a held view.
+    pub fn write_handle_bytes(&mut self, h: Handle, offset: usize, bytes: &[u8]) -> Option<usize> {
+        let v = load_handle(self.scope, &self.state, h).ok()?;
+        write_view(v, offset, bytes)
+    }
+
     /// Forget a handle (e.g. a cleared timer's callback).
     pub fn release(&mut self, h: Handle) {
         self.state.borrow_mut().handles.remove(h.idx, h.generation);
@@ -1813,6 +1964,16 @@ impl<'s, 'i> PropCtx<'_, 's, 'i> {
     /// Escape hatch: the raw V8 scope.
     pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
         self.scope
+    }
+    /// The realm the holder object was created in. For a window global
+    /// read from another frame (`frames[0][0]`) this is the holder's own
+    /// realm, while [`PropCtx::realm`] is the caller's.
+    pub fn holder_realm(&mut self) -> RealmId {
+        let holder = self.args.holder();
+        holder
+            .get_creation_context(self.scope)
+            .and_then(|c| c.get_slot::<RealmTag>().map(|t| t.0))
+            .unwrap_or(self.realm)
     }
 }
 
@@ -2015,6 +2176,106 @@ fn named_enum_trampoline<'s>(
     let scope = cx.scope;
     let elems: Vec<v8::Local<v8::Value>> = names.iter().map(|n| v8_str(scope, n).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &elems));
+}
+
+/// `[LegacyUnenumerableNamedProperties]`: supported names are read-only
+/// and not enumerable.
+fn named_query_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Integer>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let idx = named_index(scope, args.data(), 0);
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::Named(f)) => f.clone(),
+        _ => return v8::Intercepted::kNo,
+    };
+    let name = key.to_rust_string_lossy(scope);
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    match f(&mut cx, &name) {
+        Ok(Some(_)) => {
+            let attrs = v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM;
+            rv.set_int32(attrs.as_u32() as i32);
+            v8::Intercepted::kYes
+        }
+        _ => v8::Intercepted::kNo,
+    }
+}
+
+/// Supported indices of an interface with [`IndexedLength`].
+fn indexed_len<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::PropertyCallbackArguments<'s>,
+) -> Option<u32> {
+    let state = shared_state(scope);
+    let idx = callback_index(scope, args.data()).saturating_add(1);
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::IndexedLen(f)) => f.clone(),
+        _ => return None,
+    };
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    Some(f(&mut cx))
+}
+
+fn indexed_query_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Integer>,
+) -> v8::Intercepted {
+    match indexed_len(scope, args) {
+        Some(n) if index < n => {
+            rv.set_int32(v8::PropertyAttribute::READ_ONLY.as_u32() as i32);
+            v8::Intercepted::kYes
+        }
+        _ => v8::Intercepted::kNo,
+    }
+}
+
+fn indexed_enum_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Array>,
+) {
+    let n = indexed_len(scope, args).unwrap_or(0);
+    let elems: Vec<v8::Local<v8::Value>> = (0..n)
+        .map(|i| v8::Integer::new_from_unsigned(scope, i).into())
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &elems));
+}
+
+/// Read-only indexed properties: assignment is ignored (Blink, sloppy
+/// mode).
+fn indexed_set_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    _value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
+    _rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    match indexed_len(scope, args) {
+        Some(n) if index < n => v8::Intercepted::kYes,
+        _ => v8::Intercepted::kNo,
+    }
+}
+
+fn indexed_delete_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    match indexed_len(scope, args) {
+        Some(n) if index < n => {
+            rv.set_bool(false);
+            v8::Intercepted::kYes
+        }
+        _ => v8::Intercepted::kNo,
+    }
 }
 
 fn indexed_trampoline<'s>(
@@ -2494,6 +2755,34 @@ fn arg_to_v8<'s>(
                 .ok_or(HostError::Thrown)?
                 .into()
         }
+        Arg::Uint8ClampedArray(bytes) => {
+            let len = bytes.len();
+            let ab = new_array_buffer(scope, bytes);
+            v8::Uint8ClampedArray::new(scope, ab, 0, len)
+                .ok_or(HostError::Thrown)?
+                .into()
+        }
+        Arg::Float32Array(v) => {
+            let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_ne_bytes()).collect();
+            let ab = new_array_buffer(scope, &bytes);
+            v8::Float32Array::new(scope, ab, 0, v.len())
+                .ok_or(HostError::Thrown)?
+                .into()
+        }
+        Arg::Int32Array(v) => {
+            let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_ne_bytes()).collect();
+            let ab = new_array_buffer(scope, &bytes);
+            v8::Int32Array::new(scope, ab, 0, v.len())
+                .ok_or(HostError::Thrown)?
+                .into()
+        }
+        Arg::Uint32Array(v) => {
+            let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_ne_bytes()).collect();
+            let ab = new_array_buffer(scope, &bytes);
+            v8::Uint32Array::new(scope, ab, 0, v.len())
+                .ok_or(HostError::Thrown)?
+                .into()
+        }
     })
 }
 
@@ -2506,6 +2795,77 @@ fn new_array_buffer<'s>(
 }
 
 /// Bytes of an `ArrayBuffer` or `ArrayBufferView`, copied out.
+/// Element type of an `ArrayBufferView`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewKind {
+    Int8,
+    Uint8,
+    Uint8Clamped,
+    Int16,
+    Uint16,
+    Int32,
+    Uint32,
+    Float16,
+    Float32,
+    Float64,
+    BigInt64,
+    BigUint64,
+    DataView,
+}
+
+fn view_kind(v: v8::Local<'_, v8::Value>) -> Option<ViewKind> {
+    Some(if v.is_float32_array() {
+        ViewKind::Float32
+    } else if v.is_uint8_array() {
+        ViewKind::Uint8
+    } else if v.is_uint8_clamped_array() {
+        ViewKind::Uint8Clamped
+    } else if v.is_int8_array() {
+        ViewKind::Int8
+    } else if v.is_int16_array() {
+        ViewKind::Int16
+    } else if v.is_uint16_array() {
+        ViewKind::Uint16
+    } else if v.is_int32_array() {
+        ViewKind::Int32
+    } else if v.is_uint32_array() {
+        ViewKind::Uint32
+    } else if v.is_float64_array() {
+        ViewKind::Float64
+    } else if v.is_big_int64_array() {
+        ViewKind::BigInt64
+    } else if v.is_big_uint64_array() {
+        ViewKind::BigUint64
+    } else if v.is_data_view() {
+        ViewKind::DataView
+    } else if v.is_float16_array() {
+        ViewKind::Float16
+    } else {
+        return None;
+    })
+}
+
+fn write_view(v: v8::Local<'_, v8::Value>, offset: usize, bytes: &[u8]) -> Option<usize> {
+    let view = v8::Local::<v8::ArrayBufferView>::try_from(v).ok()?;
+    let len = view.byte_length();
+    if offset >= len {
+        return Some(0);
+    }
+    let n = bytes.len().min(len - offset);
+    let dst = view.data() as *mut u8;
+    if dst.is_null() || n == 0 {
+        return Some(0);
+    }
+    // SAFETY: V8 has no safe API for writing into an existing typed array
+    // (the out-parameter of `readPixels`, `getFloatFrequencyData`, ...).
+    // `data()` points at the view's first byte (byte offset included) in
+    // a live backing store; we write `n <= byte_length - offset` bytes, so
+    // the write stays inside the view. A detached buffer has length 0 and
+    // returns above. No JS runs while the pointer is in use.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst.add(offset), n) };
+    Some(n)
+}
+
 fn read_bytes(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
     if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(v) {
         let mut out = vec![0u8; view.byte_length()];

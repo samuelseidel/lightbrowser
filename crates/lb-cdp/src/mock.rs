@@ -1,5 +1,6 @@
-//! [`MockHost`]: a [`PageHost`] without a JS engine, for tests and for
-//! `lightbrowser serve` until `lb-page` is wired in.
+//! [`MockHost`]: a [`PageHost`] without a JS engine, for tests and for the
+//! firefox build's `lightbrowser serve` (the chrome build uses
+//! `lb_page::CdpHost`).
 //!
 //! - Documents are real: `lb-dom` parses the HTML, `lb-layout` gives box
 //!   models, hit tests and the accessibility tree.

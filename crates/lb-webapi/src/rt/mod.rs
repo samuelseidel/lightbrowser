@@ -14,6 +14,17 @@
 //! - Host refs: [`K_NODE`] (`kind = K_NODE | slot << 8`, `id` = node id),
 //!   [`K_WINDOW`] (the global) and [`K_OBJ`] (`id` indexes the window's
 //!   object table).
+//! - [`input`]: trusted user input for CDP `Input.*` (pointer, mouse and
+//!   keyboard events in Chrome's order, focus, activation, text editing)
+//!   and the UI event interfaces.
+//! - Fingerprint surfaces from the persona: `canvas` (2D, readback noise),
+//!   `webgl` (stub renderer, persona GPU, limits and extensions), `audio`
+//!   (Web Audio DSP with seeded output noise), `fonts` (Font Loading API;
+//!   measurement detection runs through layout's font tables).
+//! - `navigator`, `rtc`, `chrome`: the persona-driven fingerprint surface
+//!   (plugins, UA client hints, permissions, battery, media devices,
+//!   voices, `performance.memory`, WebRTC without networking,
+//!   `window.chrome`, ICU time zone and locale per realm).
 //! - [`Js`]: what event dispatch and callbacks need from the engine. It is
 //!   implemented for `CallCtx` (inside a host function) and [`EngineJs`]
 //!   (from the event loop), so the same code runs in both places.
@@ -28,14 +39,28 @@
 
 #![allow(clippy::type_complexity)]
 
+mod audio;
+mod audio_dsp;
+pub mod canvas;
+mod chrome;
 mod coll;
 mod dom;
 mod events;
+mod fonts;
+pub mod frames;
+mod image;
+pub mod input;
+mod matrix;
 mod misc;
+mod navigator;
 mod net;
+mod rtc;
 pub mod script;
+mod serializer;
 mod style;
 mod tags;
+mod webgl;
+mod webgl_ext;
 mod window;
 
 use std::cell::{Cell, RefCell};
@@ -57,8 +82,12 @@ use crate::host::{ConsoleMessage, NetHost, StorageArea};
 use crate::install::Bindings;
 use crate::registry::{Registry, host_fn};
 
+pub use canvas::{CanvasTarget, ContextFactory, ExternalContext, canvas_size};
+pub use chrome::LoadInfo;
 pub use events::{EventData, EventExtra, fire_event, fire_event_with};
+pub use image::load_visible_lazy_images;
 pub use script::ScriptKind;
+pub(crate) use webgl::extension_specs;
 
 /// Host ref kind of DOM nodes (`kind = K_NODE | document_slot << 8`).
 pub const K_NODE: u32 = 1;
@@ -111,6 +140,8 @@ pub trait Js {
     fn top_level(&self) -> bool;
     /// Materialize a value (e.g. a new `DOMException`) as a handle.
     fn make(&mut self, v: Arg) -> Option<Handle>;
+    /// Realm building (child frames), from the event loop or a callback.
+    fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps;
 }
 
 impl Js for CallCtx<'_, '_, '_> {
@@ -155,6 +186,9 @@ impl Js for CallCtx<'_, '_, '_> {
     }
     fn make(&mut self, v: Arg) -> Option<Handle> {
         self.make_handle(v).ok()
+    }
+    fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps {
+        self
     }
 }
 
@@ -217,6 +251,9 @@ impl Js for EngineJs<'_> {
     fn make(&mut self, v: Arg) -> Option<Handle> {
         self.engine.make_handle(self.realm, v).ok()
     }
+    fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps {
+        self.engine
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +265,8 @@ struct RtInner {
     bindings: RefCell<Option<Bindings>>,
     ids: RefCell<HashMap<&'static str, InterfaceId>>,
     dom: DomExceptions,
+    /// `getContext` factories for non-2D kinds (WebGL).
+    canvas_factories: canvas::Factories,
 }
 
 /// The implementations of one engine. Cheap to clone.
@@ -251,14 +290,24 @@ impl Runtime {
             bindings: RefCell::new(None),
             ids: RefCell::new(HashMap::new()),
             dom: reg.dom_exceptions(),
+            canvas_factories: canvas::Factories::default(),
         }));
         dom::register(reg, &rt);
         coll::register(reg, &rt);
         style::register(reg, &rt);
         events::register(reg, &rt);
+        input::register(reg, &rt);
+        serializer::register(reg, &rt);
         window::register(reg, &rt);
         net::register(reg, &rt);
         misc::register(reg, &rt);
+        canvas::register(reg, &rt);
+        image::register(reg, &rt);
+        webgl::register(reg, &rt);
+        audio::register(reg, &rt);
+        fonts::register(reg, &rt);
+        navigator::register(reg, &rt);
+        frames::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -575,6 +624,21 @@ pub struct Window {
     /// Prefetched ES module sources by URL (the realm's module loader reads
     /// them; the page layer fills it before evaluating a module graph).
     pub module_map: Rc<RefCell<HashMap<String, String>>>,
+    /// Canvas contexts, paint objects' state and image loads.
+    pub(crate) paint: canvas::PaintState,
+    /// Pointer, click and focus-value state of trusted input.
+    pub(crate) input: RefCell<input::InputState>,
+    /// Text control selections, by (slot, node), in UTF-16 units.
+    pub(crate) selections: RefCell<HashMap<(u32, NodeId), input::Sel>>,
+    /// Per-realm handles of the navigator surface (`getBattery()`).
+    pub(crate) nav_state: RefCell<navigator::NavState>,
+    /// How the document was loaded (`chrome.loadTimes()`); the page layer
+    /// may fill in the protocol and navigation type.
+    pub load_info: RefCell<LoadInfo>,
+    /// Nested browsing contexts: parent link, child frames, page hooks.
+    pub(crate) frames: frames::FrameState,
+    /// `document.visibilityState` is "hidden" (set while unloading).
+    pub(crate) hidden: Cell<bool>,
 }
 
 impl std::fmt::Debug for Window {
@@ -650,6 +714,13 @@ impl Window {
             window_name: RefCell::new(String::new()),
             opened: Cell::new(false),
             module_map: Rc::new(RefCell::new(HashMap::new())),
+            paint: canvas::PaintState::default(),
+            input: RefCell::new(input::InputState::default()),
+            selections: RefCell::new(HashMap::new()),
+            nav_state: RefCell::new(navigator::NavState::default()),
+            load_info: RefCell::new(LoadInfo::default()),
+            frames: frames::FrameState::default(),
+            hidden: Cell::new(false),
         })
     }
 
@@ -657,10 +728,10 @@ impl Window {
     /// per-realm helpers. Returns the realm.
     pub fn create_realm(
         self: &Rc<Self>,
-        engine: &mut Engine,
+        engine: &mut dyn lb_js::RealmOps,
         bindings: &Bindings,
     ) -> Result<RealmId, JsError> {
-        let insecure = !is_secure_url(&self.url.borrow());
+        let insecure = !is_secure_url(&frames::effective_url(self));
         let map = self.module_map.clone();
         let base = self.url();
         let loader: lb_js::ModuleLoader = Rc::new(move |spec: &str, referrer: &str| {
@@ -689,6 +760,7 @@ impl Window {
         )?;
         self.realm.set(realm);
         self.rt.attach(realm, self.clone());
+        engine.set_security_token(realm, &frames::origin(self))?;
         self.setup_realm(engine, realm)?;
         Ok(realm)
     }
@@ -697,7 +769,7 @@ impl Window {
     /// scripts). Nothing is added to the main world.
     pub fn create_isolated_world(
         self: &Rc<Self>,
-        engine: &mut Engine,
+        engine: &mut dyn lb_js::RealmOps,
         bindings: &Bindings,
         name: &str,
     ) -> Result<RealmId, JsError> {
@@ -707,15 +779,22 @@ impl Window {
                 window_host: Some(WINDOW_REF),
                 world: Some(lb_js::World::Isolated(name.to_owned())),
                 module_loader: None,
-                insecure: !is_secure_url(&self.url.borrow()),
+                insecure: !is_secure_url(&frames::effective_url(self)),
             },
         )?;
         self.rt.attach(realm, self.clone());
+        engine.set_security_token(realm, &frames::origin(self))?;
         window::install_console(engine, realm, &self.rt)?;
+        // Per-realm navigator state (UA-CH promises, performance.memory).
+        navigator::setup_realm(self, engine, realm)?;
         Ok(realm)
     }
 
-    fn setup_realm(self: &Rc<Self>, engine: &mut Engine, realm: RealmId) -> Result<(), JsError> {
+    fn setup_realm(
+        self: &Rc<Self>,
+        engine: &mut dyn lb_js::RealmOps,
+        realm: RealmId,
+    ) -> Result<(), JsError> {
         window::install_console(engine, realm, &self.rt)?;
         let rt = self.rt.clone();
         let deliver = engine.new_function(
@@ -746,6 +825,9 @@ impl Window {
         hp.json_parse = Some(parse);
         hp.json_stringify = Some(stringify);
         hp.freeze = Some(freeze);
+        drop(hp);
+        navigator::setup_realm(self, engine, realm)?;
+        chrome::install(self, engine, realm)?;
         Ok(())
     }
 
@@ -864,6 +946,18 @@ impl Window {
 
     pub fn set_ready_state(&self, s: ReadyState) {
         self.ready_state.set(s);
+        let now = self.clock.now();
+        let mut li = self.load_info.borrow_mut();
+        match s {
+            ReadyState::Interactive => {
+                li.dcl_ms.get_or_insert(now);
+            }
+            ReadyState::Complete => {
+                li.dcl_ms.get_or_insert(now);
+                li.load_ms.get_or_insert(now);
+            }
+            ReadyState::Loading => {}
+        }
     }
 
     /// Forward console messages (and uncaught exceptions) to `sink`.
@@ -1084,16 +1178,29 @@ impl Window {
         f: impl FnOnce(&mut lb_layout::LayoutEngine, &Document) -> R,
     ) -> R {
         let mut l = self.layout.borrow_mut();
+        let created = l.is_none();
         let engine = l.get_or_insert_with(|| match &self.profile {
             Some(p) => lb_layout::LayoutEngine::new(p.clone()),
             None => lb_layout::LayoutEngine::with_env(lb_css::MediaEnv::default()),
         });
+        if created {
+            image::apply_intrinsic(self, engine);
+        }
         let sheets = std::mem::take(&mut *self.sheets.borrow_mut());
         for (link, text) in sheets {
             engine.styles().set_external_sheet(link, Some(&text));
         }
         let docs = self.docs.borrow();
         f(engine, &docs[slot as usize])
+    }
+
+    /// The main document's layout engine (created on first use), for the
+    /// page layer (CDP box models, hit testing, viewport, AX tree).
+    pub fn with_layout_engine<R>(
+        &self,
+        f: impl FnOnce(&mut lb_layout::LayoutEngine, &Document) -> R,
+    ) -> R {
+        self.with_layout(0, f)
     }
 
     /// Hand a fetched stylesheet to the style engine (applied lazily).
@@ -1133,6 +1240,39 @@ impl Window {
     }
 
     /// Release JS state before the realm is dropped.
+    /// The unload steps of the document, as Chrome runs them when the page
+    /// navigates away or closes: `pagehide` (only after `pageshow`, i.e. once
+    /// `load` ran), `visibilitychange` to "hidden", then `unload`. Requests
+    /// started here (`navigator.sendBeacon`, keepalive) still go out.
+    pub fn unload(self: &Rc<Self>, js: &mut dyn Js) {
+        if self.is_closed() {
+            return;
+        }
+        if self.ready_state() == ReadyState::Complete {
+            fire_event_with(
+                js,
+                self,
+                WINDOW_REF,
+                "PageTransitionEvent",
+                "pagehide",
+                false,
+                false,
+                EventExtra::PageTransition { persisted: false },
+            );
+        }
+        if !self.hidden.replace(true) {
+            fire_event(
+                js,
+                self,
+                node_ref(0, lb_dom::Document::DOCUMENT),
+                "visibilitychange",
+                true,
+                false,
+            );
+        }
+        fire_event(js, self, WINDOW_REF, "unload", false, false);
+    }
+
     pub fn close(&self) {
         self.closed.set(true);
         self.timers.borrow_mut().clear();
@@ -1149,17 +1289,46 @@ impl Window {
 
 /// `t` (page clock ms) coarsened to the persona's `performance.now()`
 /// resolution (Chrome 100 µs).
+///
+/// Chrome (Blink's `TimeClamper`) rounds down to the resolution but moves
+/// to the next tick at a pseudo-random point inside each interval:
+/// `threshold = murmur3(tick ^ secret) % resolution`. The result is still a
+/// multiple of the resolution and never goes backwards. The secret is per
+/// document (here derived from the time origin). Firefox personas floor.
 pub fn coarse_time(w: &Window, t: f64) -> f64 {
-    let res = w
-        .profile
-        .as_ref()
-        .map_or(100, |p| p.performance_now_resolution_us()) as f64
-        / 1000.0;
-    if res > 0.0 {
-        (t / res).floor() * res
-    } else {
-        t
+    let (res_us, jitter) = match &w.profile {
+        Some(p) => (
+            i64::from(p.performance_now_resolution_us()),
+            p.family() == lb_persona::BrowserFamily::Chrome,
+        ),
+        None => (100, w.persona.family == lb_persona::BrowserFamily::Chrome),
+    };
+    if res_us <= 0 || !t.is_finite() {
+        return t;
     }
+    let us = (t * 1000.0).floor() as i64;
+    let (neg, us) = (us < 0, us.abs());
+    let lower = us % res_us;
+    let mut clamped = us - lower;
+    if jitter {
+        let secret = w.clock.time_origin.to_bits().rotate_left(17) ^ 0x9e37_79b9_7f4a_7c15;
+        let threshold = (murmur3(clamped as u64 ^ secret) % res_us as u64) as i64;
+        if lower >= threshold {
+            clamped += res_us;
+        }
+    }
+    let clamped = if neg { -clamped } else { clamped };
+    clamped as f64 / 1000.0
+}
+
+/// MurmurHash3's 64-bit finalizer (Blink `TimeClamper`).
+fn murmur3(mut v: u64) -> u64 {
+    v ^= v >> 33;
+    v = v.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    v ^= v >> 33;
+    v = v.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    v ^= v >> 33;
+    v
 }
 
 /// `https:`, `wss:`, `file:`, loopback `http:` and `about:` count as secure
@@ -1242,9 +1411,21 @@ pub(crate) enum Obj {
     TextEncoder,
     TextDecoder(Box<misc::DecoderData>),
     DomParser,
+    XmlSerializer,
     MutationObserver(Box<misc::MoData>),
     MutationRecord(Box<misc::MoRecord>),
     Blob(Box<misc::BlobData>),
+    /// Canvas contexts, gradients, patterns, paths, image data, metrics,
+    /// offscreen canvases and matrices.
+    Paint(Box<canvas::PaintObj>),
+    /// WebGL contexts, resources and extension objects.
+    Gl(Box<webgl::GlObj>),
+    /// Web Audio contexts, nodes, params, buffers and periodic waves.
+    Audio(Box<audio::AudioObj>),
+    /// `FontFaceSet` and `FontFace`.
+    Font(Box<fonts::FontObj>),
+    /// Navigator surface objects (plugins, UA data, permissions, ...).
+    Nav(Box<navigator::NavObj>),
 }
 
 impl Obj {
@@ -1281,9 +1462,15 @@ impl Obj {
             Obj::TextEncoder => "TextEncoder",
             Obj::TextDecoder(_) => "TextDecoder",
             Obj::DomParser => "DOMParser",
+            Obj::XmlSerializer => "XMLSerializer",
             Obj::MutationObserver(_) => "MutationObserver",
             Obj::MutationRecord(_) => "MutationRecord",
             Obj::Blob(_) => "Blob",
+            Obj::Paint(p) => p.iface_name(),
+            Obj::Gl(g) => g.iface_name(),
+            Obj::Audio(a) => a.iface_name(),
+            Obj::Font(f) => f.iface_name(),
+            Obj::Nav(n) => n.iface_name(),
         }
     }
 }

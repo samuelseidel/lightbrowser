@@ -5,12 +5,10 @@
 use std::rc::Rc;
 
 use lb_dom::{Document, NodeFlags, NodeId, local_name};
-use lb_js::{
-    Arg, CallCtx, Engine, HostError, HostRef, JsError, JsValue, RealmId, ScriptOrigin, ValueKind,
-};
+use lb_js::{Arg, CallCtx, HostError, HostRef, JsError, JsValue, RealmId, ScriptOrigin, ValueKind};
 use url::Url;
 
-use super::events::{EventExtra, coarse_now, fire_event, fire_event_with};
+use super::events::{EventExtra, coarse_now, fire_event_with};
 use super::{
     HistEntry, Js, K_OBJ, NavRequest, Obj, Runtime, TaskSource, TimerCallback, WINDOW_REF, Window,
     getter, illegal, method, need_args, node_ref, setter, this_obj,
@@ -26,7 +24,7 @@ use crate::registry::{Registry, host_fn};
 /// functions that log into the window. Same names, lengths and property
 /// positions as V8's own.
 pub(crate) fn install_console(
-    engine: &mut Engine,
+    engine: &mut dyn lb_js::RealmOps,
     realm: RealmId,
     rt: &Runtime,
 ) -> Result<(), JsError> {
@@ -293,83 +291,9 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 pub(crate) use crate::text::inner_text;
 
 /// `element.click()`: a synthetic `click` plus default actions for
-/// checkboxes, radios, links and submit buttons.
+/// checkboxes, radios, links, labels and submit buttons.
 pub(crate) fn synthetic_click(js: &mut dyn Js, w: &Rc<Window>, slot: u32, n: NodeId) {
-    let (local, ty, disabled) = w.doc_slot(slot, |d| {
-        (
-            d.local_name(n).map(|l| l.to_string()).unwrap_or_default(),
-            super::dom::input_type(d, n),
-            d.has_attribute(n, "disabled"),
-        )
-    });
-    if disabled && matches!(local.as_str(), "input" | "button" | "select" | "textarea") {
-        return;
-    }
-    let toggles = local == "input" && matches!(ty.as_str(), "checkbox" | "radio");
-    let before = toggles.then(|| w.doc_slot(slot, |d| super::dom::checked(d, n, "checked")));
-    if let Some(b) = before {
-        w.doc_slot_mut(slot, |d| {
-            d.set_flags(n, NodeFlags::CHECKED_DIRTY, true);
-            d.set_flags(n, NodeFlags::CHECKED, if ty == "radio" { true } else { !b });
-        });
-    }
-    let ev = super::events::new_event(w, "PointerEvent", "click", true, true, EventExtra::None);
-    w.with_obj(ev, |o| {
-        if let Obj::Event(e) = o {
-            e.composed = true;
-            e.trusted = false;
-        }
-    });
-    let ok = super::events::dispatch(js, w, node_ref(slot, n), ev);
-    if let Some(b) = before {
-        if !ok {
-            w.doc_slot_mut(slot, |d| d.set_flags(n, NodeFlags::CHECKED, b));
-        } else if Some(b) != Some(w.doc_slot(slot, |d| super::dom::checked(d, n, "checked"))) {
-            fire_event(js, w, node_ref(slot, n), "input", true, false);
-            fire_event(js, w, node_ref(slot, n), "change", true, false);
-        }
-    }
-    if ok && slot == 0 {
-        let link = w.with_doc(|d| {
-            std::iter::once(n)
-                .chain(d.ancestors(n))
-                .find(|&a| {
-                    d.is_html_element_named(a, &local_name!("a")) && d.has_attribute(a, "href")
-                })
-                .and_then(|a| d.get_attribute(a, "href").map(str::to_owned))
-        });
-        if let Some(href) = link
-            && let Some(u) = w.resolve_url(&href)
-        {
-            navigate_to(js, w, u, false);
-        } else if (local == "button"
-            && w.with_doc(|d| {
-                d.get_attribute(n, "type")
-                    .is_none_or(|t| t.eq_ignore_ascii_case("submit"))
-            }))
-            || (local == "input" && matches!(ty.as_str(), "submit" | "image"))
-        {
-            let form = w.with_doc(|d| {
-                d.ancestors(n)
-                    .find(|&a| d.is_html_element_named(a, &local_name!("form")))
-            });
-            if let Some(f) = form
-                && fire_event_with(
-                    js,
-                    w,
-                    node_ref(0, f),
-                    "SubmitEvent",
-                    "submit",
-                    true,
-                    true,
-                    EventExtra::None,
-                )
-            {
-                submit_form(w, f);
-            }
-        }
-    }
-    w.after_mutation(js);
+    super::input::synthetic_click(js, w, slot, n);
 }
 
 /// Move focus (`focus()` / `blur()`), firing blur/focusout and
@@ -379,7 +303,11 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
     if old == to {
         return;
     }
+    let focus_extra = |related: Option<NodeId>| EventExtra::Focus {
+        related: related.map(|r| node_ref(0, r)),
+    };
     if let Some(o) = old {
+        super::input::before_blur(js, w, o);
         w.with_doc_mut(|d| d.set_flags(o, NodeFlags::FOCUS | NodeFlags::FOCUS_VISIBLE, false));
         w.focused.set(None);
         fire_event_with(
@@ -390,7 +318,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
             "blur",
             false,
             false,
-            EventExtra::None,
+            focus_extra(to),
         );
         fire_event_with(
             js,
@@ -400,12 +328,13 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
             "focusout",
             true,
             false,
-            EventExtra::None,
+            focus_extra(to),
         );
     }
     if let Some(n) = to {
         w.with_doc_mut(|d| d.set_flags(n, NodeFlags::FOCUS, true));
         w.focused.set(Some(n));
+        super::input::after_focus(w, n);
         fire_event_with(
             js,
             w,
@@ -414,7 +343,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
             "focus",
             false,
             false,
-            EventExtra::None,
+            focus_extra(old),
         );
         fire_event_with(
             js,
@@ -424,7 +353,7 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
             "focusin",
             true,
             false,
-            EventExtra::None,
+            focus_extra(old),
         );
     }
 }
@@ -580,7 +509,7 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
     w.request_navigation(NavRequest { url, replace });
 }
 
-fn screen_dims(w: &Window) -> lb_persona::profile::ScreenInfo {
+pub(crate) fn screen_dims(w: &Window) -> lb_persona::profile::ScreenInfo {
     w.profile
         .as_ref()
         .map(|p| p.screen.clone())
@@ -902,6 +831,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                     EventExtra::Message {
                         data: Some(data),
                         origin,
+                        source: None,
                     },
                 );
             }),

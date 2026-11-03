@@ -26,6 +26,14 @@
 //!   `DOMContentLoaded`, stylesheets for lb-css, `load`. Lifecycle events
 //!   go to a [`PageObserver`] (shaped like CDP `Page.lifecycleEvent`).
 //!
+//! - CDP ([`CdpHost`], chrome): `lb_cdp::PageHost` on these pages, used by
+//!   `lightbrowser serve`. One agent per page on its worker tracks realms
+//!   as execution contexts (main world plus isolated worlds recreated per
+//!   document), remote objects, new-document scripts, bindings (isolated
+//!   worlds only), `Network.*` events and `Fetch.*` interception around
+//!   every request of the page. Input goes through lb-webapi's trusted
+//!   input pipeline. See the `cdp` module docs for the threading.
+//!
 //! The firefox build has [`BrowserContext`] and [`load_document`] (fetch
 //! and parse without running scripts) until SpiderMonkey lands (M4b).
 
@@ -34,15 +42,23 @@ mod context;
 #[cfg(feature = "chrome")]
 mod browser;
 #[cfg(feature = "chrome")]
+pub mod cdp;
+#[cfg(feature = "chrome")]
+pub mod fingerprint;
+#[cfg(feature = "chrome")]
+mod frames;
+#[cfg(feature = "chrome")]
 mod nav;
 #[cfg(feature = "chrome")]
 mod page;
 
-pub use context::{BrowserContext, ContextOptions, PageError};
+pub use context::{BrowserContext, ContextOptions, FetchTrace, PageError};
 pub use lb_webapi::host::{ConsoleMessage, Destination, NetRequest, NetResponse, decode_text};
 
 #[cfg(feature = "chrome")]
 pub use browser::{Browser, BrowserOptions};
+#[cfg(feature = "chrome")]
+pub use cdp::{CdpHost, CdpHostOptions, context_options_for};
 #[cfg(feature = "chrome")]
 pub use page::{Page, PageHandle};
 

@@ -35,14 +35,17 @@ DEFAULT_CONFIG = {
 
 # ---- expected request shapes per family (HTTP/1.1 navigations) -------------
 # Chrome values were captured from Chrome for Testing 153 on loopback (this
-# bench, T-001). Firefox values are Firefox 128 ESR; re-capture before relying
-# on them.
+# bench, T-001). T-001's headless shell sends no Accept-Language; the
+# Accept-Language slot comes from `chromium --headless=new` 153.0.8010.12 on
+# loopback, which sends it right after sec-ch-ua-platform (Chrome 131 sent it
+# after Accept-Encoding). Firefox values are Firefox 128 ESR; re-capture
+# before relying on them.
 EXPECTED = {
     "chrome": {
         "doc_header_order": [
             "Host", "Connection", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
-            "Upgrade-Insecure-Requests", "User-Agent", "Accept", "Sec-Fetch-Site", "Sec-Fetch-Mode",
-            "Sec-Fetch-User", "Sec-Fetch-Dest", "Accept-Encoding", "Accept-Language", "Cookie",
+            "Accept-Language", "Upgrade-Insecure-Requests", "User-Agent", "Accept", "Sec-Fetch-Site",
+            "Sec-Fetch-Mode", "Sec-Fetch-User", "Sec-Fetch-Dest", "Accept-Encoding", "Cookie",
         ],
         "accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,"
                    "image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"),

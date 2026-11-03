@@ -178,7 +178,7 @@ fn set_checked(d: &mut Document, n: NodeId, v: bool) {
 }
 
 /// Text of an `<option>` (descendant text, whitespace collapsed).
-fn option_text(d: &Document, n: NodeId) -> String {
+pub(crate) fn option_text(d: &Document, n: NodeId) -> String {
     d.text_content(n)
         .unwrap_or_default()
         .split_ascii_whitespace()
@@ -186,13 +186,13 @@ fn option_text(d: &Document, n: NodeId) -> String {
         .join(" ")
 }
 
-fn select_options(d: &Document, sel: NodeId) -> Vec<NodeId> {
+pub(crate) fn select_options(d: &Document, sel: NodeId) -> Vec<NodeId> {
     d.descendants(sel)
         .filter(|&n| d.is_html_element_named(n, &local_name!("option")))
         .collect()
 }
 
-fn selected_index(d: &Document, sel: NodeId) -> i32 {
+pub(crate) fn selected_index(d: &Document, sel: NodeId) -> i32 {
     let opts = select_options(d, sel);
     if let Some(i) = opts.iter().position(|&o| checked(d, o, "selected")) {
         return i as i32;
@@ -1398,21 +1398,21 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         this_node(cx)?;
         cx.ret(super::window::last_modified_now())
     });
-    getter(reg, rt, "Document", "visibilityState", |cx, _w| {
+    getter(reg, rt, "Document", "visibilityState", |cx, w| {
         this_node(cx)?;
-        cx.ret("visible")
+        cx.ret(if w.hidden.get() { "hidden" } else { "visible" })
     });
-    getter(reg, rt, "Document", "webkitVisibilityState", |cx, _w| {
+    getter(reg, rt, "Document", "webkitVisibilityState", |cx, w| {
         this_node(cx)?;
-        cx.ret("visible")
+        cx.ret(if w.hidden.get() { "hidden" } else { "visible" })
     });
-    getter(reg, rt, "Document", "hidden", |cx, _w| {
+    getter(reg, rt, "Document", "hidden", |cx, w| {
         this_node(cx)?;
-        cx.ret(false)
+        cx.ret(w.hidden.get())
     });
-    getter(reg, rt, "Document", "webkitHidden", |cx, _w| {
+    getter(reg, rt, "Document", "webkitHidden", |cx, w| {
         this_node(cx)?;
-        cx.ret(false)
+        cx.ret(w.hidden.get())
     });
     method(reg, rt, "Document", "hasFocus", |cx, _w| {
         this_node(cx)?;
@@ -2093,6 +2093,8 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
                 cx.arg_string(0)?
             };
             w.values.borrow_mut().insert((slot, n), v);
+            // A value set by script puts the caret at the end.
+            w.selections.borrow_mut().remove(&(slot, n));
             Ok(())
         });
         getter(reg, rt, iface, "defaultValue", |cx, w| {

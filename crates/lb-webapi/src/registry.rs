@@ -9,7 +9,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use lb_js::{HostFn, IndexedGetter, NamedDeleter, NamedEnumerator, NamedGetter, NamedSetter};
+use lb_js::{
+    HostFn, IndexedGetter, IndexedLength, NamedDeleter, NamedEnumerator, NamedGetter, NamedSetter,
+};
 
 use crate::dom_exception::DomExceptions;
 
@@ -44,6 +46,8 @@ pub struct Registry {
     named_set: HashMap<&'static str, NamedSetter>,
     named_delete: HashMap<&'static str, NamedDeleter>,
     named_enum: HashMap<&'static str, NamedEnumerator>,
+    indexed_len: HashMap<&'static str, IndexedLength>,
+    unenumerable: std::collections::HashSet<&'static str>,
     dom_exceptions: DomExceptions,
 }
 
@@ -114,6 +118,29 @@ impl Registry {
     pub fn named_enumerator(&mut self, iface: &'static str, f: NamedEnumerator) -> &mut Self {
         self.named_enum.insert(iface, f);
         self
+    }
+
+    /// Number of supported indices, so indexed properties enumerate with
+    /// Blink's read-only descriptor (see [`lb_js::IndexedLength`]); needs
+    /// an indexed getter.
+    pub fn indexed_length(&mut self, iface: &'static str, f: IndexedLength) -> &mut Self {
+        self.indexed_len.insert(iface, f);
+        self
+    }
+
+    /// `[LegacyUnenumerableNamedProperties]` for `iface`; needs a named
+    /// getter.
+    pub fn named_unenumerable(&mut self, iface: &'static str) -> &mut Self {
+        self.unenumerable.insert(iface);
+        self
+    }
+
+    pub fn indexed_length_for(&self, iface: &'static str) -> Option<&IndexedLength> {
+        self.indexed_len.get(iface)
+    }
+
+    pub fn is_named_unenumerable(&self, iface: &'static str) -> bool {
+        self.unenumerable.contains(iface)
     }
 
     pub fn named_setter_for(&self, iface: &'static str) -> Option<&NamedSetter> {

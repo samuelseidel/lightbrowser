@@ -17,7 +17,10 @@ pub mod uach;
 pub use consistency::{
     ValidateOutcome, ValidationResult, Violation, Warning, validate, validate_file,
 };
-pub use profile::{BrandVersion, ClientHints, PersonaError, PersonaProfile, format_brand_list};
+pub use profile::{
+    BatteryInfo, BrandVersion, ClientHints, MediaDevices, PersonaError, PersonaProfile,
+    Preferences, format_brand_list,
+};
 
 /// The network-facing summary of a persona: what `lb-net` needs. The full
 /// schema (`profiles/schemas/persona_v2.schema.json`) is [`PersonaProfile`];

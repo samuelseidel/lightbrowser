@@ -45,6 +45,8 @@ pub(crate) struct Builder<'a> {
     /// The inline content so far ends in a collapsible space (or a run is
     /// just starting), so a leading space is dropped.
     ends_in_space: bool,
+    /// Natural sizes of loaded images.
+    intrinsic: Option<&'a HashMap<NodeId, (f32, f32)>>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -79,7 +81,14 @@ impl<'a> Builder<'a> {
             tree: BoxTree::default(),
             node_box: HashMap::new(),
             ends_in_space: true,
+            intrinsic: None,
         }
+    }
+
+    /// Natural sizes of loaded images (see `LayoutEngine::set_intrinsic_size`).
+    pub(crate) fn with_intrinsic(mut self, map: &'a HashMap<NodeId, (f32, f32)>) -> Self {
+        self.intrinsic = Some(map);
+        self
     }
 
     pub(crate) fn build(mut self, width: f32, height: f32) -> Built {
@@ -305,6 +314,21 @@ impl<'a> Builder<'a> {
         };
         let scrollbar = if self.os == OsKind::MacOs { 0.0 } else { 17.0 };
         Some(match local {
+            "img" if self.intrinsic.and_then(|m| m.get(&el)).is_some() => {
+                let (w, h) = self
+                    .intrinsic
+                    .and_then(|m| m.get(&el))
+                    .copied()
+                    .unwrap_or_default();
+                (
+                    BoxKind::Replaced {
+                        width: Some(w),
+                        height: Some(h),
+                        ratio: (h > 0.0).then_some(w / h),
+                    },
+                    true,
+                )
+            }
             "img" => {
                 let (w, h) = (num("width"), num("height"));
                 (

@@ -117,6 +117,29 @@ const BUNDLED: &[(&str, &str)] = &[
     ),
 ];
 
+/// Approximate tables for persona fonts without a metric table (scaled
+/// copies of a similar bundled table; `profiles/fonts/derived.json`).
+const DERIVED: &str = include_str!("../../../profiles/fonts/derived.json");
+
+#[derive(Deserialize)]
+struct DerivedFile {
+    format: u32,
+    families: Vec<DerivedEntry>,
+}
+
+#[derive(Deserialize)]
+struct DerivedEntry {
+    family: String,
+    os: String,
+    base: String,
+    /// Advance-width factor applied to the base table.
+    scale: f32,
+    /// Vertical metrics in em.
+    ascent: f32,
+    descent: f32,
+    line_gap: f32,
+}
+
 /// Number of bundled table files (checked against the directory in tests).
 pub fn bundled_table_count() -> usize {
     BUNDLED.len()
@@ -245,6 +268,43 @@ impl FontFamily {
         })
     }
 
+    /// An approximate family: `base`'s advances scaled, own vertical
+    /// metrics.
+    fn derived(base: &FontFamily, e: &DerivedEntry) -> FontFamily {
+        let upem = base.units_per_em;
+        let scale = |v: f32| (v * e.scale).round();
+        FontFamily {
+            name: e.family.clone(),
+            approximate: true,
+            source: format!("{} advances x {} (derived.json)", base.name, e.scale),
+            units_per_em: upem,
+            ascent: (e.ascent * upem).round(),
+            descent: (e.descent * upem).round(),
+            line_gap: (e.line_gap * upem).round(),
+            faces: base
+                .faces
+                .iter()
+                .map(|f| FontFace {
+                    weight: f.weight,
+                    italic: f.italic,
+                    default_advance: scale(f.default_advance),
+                    ranges: f
+                        .ranges
+                        .iter()
+                        .map(|(start, adv)| {
+                            (
+                                *start,
+                                adv.iter()
+                                    .map(|a| scale(f32::from(*a)).min(f32::from(u16::MAX)) as u16)
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
     /// Closest face: style first, then weight (CSS font matching, roughly).
     pub fn face(&self, weight: f32, italic: bool) -> &FontFace {
         let score = |f: &FontFace| {
@@ -297,6 +357,16 @@ impl FontDb {
             if *d == dir {
                 let fam = FontFamily::from_json(json).expect("bundled font table");
                 db.insert(fam);
+            }
+        }
+        let derived: DerivedFile = serde_json::from_str(DERIVED).expect("derived font list");
+        debug_assert_eq!(derived.format, 1);
+        for e in derived.families.iter().filter(|e| e.os == dir) {
+            if db.get(&e.family).is_some() {
+                continue;
+            }
+            if let Some(base) = db.get(&e.base).cloned() {
+                db.insert(FontFamily::derived(&base, e));
             }
         }
         db
@@ -522,10 +592,44 @@ mod tests {
         for os in std::fs::read_dir(dir).unwrap() {
             let os = os.unwrap().path();
             if os.is_dir() {
-                files += std::fs::read_dir(os).unwrap().count();
+                files += std::fs::read_dir(os)
+                    .unwrap()
+                    .filter(|e| {
+                        e.as_ref()
+                            .is_ok_and(|e| e.path().extension().is_some_and(|x| x == "json"))
+                    })
+                    .count();
             }
         }
         assert_eq!(files, bundled_table_count(), "embed every table in BUNDLED");
+    }
+
+    #[test]
+    fn derived_tables_cover_reference_personas() {
+        let win = FontDb::for_os(OsKind::Windows);
+        let consolas = win.get("Consolas").unwrap();
+        assert!(consolas.approximate);
+        let courier = win.get("Courier New").unwrap();
+        let (c, k) = (consolas.face(400.0, false), courier.face(400.0, false));
+        assert!(c.advance('m', 2048.0) < k.advance('m', 2048.0));
+        let mac = FontDb::for_os(OsKind::MacOs);
+        assert!(mac.get("Menlo").is_some());
+        assert!(win.get("Menlo").is_none());
+        let dir = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../profiles/reference/chrome"
+        );
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let p: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let os = OsKind::from_name(p["os"]["name"].as_str().unwrap());
+            let db = FontDb::for_os(os);
+            for f in p["fonts"]["available"].as_array().unwrap() {
+                let f = f.as_str().unwrap();
+                assert!(db.get(f).is_some(), "{}: no table for {f}", path.display());
+            }
+        }
     }
 
     #[test]

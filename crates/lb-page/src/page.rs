@@ -57,6 +57,11 @@ pub(crate) struct PageState {
     pub loading: Cell<bool>,
     idle_since: Cell<Option<f64>>,
     history_len: Cell<u32>,
+    /// Notified after each event loop turn that ran something (CDP waits
+    /// for promises on it).
+    pub turn: Rc<Notify>,
+    /// The CDP agent of this page, when it is driven over CDP.
+    pub cdp: RefCell<Option<Rc<crate::cdp::agent::Agent>>>,
 }
 
 impl PageState {
@@ -73,6 +78,14 @@ impl PageState {
         if let Some(o) = obs {
             o.lifecycle(name, loader, &url);
         }
+        if let Some(a) = self.agent() {
+            a.lifecycle(self, name, loader);
+        }
+    }
+
+    /// The CDP agent, if the page is driven over CDP.
+    pub(crate) fn agent(&self) -> Option<Rc<crate::cdp::agent::Agent>> {
+        self.cdp.borrow().clone()
     }
 
     pub(crate) fn update_life(&self, f: impl FnOnce(&mut Life)) {
@@ -93,14 +106,29 @@ impl PageState {
 
     /// Tear down the current document: realm and arena go in one step.
     pub(crate) fn drop_window(&self, ws: &WorkerState) {
+        // Unload events run while the window is still current, so their
+        // handlers see a live document (and beacons from them go out).
+        if let Some(w) = self.window() {
+            let realm = w.realm();
+            ws.with_engine(|engine| {
+                let mut js = EngineJs { engine, realm };
+                w.unload(&mut js);
+                js.engine.perform_microtask_checkpoint();
+            });
+        }
         let old = self.window.borrow_mut().take();
         if let Some(w) = old {
+            ws.with_engine(|e| lb_webapi::rt::frames::drop_children(e, &w));
             w.close();
             let realm = w.realm();
+            if let Some(a) = self.agent() {
+                a.drop_worlds(ws);
+            }
             if let Some((rt, _)) = ws.runtime() {
                 rt.detach(realm);
             }
             ws.with_engine(|e| e.drop_realm(realm));
+            self.turn.notify_waiters();
         }
     }
 
@@ -129,6 +157,9 @@ impl PageState {
                 if let Some(o) = obs {
                     o.console(m);
                 }
+                if let Some(a) = p.agent() {
+                    a.console(&p, m);
+                }
             }
         })
     }
@@ -146,35 +177,52 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             page.notify.notified().await;
             continue;
         };
-        let realm = w.realm();
+        // Every window of the page: the top-level one, then its frames.
+        let wins = crate::frames::tree(&w);
         let mut did = false;
-        if let Some(task) = w.take_task() {
-            ws.with_engine(|engine| {
-                let mut js = EngineJs { engine, realm };
-                task(&mut js, &w);
-                js.engine.perform_microtask_checkpoint();
-            });
-            did = true;
-        } else if ws
-            .with_engine(|engine| {
-                let mut js = EngineJs { engine, realm };
-                let ran = w.run_due_timer(&mut js);
-                if ran {
+        for x in &wins {
+            if let Some(task) = x.take_task() {
+                let realm = x.realm();
+                ws.with_engine(|engine| {
+                    let mut js = EngineJs { engine, realm };
+                    task(&mut js, x);
                     js.engine.perform_microtask_checkpoint();
+                });
+                did = true;
+                break;
+            }
+        }
+        if !did {
+            for x in &wins {
+                let realm = x.realm();
+                let ran = ws
+                    .with_engine(|engine| {
+                        let mut js = EngineJs { engine, realm };
+                        let ran = x.run_due_timer(&mut js);
+                        if ran {
+                            js.engine.perform_microtask_checkpoint();
+                        }
+                        ran
+                    })
+                    .unwrap_or(false);
+                if ran {
+                    did = true;
+                    break;
                 }
-                ran
-            })
-            .unwrap_or(false)
-        {
-            did = true;
-        } else if w.has_animation_frames() && w.clock.now() >= next_frame {
+            }
+        }
+        if !did && wins.iter().any(|x| x.has_animation_frames()) && w.clock.now() >= next_frame {
             let now = w.clock.now();
             next_frame = (now / FRAME_MS).floor() * FRAME_MS + FRAME_MS;
-            ws.with_engine(|engine| {
-                let mut js = EngineJs { engine, realm };
-                w.run_animation_frames(&mut js, lb_webapi::rt::coarse_time(&w, now));
-                js.engine.perform_microtask_checkpoint();
-            });
+            for x in wins.iter().filter(|x| x.has_animation_frames()) {
+                let realm = x.realm();
+                let t = x.clock.now();
+                ws.with_engine(|engine| {
+                    let mut js = EngineJs { engine, realm };
+                    x.run_animation_frames(&mut js, lb_webapi::rt::coarse_time(x, t));
+                    js.engine.perform_microtask_checkpoint();
+                });
+            }
             did = true;
         }
         if let Some(nav) = w.take_nav_request() {
@@ -185,23 +233,40 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             });
             did = true;
         }
+        for x in wins.iter().skip(1) {
+            if let Some(nav) = x.take_nav_request() {
+                crate::frames::navigate_from_script(&ws, &page, x, nav.url);
+                did = true;
+            }
+        }
         let idle_deadline = track_network_idle(&page, &w);
         if did {
             gc_done = false;
+            page.turn.notify_waiters();
             tokio::task::yield_now().await;
             continue;
         }
 
-        // Idle: work out when something is due next.
+        // Idle: work out when something is due next (on the top-level
+        // clock; frames have their own clocks, compared by delay).
         let now = w.clock.now();
         let mut deadline = w.next_timer_due();
-        if w.has_animation_frames() {
+        for x in wins.iter().skip(1) {
+            if let Some(d) = x.next_timer_due() {
+                let at = now + (d - x.clock.now()).max(0.0);
+                deadline = Some(deadline.map_or(at, |y: f64| y.min(at)));
+            }
+        }
+        if wins.iter().any(|x| x.has_animation_frames()) {
             deadline = Some(deadline.map_or(next_frame, |d| d.min(next_frame)));
         }
         if let Some(d) = idle_deadline {
             deadline = Some(deadline.map_or(d, |x| x.min(d)));
         }
-        let quiet = w.in_flight.get() == 0 && !page.loading.get() && !w.has_tasks();
+        let quiet = !page.loading.get()
+            && wins
+                .iter()
+                .all(|x| x.in_flight.get() == 0 && !x.has_tasks());
         if !gc_done && quiet && deadline.is_none_or(|d| d - now > 1000.0) {
             ws.with_engine(|e| e.low_memory_notification());
             gc_done = true;
@@ -210,7 +275,10 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             && quiet
             && let Some(d) = deadline
         {
-            w.clock.advance_to(d);
+            let step = d - now;
+            for x in &wins {
+                x.clock.advance_to(x.clock.now() + step);
+            }
             tokio::task::yield_now().await;
             continue;
         }
@@ -261,6 +329,10 @@ fn track_network_idle(page: &PageState, w: &Window) -> Option<f64> {
 // Page handle
 // ---------------------------------------------------------------------------
 
+/// Runs once on the worker when a page is created, before its first
+/// navigation (installs the CDP agent).
+pub(crate) type PageSetup = Box<dyn FnOnce(&Rc<PageState>) + Send>;
+
 /// What [`Page::run`] closures get: the engine and the current window.
 pub struct PageHandle<'a> {
     pub engine: &'a mut Engine,
@@ -286,6 +358,7 @@ impl Page {
         worker: WorkerHandle,
         id: u64,
         ctx: BrowserContext,
+        setup: Option<PageSetup>,
     ) -> Result<Page, PageError> {
         let (tx, rx) = oneshot::channel();
         let c2 = ctx.clone();
@@ -307,7 +380,12 @@ impl Page {
                     loading: Cell::new(false),
                     idle_since: Cell::new(None),
                     history_len: Cell::new(0),
+                    turn: Rc::new(Notify::new()),
+                    cdp: RefCell::new(None),
                 });
+                if let Some(setup) = setup {
+                    setup(&page);
+                }
                 ws.pages.borrow_mut().insert(id, page.clone());
                 tokio::task::spawn_local(event_loop(ws.clone(), page));
                 Ok(life_rx)
@@ -326,9 +404,14 @@ impl Page {
         Ok(page)
     }
 
+    /// The page id (unique in its browser).
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     /// Run `f` on the page's worker with its state; `f` returns a local
     /// future.
-    async fn call<R, F, Fut>(&self, f: F) -> Result<R, PageError>
+    pub(crate) async fn call<R, F, Fut>(&self, f: F) -> Result<R, PageError>
     where
         R: Send + 'static,
         F: FnOnce(Rc<WorkerState>, Rc<PageState>) -> Fut + Send + 'static,
@@ -348,6 +431,45 @@ impl Page {
             });
         }))?;
         rx.await.map_err(|_| PageError::Closed)?
+    }
+
+    /// Run `f` on the page's worker and block this thread until it
+    /// returns (at most `timeout`). For callers that cannot await (sync
+    /// CDP methods). `f` must not wait for the calling thread.
+    pub(crate) fn call_blocking<R: Send + 'static>(
+        &self,
+        timeout: Duration,
+        f: impl FnOnce(&Rc<WorkerState>, &Rc<PageState>) -> R + Send + 'static,
+    ) -> Result<R, PageError> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let id = self.id;
+        self.worker.send(Box::new(move |ws| {
+            let page = ws.pages.borrow().get(&id).cloned();
+            let r = match page {
+                Some(p) => Ok(f(ws, &p)),
+                None => Err(PageError::Closed),
+            };
+            let _ = tx.send(r);
+        }))?;
+        rx.recv_timeout(timeout).map_err(|e| match e {
+            std::sync::mpsc::RecvTimeoutError::Timeout => PageError::Timeout,
+            std::sync::mpsc::RecvTimeoutError::Disconnected => PageError::Closed,
+        })?
+    }
+
+    /// Queue `f` on the page's worker without waiting. Jobs run in the
+    /// order they were posted.
+    pub(crate) fn post(
+        &self,
+        f: impl FnOnce(&Rc<WorkerState>, &Rc<PageState>) + Send + 'static,
+    ) -> Result<(), PageError> {
+        let id = self.id;
+        self.worker.send(Box::new(move |ws| {
+            let page = ws.pages.borrow().get(&id).cloned();
+            if let Some(p) = page {
+                f(ws, &p);
+            }
+        }))
     }
 
     /// The context this page belongs to.
@@ -480,6 +602,17 @@ impl Page {
             Ok(())
         })
         .await
+    }
+
+    /// Close the page without waiting (CDP `Target.closeTarget`).
+    pub(crate) fn close_now(&self) -> Result<(), PageError> {
+        let id = self.id;
+        self.post(move |ws, page| {
+            page.shutdown(ws);
+            if ws.pages.borrow_mut().remove(&id).is_some() {
+                ws.page_count.fetch_sub(1, Ordering::Relaxed);
+            }
+        })
     }
 
     /// Close the page: its document and realm are dropped.
