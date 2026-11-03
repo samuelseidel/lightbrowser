@@ -242,6 +242,8 @@ impl Bindings {
                 let desc = table.interface(iface).ok_or(InstallError::Unknown(iface))?;
                 let mut spec = InterfaceSpec::new(name);
                 spec.to_string_tag = false;
+                // `Image.prototype === HTMLImageElement.prototype`.
+                spec.prototype_from = shared.borrow().get(iface).copied();
                 match registry.get(iface, name, ImplKind::LegacyFactory) {
                     Some(f) => {
                         spec = spec.constructor(u32::from(desc.legacy_factory_length), f.clone())

@@ -2449,7 +2449,27 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
                     let _ = w.doc_slot_mut(0, |d| d.set_attribute(n, attr, &v.to_string()));
                 }
             }
-            cx.ret(w.node_arg(0, n))
+            cx.ret_constructed(w.node_arg(0, n))
+        }),
+    );
+    reg.register(
+        "HTMLAudioElement",
+        "Audio",
+        crate::registry::ImplKind::LegacyFactory,
+        super::wf(rt, |cx, w| {
+            let src = opt_string(cx, 0)?;
+            let n = w.doc_slot_mut(0, |d| {
+                let n = d.create_element(
+                    QualName::new(None, ns!(html), local_name!("audio")),
+                    Vec::new(),
+                );
+                let _ = d.set_attribute(n, "preload", "auto");
+                if let Some(s) = src {
+                    let _ = d.set_attribute(n, "src", &s);
+                }
+                n
+            });
+            cx.ret_constructed(w.node_arg(0, n))
         }),
     );
     reg.register(
@@ -2480,7 +2500,7 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
                 }
                 n
             });
-            cx.ret(w.node_arg(0, n))
+            cx.ret_constructed(w.node_arg(0, n))
         }),
     );
     // Frames are a skeleton in M2: no nested browsing contexts yet.

@@ -418,6 +418,7 @@ pub(super) fn spec_digest(spec: &InterfaceSpec) -> u64 {
     h.u32(spec.length);
     h.flag(spec.to_string_tag);
     h.flag(spec.immutable_proto);
+    h.u32(spec.prototype_from.map_or(u32::MAX, |p| p.0));
     for list in [&spec.statics, &spec.prototype, &spec.instance] {
         h.u32(list.len() as u32);
         for m in list {
@@ -541,6 +542,7 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
         direct: Vec::new(),
     };
     let parent = spec.parent;
+    let prototype_from = spec.prototype_from;
     let reorder_last = spec.reorder_last.clone();
     push_spec_callbacks(st, spec.clone());
     // The replay mirrors the builder; a count mismatch is a bug in this
@@ -554,6 +556,7 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
     st.interfaces.push(IfaceSlot::Built(IfaceEntry {
         template,
         parent,
+        prototype_from,
         overflow,
         reorder_last,
     }));

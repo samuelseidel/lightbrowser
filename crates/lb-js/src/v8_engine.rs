@@ -466,6 +466,12 @@ pub struct InterfaceSpec {
     pub to_string_tag: bool,
     /// Make instances immutable-prototype exotic objects (the global).
     pub immutable_proto: bool,
+    /// A `[LegacyFactoryFunction]` (`Image`): `X.prototype` is this
+    /// interface's prototype object (read-only, not enumerable, not
+    /// configurable), as in Chrome, so `Image.prototype ===
+    /// HTMLImageElement.prototype`. Its constructor should return with
+    /// [`CallCtx::ret_constructed`].
+    pub prototype_from: Option<InterfaceId>,
     pub named_getter: Option<NamedGetter>,
     pub indexed_getter: Option<IndexedGetter>,
     pub named_setter: Option<NamedSetter>,
@@ -497,6 +503,7 @@ impl InterfaceSpec {
             instance: Vec::new(),
             to_string_tag: true,
             immutable_proto: false,
+            prototype_from: None,
             named_getter: None,
             indexed_getter: None,
             named_setter: None,
@@ -675,6 +682,8 @@ impl IfaceSlot {
 struct IfaceEntry {
     template: v8::Global<v8::FunctionTemplate>,
     parent: Option<InterfaceId>,
+    /// See [`InterfaceSpec::prototype_from`].
+    prototype_from: Option<InterfaceId>,
     /// Instance members not on the instance template, defined on each
     /// instance after it is created, in order (see `apply_overflow`).
     overflow: Overflow,
@@ -1705,7 +1714,11 @@ fn build_into(
         .length(spec.length as i32)
         .build(scope);
     ft.set_class_name(v8_str(scope, &name));
-    ft.read_only_prototype();
+    // A legacy factory function's `prototype` is replaced per realm
+    // (`interface_object`), which a read-only one would refuse.
+    if spec.prototype_from.is_none() {
+        ft.read_only_prototype();
+    }
     if let Some(parent) = spec.parent {
         let parent_ft = v8::Local::new(
             scope,
@@ -1874,6 +1887,7 @@ fn build_into(
     st.interfaces[self_id.0 as usize] = IfaceSlot::Built(IfaceEntry {
         template,
         parent: spec.parent,
+        prototype_from: spec.prototype_from,
         overflow,
         reorder_last: spec.reorder_last,
     });
@@ -2095,6 +2109,22 @@ fn interface_object<'s>(
         f.set_prototype(scope, pf.into());
     }
     mat.set_made(id);
+    let from = state.borrow().entry(id).and_then(|e| e.prototype_from);
+    if let Some(target) = from
+        && let Some(tf) = interface_object(scope, state, mat, target)
+    {
+        let key = v8_str(scope, "prototype");
+        if let Some(proto) = tf.get(scope, key.into()) {
+            // Like Blink's legacy factory functions: the interface's own
+            // prototype object, read-only, not enumerable or configurable.
+            // Defining it through the function's `prototype` accessor also
+            // sets the initial map, so `new.target` subclasses still work.
+            let mut desc = v8::PropertyDescriptor::new_from_value_writable(proto, false);
+            desc.set_enumerable(false);
+            desc.set_configurable(false);
+            f.define_property(scope, key.into(), &desc);
+        }
+    }
     if let Some(fx) = mat.fixup(id) {
         apply_fixup(scope, f, &fx, true, true);
     }
@@ -2560,6 +2590,23 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
             .borrow_mut()
             .wrappers
             .insert((self.realm, host), global);
+        Ok(())
+    }
+
+    /// Return `value` from a constructor that makes its object itself (a
+    /// legacy factory function such as `Image`): when `new.target` gave
+    /// `this` another prototype (`Reflect.construct(Image, [], F)`, a
+    /// subclass), the returned object gets that prototype, as in Chrome.
+    pub fn ret_constructed(&mut self, value: impl Into<Arg>) -> Result<(), HostError> {
+        let v = arg_to_v8(self.scope, &self.state, self.realm, &value.into())?;
+        if self.args.is_construct_call()
+            && let Ok(obj) = v8::Local::<v8::Object>::try_from(v)
+            && let Some(want) = self.args.this().get_prototype(self.scope)
+            && obj.get_prototype(self.scope) != Some(want)
+        {
+            obj.set_prototype(self.scope, want);
+        }
+        self.rv.set(v);
         Ok(())
     }
 
