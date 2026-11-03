@@ -1,0 +1,158 @@
+{
+  "source": {
+    "name": "NikolaiT/zardaxt database/newCleaned.json",
+    "url": "https://raw.githubusercontent.com/NikolaiT/zardaxt/master/database/newCleaned.json",
+    "retrieved": "2026-11-03",
+    "entries": 1453,
+    "licence_note": "The source is all-rights-reserved, so only the aggregate shares below are kept; the file itself is not copied.",
+    "method": "share of sessions (weighted by each fingerprint's n) over every fingerprint of the class",
+    "caveat": "Labels come from the User-Agent, so classes include traffic behind proxies and VPNs. 'linux' includes Android and Chrome OS.",
+    "regenerate": "python3 scripts/tcp_public_reference.py"
+  },
+  "classes": {
+    "windows": {
+      "label": "Windows",
+      "sessions": 9684,
+      "option_order": {
+        "MNWNNS": 0.822,
+        "MSTNW": 0.1483,
+        "MNNS": 0.0196,
+        "MNWST": 0.0061,
+        "MNNSNW": 0.0018,
+        "MSTNWUNN": 0.0009,
+        "M": 0.0006,
+        "MSWEEE": 0.0002,
+        "MNWSEE": 0.0001,
+        "MSNNNW": 0.0001,
+        "MSTNWU": 0.0001,
+        "MNWNNTSEE": 0.0001
+      },
+      "window": {
+        "65535": 0.6579,
+        "64240": 0.2993,
+        "8192": 0.0104,
+        "64860": 0.0088,
+        "42340": 0.0034,
+        "65170": 0.0032,
+        "64320": 0.0026,
+        "27520": 0.0025,
+        "65392": 0.0017,
+        "64672": 0.0017,
+        "8760": 0.0014,
+        "65280": 0.0012
+      },
+      "window_scale": {
+        "8": 0.8203,
+        "10": 0.0719,
+        "9": 0.0536,
+        "None": 0.0202,
+        "7": 0.0107,
+        "6": 0.008,
+        "2": 0.0077,
+        "12": 0.0066,
+        "13": 0.0005,
+        "4": 0.0004
+      },
+      "ttl": {
+        "128": 0.8053,
+        "64": 0.1901,
+        "255": 0.0043,
+        "32": 0.0002
+      },
+      "ip_id_zero": 0.0168,
+      "ecn_on_syn": 0.0139
+    },
+    "macos": {
+      "label": "Mac OS",
+      "sessions": 3407,
+      "option_order": {
+        "MNWNNTSEE": 0.9345,
+        "MSTNW": 0.0619,
+        "MNWNNNNNNNNNNNNSEE": 0.0018,
+        "MNWNNS": 0.0009,
+        "MNWST": 0.0003,
+        "MSNNNNNNNNNNNW": 0.0003,
+        "MSTNWUNN": 0.0003
+      },
+      "window": {
+        "65535": 0.9522,
+        "64240": 0.0417,
+        "65170": 0.0023,
+        "42340": 0.0015,
+        "63188": 0.0009,
+        "64896": 0.0006,
+        "63940": 0.0003,
+        "65280": 0.0003,
+        "42780": 0.0003
+      },
+      "window_scale": {
+        "6": 0.8682,
+        "5": 0.0722,
+        "10": 0.0385,
+        "9": 0.0088,
+        "8": 0.0062,
+        "7": 0.005,
+        "12": 0.0012
+      },
+      "ttl": {
+        "64": 0.993,
+        "255": 0.0056,
+        "128": 0.0012,
+        "32": 0.0003
+      },
+      "ip_id_zero": 0.9225,
+      "ecn_on_syn": 0.666
+    },
+    "linux": {
+      "label": "Linux",
+      "sessions": 7459,
+      "option_order": {
+        "MSTNW": 0.9777,
+        "MSNNNNNNNNNNNW": 0.0094,
+        "MNWST": 0.0064,
+        "MNWNNS": 0.0032,
+        "MNWNNTSEE": 0.0012,
+        "M": 0.0007,
+        "MNNSNW": 0.0005,
+        "MNWSEE": 0.0004,
+        "MNNS": 0.0003,
+        "MSNNNW": 0.0001
+      },
+      "window": {
+        "65535": 0.95,
+        "64240": 0.0373,
+        "65170": 0.0031,
+        "64320": 0.0019,
+        "42340": 0.0013,
+        "4380": 0.0007,
+        "64860": 0.0007,
+        "27520": 0.0007,
+        "64480": 0.0005,
+        "64680": 0.0004,
+        "32160": 0.0004,
+        "65455": 0.0004
+      },
+      "window_scale": {
+        "9": 0.4155,
+        "8": 0.2944,
+        "10": 0.2648,
+        "7": 0.0133,
+        "12": 0.0054,
+        "6": 0.0032,
+        "5": 0.0015,
+        "None": 0.0009,
+        "2": 0.0007,
+        "13": 0.0003,
+        "0": 0.0001
+      },
+      "ttl": {
+        "64": 0.9649,
+        "255": 0.026,
+        "128": 0.0088,
+        "32": 0.0003
+      },
+      "ip_id_zero": 0.0476,
+      "ecn_on_syn": 0.0063
+    }
+  }
+}

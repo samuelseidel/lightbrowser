@@ -26,6 +26,17 @@ pub enum NetError {
     Profile(String),
     #[error("persona family {persona} does not match TLS profile {profile}")]
     FamilyMismatch { persona: String, profile: String },
+    #[error("persona claims {persona} but TCP profile {profile} is for {profile_os}")]
+    TcpOsMismatch {
+        persona: String,
+        profile: String,
+        profile_os: String,
+    },
+    #[error(
+        "TCP profile {0} needs the packet shim, but its iptables rule is not installed: \
+         start `lightbrowser tcp-shim` first (without it the host's own SYN would be sent)"
+    )]
+    TcpShimMissing(String),
 }
 
 impl From<boring::error::ErrorStack> for NetError {

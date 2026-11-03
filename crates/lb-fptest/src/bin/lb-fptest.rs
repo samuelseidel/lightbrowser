@@ -64,6 +64,95 @@ enum Cmd {
         #[arg(long, default_value = "h2,http/1.1")]
         alpn: String,
     },
+    /// Print the TCP SYN signature (TTL, DF, window, options, JA4T) of every
+    /// connection to a plain TCP port. Linux, needs CAP_NET_RAW. Use it to
+    /// check `profiles/tcp/*.json` against a real device of ours.
+    TcpCapture {
+        /// Address to listen on. Loopback unless --allow-non-loopback.
+        #[arg(long, default_value = "127.0.0.1:18446")]
+        listen: SocketAddr,
+        /// Interface to capture on (`lo` for loopback, e.g. `eth0` for a lab
+        /// network).
+        #[arg(long, default_value = "lo")]
+        iface: String,
+        /// Stop after this many connections.
+        #[arg(long, default_value_t = 1)]
+        count: usize,
+        /// Give up after this many seconds.
+        #[arg(long, default_value_t = 120)]
+        timeout_secs: u64,
+        /// Listen on a non-loopback address, so a real Windows or macOS
+        /// machine of ours on the lab network can connect. Our own test
+        /// network and our own devices only.
+        #[arg(long)]
+        allow_non_loopback: bool,
+        /// Record the whole connection, not just the SYN: every packet plus a
+        /// summary of SYN retransmit times, IP ID pattern, timestamp rate and
+        /// window fields. To see retransmissions, make this host ignore SYNs
+        /// for a while: `iptables -I INPUT -p tcp --syn --dport PORT -j DROP`.
+        #[arg(long)]
+        flow: bool,
+    },
+}
+
+#[cfg(target_os = "linux")]
+fn tcp_capture(
+    listen: SocketAddr,
+    iface: &str,
+    count: usize,
+    timeout_secs: u64,
+    allow: bool,
+    flow: bool,
+) -> Result<(), String> {
+    use lb_fptest::tcp::{Capture, flow_summary, packets, syns};
+    if !listen.ip().is_loopback() && !allow {
+        return Err(format!(
+            "{listen} is not a loopback address; pass --allow-non-loopback to capture from \
+             one of our own devices on the lab network"
+        ));
+    }
+    let l = std::net::TcpListener::bind(listen).map_err(|e| format!("bind {listen}: {e}"))?;
+    l.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let cap =
+        Capture::start(iface, listen.port()).map_err(|e| format!("capture on {iface}: {e}"))?;
+    eprintln!("lb-fptest: waiting for {count} connection(s) to {listen} (capturing on {iface})");
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let (mut seen, mut held) = (0, Vec::new());
+    while seen < count && std::time::Instant::now() < end {
+        match l.accept() {
+            Ok((s, peer)) => {
+                eprintln!("lb-fptest: connection from {peer}");
+                held.push(s);
+                seen += 1;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    if flow {
+        // Give the device time to send its request and for retransmissions.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+    let (raw, lost) = cap.finish_stats();
+    if lost > 0 {
+        eprintln!("lb-fptest: warning: the kernel dropped {lost} packets before capture saw them");
+    }
+    if flow {
+        let pkts = packets(&raw);
+        for p in &pkts {
+            println!("{}", serde_json::to_string(p).map_err(|e| e.to_string())?);
+        }
+        println!("{}", flow_summary(&pkts));
+        return Ok(());
+    }
+    for syn in syns(&raw) {
+        let mut v = serde_json::to_value(&syn).map_err(|e| e.to_string())?;
+        v["ja4t"] = syn.ja4t().into();
+        println!("{v}");
+    }
+    Ok(())
 }
 
 fn summary(c: &Capture) -> serde_json::Value {
@@ -99,6 +188,26 @@ async fn main() -> ExitCode {
 async fn run(cli: Cli) -> Result<(), String> {
     let (listen, count) = match &cli.cmd {
         Cmd::Capture { listen, count, .. } | Cmd::Serve { listen, count, .. } => (*listen, *count),
+        #[cfg(target_os = "linux")]
+        Cmd::TcpCapture {
+            listen,
+            iface,
+            count,
+            timeout_secs,
+            allow_non_loopback,
+            flow,
+        } => {
+            return tcp_capture(
+                *listen,
+                iface,
+                *count,
+                *timeout_secs,
+                *allow_non_loopback,
+                *flow,
+            );
+        }
+        #[cfg(not(target_os = "linux"))]
+        Cmd::TcpCapture { .. } => return Err("tcp-capture needs Linux".into()),
     };
     let mut cfg = ServerConfig::default();
     if let Cmd::Serve { alpn, .. } = &cli.cmd {

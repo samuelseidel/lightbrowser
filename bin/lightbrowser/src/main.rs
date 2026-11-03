@@ -18,6 +18,7 @@ USAGE:
   lightbrowser --version
   lightbrowser serve --port 9222 [--persona FILE]   (M3)
   lightbrowser fetch <url> [OPTIONS]
+  lightbrowser tcp-shim [--queue N] [--tcp-dir DIR] [--no-rules]   (Linux, root)
 
 FETCH OPTIONS:
   --dump html|text       print the body (text = tags stripped); default: none
@@ -25,8 +26,20 @@ FETCH OPTIONS:
                          PATH.json personas are not supported yet (M4)
   --profiles-dir DIR     TLS profiles (default: nearest profiles/tls above
                          the current directory or the executable)
+  --tcp-profile NAME     shape the TCP SYN like a Windows, macOS or Linux host:
+                         persona (the persona's tcp_profile_id) | off | a
+                         profile id from profiles/tcp. Default: off. Windows and
+                         macOS profiles need `tcp-shim` running (ADR 0007).
   --insecure             accept invalid certificates (local test servers only)
   -v, --verbose          print the status line and headers to stderr
+
+TCP-SHIM OPTIONS:
+  --queue N              netfilter queue number (default 4100)
+  --tcp-dir DIR          TCP profiles (default: nearest profiles/tcp)
+  --no-rules             do not install the iptables rule; you manage it
+  Rewrites the SYN, IP ID and SYN retransmissions of connections marked by
+  `fetch --tcp-profile`. Needs CAP_NET_ADMIN and CAP_NET_RAW. If it stops, marked connections fail: they never leak the
+  host's own stack. Runs until Ctrl-C.
 
 Exit code: 0 on 2xx/3xx, 1 on other statuses or errors, 2 on bad usage.
 ";
@@ -44,6 +57,7 @@ struct FetchArgs {
     dump: Dump,
     persona: Option<String>,
     profiles_dir: Option<PathBuf>,
+    tcp_profile: Option<String>,
     insecure: bool,
     verbose: bool,
 }
@@ -55,6 +69,7 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
         dump: Dump::None,
         persona: None,
         profiles_dir: None,
+        tcp_profile: None,
         insecure: false,
         verbose: false,
     };
@@ -81,6 +96,7 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
             }
             "--persona" => out.persona = Some(value("--persona")?),
             "--profiles-dir" => out.profiles_dir = Some(PathBuf::from(value("--profiles-dir")?)),
+            "--tcp-profile" => out.tcp_profile = Some(value("--tcp-profile")?),
             "--insecure" => out.insecure = true,
             "-v" | "--verbose" => out.verbose = true,
             f if f.starts_with('-') => return Err(format!("unknown option: {f}")),
@@ -125,21 +141,22 @@ fn select_persona(name: Option<&str>) -> Result<Persona, String> {
     }
 }
 
-/// Nearest `profiles/tls` directory at or above `start`.
-fn find_profiles_upward(start: &Path) -> Option<PathBuf> {
+/// Nearest `profiles/<kind>` directory at or above `start`.
+fn find_profiles_upward(start: &Path, kind: &str) -> Option<PathBuf> {
     start
         .ancestors()
-        .map(|d| d.join("profiles").join("tls"))
+        .map(|d| d.join("profiles").join(kind))
         .find(|d| d.is_dir())
 }
 
-fn find_profiles_dir() -> Option<PathBuf> {
+/// `profiles/<kind>` above the current directory or the executable.
+fn find_profiles_dir(kind: &str) -> Option<PathBuf> {
     std::env::current_dir()
         .ok()
-        .and_then(|d| find_profiles_upward(&d))
+        .and_then(|d| find_profiles_upward(&d, kind))
         .or_else(|| {
             let exe = std::env::current_exe().ok()?;
-            find_profiles_upward(exe.parent()?)
+            find_profiles_upward(exe.parent()?, kind)
         })
 }
 
@@ -149,7 +166,7 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
 
     let dir = match &args.profiles_dir {
         Some(d) => d.clone(),
-        None => find_profiles_dir().ok_or(
+        None => find_profiles_dir("tls").ok_or(
             "no profiles/tls directory found above the current directory or the executable; \
              pass --profiles-dir",
         )?,
@@ -158,8 +175,30 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
     let profile = ClientHelloProfile::load(&profile_path)
         .map_err(|e| format!("loading {}: {e}", profile_path.display()))?;
 
-    let mut ctx = NetContext::new(persona, Arc::new(profile)).map_err(|e| e.to_string())?;
+    let mut ctx =
+        NetContext::new(Arc::clone(&persona), Arc::new(profile)).map_err(|e| e.to_string())?;
     ctx.danger_accept_invalid_certs = args.insecure;
+
+    let tcp_id = match args.tcp_profile.as_deref() {
+        None | Some("off") => None,
+        Some("persona") => Some(persona.tcp_profile_id.clone()),
+        Some(id) => Some(id.to_owned()),
+    };
+    if let Some(id) = tcp_id {
+        // profiles/tcp sits next to profiles/tls.
+        let tcp_dir = args
+            .profiles_dir
+            .as_ref()
+            .and_then(|d| d.parent().map(|p| p.join("tcp")))
+            .or_else(|| find_profiles_dir("tcp"))
+            .ok_or("no profiles/tcp directory found; pass --profiles-dir")?;
+        let path = tcp_dir.join(format!("{id}.json"));
+        let tcp = lb_net::tcpfp::TcpProfile::load(&path)
+            .map_err(|e| format!("loading {}: {e}", path.display()))?;
+        ctx = ctx
+            .with_tcp_profile(Arc::new(tcp))
+            .map_err(|e| e.to_string())?;
+    }
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -355,6 +394,13 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some("tcp-shim") => match tcp_shim::run(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::from(1)
+            }
+        },
         Some("serve") => {
             eprintln!("not implemented yet; see docs/ROADMAP.md");
             ExitCode::from(2)
@@ -368,6 +414,78 @@ fn main() -> ExitCode {
             eprint!("{USAGE}");
             ExitCode::from(2)
         }
+    }
+}
+
+/// `lightbrowser tcp-shim`: the privileged packet shim (ADR 0007).
+mod tcp_shim {
+    #[cfg(target_os = "linux")]
+    pub fn run(args: &[String]) -> Result<(), String> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use lb_net::tcpfp::TcpProfile;
+        use lb_net::tcpfp::nfq::{RuleGuard, Shim};
+
+        // Set by the signal handler; the shim polls it. Process control only,
+        // not fingerprint data.
+        static STOP: AtomicBool = AtomicBool::new(false);
+        extern "C" fn on_signal(_: libc::c_int) {
+            STOP.store(true, Ordering::Relaxed);
+        }
+
+        let (mut queue, mut dir, mut rules) = (4100u16, None, true);
+        let mut it = args.iter();
+        while let Some(a) = it.next() {
+            match a.as_str() {
+                "--queue" => {
+                    queue = it
+                        .next()
+                        .and_then(|v| v.parse().ok())
+                        .ok_or("--queue needs a number from 0 to 65535")?;
+                }
+                "--tcp-dir" => dir = it.next().map(std::path::PathBuf::from),
+                "--no-rules" => rules = false,
+                other => return Err(format!("unknown option: {other}")),
+            }
+        }
+        let dir = dir
+            .or_else(|| super::find_profiles_dir("tcp"))
+            .ok_or("no profiles/tcp directory found; pass --tcp-dir")?;
+        let profiles = TcpProfile::load_dir(&dir).map_err(|e| e.to_string())?;
+        let shim = Shim::bind(queue, profiles.clone()).map_err(|e| {
+            format!("cannot bind netfilter queue {queue} (needs CAP_NET_ADMIN, and the queue must be free): {e}")
+        })?;
+        let _rules = if rules {
+            Some(
+                RuleGuard::install(queue)
+                    .map_err(|e| format!("installing the iptables rule: {e}"))?,
+            )
+        } else {
+            None
+        };
+        // SAFETY: the handler only stores to an atomic, which is
+        // async-signal-safe.
+        unsafe {
+            libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+        }
+        eprintln!(
+            "tcp-shim: queue {queue}, {} profiles ({}), Ctrl-C to stop",
+            profiles.len(),
+            profiles
+                .iter()
+                .map(|p| p.profile_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let stats = shim.run(&STOP).map_err(|e| e.to_string())?;
+        eprintln!("tcp-shim: stopped. {stats:?}");
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn run(_: &[String]) -> Result<(), String> {
+        Err("tcp-shim needs Linux".into())
     }
 }
 
@@ -412,8 +530,11 @@ mod tests {
             "-v",
             "--persona",
             "firefox",
+            "--tcp-profile",
+            "persona",
         ])
         .unwrap();
+        assert_eq!(p.tcp_profile.as_deref(), Some("persona"));
         assert_eq!(p.dump, Dump::Text);
         assert!(p.insecure && p.verbose);
         assert_eq!(p.persona.as_deref(), Some("firefox"));

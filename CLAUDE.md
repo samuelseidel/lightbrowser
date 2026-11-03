@@ -21,8 +21,8 @@ empty skeletons.
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | sfc32 done |
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | trait + `COMPILED_FAMILY` |
-| `lb-net` | BoringSSL, hyper h1, forked h2 (`vendor/h2`), cookies, decoding, `fetch` | M1 done; cache, proxies M2 |
-| `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
+| `lb-net` | BoringSSL, hyper h1, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, `tcpfp` (TCP SYN profiles, shim) | M1, M1b done; cache, proxies M2 |
+| `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, TCP SYN capture and JA4T | M1, M1b done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | M2 |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | M2 |
 | `lb-webapi` | fetch, XHR, timers, storage, canvas/WebGL/audio APIs | M2+ |
@@ -32,7 +32,7 @@ empty skeletons.
 | `lb-page` | Event loop, navigation, frames, workers | M2/M3 |
 | `lb-cdp` | CDP server | M3 |
 | `lb-behavior` | Human input simulation (vendored from stealth-browser) | M5 |
-| `bin/lightbrowser` | CLI; picks family by feature; `fetch` | `fetch` done, `serve` stub |
+| `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `tcp-shim` | `fetch`, `tcp-shim` done, `serve` stub |
 
 ## Commands
 ```bash
@@ -48,6 +48,13 @@ cargo clippy -p lightbrowser -p lb-js --no-default-features --features firefox -
 ./target/release/lightbrowser --version       # prints the compiled family
 # Network fingerprint check vs profiles/tls (loopback only, prints JA3/JA4/H2)
 cargo test -p lb-net --test fingerprint -- --nocapture
+# TCP profile values vs real traffic in profiles/reference/tcp_public.json (ADR 0009)
+cargo test -p lb-net --test public_reference -- --nocapture
+# TCP SYN check (Windows/macOS/Linux stack) on loopback; needs root, skips without it
+cargo test -p lb-net --test tcp_fingerprint -- --nocapture --test-threads=1
+# Run the packet shim, then fetch with a persona's TCP stack (ADR 0007)
+sudo ./target/debug/lightbrowser tcp-shim &
+./target/debug/lightbrowser fetch http://127.0.0.1:PORT/ --tcp-profile persona
 # Fetch from a local test server (self-signed cert)
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
 ```
@@ -84,6 +91,13 @@ and run the fingerprint test. Only capture on loopback with a local browser.
 - **SFC32 must stay bit-identical** to `geckophantom_config.h` in
   stealth-browser (`geckophantom_config/include/`). Same seed, same sequence.
   Do not change `lb-persona::sfc32` without re-checking against the C output.
+- **TCP profile matches the UA's OS.** `persona.tcp_profile_id` names a
+  `profiles/tcp/` profile for the same OS as the User-Agent. Windows and macOS
+  profiles need `tcp-shim` and fail closed without it; never send the host's SYN
+  by accident (ADR 0007). The shim also sets the IP ID and the SYN retransmit
+  schedule of every packet (ADR 0008). Profile values must be seen in the public
+  traffic data (`profiles/reference/tcp_public.json`, ADR 0009); do not copy that
+  dataset's source file into the repo (its licence forbids it).
 - **Nothing automation-related is visible to the page world** (`webdriver`,
   CDP leaks). CDP helper code runs in an isolated world.
 - **Keep docs current.** When a decision changes, update

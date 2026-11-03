@@ -1,0 +1,53 @@
+{
+  "profile_id": "macos_14",
+  "description": "macOS 12 to 15 client SYN over Ethernet or Wi-Fi (MSS 1460)",
+  "os": "macos",
+  "slot": 2,
+  "ip": {
+    "ttl": 64,
+    "df": true,
+    "id": "zero"
+  },
+  "tcp": {
+    "window": 65535,
+    "mss": 1460,
+    "window_scale": 6,
+    "options": [
+      "mss",
+      "nop",
+      "ws",
+      "nop",
+      "nop",
+      "ts",
+      "sack_ok",
+      "eol"
+    ],
+    "ecn": true
+  },
+  "expected": {
+    "ja4t": "65535_2-1-3-1-1-8-4-0_1460_6"
+  },
+  "provenance": {
+    "status": "public-data",
+    "unverified": [
+      "syn_retransmit"
+    ],
+    "notes": "SYN traits attested by real traffic in the Zardaxt public database: layout MNWNNTSEE 93%, window 65535 95%, scale 6 87% (p0f's 4 for 10.9+ is out of date), TTL 64 99%, zero IP ID 92% (99% among canonical sessions; XNU ip_output.c sets it for DF packets), ECE+CWR set on the SYN in 67% of sessions (73% canonical, the rest send a plain SYN), timestamps always. ecn=true is the majority; the other 27-33% send a plain SYN. The shim sets the flags only on the SYN; a real Mac then marks data packets ECT, which is not shaped. Retransmits: XNU tcp_syn_backoff {1,1,1,1,1,2,4,8,...} times a base RTO assumed to be 1 s; the public data has no retransmit information. Timestamps: XNU tsval = t_ts_offset + tcp_now (random offset, 1 ms ticks), same as Linux. Capture a real Mac with `lb-fptest tcp-capture --flow` to settle the retransmit base."
+  },
+  "syn_retransmit": {
+    "schedule_ms": [
+      1000,
+      2000,
+      3000,
+      4000,
+      6000,
+      10000,
+      18000,
+      34000,
+      66000,
+      130000,
+      194000,
+      258000
+    ]
+  }
+}

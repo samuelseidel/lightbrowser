@@ -1,0 +1,55 @@
+{
+  "profile_id": "windows_64240",
+  "description": "Windows 10 / 11 client SYN, window 64240 (44 x MSS 1460; FoxIO lists it for Windows 11), MSS 1460",
+  "os": "windows",
+  "slot": 4,
+  "ip": {
+    "ttl": 128,
+    "df": true,
+    "id": "host_counter"
+  },
+  "tcp": {
+    "window": 64240,
+    "mss": 1460,
+    "window_scale": 8,
+    "options": [
+      "mss",
+      "nop",
+      "ws",
+      "nop",
+      "nop",
+      "sack_ok"
+    ],
+    "ecn": false
+  },
+  "expected": {
+    "ja4t": "64240_2-1-3-1-1-4_1460_8"
+  },
+  "provenance": {
+    "status": "public-data",
+    "unverified": [
+      "ip.id=host_counter",
+      "syn_retransmit"
+    ],
+    "notes": "SYN traits attested by real traffic in the Zardaxt public database (profiles/reference/tcp_public.json): window 64240 is sent by 30% of Windows sessions (28% of canonical ones), the second most common value after 65535; FoxIO publishes JA4T=64240_2-1-3-1-1-4_1460_8 as its Windows 11 example. Every other trait and every unverified part is the same as windows_65535 (see its notes)."
+  },
+  "syn_retransmit": {
+    "schedule_ms": [
+      1000,
+      3000,
+      7000,
+      15000
+    ],
+    "option_variants": [
+      {
+        "from_attempt": 2,
+        "options": [
+          "mss",
+          "nop",
+          "nop",
+          "sack_ok"
+        ]
+      }
+    ]
+  }
+}
