@@ -1,6 +1,6 @@
 # ADR 0013: V8 startup snapshot made in memory; binary budget follows the V8 floor
 
-Status: Accepted (2026-11-03); budget back to < 40 MB in revision 2; ICU data paged lazily in revision 3
+Status: Accepted (2026-11-03); budget back to < 40 MB in revision 2; ICU data paged lazily in revision 3; budget raised to < 50 MB by user decision in revision 4
 
 ## Context
 
@@ -254,3 +254,41 @@ Lightpanda comparison"). The budget stays < 40 MB: 39,628,664 bytes.
   1.39 MB; where the extra 0.24 MB comes from is not pinned down (not the
   chunk templates' cached instances, not the code cache, not the template
   split threshold). Still under the < 5 ms budget.
+
+## Revision 4: budget < 50 MB (user decision), ICU data in 4 KiB chunks (2026-11-03)
+
+**The binary budget is < 50 MB** (was < 40 MB), a user decision "to have
+all features possible": the extra room may hold anything that helps, as
+long as each use pays for itself in the bench and loses no fidelity.
+`bench/run.py` checks `BUDGET_BINARY_MB = 50.0`. Nothing cut for size
+earlier has come back yet: the root crate and the bindings stay at
+`opt-level = "s"` (`3` was not re-measured against the new code), the V8
+code behind off-by-default flags stays unlinked (no page can reach it),
+and there is no embedded build-time snapshot (ADR 0016: the startup
+snapshot is off by default and the lazily built realm meets the budget;
+the obstacle is the build cost, not size). Stripped release binary:
+40,386,424 bytes (40.39 MB; 39,718,776 before this revision, of which
++0.66 MB is the ICU chunk size below).
+
+First use of the room: **ICU data in 4 KiB chunks** instead of 128 KiB
+(`icu/icudt78.dat.zch` 4.26 → 4.92 MB, +0.66 MB of binary). A page load
+reads ~27 of the package's pages, scattered over its table of contents,
+the root locale and time zone data; with 128 KiB frames ~0.6 MB of
+decompressed data stayed resident per process, with 4 KiB frames
+~0.1 MB. Sizes measured for the whole package: 4 KiB 4.92 MB, 8 KiB
+4.75 MB, 16 KiB 4.60 MB, 32 KiB 4.49 MB, 64 KiB 4.41 MB, 128 KiB 4.26 MB
+(zstd level 22; level 19 is within 0.1 %). The lazy path checks that the
+system page size divides the chunk size (else it decompresses eagerly).
+After each chunk, the pages of the compressed pack that reading its frame
+mapped (the kernel maps up to 64 KB of the binary around a fault) are
+unmapped again with `MADV_DONTNEED`; they are clean pages of the
+executable, so this changes RSS (-0.37 MB at the end of a `fetch`), not what the
+page cache holds.
+
+Tools: callgrind does not retry a load that faulted into the lazily paged
+data correctly (the retried load uses a stale register, so ICU follows a
+garbage pointer); with 4 KiB chunks that broke every
+`tools/hot_symbols` run. `LB_ICU_EAGER=1` decompresses the package at once
+and `gen.py` sets it. Plain valgrind needs
+`--vex-iropt-register-updates=allregs-at-mem-access` for the same reason.
+

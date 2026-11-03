@@ -53,7 +53,9 @@ page touches a few dozen interfaces.
   per process); the registry's function maps are sorted vectors after
   install; response bodies are `bytes::Bytes` shared between the page,
   the CDP agent and the decoders instead of copied; a layout box tree is
-  shrunk to fit after it is built.
+  shrunk to fit after it is built, and its boxes share equal taffy styles
+  (552 of a box's 1,224 bytes; every text run has the same one); the ICU
+  data is paged in 4 KiB chunks (ADR 0013, revision 4).
 - **Hot code first**: `bin/lightbrowser/hot-symbols.txt` orders the
   functions a page load runs at the start of `.text`
   (`--symbol-ordering-file`). Made by `tools/hot_symbols/gen.py` under
@@ -63,8 +65,12 @@ page touches a few dozen interfaces.
 ## Alternatives considered
 
 - **Build-time snapshot embedded in the binary** for `fetch`: saved
-  ~10 ms of 47 per process in a test with the blob read from a file, and
-  needs ~0.4 MB the binary does not have.
+  ~10 ms of 47 per process in a test with the blob read from a file. It
+  needed ~0.4 MB the binary did not have under the old < 40 MB budget;
+  with < 50 MB (ADR 0013, revision 4) size is no longer the obstacle, but
+  the build cost is (a build script that links V8 compiles `lb-webapi`
+  and V8 a second time for the host, ADR 0013), and the lazily built realm
+  already meets the < 5 ms budget and wins the CPU checks. Not done.
 - **Lazy accessors** (rejected in ADR 0013): change descriptors. Lazy
   data properties do not.
 - **Smaller V8 young generation** (`--max-semi-space-size=1`): no RSS
@@ -75,17 +81,24 @@ page touches a few dozen interfaces.
 
 ## Consequences
 
-- Fidelity: the full surface (globals, every interface, prototype and
+- Fidelity (`tools/surface_diff`, against the M7 build `525e94d`, for a
+  Windows, a macOS and a Linux persona, in `fetch` and over CDP): the
+  global's keys in order, every global and interface object, prototype and
   their descriptors, function names, lengths, `toString`, errors of calls
-  with a wrong receiver) is byte-identical before and after for a Windows,
-  a macOS and a Linux persona, in `fetch` and in CDP realms.
+  with a wrong receiver, cross-realm and detached-frame behaviour are
+  identical. One difference, a fix: a page's global function declaration
+  that replaces an interface object (`function Attr() {}`) now moves the
+  key to the end of `Object.getOwnPropertyNames(window)`, as in Chrome 153
+  (checked against the local Chrome for Testing 153.0.8010.12, where Blink
+  also installs interface objects as lazy data properties); M7 kept the
+  old position.
 - The bench's `fetch` peak RSS was wrong for every target: a child's
   `ru_maxrss` includes its parent's RSS at `exec`, so each `fetch`
   process "peaked" at the size of the Python bench process (Playwright
   loaded). `bench/run.py` now spawns the `fetch` processes from a small
   helper process; this lowered both LightBrowser's and Lightpanda's
   `fetch` peak (Lightpanda 44.9 → 24.3 MB).
-- See "M7 status: Lightpanda start-up and memory" in `docs/ROADMAP.md`
-  for the measured effect.
+- See "M6 status: Lightpanda comparison" ("Second pass") in
+  `docs/ROADMAP.md` for the measured effect.
 - A stale order list only costs locality; regenerate it after large
   changes or a V8 upgrade.
