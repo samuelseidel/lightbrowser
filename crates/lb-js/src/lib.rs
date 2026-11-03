@@ -27,11 +27,15 @@
 //! - **Interfaces** ([`InterfaceSpec`], chrome): declarative description of a
 //!   WebIDL interface (interface object, prototype, instance members,
 //!   constants, named/indexed getters). Defined once per engine as V8
-//!   templates and instantiated lazily in each realm, so property order and
-//!   descriptors come out exactly as listed. The global of a realm is built
-//!   from one interface (normally `Window`); for a `[Global]` interface its
-//!   `instance` members are the global's own properties, including the
-//!   interface objects ([`Member::interface`]).
+//!   templates (at once, or when first needed with
+//!   [`Engine::define_interface_lazy`]) and instantiated lazily in each
+//!   realm, so property order and descriptors come out exactly as listed.
+//!   The global of a realm is built from one interface (normally `Window`);
+//!   for a `[Global]` interface its `instance` members are the global's own
+//!   properties, including the interface objects ([`Member::interface`]),
+//!   which are lazy data properties as in Blink: an interface object is
+//!   made, linked to its parent's and fixed up ([`InterfaceFixup`]) the
+//!   first time anything in the realm reaches it.
 //! - **Host objects** ([`HostRef`]): a `(kind, id)` pair the host chooses,
 //!   e.g. a DOM node id. [`Engine::wrap`] / [`CallCtx::ret`] with
 //!   [`Arg::Host`] create a JS wrapper with the pair in internal fields. A
@@ -371,7 +375,54 @@ pub struct RealmOptions {
     pub world: World,
     /// Import resolution for ES modules. Without it, imports fail.
     pub module_loader: Option<ModuleLoader>,
+    /// Changes made to interface objects of this realm as they are created
+    /// (see [`InterfaceFixup`]).
+    pub fixups: Option<InterfaceFixups>,
 }
+
+/// What a realm changes on an interface object and its prototype right
+/// after creating it: the WebIDL details V8 templates cannot express.
+/// Interface objects are created when first used (a read of the global
+/// property, a wrapper, a subclass), so these run then, once per realm,
+/// before any script sees the object.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct InterfaceFixup {
+    /// Prototype members moved after `constructor`, in this order
+    /// (members Chrome installs per context, after the template).
+    pub proto_late: Vec<String>,
+    /// Keys of `X.prototype[Symbol.unscopables]` (a null-prototype object,
+    /// defined last).
+    pub unscopables: Vec<String>,
+    /// `Object.getPrototypeOf(X.prototype)` is the realm's
+    /// `Error.prototype` (`DOMException`).
+    pub error_proto: bool,
+    /// Prototype members this realm does not have (secure-context or
+    /// OS-gated members).
+    pub remove_proto: Vec<String>,
+    /// Members of the interface object this realm does not have.
+    pub remove_static: Vec<String>,
+}
+
+impl InterfaceFixup {
+    /// Whether this changes nothing.
+    pub fn is_empty(&self) -> bool {
+        self == &InterfaceFixup::default()
+    }
+
+    /// The part that is the same in every realm of a global (the
+    /// removals are per realm).
+    pub fn base(&self) -> InterfaceFixup {
+        InterfaceFixup {
+            proto_late: self.proto_late.clone(),
+            unscopables: self.unscopables.clone(),
+            error_proto: self.error_proto,
+            ..Default::default()
+        }
+    }
+}
+
+/// Fixups of a realm, by interface.
+pub type InterfaceFixups = Rc<std::collections::HashMap<InterfaceId, InterfaceFixup>>;
 
 impl RealmOptions {
     /// Main-world realm whose global is built from `global`.
@@ -390,6 +441,7 @@ impl Default for RealmOptions {
             global_host: None,
             world: World::Main,
             module_loader: None,
+            fixups: None,
         }
     }
 }
@@ -401,6 +453,7 @@ impl std::fmt::Debug for RealmOptions {
             .field("global_host", &self.global_host)
             .field("world", &self.world)
             .field("module_loader", &self.module_loader.is_some())
+            .field("fixups", &self.fixups.as_ref().map(|f| f.len()))
             .finish()
     }
 }

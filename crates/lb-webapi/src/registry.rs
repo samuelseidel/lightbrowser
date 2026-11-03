@@ -91,6 +91,29 @@ pub struct Registry {
     indexed_len: KeyMap<&'static str, IndexedLength>,
     unenumerable: std::collections::HashSet<&'static str, BuildHasherDefault<KeyHasher>>,
     dom_exceptions: DomExceptions,
+    inherit: Option<Rc<Inherit>>,
+}
+
+/// Inheritance of redeclared members (see [`Registry::inherit_redeclared`]).
+struct Inherit {
+    table: &'static crate::desc::Table,
+    keep: &'static [(&'static str, &'static str)],
+    parents: std::cell::OnceCell<KeyMap<&'static str, &'static str>>,
+}
+
+impl Inherit {
+    fn parent_of(&self, iface: &str) -> Option<&'static str> {
+        self.parents
+            .get_or_init(|| {
+                self.table
+                    .interfaces
+                    .iter()
+                    .filter_map(|d| Some((d.name, d.parent?)))
+                    .collect()
+            })
+            .get(iface)
+            .copied()
+    }
 }
 
 impl Registry {
@@ -204,6 +227,51 @@ impl Registry {
         kind: ImplKind,
     ) -> Option<&HostFn> {
         self.fns.get(&(iface, member, kind))
+    }
+
+    /// An attribute or operation `iface` itself declares: [`Registry::get`],
+    /// or with [`Registry::inherit_redeclared`] on, the implementation of
+    /// the nearest ancestor that has one.
+    pub fn get_declared(
+        &self,
+        iface: &'static str,
+        member: &'static str,
+        kind: ImplKind,
+    ) -> Option<&HostFn> {
+        if let Some(f) = self.fns.get(&(iface, member, kind)) {
+            return Some(f);
+        }
+        let inh = self.inherit.as_ref()?;
+        if !matches!(kind, ImplKind::Getter | ImplKind::Setter | ImplKind::Method)
+            || inh.keep.contains(&(iface, member))
+        {
+            return None;
+        }
+        let mut parent = inh.parent_of(iface);
+        while let Some(p) = parent {
+            if let Some(f) = self.fns.get(&(p, member, kind)) {
+                return Some(f);
+            }
+            parent = inh.parent_of(p);
+        }
+        None
+    }
+
+    /// A member an interface of `table` redeclares (WebIDL repeats
+    /// `remove()` on `CharacterData` and `Element` from `ChildNode`)
+    /// without its own implementation uses its nearest ancestor's, except
+    /// the `(interface, member)` pairs in `keep` (a different meaning).
+    /// Looked up per member as specs are made ([`Registry::get_declared`]).
+    pub fn inherit_redeclared(
+        &mut self,
+        table: &'static crate::desc::Table,
+        keep: &'static [(&'static str, &'static str)],
+    ) {
+        self.inherit = Some(Rc::new(Inherit {
+            table,
+            keep,
+            parents: std::cell::OnceCell::new(),
+        }));
     }
 
     pub fn named_getter_for(&self, iface: &'static str) -> Option<&NamedGetter> {

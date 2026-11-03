@@ -22,7 +22,6 @@ use lb_js::{Arg, CallCtx, HostError, JsError, RealmId, ScriptOrigin};
 use lb_persona::BrowserFamily;
 
 use super::{TaskSource, Window};
-use crate::desc::GlobalProp;
 use crate::registry::host_fn;
 
 /// What the page layer knows about how the document was loaded
@@ -96,7 +95,6 @@ pub(crate) fn install(
     )?;
     let running_state =
         engine.new_function(realm, "runningState", 0, host_fn(|cx| cx.ret("cannot_run")))?;
-    let later = serde_json::to_string(&later_globals()).unwrap_or_else(|_| "[]".into());
     let builder = engine.evaluate_handle(realm, BUILDER, ScriptOrigin::new(""))?;
     let r = engine.call(
         realm,
@@ -109,7 +107,6 @@ pub(crate) fn install(
             Arg::Handle(get_is_installed),
             Arg::Handle(install_state),
             Arg::Handle(running_state),
-            Arg::Json(later),
         ],
     );
     for h in [
@@ -126,27 +123,15 @@ pub(crate) fn install(
     r.map(|_| ())
 }
 
-/// Defines `window.chrome` and moves the window properties Chrome
-/// installs after it back behind it. Runs once and leaves nothing behind.
-const BUILDER: &str = "(function(lt,csi,gd,gi,is,rs,later){'use strict';\
-const g=globalThis,O=Object,gpd=O.getOwnPropertyDescriptor,dp=O.defineProperty;\
+/// Defines `window.chrome` in the slot the window keeps for it (see
+/// `WindowRealmOptions::chrome_slot`), so it sits right after
+/// `WebAssembly` as in Chrome. Runs once and leaves nothing behind.
+const BUILDER: &str = "(function(lt,csi,gd,gi,is,rs){'use strict';\
+const g=globalThis,dp=Object.defineProperty;\
 const app={isInstalled:false,getDetails:gd,getIsInstalled:gi,installState:is,runningState:rs,\
 InstallState:{DISABLED:'disabled',INSTALLED:'installed',NOT_INSTALLED:'not_installed'},\
 RunningState:{CANNOT_RUN:'cannot_run',READY_TO_RUN:'ready_to_run',RUNNING:'running'}};\
-dp(g,'chrome',{value:{loadTimes:lt,csi:csi,app:app},writable:true,enumerable:true,configurable:true});\
-for(const k of later){const d=gpd(g,k);if(d&&d.configurable){delete g[k];dp(g,k,d);}}})";
-
-/// Window property names that come after `chrome` in Chrome's order.
-fn later_globals() -> Vec<&'static str> {
-    let props = crate::generated::chromium::TABLE.window_props;
-    let at = props
-        .iter()
-        .position(|p| matches!(p, GlobalProp::Other("chrome")));
-    match at {
-        Some(i) => props[i + 1..].iter().map(GlobalProp::name).collect(),
-        None => Vec::new(),
-    }
-}
+dp(g,'chrome',{value:{loadTimes:lt,csi:csi,app:app},writable:true,enumerable:true,configurable:true});})";
 
 fn info(w: &Window) -> LoadInfo {
     w.load_info.borrow().clone()
@@ -247,13 +232,15 @@ fn install_state(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(), HostErr
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn chrome_comes_before_late_globals() {
-        let later = later_globals();
-        assert!(later.len() > 300, "{}", later.len());
-        assert_eq!(later[0], "crashReport");
-        assert!(!later.contains(&"chrome"));
+    fn chrome_slot_follows_webassembly() {
+        let props = crate::generated::chromium::TABLE.window_props;
+        let at = props
+            .iter()
+            .position(|p| matches!(p, crate::desc::GlobalProp::Other("chrome")))
+            .unwrap();
+        assert_eq!(props[at - 1].name(), "WebAssembly");
+        assert_eq!(props[at + 1].name(), "crashReport");
+        assert!(props.len() - at > 300);
     }
 }

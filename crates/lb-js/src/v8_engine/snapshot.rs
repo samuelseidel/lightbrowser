@@ -27,7 +27,7 @@ use std::borrow::Cow;
 
 use super::*;
 
-const MAGIC: &[u8; 8] = b"LBSNAP02";
+const MAGIC: &[u8; 8] = b"LBSNAP03";
 
 /// Every native function a snapshot can reference, in a fixed order (the
 /// index is what the snapshot stores). Both the creating and the restoring
@@ -71,6 +71,12 @@ pub(super) fn external_refs() -> Cow<'static, [v8::ExternalReference]> {
         R {
             indexed_deleter: indexed_delete_trampoline.map_fn_to(),
         },
+        R {
+            pointer: {
+                let f: v8::AccessorNameGetterCallback = lazy_interface_getter.map_fn_to();
+                f as *mut std::ffi::c_void
+            },
+        },
     ])
 }
 
@@ -102,8 +108,11 @@ pub(crate) struct Meta {
     pub v8_flags: String,
     /// The global interface of the snapshot context.
     pub window: u32,
-    /// FNV-1a of the init script run in the context.
+    /// FNV-1a of the init script run in the context and of the base
+    /// interface fixups (see [`init_digest`]).
     pub init_hash: u64,
+    /// Interface objects made in the snapshot context.
+    pub made: Vec<u32>,
     /// Per interface: spec digest, callback count before and after.
     pub digests: Vec<u64>,
     pub cb_before: Vec<u32>,
@@ -122,6 +131,10 @@ impl Meta {
         put_str(out, &self.v8_flags);
         put_u32(out, self.window);
         out.extend_from_slice(&self.init_hash.to_le_bytes());
+        put_u32(out, self.made.len() as u32);
+        for &id in &self.made {
+            put_u32(out, id);
+        }
         put_u32(out, self.digests.len() as u32);
         for i in 0..self.digests.len() {
             out.extend_from_slice(&self.digests[i].to_le_bytes());
@@ -149,6 +162,10 @@ impl Meta {
             init_hash: r.u64()?,
             ..Meta::default()
         };
+        let made = r.u32()? as usize;
+        for _ in 0..made {
+            m.made.push(r.u32()?);
+        }
         let n = r.u32()? as usize;
         for _ in 0..n {
             m.digests.push(r.u64()?);
@@ -246,6 +263,21 @@ impl SnapState {
             _ => None,
         }
     }
+
+    /// Which interface objects a realm from the snapshot context starts
+    /// with, by id.
+    pub(super) fn context_made(&self) -> Vec<bool> {
+        let SnapState::Restoring(r) = self else {
+            return Vec::new();
+        };
+        let mut made = vec![false; r.meta.digests.len()];
+        for &id in &r.meta.made {
+            if let Some(m) = made.get_mut(id as usize) {
+                *m = true;
+            }
+        }
+        made
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +314,34 @@ impl Fnv {
 pub(super) fn hash_str(s: &str) -> u64 {
     let mut h = Fnv::new();
     h.str(s);
+    h.finish()
+}
+
+/// What a snapshot context depends on besides the templates: the init
+/// script run in it and the base part of the realm fixups (the removals
+/// are per realm and run on every restore).
+pub(super) fn init_digest(init_script: &str, fixups: Option<&InterfaceFixups>) -> u64 {
+    let mut h = Fnv::new();
+    h.str(init_script);
+    let mut ids: Vec<&InterfaceId> = fixups.map(|f| f.keys().collect()).unwrap_or_default();
+    ids.sort_by_key(|id| id.0);
+    for id in ids {
+        let Some(fx) = fixups.and_then(|f| f.get(id)) else {
+            continue;
+        };
+        let base = fx.base();
+        if base.is_empty() {
+            continue;
+        }
+        h.u32(id.0);
+        for list in [&base.proto_late, &base.unscopables] {
+            h.u32(list.len() as u32);
+            for k in list {
+                h.str(k);
+            }
+        }
+        h.flag(base.error_proto);
+    }
     h.finish()
 }
 
@@ -371,6 +431,10 @@ pub(super) fn spec_digest(spec: &InterfaceSpec) -> u64 {
     h.flag(spec.indexed_getter.is_some());
     h.flag(spec.indexed_length.is_some());
     h.flag(spec.named_unenumerable);
+    h.u32(spec.reorder_last.len() as u32);
+    for k in &spec.reorder_last {
+        hash_key(&mut h, k);
+    }
     h.u32(MAX_TEMPLATE_PROPS as u32);
     h.u32(OVERFLOW_CHUNK as u32);
     h.finish()
@@ -465,7 +529,7 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
     };
     let expect_after = r.meta.cb_after[i] as usize;
     r.next += 1;
-    let split = template_split(spec.instance.len());
+    let split = template_split(&spec.instance);
     let (items, plan) = overflow_plan(&spec.instance[split..]);
     if plan.len() != overflow.len() {
         r.diverged = true;
@@ -474,8 +538,10 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
     let overflow = Overflow {
         chunks: overflow,
         items,
+        direct: Vec::new(),
     };
     let parent = spec.parent;
+    let reorder_last = spec.reorder_last.clone();
     push_spec_callbacks(st, spec.clone());
     // The replay mirrors the builder; a count mismatch is a bug in this
     // file, caught by the tests.
@@ -485,11 +551,12 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
         "snapshot replay of {}",
         spec.name
     );
-    st.interfaces.push(IfaceEntry {
+    st.interfaces.push(IfaceSlot::Built(IfaceEntry {
         template,
         parent,
         overflow,
-    });
+        reorder_last,
+    }));
     Some(InterfaceId(id as u32))
 }
 
@@ -551,7 +618,12 @@ impl Engine {
     /// `init_script` is the script the snapshot ran. Such realms skip the
     /// init script (see [`RealmOps::is_snapshot_realm`]). Returns whether
     /// the snapshot context is in use.
-    pub fn use_snapshot_context(&mut self, global: InterfaceId, init_script: &str) -> bool {
+    pub fn use_snapshot_context(
+        &mut self,
+        global: InterfaceId,
+        init_script: &str,
+        fixups: Option<&InterfaceFixups>,
+    ) -> bool {
         let mut st = self.state.borrow_mut();
         let SnapState::Restoring(r) = &mut st.snap else {
             return false;
@@ -559,7 +631,7 @@ impl Engine {
         r.context_ready = !r.diverged
             && r.next == r.meta.digests.len()
             && global.0 == r.meta.window
-            && hash_str(init_script) == r.meta.init_hash;
+            && init_digest(init_script, fixups) == r.meta.init_hash;
         r.context_ready
     }
 
@@ -573,6 +645,7 @@ impl Engine {
         self,
         global: InterfaceId,
         init_script: &str,
+        fixups: Option<InterfaceFixups>,
     ) -> Result<&'static [u8], JsError> {
         if !matches!(self.state.borrow().snap, SnapState::Creating(_)) {
             return Err(JsError::host("not a snapshot creator engine"));
@@ -594,7 +667,7 @@ impl Engine {
         // SAFETY: the SnapshotCreator exits and disposes the isolate once
         // when the blob is created, so it must be entered (once) then.
         unsafe { isolate.enter() };
-        let result = fill_snapshot(&mut isolate, &state, global, init_script);
+        let result = fill_snapshot(&mut isolate, &state, global, init_script, fixups);
         // Every `Global` must be gone before serializing.
         {
             let mut st = state.borrow_mut();
@@ -602,8 +675,10 @@ impl Engine {
             st.handles.clear();
             st.resolvers.clear();
             st.realms.clear();
+            st.detached.clear();
             st.interfaces.clear();
             st.callbacks.clear();
+            st.creating = None;
         }
         isolate.remove_slot::<SharedState>();
         drop(state);
@@ -654,6 +729,7 @@ fn fill_snapshot(
     state: &SharedState,
     global: InterfaceId,
     init_script: &str,
+    fixups: Option<InterfaceFixups>,
 ) -> Result<Meta, JsError> {
     let mut meta = match &state.borrow().snap {
         SnapState::Creating(m) => m.clone(),
@@ -669,7 +745,7 @@ fn fill_snapshot(
         return Err(JsError::host(format!("unknown interface {global:?}")));
     }
     meta.window = global.0;
-    meta.init_hash = hash_str(init_script);
+    meta.init_hash = init_digest(init_script, fixups.as_ref());
     meta.v8_version = v8::V8::get_version().to_owned();
     meta.v8_flags = v8_flags();
 
@@ -678,27 +754,61 @@ fn fill_snapshot(
     let default = v8::Context::new(scope, Default::default());
     scope.set_default_context(default);
 
-    let context = build_context(scope, state, Some(global));
-    {
+    // Set up like a realm's (`new_realm_in`), but registered as no realm:
+    // a realm id would put an identity hash on the global, shared by every
+    // realm made from it. Interface objects stay lazy except the ones V8
+    // makes with the global; base fixups only (removals are per realm).
+    let context = new_context(scope, state, Some(global));
+    let base: Option<InterfaceFixups> = fixups.map(|f| {
+        Rc::new(
+            f.iter()
+                .map(|(id, fx)| (*id, fx.base()))
+                .filter(|(_, fx)| !fx.is_empty())
+                .collect(),
+        )
+    });
+    let mat = Rc::new(RealmMat {
+        made: RefCell::new(Vec::new()),
+        fixups: base,
+    });
+    state.borrow_mut().creating = Some(mat.clone());
+    let setup = {
         let cs = &mut v8::ContextScope::new(scope, context);
-        v8::tc_scope!(let tc, cs);
-        if run_script(tc, init_script, ScriptOrigin::new("")).is_none() {
-            return Err(caught_nested(tc));
-        }
-    }
+        let g = context.global(cs);
+        setup_global(cs, state, &mat, global, g).and_then(|()| {
+            v8::tc_scope!(let tc, cs);
+            match run_script(tc, init_script, ScriptOrigin::new("")) {
+                Some(_) => Ok(()),
+                None => Err(caught_nested(tc)),
+            }
+        })
+    };
+    state.borrow_mut().creating = None;
+    setup?;
+    meta.made = mat
+        .made
+        .borrow()
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| **m)
+        .map(|(i, _)| i as u32)
+        .collect();
     let index = scope.add_context(context);
     if index != 0 {
         return Err(JsError::host("snapshot context is not the first one"));
     }
     let st = state.borrow();
-    for (i, entry) in st.interfaces.iter().enumerate() {
+    for (i, slot) in st.interfaces.iter().enumerate() {
+        let entry = slot
+            .built()
+            .ok_or_else(|| JsError::host("lazy interface in a snapshot creator"))?;
         let t = v8::Local::new(scope, &entry.template);
         let at = scope.add_isolate_data(t);
         if at != i {
             return Err(JsError::host("unexpected snapshot data index"));
         }
     }
-    for entry in &st.interfaces {
+    for entry in st.interfaces.iter().filter_map(IfaceSlot::built) {
         let mut first = u32::MAX;
         for (j, ot) in entry.overflow.chunks.iter().enumerate() {
             let t = v8::Local::new(scope, ot);
@@ -788,6 +898,7 @@ mod tests {
             v8_flags: "--jitless".into(),
             window: 7,
             init_hash: 42,
+            made: vec![3, 7],
             digests: vec![1, 2],
             cb_before: vec![0, 3],
             cb_after: vec![3, 9],

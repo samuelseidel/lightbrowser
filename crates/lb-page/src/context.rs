@@ -54,6 +54,9 @@ struct Shared {
     local_storage: StoragePartition,
     /// Idle network contexts (TLS connector and resolver are reused).
     pool: Mutex<Vec<NetContext>>,
+    /// The family's built-in header profile, parsed once for all network
+    /// contexts of this browser context.
+    header_profile: std::sync::OnceLock<Option<Arc<lb_net::header_profile::HeaderProfile>>>,
     /// Favicon URLs already requested by this context (Chrome asks once).
     favicons: Mutex<HashSet<String>>,
     /// Connection slots per origin ([`MAX_CONNECTIONS_PER_HOST`]).
@@ -127,6 +130,7 @@ impl BrowserContext {
             client_hints: ClientHintsStore::new(),
             local_storage: StoragePartition::new(),
             pool: Mutex::new(Vec::new()),
+            header_profile: std::sync::OnceLock::new(),
             favicons: Mutex::new(HashSet::new()),
             hosts: Mutex::new(HashMap::new()),
         }));
@@ -165,8 +169,18 @@ impl BrowserContext {
         let pooled = self.0.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
         let mut net = match pooled {
             Some(n) => n,
-            None => NetContext::new(self.0.opts.persona.clone(), self.0.opts.tls_profile.clone())
-                .map_err(|e| PageError::Setup(e.to_string()))?,
+            None => {
+                let persona = self.0.opts.persona.clone();
+                let headers = self
+                    .0
+                    .header_profile
+                    .get_or_init(|| {
+                        lb_net::header_profile::HeaderProfile::builtin(persona.family).map(Arc::new)
+                    })
+                    .clone();
+                NetContext::with_header_profile(persona, self.0.opts.tls_profile.clone(), headers)
+                    .map_err(|e| PageError::Setup(e.to_string()))?
+            }
         };
         net.cookies = self.0.cookies.clone();
         net.client_hints = self.0.client_hints.clone();

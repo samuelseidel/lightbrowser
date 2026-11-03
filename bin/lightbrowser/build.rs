@@ -1,5 +1,6 @@
-//! Release link options for binary size (M6, ADR 0013). Only the final
-//! link of `lightbrowser` changes; no dependency is rebuilt.
+//! Release link options for binary size and memory (M6, ADR 0013 and
+//! 0016). Only the final link of `lightbrowser` changes; no dependency is
+//! rebuilt.
 //!
 //! - `--icf=safe`: fold identical functions whose address is not taken
 //!   (mostly V8 template instances): about -5 MB.
@@ -13,6 +14,15 @@
 //!   reports (Rust `RUST_BACKTRACE`, V8's fatal-error "C stack trace",
 //!   gdb without debug info), which the stripped binary has no symbols
 //!   for anyway. Set `LB_KEEP_UNWIND=1` to keep them.
+//! - Hot code first: `--symbol-ordering-file=hot-symbols.txt` puts the
+//!   functions a page load runs (made by `tools/hot_symbols/gen.py` from a
+//!   training workload, not the bench corpus) at the start of `.text`, so
+//!   they share pages instead of being spread over ~29 MB of code. The
+//!   kernel maps the 64 KB around each code page fault, so a scattered hot
+//!   set costs resident memory and faults: `serve` crawling the bench
+//!   corpus -4 to -5 MB RSS (ADR 0016). Symbols a build lacks are ignored
+//!   (`--no-warn-symbol-ordering`); a stale list only costs locality.
+//!   `LB_NO_ORDER=1` links without it.
 //!
 //! All need lld, the default linker of `x86_64-unknown-linux-gnu` since
 //! Rust 1.90. Set `LB_PLAIN_LINK=1` to link without any of them. For size
@@ -25,6 +35,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LB_PLAIN_LINK");
     println!("cargo:rerun-if-env-changed=LB_KEEP_UNWIND");
     println!("cargo:rerun-if-env-changed=LB_LINK_MAP");
+    println!("cargo:rerun-if-env-changed=LB_NO_ORDER");
+    println!("cargo:rerun-if-changed=hot-symbols.txt");
     let release = std::env::var("PROFILE").is_ok_and(|p| p == "release");
     let target = std::env::var("TARGET").unwrap_or_default();
     if !release
@@ -39,6 +51,15 @@ fn main() {
             "cargo:rustc-link-arg-bins=-Wl,-Map={}",
             map.to_string_lossy()
         );
+    }
+    let order = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"))
+        .join("hot-symbols.txt");
+    if std::env::var_os("LB_NO_ORDER").is_none() && order.is_file() {
+        println!(
+            "cargo:rustc-link-arg-bins=-Wl,--symbol-ordering-file={}",
+            order.display()
+        );
+        println!("cargo:rustc-link-arg-bins=-Wl,--no-warn-symbol-ordering");
     }
     println!("cargo:rustc-link-arg-bins=-Wl,--icf=safe");
     println!("cargo:rustc-link-arg-bins=-Wl,-z,pack-relative-relocs");

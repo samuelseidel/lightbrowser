@@ -273,11 +273,16 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
     })
     .map_err(|e| e.to_string())?;
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    // The page and its network run on the browser's worker thread; this
+    // runtime only waits for it.
+    let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("starting runtime: {e}"))?;
     let loaded = rt.block_on(load_page(&ctx, url, args))?;
+    // One page per process: the process ends right after the output, so
+    // the runtime is not shut down (nothing is pending; no disk state).
+    std::mem::forget(rt);
 
     if args.verbose {
         eprintln!("{}", loaded.status);
@@ -337,7 +342,10 @@ async fn load_page(
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;
-    let page = browser.new_page(ctx).await.map_err(|e| e.to_string())?;
+    let page = browser
+        .new_page_to_load(ctx)
+        .await
+        .map_err(|e| e.to_string())?;
     let nav = page
         .navigate(url.as_str())
         .await
@@ -360,7 +368,10 @@ async fn load_page(
             eprintln!("console.{}: {}", m.level, m.text);
         }
     }
-    let _ = page.close().await;
+    // No teardown: the process exits after printing (V8 isolate, DOM and
+    // the worker thread go with it), like a browser's fast shutdown.
+    std::mem::forget(page);
+    std::mem::forget(browser);
     Ok(Loaded {
         status: nav.status,
         url: nav.url,

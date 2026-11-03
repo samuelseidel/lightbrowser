@@ -534,25 +534,29 @@ fn ext_desc(name: &str) -> Option<&'static ExtDesc> {
 }
 
 /// Interface specs of the extension objects, for the installer.
-pub(crate) fn extension_specs(registry: &Registry) -> Vec<(&'static str, lb_js::InterfaceSpec)> {
-    EXTENSIONS
+pub(crate) fn extension_names() -> impl Iterator<Item = &'static str> {
+    EXTENSIONS.iter().map(|e| e.iface)
+}
+
+/// The spec of WebGL extension interface `iface` (one of
+/// [`extension_names`]).
+pub(crate) fn extension_spec(registry: &Registry, iface: &str) -> lb_js::InterfaceSpec {
+    let Some(e) = EXTENSIONS.iter().find(|e| e.iface == iface) else {
+        return lb_js::InterfaceSpec::new(iface.to_owned());
+    };
+    let mut proto: Vec<Member> = e
+        .consts
         .iter()
-        .map(|e| {
-            let mut proto: Vec<Member> = e
-                .consts
-                .iter()
-                .map(|(n, v)| Member::constant(*n, JsValue::Number(f64::from(*v))))
-                .collect();
-            for (op, len) in e.ops {
-                let f = registry
-                    .get(e.iface, op, ImplKind::Method)
-                    .cloned()
-                    .unwrap_or_else(|| host_fn(|_| Ok(())));
-                proto.push(Member::method(*op, u32::from(*len), f));
-            }
-            (e.iface, lb_js::InterfaceSpec::new(e.iface).prototype(proto))
-        })
-        .collect()
+        .map(|(n, v)| Member::constant(*n, JsValue::Number(f64::from(*v))))
+        .collect();
+    for (op, len) in e.ops {
+        let f = registry
+            .get(e.iface, op, ImplKind::Method)
+            .cloned()
+            .unwrap_or_else(|| host_fn(|_| Ok(())));
+        proto.push(Member::method(*op, u32::from(*len), f));
+    }
+    lb_js::InterfaceSpec::new(e.iface).prototype(proto)
 }
 
 fn persona_num(v: &serde_json::Value) -> Option<f64> {

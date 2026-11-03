@@ -25,9 +25,12 @@ pub struct BrowserOptions {
     /// JS heap cap per engine (worker).
     pub max_heap_bytes: Option<usize>,
     /// Restore engines from the process-wide V8 startup snapshot
-    /// (`lb_webapi::snapshot`, ADR 0013): window realms then take about
-    /// 2 ms instead of ~30. The snapshot is made in memory when the first
-    /// engine starts (about 110 ms once).
+    /// (`lb_webapi::snapshot`, ADR 0013), made in memory when the first
+    /// engine starts (about 90 ms once). Off by default: with interface
+    /// objects made lazily (ADR 0016) a window realm built from templates
+    /// costs about what a deserialized one does, and the snapshot's blob,
+    /// its creation and the template set it holds cost ~3 MB of resident
+    /// memory in `serve`.
     pub startup_snapshot: bool,
 }
 
@@ -36,7 +39,7 @@ impl Default for BrowserOptions {
         BrowserOptions {
             workers: std::thread::available_parallelism().map_or(1, |n| n.get()),
             max_heap_bytes: Some(512 << 20),
-            startup_snapshot: true,
+            startup_snapshot: false,
         }
     }
 }
@@ -172,6 +175,28 @@ impl Browser {
         self.new_page_with(ctx, None).await
     }
 
+    /// A page to navigate at once, for one-shot loads (`lightbrowser
+    /// fetch`): it skips the initial about:blank document, whose realm
+    /// nothing could use, but keeps its history entry, so the loaded
+    /// document sees the same `history.length` as after
+    /// [`Browser::new_page`]. Navigate it before anything else.
+    pub async fn new_page_to_load(&self, ctx: &BrowserContext) -> Result<Page, PageError> {
+        let worker = self.pick_worker()?;
+        let id = self.next_page.fetch_add(1, Ordering::Relaxed);
+        Page::open_unstarted(worker, id, ctx.clone()).await
+    }
+
+    fn pick_worker(&self) -> Result<WorkerHandle, PageError> {
+        let worker = self
+            .workers
+            .iter()
+            .min_by_key(|w| w.pages.load(Ordering::Relaxed))
+            .ok_or(PageError::Closed)?
+            .clone();
+        worker.pages.fetch_add(1, Ordering::Relaxed);
+        Ok(worker)
+    }
+
     /// Like [`Browser::new_page`], running `setup` on the worker before the
     /// first navigation.
     pub(crate) async fn new_page_with(
@@ -179,14 +204,8 @@ impl Browser {
         ctx: &BrowserContext,
         setup: Option<crate::page::PageSetup>,
     ) -> Result<Page, PageError> {
-        let worker = self
-            .workers
-            .iter()
-            .min_by_key(|w| w.pages.load(Ordering::Relaxed))
-            .ok_or(PageError::Closed)?
-            .clone();
+        let worker = self.pick_worker()?;
         let id = self.next_page.fetch_add(1, Ordering::Relaxed);
-        worker.pages.fetch_add(1, Ordering::Relaxed);
         Page::open(worker, id, ctx.clone(), setup).await
     }
 

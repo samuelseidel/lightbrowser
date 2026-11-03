@@ -33,8 +33,9 @@ pub use snapshot::SnapshotStatus;
 use snapshot::{Meta, SnapState};
 
 use crate::{
-    EngineError, HeapStats, HostRef, InterfaceId, JsEngine, JsError, JsErrorKind, JsValue,
-    ModuleLoader, PropAttrs, Realm, RealmId, RealmOptions, ScriptOrigin, ValueKind, World,
+    EngineError, HeapStats, HostRef, InterfaceFixup, InterfaceFixups, InterfaceId, JsEngine,
+    JsError, JsErrorKind, JsValue, ModuleLoader, PropAttrs, Realm, RealmId, RealmOptions,
+    ScriptOrigin, ValueKind, World,
 };
 
 // ---------------------------------------------------------------------------
@@ -284,7 +285,7 @@ impl HostError {
 }
 
 /// Well-known symbols usable as property keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WellKnownSymbol {
     Iterator,
     AsyncIterator,
@@ -294,7 +295,7 @@ pub enum WellKnownSymbol {
 }
 
 /// A property key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PropKey {
     Name(String),
     Symbol(WellKnownSymbol),
@@ -476,6 +477,12 @@ pub struct InterfaceSpec {
     /// read-only and not enumerable (`Object.keys` skips them,
     /// `getOwnPropertyNames` lists them). Needs a named getter.
     pub named_unenumerable: bool,
+    /// For a global interface: own properties of the global (its
+    /// `instance` members or the engine's built-ins) moved to the end, in
+    /// this order, once the members are defined, in every realm
+    /// (including ones from the snapshot, where V8 appends its flag-gated
+    /// built-ins again). Interface objects among them stay lazy.
+    pub reorder_last: Vec<PropKey>,
 }
 
 impl InterfaceSpec {
@@ -497,6 +504,7 @@ impl InterfaceSpec {
             named_enumerator: None,
             indexed_length: None,
             named_unenumerable: false,
+            reorder_last: Vec::new(),
         }
     }
     pub fn parent(mut self, parent: InterfaceId) -> Self {
@@ -643,12 +651,35 @@ enum Callback {
     Empty,
 }
 
+/// Builds an interface's spec when its templates are first needed (see
+/// [`Engine::define_interface_lazy`]).
+pub type LazySpec = Box<dyn FnOnce() -> InterfaceSpec>;
+
+/// An interface of the engine: templates made, or still to make.
+enum IfaceSlot {
+    Built(IfaceEntry),
+    Pending(LazySpec),
+    /// Being built (its parent first).
+    Building,
+}
+
+impl IfaceSlot {
+    fn built(&self) -> Option<&IfaceEntry> {
+        match self {
+            IfaceSlot::Built(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 struct IfaceEntry {
     template: v8::Global<v8::FunctionTemplate>,
     parent: Option<InterfaceId>,
     /// Instance members not on the instance template, defined on each
     /// instance after it is created, in order (see `apply_overflow`).
     overflow: Overflow,
+    /// See [`InterfaceSpec::reorder_last`].
+    reorder_last: Vec<PropKey>,
 }
 
 /// Instance members defined after creation: interface objects directly
@@ -662,6 +693,33 @@ struct IfaceEntry {
 struct Overflow {
     chunks: Vec<v8::Global<v8::ObjectTemplate>>,
     items: Vec<OverflowItem>,
+    /// Per item, when the engine built the templates itself (not restored
+    /// from a snapshot): the member's function templates or value, so it
+    /// is defined directly instead of copied from a chunk instance. Same
+    /// functions (V8 caches one per template and context), same
+    /// descriptor.
+    direct: Vec<Option<Direct>>,
+}
+
+/// A chunk member defined directly (see [`Overflow::direct`]).
+enum Direct {
+    Method(v8::Global<v8::FunctionTemplate>, PropAttrs),
+    Accessor(
+        Option<v8::Global<v8::FunctionTemplate>>,
+        Option<v8::Global<v8::FunctionTemplate>>,
+        PropAttrs,
+    ),
+    Value(JsValue, PropAttrs),
+}
+
+/// What [`install_member`] made, for [`Direct`].
+enum Made<'s> {
+    Method(v8::Local<'s, v8::FunctionTemplate>),
+    Accessor(
+        Option<v8::Local<'s, v8::FunctionTemplate>>,
+        Option<v8::Local<'s, v8::FunctionTemplate>>,
+    ),
+    Value,
 }
 
 #[derive(Clone)]
@@ -721,9 +779,20 @@ const MAX_TEMPLATE_PROPS: usize = 64;
 /// Members per overflow chunk template.
 const OVERFLOW_CHUNK: usize = 32;
 
-/// How many of `n` instance members go on the instance template itself.
-fn template_split(n: usize) -> usize {
-    if n > MAX_TEMPLATE_PROPS { 0 } else { n }
+/// How many of the instance members go on the instance template itself.
+/// Interface objects never do: they are lazy properties defined after
+/// creation, so a list with one goes through `overflow` entirely.
+fn template_split(members: &[Member]) -> usize {
+    let n = members.len();
+    if n > MAX_TEMPLATE_PROPS
+        || members
+            .iter()
+            .any(|m| matches!(m.kind, MemberKind::Interface(_)))
+    {
+        0
+    } else {
+        n
+    }
 }
 
 struct ModuleEntry {
@@ -732,8 +801,36 @@ struct ModuleEntry {
     module: v8::Global<v8::Module>,
 }
 
+/// Which interface objects a realm has made, and what it changes on them.
+struct RealmMat {
+    made: RefCell<Vec<bool>>,
+    fixups: Option<InterfaceFixups>,
+}
+
+impl RealmMat {
+    fn is_made(&self, id: InterfaceId) -> bool {
+        self.made
+            .borrow()
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+    fn set_made(&self, id: InterfaceId) {
+        let mut m = self.made.borrow_mut();
+        let i = id.0 as usize;
+        if m.len() <= i {
+            m.resize(i + 1, false);
+        }
+        m[i] = true;
+    }
+    fn fixup(&self, id: InterfaceId) -> Option<InterfaceFixup> {
+        self.fixups.as_ref()?.get(&id).cloned()
+    }
+}
+
 struct RealmEntry {
     context: v8::Global<v8::Context>,
+    mat: Rc<RealmMat>,
     /// Deserialized from the startup snapshot context.
     from_snapshot: bool,
     world: World,
@@ -754,7 +851,7 @@ struct HeapGuard {
 
 struct State {
     callbacks: Vec<Callback>,
-    interfaces: Vec<IfaceEntry>,
+    interfaces: Vec<IfaceSlot>,
     realms: HashMap<RealmId, RealmEntry>,
     /// Realms by the identity hash of their global proxy, so callbacks
     /// find the realm of a context. Kept here rather than in a context
@@ -768,6 +865,11 @@ struct State {
     wrappers: HashMap<(RealmId, HostRef), v8::Global<v8::Object>>,
     heap: Option<Rc<HeapGuard>>,
     snap: SnapState,
+    /// The snapshot context while it is being made (it is no realm).
+    creating: Option<Rc<RealmMat>>,
+    /// Dropped realms whose context is still alive (see
+    /// `drop_realm_state`).
+    detached: Vec<(v8::Weak<v8::Context>, Rc<RealmMat>)>,
     /// Large classic scripts compiled in this engine, most recent last,
     /// with their V8 code cache once they were compiled twice (see
     /// `run_script`).
@@ -794,6 +896,16 @@ impl State {
 
     fn take_oom(&self) -> bool {
         self.heap.as_ref().is_some_and(|h| h.tripped.replace(false))
+    }
+
+    /// A built interface.
+    fn entry(&self, id: InterfaceId) -> Option<&IfaceEntry> {
+        self.interfaces.get(id.0 as usize)?.built()
+    }
+
+    /// The materialization state of a realm.
+    fn mat(&self, realm: RealmId) -> Option<Rc<RealmMat>> {
+        self.realms.get(&realm).map(|r| r.mat.clone())
     }
 }
 
@@ -889,7 +1001,7 @@ impl Engine {
                 compiled: Some(BrowserFamily::Chrome),
             });
         }
-        init_v8("");
+        init_v8(&std::env::var("LB_EXP_V8FLAGS").unwrap_or_default());
         let mut params = v8::CreateParams::default();
         if let Some(max) = options.max_heap_bytes {
             params = params.heap_limits(0, max);
@@ -981,6 +1093,8 @@ impl Engine {
             wrappers: HashMap::new(),
             heap: heap.clone(),
             snap,
+            creating: None,
+            detached: Vec::new(),
             code_cache: Vec::new(),
         }));
         {
@@ -1030,174 +1144,38 @@ impl Engine {
             matches!(st.snap, SnapState::Creating(_))
                 .then(|| (snapshot::spec_digest(&spec), st.callbacks.len() as u32))
         };
-        let id = self.build_interface(spec);
+        let id = {
+            let mut st = self.state.borrow_mut();
+            st.interfaces.push(IfaceSlot::Building);
+            InterfaceId((st.interfaces.len() - 1) as u32)
+        };
+        {
+            let mut iso = Entered::new(&mut self.isolate);
+            v8::scope!(let scope, &mut **iso);
+            build_into(scope, &self.state, id, spec);
+        }
         if let Some((digest, cb_before)) = record {
             snapshot::record_interface(&mut self.state.borrow_mut(), digest, cb_before);
         }
         id
     }
 
-    /// Build the V8 templates of an interface.
-    fn build_interface(&mut self, spec: InterfaceSpec) -> InterfaceId {
-        let mut iso = Entered::new(&mut self.isolate);
-        v8::scope!(let scope, &mut **iso);
+    /// Like [`Engine::define_interface`], but the spec is made, and the
+    /// templates built, only when first needed: by a realm's global (its
+    /// interface object, read lazily), a wrapper, a subclass or
+    /// [`Arg::Construct`]. The result is the same as an eager definition.
+    /// Snapshot creators and restoring engines build at once (the snapshot
+    /// records and replays definitions in order).
+    pub fn define_interface_lazy(&mut self, make: LazySpec) -> InterfaceId {
+        let eager = matches!(
+            self.state.borrow().snap,
+            SnapState::Creating(_) | SnapState::Restoring(_)
+        );
+        if eager {
+            return self.define_interface(make());
+        }
         let mut st = self.state.borrow_mut();
-
-        let name: Rc<str> = spec.name.as_str().into();
-        let self_id = InterfaceId(st.interfaces.len() as u32);
-        let ctor_idx = st.push_callback(Callback::Ctor {
-            iface: name.clone(),
-            f: spec.constructor.clone(),
-        });
-        let data = v8::Integer::new_from_unsigned(scope, ctor_idx);
-        let ft = v8::FunctionTemplate::builder(ctor_trampoline)
-            .data(data.into())
-            .length(spec.length as i32)
-            .build(scope);
-        ft.set_class_name(v8_str(scope, &name));
-        ft.read_only_prototype();
-        if let Some(parent) = spec.parent {
-            let parent_ft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
-            ft.inherit(parent_ft);
-        }
-        let signature = v8::Signature::new(scope, ft);
-        let inst = ft.instance_template(scope);
-        inst.set_internal_field_count(HOST_FIELDS);
-        let proto = ft.prototype_template(scope);
-
-        let mut methods = Vec::new();
-        let this_iface = (self_id, ft);
-        for m in &spec.statics {
-            install_member(
-                scope,
-                &mut st,
-                Target::Function(ft),
-                None,
-                m,
-                &mut methods,
-                this_iface,
-            );
-        }
-        methods.clear();
-        for m in &spec.prototype {
-            install_member(
-                scope,
-                &mut st,
-                Target::Object(proto),
-                Some(signature),
-                m,
-                &mut methods,
-                this_iface,
-            );
-        }
-        if spec.to_string_tag {
-            let tag = v8::Symbol::get_to_string_tag(scope);
-            let value = v8_str(scope, &name);
-            proto.set_with_attr(
-                tag.into(),
-                value.into(),
-                v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
-            );
-        }
-        methods.clear();
-        let split = template_split(spec.instance.len());
-        for m in &spec.instance[..split] {
-            install_member(
-                scope,
-                &mut st,
-                Target::Object(inst),
-                Some(signature),
-                m,
-                &mut methods,
-                this_iface,
-            );
-        }
-        let (items, plan) = overflow_plan(&spec.instance[split..]);
-        let chunks = plan
-            .into_iter()
-            .map(|chunk| {
-                let ot = v8::ObjectTemplate::new(scope);
-                for m in chunk {
-                    install_member(
-                        scope,
-                        &mut st,
-                        Target::Object(ot),
-                        Some(signature),
-                        m,
-                        &mut methods,
-                        this_iface,
-                    );
-                }
-                v8::Global::new(scope, ot)
-            })
-            .collect();
-        let overflow = Overflow { chunks, items };
-        if spec.immutable_proto {
-            inst.set_immutable_proto();
-        }
-        if let Some(getter) = spec.named_getter {
-            // The named callbacks sit at consecutive indexes (get, set,
-            // delete, enum) so one integer of data reaches all four.
-            let has = (
-                spec.named_setter.is_some(),
-                spec.named_deleter.is_some(),
-                spec.named_enumerator.is_some(),
-            );
-            let base = st.push_callback(Callback::Named(getter));
-            st.push_callback(
-                spec.named_setter
-                    .map_or(Callback::Empty, Callback::NamedSet),
-            );
-            st.push_callback(
-                spec.named_deleter
-                    .map_or(Callback::Empty, Callback::NamedDelete),
-            );
-            st.push_callback(
-                spec.named_enumerator
-                    .map_or(Callback::Empty, Callback::NamedEnum),
-            );
-            let data = v8::Integer::new_from_unsigned(scope, base);
-            let mut config = v8::NamedPropertyHandlerConfiguration::new()
-                .getter(named_trampoline)
-                .data(data.into())
-                .flags(v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS);
-            if has.0 {
-                config = config.setter(named_set_trampoline);
-            }
-            if has.1 {
-                config = config.deleter(named_delete_trampoline);
-            }
-            if has.2 {
-                config = config.enumerator(named_enum_trampoline);
-            }
-            if spec.named_unenumerable {
-                config = config.query(named_query_trampoline);
-            }
-            inst.set_named_property_handler(config);
-        }
-        if let Some(getter) = spec.indexed_getter {
-            // The length callback, if any, sits right after the getter.
-            let idx = st.push_callback(Callback::Indexed(getter));
-            let mut config =
-                v8::IndexedPropertyHandlerConfiguration::new().getter(indexed_trampoline);
-            if let Some(len) = spec.indexed_length {
-                st.push_callback(Callback::IndexedLen(len));
-                config = config
-                    .query(indexed_query_trampoline)
-                    .enumerator(indexed_enum_trampoline)
-                    .setter(indexed_set_trampoline)
-                    .deleter(indexed_delete_trampoline);
-            }
-            let data = v8::Integer::new_from_unsigned(scope, idx);
-            inst.set_indexed_property_handler(config.data(data.into()));
-        }
-
-        let template = v8::Global::new(scope, ft);
-        st.interfaces.push(IfaceEntry {
-            template,
-            parent: spec.parent,
-            overflow,
-        });
+        st.interfaces.push(IfaceSlot::Pending(make));
         InterfaceId((st.interfaces.len() - 1) as u32)
     }
 
@@ -1219,7 +1197,7 @@ impl Engine {
 
     /// Drop a realm, its wrappers, handles and resolvers.
     pub fn drop_realm(&mut self, realm: RealmId) {
-        drop_realm_state(&self.state, realm);
+        drop_realm_state(&mut self.isolate, &self.state, realm);
     }
 
     /// Run `f` inside `realm`'s context, then clean up termination state.
@@ -1527,9 +1505,7 @@ impl Engine {
     /// see the new zone in `Intl` immediately. Call it before running a
     /// page whose persona has a different zone than the last one.
     pub fn set_time_zone(&mut self, time_zone: &str) -> bool {
-        if v8::icu::get_default_time_zone() != time_zone
-            && !v8::icu::set_default_time_zone(time_zone)
-        {
+        if !set_icu_time_zone(time_zone) {
             return false;
         }
         let mut iso = Entered::new(&mut self.isolate);
@@ -1659,6 +1635,7 @@ impl Drop for Engine {
             st.handles.clear();
             st.resolvers.clear();
             st.realms.clear();
+            st.detached.clear();
             st.interfaces.clear();
             st.callbacks.clear();
             st.heap.take()
@@ -1690,6 +1667,260 @@ impl Drop for Engine {
     }
 }
 
+/// Build the V8 templates of interface `self_id` (its slot exists) from
+/// `spec`; the templates it refers to are built first.
+fn build_into(
+    scope: &mut v8::PinScope<'_, '_, ()>,
+    state: &SharedState,
+    self_id: InterfaceId,
+    spec: InterfaceSpec,
+) {
+    let deps: Vec<InterfaceId> = spec
+        .parent
+        .into_iter()
+        .chain(
+            // Instance lists never hold interface objects as template
+            // values (`template_split`): those stay lazy.
+            spec.statics
+                .iter()
+                .chain(&spec.prototype)
+                .filter_map(|m| match m.kind {
+                    MemberKind::Interface(id) if id != self_id => Some(id),
+                    _ => None,
+                }),
+        )
+        .collect();
+    for d in deps {
+        ensure_template(scope, state, d);
+    }
+    let mut st = state.borrow_mut();
+    let name: Rc<str> = spec.name.as_str().into();
+    let ctor_idx = st.push_callback(Callback::Ctor {
+        iface: name.clone(),
+        f: spec.constructor.clone(),
+    });
+    let data = v8::Integer::new_from_unsigned(scope, ctor_idx);
+    let ft = v8::FunctionTemplate::builder(ctor_trampoline)
+        .data(data.into())
+        .length(spec.length as i32)
+        .build(scope);
+    ft.set_class_name(v8_str(scope, &name));
+    ft.read_only_prototype();
+    if let Some(parent) = spec.parent {
+        let parent_ft = v8::Local::new(
+            scope,
+            &st.entry(parent)
+                .expect("parent interface defined first")
+                .template,
+        );
+        ft.inherit(parent_ft);
+    }
+    let signature = v8::Signature::new(scope, ft);
+    let inst = ft.instance_template(scope);
+    inst.set_internal_field_count(HOST_FIELDS);
+    let proto = ft.prototype_template(scope);
+
+    let mut methods = Vec::new();
+    let this_iface = (self_id, ft);
+    for m in &spec.statics {
+        install_member(
+            scope,
+            &mut st,
+            Target::Function(ft),
+            None,
+            m,
+            &mut methods,
+            this_iface,
+        );
+    }
+    methods.clear();
+    for m in &spec.prototype {
+        install_member(
+            scope,
+            &mut st,
+            Target::Object(proto),
+            Some(signature),
+            m,
+            &mut methods,
+            this_iface,
+        );
+    }
+    if spec.to_string_tag {
+        let tag = v8::Symbol::get_to_string_tag(scope);
+        let value = v8_str(scope, &name);
+        proto.set_with_attr(
+            tag.into(),
+            value.into(),
+            v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
+        );
+    }
+    methods.clear();
+    let split = template_split(&spec.instance);
+    for m in &spec.instance[..split] {
+        install_member(
+            scope,
+            &mut st,
+            Target::Object(inst),
+            Some(signature),
+            m,
+            &mut methods,
+            this_iface,
+        );
+    }
+    let (items, plan) = overflow_plan(&spec.instance[split..]);
+    let mut made: Vec<Option<Direct>> = Vec::new();
+    let chunks = plan
+        .into_iter()
+        .map(|chunk| {
+            let ot = v8::ObjectTemplate::new(scope);
+            for m in chunk {
+                let r = install_member(
+                    scope,
+                    &mut st,
+                    Target::Object(ot),
+                    Some(signature),
+                    m,
+                    &mut methods,
+                    this_iface,
+                );
+                let g = |ft: v8::Local<'_, v8::FunctionTemplate>| v8::Global::new(scope, ft);
+                made.push(match (r, &m.kind) {
+                    (Some(Made::Method(ft)), _) => Some(Direct::Method(g(ft), m.attrs)),
+                    (Some(Made::Accessor(get, set)), _) => {
+                        Some(Direct::Accessor(get.map(g), set.map(g), m.attrs))
+                    }
+                    (Some(Made::Value), MemberKind::Value(v)) => {
+                        Some(Direct::Value(v.clone(), m.attrs))
+                    }
+                    _ => None,
+                });
+            }
+            v8::Global::new(scope, ot)
+        })
+        .collect();
+    let mut made = made.into_iter();
+    let direct = items
+        .iter()
+        .map(|it| match it {
+            OverflowItem::Chunk { .. } => made.next().flatten(),
+            OverflowItem::Interface { .. } => None,
+        })
+        .collect();
+    let overflow = Overflow {
+        chunks,
+        items,
+        direct,
+    };
+    if spec.immutable_proto {
+        inst.set_immutable_proto();
+    }
+    if let Some(getter) = spec.named_getter {
+        // The named callbacks sit at consecutive indexes (get, set,
+        // delete, enum) so one integer of data reaches all four.
+        let has = (
+            spec.named_setter.is_some(),
+            spec.named_deleter.is_some(),
+            spec.named_enumerator.is_some(),
+        );
+        let base = st.push_callback(Callback::Named(getter));
+        st.push_callback(
+            spec.named_setter
+                .map_or(Callback::Empty, Callback::NamedSet),
+        );
+        st.push_callback(
+            spec.named_deleter
+                .map_or(Callback::Empty, Callback::NamedDelete),
+        );
+        st.push_callback(
+            spec.named_enumerator
+                .map_or(Callback::Empty, Callback::NamedEnum),
+        );
+        let data = v8::Integer::new_from_unsigned(scope, base);
+        let mut config = v8::NamedPropertyHandlerConfiguration::new()
+            .getter(named_trampoline)
+            .data(data.into())
+            .flags(v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS);
+        if has.0 {
+            config = config.setter(named_set_trampoline);
+        }
+        if has.1 {
+            config = config.deleter(named_delete_trampoline);
+        }
+        if has.2 {
+            config = config.enumerator(named_enum_trampoline);
+        }
+        if spec.named_unenumerable {
+            config = config.query(named_query_trampoline);
+        }
+        inst.set_named_property_handler(config);
+    }
+    if let Some(getter) = spec.indexed_getter {
+        // The length callback, if any, sits right after the getter.
+        let idx = st.push_callback(Callback::Indexed(getter));
+        let mut config = v8::IndexedPropertyHandlerConfiguration::new().getter(indexed_trampoline);
+        if let Some(len) = spec.indexed_length {
+            st.push_callback(Callback::IndexedLen(len));
+            config = config
+                .query(indexed_query_trampoline)
+                .enumerator(indexed_enum_trampoline)
+                .setter(indexed_set_trampoline)
+                .deleter(indexed_delete_trampoline);
+        }
+        let data = v8::Integer::new_from_unsigned(scope, idx);
+        inst.set_indexed_property_handler(config.data(data.into()));
+    }
+
+    let template = v8::Global::new(scope, ft);
+    st.interfaces[self_id.0 as usize] = IfaceSlot::Built(IfaceEntry {
+        template,
+        parent: spec.parent,
+        overflow,
+        reorder_last: spec.reorder_last,
+    });
+}
+
+/// The templates of `id`, built now if they were defined lazily. `None`
+/// for an unknown interface (or one that is its own ancestor).
+fn ensure_template<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    state: &SharedState,
+    id: InterfaceId,
+) -> Option<v8::Local<'s, v8::FunctionTemplate>> {
+    let make = {
+        let mut st = state.borrow_mut();
+        let slot = st.interfaces.get_mut(id.0 as usize)?;
+        match slot {
+            IfaceSlot::Built(e) => return Some(v8::Local::new(scope, &e.template)),
+            IfaceSlot::Building => return None,
+            IfaceSlot::Pending(_) => match std::mem::replace(slot, IfaceSlot::Building) {
+                IfaceSlot::Pending(make) => make,
+                _ => unreachable!(),
+            },
+        }
+    };
+    let spec = make();
+    build_into(scope, state, id, spec);
+    let st = state.borrow();
+    st.entry(id).map(|e| v8::Local::new(scope, &e.template))
+}
+
+/// Make `time_zone` ICU's (process-wide) default zone unless it already
+/// is. The default changes only here, so the last zone set says whether
+/// it is: asking ICU instead would make it detect the host's zone first
+/// (its data paged in, about 0.5 ms per process).
+fn set_icu_time_zone(time_zone: &str) -> bool {
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if last.as_deref() == Some(time_zone) {
+        return true;
+    }
+    if !v8::icu::set_default_time_zone(time_zone) {
+        return false;
+    }
+    *last = Some(time_zone.to_owned());
+    true
+}
+
 /// Body of [`Engine::new_realm`], shared with [`RealmOps`] for `CallCtx`.
 fn new_realm_in(
     scope: &mut v8::PinScope<'_, '_, ()>,
@@ -1707,8 +1938,17 @@ fn new_realm_in(
         v8::Context::from_snapshot(scope, 0, Default::default())
             .ok_or_else(|| JsError::host("snapshot context could not be created"))?
     } else {
-        build_context(scope, state, options.global)
+        new_context(scope, state, options.global)
     };
+    let made = if from_snapshot {
+        state.borrow().snap.context_made()
+    } else {
+        Vec::new()
+    };
+    let mat = Rc::new(RealmMat {
+        made: RefCell::new(made),
+        fixups: options.fixups.clone(),
+    });
     let id = {
         let mut st = state.borrow_mut();
         let id = RealmId(st.next_realm);
@@ -1717,74 +1957,412 @@ fn new_realm_in(
     };
     let scope = &mut v8::ContextScope::new(scope, context);
     let global = context.global(scope);
-    let mut st = state.borrow_mut();
-    st.realm_by_global
-        .entry(global.get_identity_hash().get())
-        .or_default()
-        .push(id);
-    if let Some(host) = options.global_host {
-        if global.internal_field_count() >= HOST_FIELDS {
-            set_host(scope, global, host);
+    {
+        let mut st = state.borrow_mut();
+        st.realm_by_global
+            .entry(global.get_identity_hash().get())
+            .or_default()
+            .push(id);
+        if let Some(host) = options.global_host {
+            if global.internal_field_count() >= HOST_FIELDS {
+                set_host(scope, global, host);
+            }
+            st.wrappers
+                .insert((id, host), v8::Global::new(scope, global));
         }
-        st.wrappers
-            .insert((id, host), v8::Global::new(scope, global));
+        st.realms.insert(
+            id,
+            RealmEntry {
+                context: v8::Global::new(scope, context),
+                mat: mat.clone(),
+                from_snapshot,
+                world: options.world,
+                loader: options.module_loader,
+                modules: Vec::new(),
+            },
+        );
     }
-    st.realms.insert(
-        id,
-        RealmEntry {
-            context: v8::Global::new(scope, context),
-            from_snapshot,
-            world: options.world,
-            loader: options.module_loader,
-            modules: Vec::new(),
-        },
-    );
+    let result = match options.global {
+        Some(g) if from_snapshot => restore_global(scope, state, &mat, g, global),
+        Some(g) => setup_global(scope, state, &mat, g, global),
+        None => Ok(()),
+    };
+    if let Err(e) = result {
+        drop_realm_state(scope, state, id);
+        return Err(e);
+    }
     Ok(id)
 }
 
-/// A context whose global is built from `global`, with every interface
-/// object instantiated and linked and the overflow members defined. No
-/// realm slot: this is also the snapshot context.
-fn build_context<'s>(
+/// A new context whose global is made from `global`'s instance template
+/// (members and interface objects are added by [`setup_global`]).
+fn new_context<'s>(
     scope: &mut v8::PinScope<'s, '_, ()>,
     state: &SharedState,
     global: Option<InterfaceId>,
 ) -> v8::Local<'s, v8::Context> {
-    let global_template = global.and_then(|id| {
-        let st = state.borrow();
-        let entry = st.interfaces.get(id.0 as usize)?;
-        let ft = v8::Local::new(scope, &entry.template);
-        Some(ft.instance_template(scope))
-    });
-    let context = v8::Context::new(
+    let global_template = global
+        .and_then(|id| ensure_template(scope, state, id))
+        .map(|ft| ft.instance_template(scope));
+    v8::Context::new(
         scope,
         v8::ContextOptions {
             global_template,
             ..Default::default()
         },
-    );
-    let scope = &mut v8::ContextScope::new(scope, context);
+    )
+}
 
-    // WebIDL: an interface object's [[Prototype]] is its parent's
-    // interface object. V8 templates only link the prototype objects, so
-    // this instantiates every interface object now (the startup snapshot
-    // context has this done already).
-    {
-        let st = state.borrow();
-        for entry in &st.interfaces {
-            let Some(parent) = entry.parent else { continue };
-            let ft = v8::Local::new(scope, &entry.template);
-            let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
-            if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
-                f.set_prototype(scope, pf.into());
+/// Finish the global of a new context (entered): link and fix the
+/// interface objects V8 made with it (the global interface and its
+/// ancestors), define the global's members (interface objects as lazy
+/// properties) and move `reorder_last` to the end. Also makes the
+/// snapshot context.
+fn setup_global<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    mat: &RealmMat,
+    iface: InterfaceId,
+    global: v8::Local<'s, v8::Object>,
+) -> Result<(), JsError> {
+    interface_object(scope, state, mat, iface);
+    let last = state
+        .borrow()
+        .entry(iface)
+        .map(|e| e.reorder_last.clone())
+        .unwrap_or_default();
+    apply_overflow_with(scope, state, iface, global, &last)
+}
+
+/// The global of a context deserialized from the snapshot (entered): the
+/// interface objects made in the snapshot context had their base fixups
+/// there, this realm's removals run now; then `reorder_last`, because V8
+/// appends its flag-gated built-ins to every new context.
+fn restore_global<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    mat: &RealmMat,
+    iface: InterfaceId,
+    global: v8::Local<'s, v8::Object>,
+) -> Result<(), JsError> {
+    if let Some(fixups) = &mat.fixups {
+        let made: Vec<InterfaceId> = {
+            let m = mat.made.borrow();
+            (0..m.len())
+                .filter(|&i| m[i])
+                .map(|i| InterfaceId(i as u32))
+                .collect()
+        };
+        for id in made {
+            let Some(fx) = fixups.get(&id) else { continue };
+            if fx.remove_proto.is_empty() && fx.remove_static.is_empty() {
+                continue;
+            }
+            let Some(f) = ensure_template(scope, state, id).and_then(|ft| ft.get_function(scope))
+            else {
+                continue;
+            };
+            apply_fixup(scope, f, fx, false, true);
+        }
+    }
+    reorder_last(scope, state, iface, global)
+}
+
+/// The interface object of `id` in the current context (realm state
+/// `mat`), made on first use: ancestors first, then the WebIDL link
+/// `[[Prototype]]` = parent interface object (V8 templates only link the
+/// prototype objects), then the realm's fixups. Every path that makes an
+/// interface object goes through here (the global's lazy properties,
+/// wrappers, [`Arg::Construct`]), so V8's per-context template cache
+/// returns the fixed object everywhere else.
+fn interface_object<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    mat: &RealmMat,
+    id: InterfaceId,
+) -> Option<v8::Local<'s, v8::Function>> {
+    let ft = ensure_template(scope, state, id)?;
+    if mat.is_made(id) {
+        return ft.get_function(scope);
+    }
+    let parent = state.borrow().entry(id).and_then(|e| e.parent);
+    let pf = match parent {
+        Some(p) => Some(interface_object(scope, state, mat, p)?),
+        None => None,
+    };
+    let f = ft.get_function(scope)?;
+    if let Some(pf) = pf {
+        f.set_prototype(scope, pf.into());
+    }
+    mat.set_made(id);
+    if let Some(fx) = mat.fixup(id) {
+        apply_fixup(scope, f, &fx, true, true);
+    }
+    Some(f)
+}
+
+/// Run a fixup on interface object `f`: the per-global `base` part
+/// (late members, unscopables, error prototype) and/or this realm's
+/// `removals`, in the order the old init script ran them.
+fn apply_fixup<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    f: v8::Local<'s, v8::Function>,
+    fx: &InterfaceFixup,
+    base: bool,
+    removals: bool,
+) {
+    let key = v8_str(scope, "prototype");
+    let proto = f
+        .get(scope, key.into())
+        .and_then(|p| v8::Local::<v8::Object>::try_from(p).ok());
+    if let Some(proto) = proto {
+        if base {
+            for k in &fx.proto_late {
+                let key = v8_str(scope, k);
+                let _ = move_to_end(scope, proto, key.into());
+            }
+            if !fx.unscopables.is_empty() {
+                let u = v8::Object::new(scope);
+                let null = v8::null(scope);
+                u.set_prototype(scope, null.into());
+                for k in &fx.unscopables {
+                    let key = v8_str(scope, k);
+                    let t = v8::Boolean::new(scope, true);
+                    u.set(scope, key.into(), t.into());
+                }
+                let sym = v8::Symbol::get_unscopables(scope);
+                let mut desc = v8::PropertyDescriptor::new_from_value_writable(u.into(), false);
+                desc.set_enumerable(false);
+                desc.set_configurable(true);
+                proto.define_property(scope, sym.into(), &desc);
+            }
+            if fx.error_proto {
+                // The realm's own Error.prototype, whatever `globalThis.Error`
+                // is by now.
+                let msg = v8::String::empty(scope);
+                let err = v8::Exception::error(scope, msg);
+                if let Some(ep) = err.to_object(scope).and_then(|o| o.get_prototype(scope)) {
+                    proto.set_prototype(scope, ep);
+                }
+            }
+        }
+        if removals {
+            for k in &fx.remove_proto {
+                let key = v8_str(scope, k);
+                proto.delete(scope, key.into());
             }
         }
     }
-    if let Some(id) = global {
-        let g = context.global(scope);
-        apply_overflow(scope, state, id, g);
+    if removals {
+        for k in &fx.remove_static {
+            let key = v8_str(scope, k);
+            f.delete(scope, key.into());
+        }
     }
-    context
+}
+
+/// A property descriptor object (from `getOwnPropertyDescriptor`) as a
+/// descriptor to define with.
+fn copy_descriptor<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    d: v8::Local<'s, v8::Object>,
+) -> v8::PropertyDescriptor {
+    let field = |scope: &mut v8::PinScope<'s, '_>, name: &str| -> v8::Local<'s, v8::Value> {
+        v8_str(scope, name).into()
+    };
+    let (k_enum, k_conf, k_get, k_set, k_value, k_writable) = (
+        field(scope, "enumerable"),
+        field(scope, "configurable"),
+        field(scope, "get"),
+        field(scope, "set"),
+        field(scope, "value"),
+        field(scope, "writable"),
+    );
+    descriptor_with(
+        scope,
+        d,
+        [k_enum, k_conf, k_get, k_set, k_value, k_writable],
+    )
+}
+
+/// [`copy_descriptor`] with the field names made once by the caller:
+/// `enumerable`, `configurable`, `get`, `set`, `value`, `writable`.
+fn descriptor_with<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    d: v8::Local<'s, v8::Object>,
+    [k_enum, k_conf, k_get, k_set, k_value, k_writable]: [v8::Local<'s, v8::Value>; 6],
+) -> v8::PropertyDescriptor {
+    let enumerable = d.get(scope, k_enum).is_some_and(|v| v.is_true());
+    let configurable = d.get(scope, k_conf).is_some_and(|v| v.is_true());
+    let get = d.get(scope, k_get);
+    let set = d.get(scope, k_set);
+    let mut desc = match (get, set) {
+        (Some(g), Some(s)) if g.is_function() || s.is_function() => {
+            v8::PropertyDescriptor::new_from_get_set(g, s)
+        }
+        _ => {
+            let value = d
+                .get(scope, k_value)
+                .unwrap_or_else(|| v8::undefined(scope).into());
+            let writable = d.get(scope, k_writable).is_some_and(|v| v.is_true());
+            v8::PropertyDescriptor::new_from_value_writable(value, writable)
+        }
+    };
+    desc.set_enumerable(enumerable);
+    desc.set_configurable(configurable);
+    desc
+}
+
+/// Move an own property to the end of `obj`'s property order, keeping its
+/// descriptor (delete, then define again). `Ok(false)` if there is none;
+/// an error if it cannot be deleted.
+fn move_to_end<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    obj: v8::Local<'s, v8::Object>,
+    key: v8::Local<'s, v8::Name>,
+) -> Result<bool, JsError> {
+    let Some(d) = obj.get_own_property_descriptor(scope, key) else {
+        return Ok(false);
+    };
+    let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
+        return Ok(false);
+    };
+    let desc = copy_descriptor(scope, d);
+    if obj.delete(scope, key.into()) != Some(true) {
+        return Err(JsError::host(format!(
+            "cannot move {} to the end",
+            key.to_rust_string_lossy(scope)
+        )));
+    }
+    obj.define_property(scope, key, &desc);
+    Ok(true)
+}
+
+/// Define interface object `id` as a lazy data property of `obj` (as
+/// Blink does for the global's interface objects): it looks and behaves
+/// like a plain data property; the object is made on first read.
+fn define_lazy_interface<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    obj: v8::Local<'s, v8::Object>,
+    key: v8::Local<'s, v8::Name>,
+    id: InterfaceId,
+    attrs: PropAttrs,
+) {
+    let data = v8::Integer::new_from_unsigned(scope, id.0);
+    obj.set_lazy_data_property_with_data(
+        scope,
+        key,
+        lazy_interface_getter,
+        data.into(),
+        v8_attrs(attrs, false),
+        v8::SideEffectType::HasNoSideEffect,
+        v8::SideEffectType::HasSideEffectToReceiver,
+    );
+}
+
+/// Move the global interface's `reorder_last` keys to the end of
+/// `global`, in order (a global from the snapshot). Interface objects
+/// among them stay lazy.
+fn reorder_last<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    iface: InterfaceId,
+    global: v8::Local<'s, v8::Object>,
+) -> Result<(), JsError> {
+    let keys = state
+        .borrow()
+        .entry(iface)
+        .map(|e| e.reorder_last.clone())
+        .unwrap_or_default();
+    move_globals_last(scope, state, iface, global, &keys)
+}
+
+/// Move own properties of a global made from `iface` to the end, in the
+/// order of `keys` (absent ones are skipped; one that cannot be deleted
+/// is an error, as `delete` in strict code). The global's interface
+/// objects are defined again as lazy properties instead of being read.
+fn move_globals_last<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    iface: InterfaceId,
+    global: v8::Local<'s, v8::Object>,
+    keys: &[PropKey],
+) -> Result<(), JsError> {
+    let plan: Vec<Option<(InterfaceId, PropAttrs)>> = {
+        let st = state.borrow();
+        let lazy: HashMap<&PropKey, (InterfaceId, PropAttrs)> = st
+            .entry(iface)
+            .map(|entry| {
+                entry
+                    .overflow
+                    .items
+                    .iter()
+                    .filter_map(|i| match i {
+                        OverflowItem::Interface { key, id, attrs } => Some((key, (*id, *attrs))),
+                        OverflowItem::Chunk { .. } => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        keys.iter().map(|k| lazy.get(k).copied()).collect()
+    };
+    for (key, lazy) in keys.iter().zip(plan) {
+        let k = v8_key(scope, key);
+        match lazy {
+            Some((id, attrs)) => {
+                if global.has_own_property(scope, k) != Some(true) {
+                    continue;
+                }
+                if global.delete(scope, k.into()) != Some(true) {
+                    return Err(JsError::host("cannot move an interface object"));
+                }
+                define_lazy_interface(scope, global, k, id, attrs);
+            }
+            None => {
+                move_to_end(scope, global, k)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Getter of the global's lazy interface-object properties: makes the
+/// interface object in the global's own realm (also when read from
+/// another realm, e.g. a frame's `contentWindow.Node`). V8 then replaces
+/// the property with a plain data property holding the value.
+fn lazy_interface_getter<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    _key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let state = shared_state(scope);
+    let id = InterfaceId(callback_index(scope, args.data()) as u32);
+    let Some(ctx) = args.holder().get_creation_context(scope) else {
+        return;
+    };
+    let creating = state.borrow().creating.clone();
+    let mat = match creating {
+        Some(m) => m,
+        None => {
+            let live = realm_of_context(scope, ctx).and_then(|r| state.borrow().mat(r));
+            let mat = live.or_else(|| {
+                let st = state.borrow();
+                st.detached
+                    .iter()
+                    .find(|(w, _)| w.to_local(scope) == Some(ctx))
+                    .map(|(_, m)| m.clone())
+            });
+            let Some(m) = mat else {
+                return;
+            };
+            m
+        }
+    };
+    let scope = &mut v8::ContextScope::new(scope, ctx);
+    if let Some(f) = interface_object(scope, &state, &mat, id) {
+        rv.set(f.into());
+    }
 }
 
 /// Whether `realm` was deserialized from the snapshot context.
@@ -1796,9 +2374,16 @@ fn is_snapshot_realm(state: &SharedState, realm: RealmId) -> bool {
         .is_some_and(|r| r.from_snapshot)
 }
 
-fn drop_realm_state(state: &SharedState, realm: RealmId) {
+fn drop_realm_state(isolate: &mut v8::Isolate, state: &SharedState, realm: RealmId) {
     let mut st = state.borrow_mut();
-    st.realms.remove(&realm);
+    if let Some(entry) = st.realms.remove(&realm) {
+        // Scripts may still hold the realm's global (a removed frame's
+        // `contentWindow`): its lazy interface objects must still be made
+        // with this realm's fixups. Kept until the context is collected.
+        st.detached.retain(|(w, _)| !w.is_empty());
+        let weak = v8::Weak::new(isolate, &entry.context);
+        st.detached.push((weak, entry.mat));
+    }
     st.realm_by_global.retain(|_, ids| {
         ids.retain(|r| *r != realm);
         !ids.is_empty()
@@ -2749,7 +3334,7 @@ fn install_member<'s>(
     m: &Member,
     methods: &mut Vec<(PropKey, v8::Local<'s, v8::FunctionTemplate>)>,
     this_iface: (InterfaceId, v8::Local<'s, v8::FunctionTemplate>),
-) {
+) -> Option<Made<'s>> {
     let key = v8_key(scope, &m.key);
     let template: &v8::Template = match &target {
         Target::Function(ft) => ft,
@@ -2761,13 +3346,14 @@ fn install_member<'s>(
             let ft = function_template(scope, st, f, *length, &name, signature);
             template.set_with_attr(key, ft.into(), v8_attrs(m.attrs, false));
             methods.push((m.key.clone(), ft));
+            Some(Made::Method(ft))
         }
         MemberKind::Alias(of) => {
             // A function template is instantiated once per context, so the
             // same template under two keys gives the same function object.
-            if let Some((_, ft)) = methods.iter().find(|(k, _)| k == of) {
-                template.set_with_attr(key, (*ft).into(), v8_attrs(m.attrs, false));
-            }
+            let (_, ft) = *methods.iter().find(|(k, _)| k == of)?;
+            template.set_with_attr(key, ft.into(), v8_attrs(m.attrs, false));
+            Some(Made::Method(ft))
         }
         MemberKind::Namespace {
             to_string_tag,
@@ -2794,6 +3380,7 @@ fn install_member<'s>(
                 v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
             );
             template.set_with_attr(key, ot.into(), v8_attrs(m.attrs, false));
+            None
         }
         MemberKind::Accessor { get, set } => {
             let getter = get.as_ref().map(|f| {
@@ -2805,13 +3392,14 @@ fn install_member<'s>(
                 function_template(scope, st, f, 1, &name, signature)
             });
             if getter.is_none() && setter.is_none() {
-                return;
+                return None;
             }
             let attrs = v8_attrs(m.attrs, true);
             match target {
                 Target::Function(ft) => ft.set_accessor_property(key, getter, setter, attrs),
                 Target::Object(ot) => ot.set_accessor_property(key, getter, setter, attrs),
             }
+            Some(Made::Accessor(getter, setter))
         }
         MemberKind::Value(v) => {
             let value: v8::Local<v8::Data> = match v {
@@ -2824,16 +3412,19 @@ fn install_member<'s>(
                 }
             };
             template.set_with_attr(key, value, v8_attrs(m.attrs, false));
+            Some(Made::Value)
         }
         MemberKind::Interface(id) if *id == this_iface.0 => {
             // The interface being defined (the global's own interface object).
             template.set_with_attr(key, this_iface.1.into(), v8_attrs(m.attrs, false));
+            None
         }
         MemberKind::Interface(id) => {
-            if let Some(entry) = st.interfaces.get(id.0 as usize) {
+            if let Some(entry) = st.entry(*id) {
                 let ft = v8::Local::new(scope, &entry.template);
                 template.set_with_attr(key, ft.into(), v8_attrs(m.attrs, false));
             }
+            None
         }
         MemberKind::Intrinsic(which) => {
             let intrinsic = match which {
@@ -2843,6 +3434,7 @@ fn install_member<'s>(
                 Intrinsic::ArrayProtoValues => v8::Intrinsic::ArrayProtoValues,
             };
             template.set_intrinsic_data_property(key, intrinsic, v8_attrs(m.attrs, false));
+            None
         }
     }
 }
@@ -2850,6 +3442,18 @@ fn install_member<'s>(
 // ---------------------------------------------------------------------------
 // Values, handles, wrappers
 // ---------------------------------------------------------------------------
+
+/// A primitive [`JsValue`] as a V8 value (`Json` and `Opaque` as strings,
+/// as on templates).
+fn js_to_v8<'s>(scope: &v8::PinScope<'s, '_, ()>, v: &JsValue) -> v8::Local<'s, v8::Value> {
+    match v {
+        JsValue::Undefined => v8::undefined(scope).into(),
+        JsValue::Null => v8::null(scope).into(),
+        JsValue::Bool(b) => v8::Boolean::new(scope, *b).into(),
+        JsValue::Number(n) => v8::Number::new(scope, *n).into(),
+        JsValue::String(s) | JsValue::Json(s) | JsValue::Opaque(s) => v8_str(scope, s).into(),
+    }
+}
 
 fn v8_str<'s>(scope: &v8::PinScope<'s, '_, ()>, s: &str) -> v8::Local<'s, v8::String> {
     // Only fails above V8's max string length (~512 MB).
@@ -2961,17 +3565,20 @@ fn wrap_host<'s>(
     iface: InterfaceId,
     host: HostRef,
 ) -> Result<v8::Local<'s, v8::Object>, JsError> {
-    let ft = {
+    let mat = {
         let st = state.borrow();
         if let Some(g) = st.wrappers.get(&(realm, host)) {
             return Ok(v8::Local::new(scope, g));
         }
-        let entry = st
-            .interfaces
-            .get(iface.0 as usize)
-            .ok_or_else(|| JsError::host(format!("unknown interface {iface:?}")))?;
-        v8::Local::new(scope, &entry.template)
+        st.mat(realm)
     };
+    // The interface object first, so the wrapper's prototype chain is the
+    // realm's fixed one.
+    if let Some(mat) = &mat {
+        interface_object(scope, state, mat, iface);
+    }
+    let ft = ensure_template(scope, state, iface)
+        .ok_or_else(|| JsError::host(format!("unknown interface {iface:?}")))?;
     let obj = ft
         .instance_template(scope)
         .new_instance(scope)
@@ -2991,99 +3598,157 @@ fn apply_overflow<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &SharedState,
     iface: InterfaceId,
-    obj: v8::Local<'_, v8::Object>,
+    obj: v8::Local<'s, v8::Object>,
 ) {
-    enum Item<'s> {
-        Interface(PropKey, v8::Local<'s, v8::FunctionTemplate>, PropAttrs),
-        Chunk(PropKey, usize),
+    let _ = apply_overflow_with(scope, state, iface, obj, &[]);
+}
+
+/// [`apply_overflow`], with the keys of `last` put at the end, in that
+/// order: members among them are skipped in member order and defined
+/// there, other existing own properties (engine built-ins) are moved
+/// there. The same result as defining everything and then moving `last`,
+/// without defining twice.
+fn apply_overflow_with<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &SharedState,
+    iface: InterfaceId,
+    obj: v8::Local<'s, v8::Object>,
+    last: &[PropKey],
+) -> Result<(), JsError> {
+    /// [`Direct`] with local handles.
+    enum DirectL<'s> {
+        Method(v8::Local<'s, v8::FunctionTemplate>, PropAttrs),
+        Accessor(
+            Option<v8::Local<'s, v8::FunctionTemplate>>,
+            Option<v8::Local<'s, v8::FunctionTemplate>>,
+            PropAttrs,
+        ),
+        Value(JsValue, PropAttrs),
     }
-    let (chunks, items): (Vec<v8::Local<'s, v8::ObjectTemplate>>, Vec<Item<'s>>) = {
+    #[allow(clippy::type_complexity)]
+    let (chunks, items, direct): (
+        Vec<v8::Local<'s, v8::ObjectTemplate>>,
+        Vec<OverflowItem>,
+        Vec<Option<DirectL<'s>>>,
+    ) = {
         let st = state.borrow();
-        let Some(entry) = st.interfaces.get(iface.0 as usize) else {
-            return;
+        let Some(entry) = st.entry(iface) else {
+            return Ok(());
         };
         let o = &entry.overflow;
         let chunks = o.chunks.iter().map(|t| v8::Local::new(scope, t)).collect();
-        let items = o
-            .items
+        let l = |g: &v8::Global<v8::FunctionTemplate>| v8::Local::new(scope, g);
+        let direct = o
+            .direct
             .iter()
-            .filter_map(|item| match item {
-                OverflowItem::Interface { key, id, attrs } => {
-                    let e = st.interfaces.get(id.0 as usize)?;
-                    Some(Item::Interface(
-                        key.clone(),
-                        v8::Local::new(scope, &e.template),
-                        *attrs,
-                    ))
-                }
-                OverflowItem::Chunk { key, chunk } => Some(Item::Chunk(key.clone(), *chunk)),
+            .map(|d| {
+                Some(match d.as_ref()? {
+                    Direct::Method(ft, a) => DirectL::Method(l(ft), *a),
+                    Direct::Accessor(g, s, a) => {
+                        DirectL::Accessor(g.as_ref().map(l), s.as_ref().map(l), *a)
+                    }
+                    Direct::Value(v, a) => DirectL::Value(v.clone(), *a),
+                })
             })
             .collect();
-        (chunks, items)
+        (chunks, o.items.clone(), direct)
     };
-    if items.is_empty() {
-        return;
-    }
     let field = |scope: &mut v8::PinScope<'s, '_>, name: &str| -> v8::Local<'s, v8::Value> {
         v8_str(scope, name).into()
     };
-    let (k_enum, k_conf, k_get, k_set, k_value, k_writable) = (
+    let fields = [
         field(scope, "enumerable"),
         field(scope, "configurable"),
         field(scope, "get"),
         field(scope, "set"),
         field(scope, "value"),
         field(scope, "writable"),
-    );
+    ];
+    let item_key = |item: &OverflowItem| match item {
+        OverflowItem::Interface { key, .. } | OverflowItem::Chunk { key, .. } => key.clone(),
+    };
+    let deferred: HashMap<PropKey, usize> = if last.is_empty() {
+        HashMap::new()
+    } else {
+        let wanted: std::collections::HashSet<&PropKey> = last.iter().collect();
+        items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| wanted.contains(&item_key(it)))
+            .map(|(i, it)| (item_key(it), i))
+            .collect()
+    };
     let mut tmps: Vec<Option<v8::Local<'s, v8::Object>>> = vec![None; chunks.len()];
-    for item in items {
-        match item {
-            Item::Interface(key, ft, attrs) => {
-                let k = v8_key(scope, &key);
-                if let Some(f) = ft.get_function(scope) {
-                    obj.define_own_property(scope, k, f.into(), v8_attrs(attrs, false));
+    let mut define = |scope: &mut v8::PinScope<'s, '_>, i: usize| match &items[i] {
+        OverflowItem::Interface { key, id, attrs } => {
+            let k = v8_key(scope, key);
+            define_lazy_interface(scope, obj, k, *id, *attrs);
+        }
+        OverflowItem::Chunk { key, .. } if direct.get(i).is_some_and(Option::is_some) => {
+            let k = v8_key(scope, key);
+            match &direct[i] {
+                Some(DirectL::Method(ft, a)) => {
+                    if let Some(f) = ft.get_function(scope) {
+                        obj.define_own_property(scope, k, f.into(), v8_attrs(*a, false));
+                    }
                 }
+                Some(DirectL::Accessor(g, s, a)) => {
+                    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+                    let get = g
+                        .and_then(|ft| ft.get_function(scope))
+                        .map_or(undefined, Into::into);
+                    let set = s
+                        .and_then(|ft| ft.get_function(scope))
+                        .map_or(undefined, Into::into);
+                    let mut desc = v8::PropertyDescriptor::new_from_get_set(get, set);
+                    desc.set_enumerable(a.enumerable);
+                    desc.set_configurable(a.configurable);
+                    obj.define_property(scope, k, &desc);
+                }
+                Some(DirectL::Value(v, a)) => {
+                    let value = js_to_v8(scope, v);
+                    obj.define_own_property(scope, k, value, v8_attrs(*a, false));
+                }
+                None => {}
             }
-            Item::Chunk(key, chunk) => {
-                let tmp = match tmps[chunk] {
-                    Some(t) => t,
-                    None => {
-                        let Some(t) = chunks[chunk].new_instance(scope) else {
-                            continue;
-                        };
-                        tmps[chunk] = Some(t);
-                        t
-                    }
-                };
-                let k = v8_key(scope, &key);
-                let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
-                    continue;
-                };
-                let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
-                    continue;
-                };
-                let enumerable = d.get(scope, k_enum).is_some_and(|v| v.is_true());
-                let configurable = d.get(scope, k_conf).is_some_and(|v| v.is_true());
-                let get = d.get(scope, k_get);
-                let set = d.get(scope, k_set);
-                let mut desc = match (get, set) {
-                    (Some(g), Some(s)) if g.is_function() || s.is_function() => {
-                        v8::PropertyDescriptor::new_from_get_set(g, s)
-                    }
-                    _ => {
-                        let value = d
-                            .get(scope, k_value)
-                            .unwrap_or_else(|| v8::undefined(scope).into());
-                        let writable = d.get(scope, k_writable).is_some_and(|v| v.is_true());
-                        v8::PropertyDescriptor::new_from_value_writable(value, writable)
-                    }
-                };
-                desc.set_enumerable(enumerable);
-                desc.set_configurable(configurable);
-                obj.define_property(scope, k, &desc);
+        }
+        OverflowItem::Chunk { key, chunk } => {
+            let tmp = match tmps[*chunk] {
+                Some(t) => t,
+                None => {
+                    let Some(t) = chunks[*chunk].new_instance(scope) else {
+                        return;
+                    };
+                    tmps[*chunk] = Some(t);
+                    t
+                }
+            };
+            let k = v8_key(scope, key);
+            let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
+                return;
+            };
+            let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
+                return;
+            };
+            let desc = descriptor_with(scope, d, fields);
+            obj.define_property(scope, k, &desc);
+        }
+    };
+    for (i, item) in items.iter().enumerate() {
+        if deferred.is_empty() || deferred.get(&item_key(item)) != Some(&i) {
+            define(scope, i);
+        }
+    }
+    for key in last {
+        match deferred.get(key) {
+            Some(&i) => define(scope, i),
+            None => {
+                let k = v8_key(scope, key);
+                move_to_end(scope, obj, k)?;
             }
         }
     }
+    Ok(())
 }
 
 fn arg_to_v8<'s>(
@@ -3107,15 +3772,12 @@ fn arg_to_v8<'s>(
             .map_err(|e| HostError::Error(e.message))?
             .into(),
         Arg::Construct(iface, args) => {
-            let ft = {
-                let st = state.borrow();
-                let entry = st
-                    .interfaces
-                    .get(iface.0 as usize)
-                    .ok_or_else(|| HostError::Error(format!("unknown interface {iface:?}")))?;
-                v8::Local::new(scope, &entry.template)
-            };
-            let f = ft.get_function(scope).ok_or(HostError::Thrown)?;
+            let mat = state.borrow().mat(realm);
+            let f = match &mat {
+                Some(mat) => interface_object(scope, state, mat, *iface),
+                None => ensure_template(scope, state, *iface).and_then(|ft| ft.get_function(scope)),
+            }
+            .ok_or_else(|| HostError::Error(format!("unknown interface {iface:?}")))?;
             let mut argv = Vec::with_capacity(args.len());
             for a in args {
                 argv.push(arg_to_v8(scope, state, realm, a)?);

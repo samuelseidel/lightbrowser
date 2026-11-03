@@ -379,6 +379,30 @@ impl Page {
         ctx: BrowserContext,
         setup: Option<PageSetup>,
     ) -> Result<Page, PageError> {
+        let page = Self::start(worker, id, ctx, setup, false).await?;
+        // Start on about:blank so scripts can be evaluated right away.
+        page.navigate("about:blank").await?;
+        Ok(page)
+    }
+
+    /// A page with no document yet (see `Browser::new_page_to_load`): its
+    /// history holds the entry of the about:blank document it skips (an
+    /// about:blank window has one), which the first navigation keeps.
+    pub(crate) async fn open_unstarted(
+        worker: WorkerHandle,
+        id: u64,
+        ctx: BrowserContext,
+    ) -> Result<Page, PageError> {
+        Self::start(worker, id, ctx, None, true).await
+    }
+
+    async fn start(
+        worker: WorkerHandle,
+        id: u64,
+        ctx: BrowserContext,
+        setup: Option<PageSetup>,
+        skip_blank: bool,
+    ) -> Result<Page, PageError> {
         let (tx, rx) = oneshot::channel();
         let c2 = ctx.clone();
         worker.send(Box::new(move |ws| {
@@ -398,7 +422,7 @@ impl Page {
                     closed: Cell::new(false),
                     loading: Cell::new(false),
                     idle_since: Cell::new(None),
-                    history_len: Cell::new(0),
+                    history_len: Cell::new(u32::from(skip_blank)),
                     turn: Rc::new(Notify::new()),
                     cdp: RefCell::new(None),
                 });
@@ -412,15 +436,12 @@ impl Page {
             let _ = tx.send(r);
         }))?;
         let life = rx.await.map_err(|_| PageError::Closed)??;
-        let page = Page {
+        Ok(Page {
             worker,
             id,
             life,
             ctx,
-        };
-        // Start on about:blank so scripts can be evaluated right away.
-        page.navigate("about:blank").await?;
-        Ok(page)
+        })
     }
 
     /// The page id (unique in its browser).

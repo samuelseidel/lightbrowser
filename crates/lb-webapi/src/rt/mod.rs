@@ -91,7 +91,7 @@ pub use chrome::LoadInfo;
 pub use events::{EventData, EventExtra, fire_event, fire_event_with};
 pub use image::load_visible_lazy_images;
 pub use script::ScriptKind;
-pub(crate) use webgl::extension_specs;
+pub(crate) use webgl::{extension_names, extension_spec};
 
 /// Host ref kind of DOM nodes (`kind = K_NODE | document_slot << 8`).
 pub const K_NODE: u32 = 1;
@@ -404,34 +404,12 @@ impl Runtime {
 /// `HTMLScriptElement.textContent`, `HTMLElement.innerText` ...): such a
 /// member without its own implementation uses the nearest ancestor's.
 fn inherit_redeclared(reg: &mut Registry) {
-    use crate::registry::ImplKind;
-    let table = &crate::generated::chromium::TABLE;
     // (interface, member) pairs that must not inherit (different meaning).
     const KEEP: &[(&str, &str)] = &[
         ("HTMLSelectElement", "remove"),
         ("HTMLOptionsCollection", "remove"),
     ];
-    for d in table.interfaces {
-        let members: Vec<(&'static str, ImplKind)> = d
-            .attributes
-            .iter()
-            .flat_map(|a| [(a.name, ImplKind::Getter), (a.name, ImplKind::Setter)])
-            .chain(d.operations.iter().map(|o| (o.name, ImplKind::Method)))
-            .collect();
-        for (name, kind) in members {
-            if reg.get(d.name, name, kind).is_some() || KEEP.contains(&(d.name, name)) {
-                continue;
-            }
-            let mut parent = d.parent;
-            while let Some(p) = parent {
-                if let Some(f) = reg.get(p, name, kind).cloned() {
-                    reg.register(d.name, name, kind, f);
-                    break;
-                }
-                parent = table.interface(p).and_then(|i| i.parent);
-            }
-        }
-    }
+    reg.inherit_redeclared(&crate::generated::chromium::TABLE, KEEP);
 }
 
 // ---------------------------------------------------------------------------
@@ -783,6 +761,8 @@ impl Window {
                 module_loader: Some(loader),
                 insecure,
                 os_apis: self.profile.as_deref().map(PersonaProfile::os_apis),
+                // `setup_realm` defines `window.chrome`.
+                host_slots: true,
             },
         )?;
         self.realm.set(realm);
@@ -808,6 +788,7 @@ impl Window {
                 module_loader: None,
                 insecure: !is_secure_url(&frames::effective_url(self)),
                 os_apis: self.profile.as_deref().map(PersonaProfile::os_apis),
+                host_slots: false,
             },
         )?;
         self.rt.attach(realm, self.clone());

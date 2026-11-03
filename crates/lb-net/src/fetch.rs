@@ -144,6 +144,17 @@ pub struct NetContext {
 
 impl NetContext {
     pub fn new(persona: Arc<Persona>, profile: Arc<ClientHelloProfile>) -> Result<Self, NetError> {
+        let header_profile = HeaderProfile::builtin(persona.family).map(Arc::new);
+        Self::with_header_profile(persona, profile, header_profile)
+    }
+
+    /// Like [`NetContext::new`] with the header profile given (contexts of
+    /// one browser context share the parsed built-in one).
+    pub fn with_header_profile(
+        persona: Arc<Persona>,
+        profile: Arc<ClientHelloProfile>,
+        header_profile: Option<Arc<HeaderProfile>>,
+    ) -> Result<Self, NetError> {
         if let Some(fam) = profile.family()
             && fam != persona.family
         {
@@ -152,7 +163,6 @@ impl NetContext {
                 profile: profile.profile_id.clone(),
             });
         }
-        let header_profile = HeaderProfile::builtin(persona.family).map(Arc::new);
         Ok(Self {
             persona,
             profile,

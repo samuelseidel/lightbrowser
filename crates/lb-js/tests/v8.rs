@@ -1227,3 +1227,126 @@ mod unused_v8 {
         assert_eq!(v, JsValue::String("4200000,1200000,80000".into()));
     }
 }
+
+/// Interface objects of a global are lazy data properties: they keep their
+/// place and look like plain data properties before and after first use,
+/// are made in the global's own realm, and get the realm's fixups whichever
+/// way they are first reached (global property, wrapper, subclass).
+#[test]
+fn lazy_interface_objects() {
+    let mut e = engine();
+    let node = e.define_interface_lazy(Box::new(|| {
+        InterfaceSpec::new("Node").prototype(vec![
+            Member::method("a", 0, host_fn(|_| Ok(()))),
+            Member::method("late", 0, host_fn(|_| Ok(()))),
+            Member::method("secret", 0, host_fn(|_| Ok(()))),
+        ])
+    }));
+    let element =
+        e.define_interface_lazy(Box::new(move || InterfaceSpec::new("Element").parent(node)));
+    let window = e.define_interface(InterfaceSpec::new("Window").instance(vec![
+        Member::interface("Node", node),
+        Member::method("first", 0, host_fn(|_| Ok(()))),
+        Member::interface("Element", element),
+        Member::method(
+            "makeElement",
+            0,
+            host_fn(move |cx| cx.ret(Arg::Host(element, HostRef::new(NODE_KIND, 1)))),
+        ),
+    ]));
+    let mut fixups = std::collections::HashMap::new();
+    fixups.insert(
+        node,
+        lb_js::InterfaceFixup {
+            proto_late: vec!["late".into()],
+            unscopables: vec!["a".into()],
+            remove_proto: vec!["secret".into()],
+            ..Default::default()
+        },
+    );
+    let fixups: lb_js::InterfaceFixups = Rc::new(fixups);
+    let realm = |e: &mut Engine| {
+        let r = e
+            .new_realm(RealmOptions {
+                fixups: Some(fixups.clone()),
+                ..RealmOptions::with_global(window)
+            })
+            .unwrap();
+        lb_js::RealmOps::set_security_token(e, r, "https://a.test").unwrap();
+        r
+    };
+    let proto = "Object.getOwnPropertyNames(Node.prototype).join()+'|'+Object.keys(Node.prototype[Symbol.unscopables]).join()";
+
+    // Order and descriptors before any use; the same after.
+    let r1 = realm(&mut e);
+    let keys = "Object.getOwnPropertyNames(globalThis).filter(k=>/^(Node|first|Element|makeElement)$/.test(k)).join()";
+    assert_eq!(
+        eval(&mut e, r1, keys),
+        JsValue::String("Node,first,Element,makeElement".into())
+    );
+    let desc = "JSON.stringify(Object.getOwnPropertyDescriptor(globalThis,'Element'),(k,v)=>typeof v==='function'?'fn:'+v.name:v)";
+    assert_eq!(
+        eval(&mut e, r1, desc),
+        JsValue::String(
+            r#"{"value":"fn:Element","writable":true,"enumerable":false,"configurable":true}"#
+                .into()
+        )
+    );
+    assert_eq!(
+        eval(&mut e, r1, keys),
+        JsValue::String("Node,first,Element,makeElement".into())
+    );
+    // Reaching Element made Node first: linked and fixed.
+    assert_eq!(
+        eval(&mut e, r1, "Object.getPrototypeOf(Element) === Node"),
+        JsValue::Bool(true)
+    );
+    assert_eq!(
+        eval(&mut e, r1, proto),
+        JsValue::String("a,constructor,late|a".into())
+    );
+
+    // Through a wrapper first: the same prototype chain and fixups.
+    let r2 = realm(&mut e);
+    assert_eq!(
+        eval(
+            &mut e,
+            r2,
+            "const x = makeElement(); Object.getPrototypeOf(x) === Element.prototype \
+             && Object.getPrototypeOf(Element) === Node && x instanceof Node"
+        ),
+        JsValue::Bool(true)
+    );
+    assert_eq!(
+        eval(&mut e, r2, proto),
+        JsValue::String("a,constructor,late|a".into())
+    );
+
+    // Read from another realm: made in the global's own realm.
+    let r3 = realm(&mut e);
+    let g3 = e.global(r3).unwrap();
+    let g1 = e.global(r1).unwrap();
+    e.set_property(r1, g1, "other", Arg::Handle(g3)).unwrap();
+    assert_eq!(
+        eval(
+            &mut e,
+            r1,
+            "other.Node !== Node && Object.getPrototypeOf(other.Element) === other.Node"
+        ),
+        JsValue::Bool(true)
+    );
+
+    // A dropped realm whose global a script still holds keeps its fixups.
+    let r4 = realm(&mut e);
+    let g4 = e.global(r4).unwrap();
+    e.set_property(r1, g1, "gone", Arg::Handle(g4)).unwrap();
+    e.drop_realm(r4);
+    assert_eq!(
+        eval(
+            &mut e,
+            r1,
+            "Object.getOwnPropertyNames(gone.Node.prototype).join()"
+        ),
+        JsValue::String("a,constructor,late".into())
+    );
+}

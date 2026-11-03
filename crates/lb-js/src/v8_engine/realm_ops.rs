@@ -100,6 +100,57 @@ pub trait RealmOps {
     /// each other's globals (same-origin frames); V8 denies access
     /// between globals whose tokens differ (`TypeError: no access`).
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError>;
+    /// Delete the configurable own string-keyed properties of the realm's
+    /// global whose names `keep` rejects (engine built-ins a browser does
+    /// not expose), as a script doing `delete globalThis[name]` would.
+    /// Returns how many own string keys the global has afterwards. Reads
+    /// no property values, so lazy interface objects stay lazy.
+    fn delete_globals_except(
+        &mut self,
+        realm: RealmId,
+        keep: &dyn Fn(&str) -> bool,
+    ) -> Result<usize, JsError>;
+}
+
+/// Shared body of [`RealmOps::delete_globals_except`].
+fn delete_globals(
+    scope: &mut v8::PinScope<'_, '_>,
+    keep: &dyn Fn(&str) -> bool,
+) -> Result<usize, JsError> {
+    let global = scope.get_current_context().global(scope);
+    let args = v8::GetPropertyNamesArgs {
+        mode: v8::KeyCollectionMode::OwnOnly,
+        property_filter: v8::PropertyFilter::ALL_PROPERTIES | v8::PropertyFilter::SKIP_SYMBOLS,
+        index_filter: v8::IndexFilter::IncludeIndices,
+        key_conversion: v8::KeyConversionMode::ConvertToString,
+    };
+    let names = global
+        .get_own_property_names(scope, args)
+        .ok_or_else(|| JsError::host("global keys"))?;
+    let n = names.length();
+    let k_conf = v8::String::new(scope, "configurable")
+        .ok_or_else(|| JsError::host("string"))?
+        .into();
+    let mut left = n as usize;
+    for i in 0..n {
+        let Some(key) = names.get_index(scope, i) else {
+            continue;
+        };
+        if keep(&key.to_rust_string_lossy(scope)) {
+            continue;
+        }
+        let Ok(name) = v8::Local::<v8::Name>::try_from(key) else {
+            continue;
+        };
+        let configurable = global
+            .get_own_property_descriptor(scope, name)
+            .and_then(|d| v8::Local::<v8::Object>::try_from(d).ok())
+            .is_some_and(|d| d.get(scope, k_conf).is_some_and(|v| v.is_true()));
+        if configurable && global.delete(scope, key) == Some(true) {
+            left -= 1;
+        }
+    }
+    Ok(left)
 }
 
 /// Shared body of [`RealmOps::set_security_token`]: the token is an
@@ -219,6 +270,13 @@ impl RealmOps for Engine {
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError> {
         self.run(realm, |scope, _| set_token(scope, token))
     }
+    fn delete_globals_except(
+        &mut self,
+        realm: RealmId,
+        keep: &dyn Fn(&str) -> bool,
+    ) -> Result<usize, JsError> {
+        self.run(realm, |scope, _| delete_globals(scope, keep))
+    }
 }
 
 impl CallCtx<'_, '_, '_> {
@@ -285,7 +343,7 @@ impl RealmOps for CallCtx<'_, '_, '_> {
         is_snapshot_realm(&self.state, realm)
     }
     fn drop_realm(&mut self, realm: RealmId) {
-        drop_realm_state(&self.state, realm);
+        drop_realm_state(self.scope, &self.state, realm);
     }
     fn evaluate(
         &mut self,
@@ -436,9 +494,7 @@ impl RealmOps for CallCtx<'_, '_, '_> {
         self.function_in(realm, name, length, f, v8::ConstructorBehavior::Allow)
     }
     fn set_time_zone(&mut self, time_zone: &str) -> bool {
-        if v8::icu::get_default_time_zone() != time_zone
-            && !v8::icu::set_default_time_zone(time_zone)
-        {
+        if !set_icu_time_zone(time_zone) {
             return false;
         }
         self.scope
@@ -467,5 +523,12 @@ impl RealmOps for CallCtx<'_, '_, '_> {
     }
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError> {
         self.run_in(realm, |scope, _| set_token(scope, token))
+    }
+    fn delete_globals_except(
+        &mut self,
+        realm: RealmId,
+        keep: &dyn Fn(&str) -> bool,
+    ) -> Result<usize, JsError> {
+        self.run_in(realm, |scope, _| delete_globals(scope, keep))
     }
 }

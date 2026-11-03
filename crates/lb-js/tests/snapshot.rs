@@ -49,7 +49,7 @@ fn blob() -> &'static [u8] {
         let mut e = Engine::snapshot_creator(persona()).unwrap();
         assert_eq!(e.snapshot_status(), SnapshotStatus::Creating);
         let window = define(&mut e, "creator", 1.0);
-        e.create_snapshot(window, INIT).unwrap()
+        e.create_snapshot(window, INIT, None).unwrap()
     })
 }
 
@@ -64,7 +64,7 @@ fn restored_realms_use_runtime_callbacks() {
     let mut e = Engine::with_snapshot(persona(), EngineOptions::default(), blob).unwrap();
     // The closures are the restoring engine's, not the creator's.
     let window = define(&mut e, "runtime", 1.0);
-    assert!(e.use_snapshot_context(window, INIT));
+    assert!(e.use_snapshot_context(window, INIT, None));
     assert_eq!(
         e.snapshot_status(),
         SnapshotStatus::Restored {
@@ -124,7 +124,7 @@ fn diverging_spec_builds_normally() {
     let mut e = Engine::with_snapshot(persona(), EngineOptions::default(), blob).unwrap();
     // Same shape, different constant: Window diverges.
     let window = define(&mut e, "runtime", 2.0);
-    assert!(!e.use_snapshot_context(window, INIT));
+    assert!(!e.use_snapshot_context(window, INIT, None));
     assert_eq!(
         e.snapshot_status(),
         SnapshotStatus::Restored {
@@ -154,7 +154,7 @@ fn other_init_script_skips_snapshot_context() {
     let blob = blob();
     let mut e = Engine::with_snapshot(persona(), EngineOptions::default(), blob).unwrap();
     let window = define(&mut e, "runtime", 1.0);
-    assert!(!e.use_snapshot_context(window, "other()"));
+    assert!(!e.use_snapshot_context(window, "other()", None));
     let r = e.new_realm(RealmOptions::with_global(window)).unwrap();
     assert!(!e.is_snapshot_realm(r));
 }
@@ -164,7 +164,7 @@ fn creator_only_api() {
     blob();
     let e = Engine::new(persona(), EngineOptions::default()).unwrap();
     assert_eq!(e.snapshot_status(), SnapshotStatus::None);
-    assert!(e.create_snapshot(InterfaceId(0), "").is_err());
+    assert!(e.create_snapshot(InterfaceId(0), "", None).is_err());
 }
 
 #[test]
