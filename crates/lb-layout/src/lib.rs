@@ -30,7 +30,7 @@ mod tree;
 
 pub use ax::{AxNode, AxStates, AxTree, Checked};
 pub use display::{DisplayItem, DisplayKind, DisplayList, DisplayStep, TextLine};
-pub use engine::{BoxModel, LayoutEngine, LayoutStats, Rect, ScrollAlign};
+pub use engine::{BoxModel, LayoutBase, LayoutEngine, LayoutStats, Rect, ScrollAlign};
 pub use fonts::{
     FontAvailability, FontDb, FontFace, FontFamily, LineMetrics, TextFont, bundled_table_count,
     resolve_font,

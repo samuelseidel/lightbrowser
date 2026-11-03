@@ -481,7 +481,9 @@ impl PageHost for CdpHost {
                 .frame_of(&frame)
                 .and_then(|id| lb_webapi::rt::frames::find(&top, id))
                 .ok_or_else(|| HostError::new("No frame for given id found"))?;
-            agent.create_world(ws, &w, &name)
+            // Reported now, made on first use (nothing runs in it before).
+            let _ = ws;
+            Ok(agent.announce_world(&w, &name))
         })
         .map_err(page_err)?
     }
@@ -518,11 +520,14 @@ impl PageHost for CdpHost {
                 let realm = match &world {
                     None => Some(w.realm()),
                     Some(n) => {
-                        a.st.borrow()
-                            .worlds
-                            .iter()
-                            .find(|x| x.frame == 0 && x.name.as_deref() == Some(n))
-                            .map(|x| x.realm)
+                        let ctx =
+                            a.st.borrow()
+                                .worlds
+                                .iter()
+                                .find(|x| x.frame == 0 && x.name.as_deref() == Some(n))
+                                .map(|x| x.id);
+                        ctx.and_then(|c| ws.with_engine(|e| a.world_realm(e, &w, c).ok()))
+                            .flatten()
                     }
                 };
                 if let Some(realm) = realm {
@@ -656,8 +661,9 @@ impl PageHost for CdpHost {
                     (BindingScope::World(n), Some(x)) => n == x,
                     (BindingScope::Context(id), Some(_)) => *id == w.id,
                 };
-                if hit {
-                    a.install_binding(ws, w.realm, w.id, &name);
+                // Worlds not made yet get their bindings when they are.
+                if hit && let Some(realm) = w.realm {
+                    a.install_binding(ws, realm, w.id, &name);
                 }
             }
         })

@@ -25,7 +25,6 @@ lb-paint = { path = "../lb-paint", optional = true }
 lb-css = { path = "../lb-css", optional = true }
 lb-behavior = { path = "../lb-behavior" }
 serde_json = "1"
-libc = "0.2"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 url = "2"
 http = "1"
@@ -35,4 +34,3 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
-libc = "0.2"

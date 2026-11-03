@@ -998,6 +998,40 @@ fn realm_ops_inside_a_callback() {
     assert_eq!(v, JsValue::String("TypeError".into()));
 }
 
+// Large scripts compiled again come from a V8 code cache (run_script):
+// results, function source and error positions are the same each time.
+#[test]
+fn code_cached_scripts_behave_the_same() {
+    let mut e = engine();
+    // > 16 KB, with a lazily compiled function and a late error position.
+    let filler = "// padding line for the code cache threshold\n".repeat(400);
+    let src = format!(
+        "{filler}function f(a) {{ return a * 2 + {}; }}\n\
+         var out = [f(20), String(f).length, typeof g];\n\
+         try {{ null.x }} catch (err) {{ out.push(String(err.stack).split('\\n')[1].trim()) }}\n\
+         JSON.stringify(out)",
+        2
+    );
+    assert!(src.len() > 16 * 1024);
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        let r = plain_realm(&mut e);
+        seen.push(
+            e.evaluate(r, &src, ScriptOrigin::new("https://a.test/big.js"))
+                .unwrap(),
+        );
+        e.drop_realm(r);
+    }
+    assert!(seen.windows(2).all(|w| w[0] == w[1]), "{seen:?}");
+    match &seen[0] {
+        JsValue::String(s) => {
+            assert!(s.starts_with("[42,"), "{s}");
+            assert!(s.ends_with("big.js:403:12\"]"), "{s}");
+        }
+        v => panic!("{v:?}"),
+    }
+}
+
 // ICU data shipped compressed (ADR 0013): the prebuilt V8 archive's data,
 // byte for byte, and ICU uses it.
 mod icu_data {
@@ -1023,13 +1057,73 @@ mod icu_data {
         );
         assert!(
             data == &expected[..],
-            "icu/icudt78.dat.zst is stale; run `cargo run --release -p lb-js --example icu_pack`"
+            "icu/icudt78.dat.zch is stale; run `cargo run --release -p lb-js --example icu_pack`"
         );
         assert_eq!(
             data.as_ptr() as usize % 16,
             0,
             "ICU wants 16-byte alignment"
         );
+    }
+
+    // Lazy paging (Linux): chunks read from many threads at once, in a
+    // scattered order, match the eager decompression byte for byte.
+    #[test]
+    fn lazy_chunks_match_from_many_threads() {
+        let data = icu_data::data();
+        let eager = icu_data::decompress_all();
+        // SAFETY: the box holds at least data.len() initialised bytes.
+        let eager = unsafe { std::slice::from_raw_parts(eager.as_ptr().cast::<u8>(), data.len()) };
+        #[cfg(target_os = "linux")]
+        assert!(
+            icu_data::resident_chunks().is_some(),
+            "lazy ICU paging is off"
+        );
+        let chunks = data.len().div_ceil(icu_data::CHUNK);
+        std::thread::scope(|s| {
+            for t in 0..8 {
+                s.spawn(move || {
+                    for k in 0..chunks {
+                        let i = (k * 7 + t * 13) % chunks;
+                        let at = i * icu_data::CHUNK
+                            + (t * 4099) % icu_data::CHUNK.min(data.len() - i * icu_data::CHUNK);
+                        assert_eq!(data[at], eager[at], "byte {at}");
+                    }
+                });
+            }
+        });
+        assert!(data == eager);
+        #[cfg(target_os = "linux")]
+        assert_eq!(icu_data::resident_chunks(), Some(chunks));
+    }
+
+    // A fault outside the ICU data is still a crash (the handler passes it
+    // on): run in a child process.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn other_faults_still_crash() {
+        if std::env::var_os("LB_ICU_CRASH_CHILD").is_some() {
+            let _ = icu_data::data();
+            // SAFETY: deliberately invalid; this child process must die.
+            unsafe { std::ptr::read_volatile(8usize as *const u8) };
+            std::process::exit(0);
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "icu_data::other_faults_still_crash",
+                "--nocapture",
+            ])
+            .env("LB_ICU_CRASH_CHILD", "1")
+            .output()
+            .unwrap();
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(out.status.signal(), Some(libc_sigsegv()), "{out:?}");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn libc_sigsegv() -> i32 {
+        11
     }
 
     #[test]

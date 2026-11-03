@@ -646,10 +646,62 @@ enum Callback {
 struct IfaceEntry {
     template: v8::Global<v8::FunctionTemplate>,
     parent: Option<InterfaceId>,
-    /// Instance members not on the instance template, in chunks of at
-    /// most [`OVERFLOW_CHUNK`], copied onto each instance after it is
-    /// created, in order (see `apply_overflow`).
-    overflow: Vec<(v8::Global<v8::ObjectTemplate>, Vec<PropKey>)>,
+    /// Instance members not on the instance template, defined on each
+    /// instance after it is created, in order (see `apply_overflow`).
+    overflow: Overflow,
+}
+
+/// Instance members defined after creation: interface objects directly
+/// from their function templates, the others copied from chunk templates
+/// of at most [`OVERFLOW_CHUNK`]. Direct definition also keeps each
+/// interface object's own name: V8 names a template function after the
+/// first property it is instantiated for, and a `[LegacyWindowAlias]`
+/// (`webkitURL`) comes before its interface (`URL`) on the global; as in
+/// Chrome, `webkitURL.name` is "URL".
+#[derive(Default)]
+struct Overflow {
+    chunks: Vec<v8::Global<v8::ObjectTemplate>>,
+    items: Vec<OverflowItem>,
+}
+
+#[derive(Clone)]
+enum OverflowItem {
+    Interface {
+        key: PropKey,
+        id: InterfaceId,
+        attrs: PropAttrs,
+    },
+    Chunk {
+        key: PropKey,
+        chunk: usize,
+    },
+}
+
+/// Split overflow `members` into direct interface items and chunks of the
+/// rest (whose members the caller installs on one template per chunk).
+fn overflow_plan(members: &[Member]) -> (Vec<OverflowItem>, Vec<Vec<&Member>>) {
+    let mut items = Vec::with_capacity(members.len());
+    let mut chunks: Vec<Vec<&Member>> = Vec::new();
+    for m in members {
+        if let MemberKind::Interface(id) = m.kind {
+            items.push(OverflowItem::Interface {
+                key: m.key.clone(),
+                id,
+                attrs: m.attrs,
+            });
+            continue;
+        }
+        if chunks.last().is_none_or(|c| c.len() >= OVERFLOW_CHUNK) {
+            chunks.push(Vec::new());
+        }
+        let chunk = chunks.len() - 1;
+        chunks[chunk].push(m);
+        items.push(OverflowItem::Chunk {
+            key: m.key.clone(),
+            chunk,
+        });
+    }
+    (items, chunks)
 }
 
 /// Interfaces with more instance members than this (the window global,
@@ -662,7 +714,9 @@ struct IfaceEntry {
 /// crashes (`PushStackTraceAndDie` in the load IC) past ~1020 properties
 /// with accessors (the descriptor limit of a fast-mode map). The global
 /// object itself is a dictionary, so defining the members on it after
-/// creation is linear; small chunks keep each temporary object cheap.
+/// creation is linear; small chunks keep each temporary object cheap (V8
+/// keeps the first instance of each template per context, so interface
+/// objects, most of the global's members, skip the templates).
 const MAX_TEMPLATE_PROPS: usize = 64;
 /// Members per overflow chunk template.
 const OVERFLOW_CHUNK: usize = 32;
@@ -714,9 +768,23 @@ struct State {
     wrappers: HashMap<(RealmId, HostRef), v8::Global<v8::Object>>,
     heap: Option<Rc<HeapGuard>>,
     snap: SnapState,
+    /// Large classic scripts compiled in this engine, most recent last,
+    /// with their V8 code cache once they were compiled twice (see
+    /// `run_script`).
+    code_cache: Vec<(u64, Option<Rc<[u8]>>)>,
 }
 
 type SharedState = Rc<RefCell<State>>;
+
+/// Classic scripts this long or longer that are compiled a second time
+/// get a V8 code cache, used when the same source is compiled again. Playwright
+/// evaluates its ~100 KB utility script in the main world of every new
+/// document; V8's own compilation cache does not outlive the GC that runs
+/// after a page closes, so without this it is parsed and compiled anew
+/// each time. Consuming a code cache changes nothing a script can observe.
+const CODE_CACHE_MIN: usize = 16 * 1024;
+/// Scripts remembered per engine.
+const CODE_CACHE_ENTRIES: usize = 8;
 
 impl State {
     fn push_callback(&mut self, cb: Callback) -> u32 {
@@ -913,6 +981,7 @@ impl Engine {
             wrappers: HashMap::new(),
             heap: heap.clone(),
             snap,
+            code_cache: Vec::new(),
         }));
         {
             let mut iso = Entered::new(&mut isolate);
@@ -1043,8 +1112,9 @@ impl Engine {
                 this_iface,
             );
         }
-        let overflow = spec.instance[split..]
-            .chunks(OVERFLOW_CHUNK)
+        let (items, plan) = overflow_plan(&spec.instance[split..]);
+        let chunks = plan
+            .into_iter()
             .map(|chunk| {
                 let ot = v8::ObjectTemplate::new(scope);
                 for m in chunk {
@@ -1058,10 +1128,10 @@ impl Engine {
                         this_iface,
                     );
                 }
-                let keys = chunk.iter().map(|m| m.key.clone()).collect();
-                (v8::Global::new(scope, ot), keys)
+                v8::Global::new(scope, ot)
             })
             .collect();
+        let overflow = Overflow { chunks, items };
         if spec.immutable_proto {
             inst.set_immutable_proto();
         }
@@ -1552,6 +1622,17 @@ impl Engine {
         iso.low_memory_notification();
     }
 
+    /// One full, memory-reducing GC (V8's critical memory-pressure path:
+    /// compaction, new space shrunk, unused pages released), then back to
+    /// no pressure. Cheaper than [`Engine::low_memory_notification`], which
+    /// repeats full GCs until nothing more is freed and also drops the
+    /// compilation cache.
+    pub fn reduce_memory(&mut self) {
+        let mut iso = Entered::new(&mut self.isolate);
+        iso.memory_pressure_notification(v8::MemoryPressureLevel::Critical);
+        iso.memory_pressure_notification(v8::MemoryPressureLevel::None);
+    }
+
     pub fn heap_stats(&mut self) -> HeapStats {
         let limit_hits = self
             .state
@@ -1688,20 +1769,10 @@ fn build_context<'s>(
     // interface object. V8 templates only link the prototype objects, so
     // this instantiates every interface object now (the startup snapshot
     // context has this done already).
-    //
-    // Every interface object is instantiated here, before the global's
-    // members are defined: V8 names a template function after the first
-    // property it is instantiated for, and `[LegacyWindowAlias]` members
-    // (`webkitURL`) come before their interface (`URL`) on the global. As
-    // in Chrome, `webkitURL.name` must be "URL".
     {
         let st = state.borrow();
         for entry in &st.interfaces {
-            let Some(parent) = entry.parent else {
-                let ft = v8::Local::new(scope, &entry.template);
-                let _ = ft.get_function(scope);
-                continue;
-            };
+            let Some(parent) = entry.parent else { continue };
             let ft = v8::Local::new(scope, &entry.template);
             let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
             if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
@@ -2914,25 +2985,43 @@ fn wrap_host<'s>(
 
 /// Define an interface's overflow members (those not on its instance
 /// template, see [`MAX_TEMPLATE_PROPS`]) on a fresh instance, in member
-/// order, with their template descriptors.
+/// order: interface objects directly, the rest with the descriptors they
+/// get on their chunk template's instance.
 fn apply_overflow<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &SharedState,
     iface: InterfaceId,
     obj: v8::Local<'_, v8::Object>,
 ) {
-    let chunks: Vec<(v8::Local<'s, v8::ObjectTemplate>, Vec<PropKey>)> = {
+    enum Item<'s> {
+        Interface(PropKey, v8::Local<'s, v8::FunctionTemplate>, PropAttrs),
+        Chunk(PropKey, usize),
+    }
+    let (chunks, items): (Vec<v8::Local<'s, v8::ObjectTemplate>>, Vec<Item<'s>>) = {
         let st = state.borrow();
         let Some(entry) = st.interfaces.get(iface.0 as usize) else {
             return;
         };
-        entry
-            .overflow
+        let o = &entry.overflow;
+        let chunks = o.chunks.iter().map(|t| v8::Local::new(scope, t)).collect();
+        let items = o
+            .items
             .iter()
-            .map(|(ot, keys)| (v8::Local::new(scope, ot), keys.clone()))
-            .collect()
+            .filter_map(|item| match item {
+                OverflowItem::Interface { key, id, attrs } => {
+                    let e = st.interfaces.get(id.0 as usize)?;
+                    Some(Item::Interface(
+                        key.clone(),
+                        v8::Local::new(scope, &e.template),
+                        *attrs,
+                    ))
+                }
+                OverflowItem::Chunk { key, chunk } => Some(Item::Chunk(key.clone(), *chunk)),
+            })
+            .collect();
+        (chunks, items)
     };
-    if chunks.is_empty() {
+    if items.is_empty() {
         return;
     }
     let field = |scope: &mut v8::PinScope<'s, '_>, name: &str| -> v8::Local<'s, v8::Value> {
@@ -2946,37 +3035,53 @@ fn apply_overflow<'s>(
         field(scope, "value"),
         field(scope, "writable"),
     );
-    for (ot, keys) in chunks {
-        let Some(tmp) = ot.new_instance(scope) else {
-            continue;
-        };
-        for key in &keys {
-            let k = v8_key(scope, key);
-            let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
-                continue;
-            };
-            let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
-                continue;
-            };
-            let enumerable = d.get(scope, k_enum).is_some_and(|v| v.is_true());
-            let configurable = d.get(scope, k_conf).is_some_and(|v| v.is_true());
-            let get = d.get(scope, k_get);
-            let set = d.get(scope, k_set);
-            let mut desc = match (get, set) {
-                (Some(g), Some(s)) if g.is_function() || s.is_function() => {
-                    v8::PropertyDescriptor::new_from_get_set(g, s)
+    let mut tmps: Vec<Option<v8::Local<'s, v8::Object>>> = vec![None; chunks.len()];
+    for item in items {
+        match item {
+            Item::Interface(key, ft, attrs) => {
+                let k = v8_key(scope, &key);
+                if let Some(f) = ft.get_function(scope) {
+                    obj.define_own_property(scope, k, f.into(), v8_attrs(attrs, false));
                 }
-                _ => {
-                    let value = d
-                        .get(scope, k_value)
-                        .unwrap_or_else(|| v8::undefined(scope).into());
-                    let writable = d.get(scope, k_writable).is_some_and(|v| v.is_true());
-                    v8::PropertyDescriptor::new_from_value_writable(value, writable)
-                }
-            };
-            desc.set_enumerable(enumerable);
-            desc.set_configurable(configurable);
-            obj.define_property(scope, k, &desc);
+            }
+            Item::Chunk(key, chunk) => {
+                let tmp = match tmps[chunk] {
+                    Some(t) => t,
+                    None => {
+                        let Some(t) = chunks[chunk].new_instance(scope) else {
+                            continue;
+                        };
+                        tmps[chunk] = Some(t);
+                        t
+                    }
+                };
+                let k = v8_key(scope, &key);
+                let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
+                    continue;
+                };
+                let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
+                    continue;
+                };
+                let enumerable = d.get(scope, k_enum).is_some_and(|v| v.is_true());
+                let configurable = d.get(scope, k_conf).is_some_and(|v| v.is_true());
+                let get = d.get(scope, k_get);
+                let set = d.get(scope, k_set);
+                let mut desc = match (get, set) {
+                    (Some(g), Some(s)) if g.is_function() || s.is_function() => {
+                        v8::PropertyDescriptor::new_from_get_set(g, s)
+                    }
+                    _ => {
+                        let value = d
+                            .get(scope, k_value)
+                            .unwrap_or_else(|| v8::undefined(scope).into());
+                        let writable = d.get(scope, k_writable).is_some_and(|v| v.is_true());
+                        v8::PropertyDescriptor::new_from_value_writable(value, writable)
+                    }
+                };
+                desc.set_enumerable(enumerable);
+                desc.set_configurable(configurable);
+                obj.define_property(scope, k, &desc);
+            }
         }
     }
 }
@@ -3310,8 +3415,76 @@ fn run_script<'s>(
     origin: ScriptOrigin<'_>,
 ) -> Option<v8::Local<'s, v8::Value>> {
     let code = v8::String::new(scope, source)?;
+    let url = origin.url;
     let origin = script_origin(scope, origin, false);
-    let script = v8::Script::compile(scope, code, Some(&origin))?;
+    if source.len() < CODE_CACHE_MIN {
+        let script = v8::Script::compile(scope, code, Some(&origin))?;
+        return script.run(scope);
+    }
+    // Large script: compile from this engine's code cache if it has one.
+    // A snapshot creator may not make code caches (V8 aborts).
+    let state = scope
+        .get_slot::<SharedState>()
+        .filter(|st| {
+            st.try_borrow()
+                .is_ok_and(|st| !matches!(st.snap, SnapState::Creating(_)))
+        })
+        .cloned();
+    if state.is_none() {
+        let script = v8::Script::compile(scope, code, Some(&origin))?;
+        return script.run(scope);
+    }
+    let key = snapshot::hash_str(source) ^ snapshot::hash_str(url).rotate_left(1);
+    // None: not seen; Some(None): compiled once before; Some(Some(_)): cached.
+    let seen: Option<Option<Rc<[u8]>>> = state.as_ref().and_then(|st| {
+        let st = st.try_borrow().ok()?;
+        st.code_cache
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, d)| d.clone())
+    });
+    let cached = seen.clone().flatten();
+    let script = match &cached {
+        Some(bytes) => {
+            let data = v8::script_compiler::CachedData::new(bytes);
+            let mut src =
+                v8::script_compiler::Source::new_with_cached_data(code, Some(&origin), data);
+            let script = v8::script_compiler::compile(
+                scope,
+                &mut src,
+                v8::script_compiler::CompileOptions::ConsumeCodeCache,
+                v8::script_compiler::NoCacheReason::NoReason,
+            )?;
+            if src.get_cached_data().is_some_and(|d| d.rejected())
+                && let Some(mut st) = state.as_ref().and_then(|s| s.try_borrow_mut().ok())
+            {
+                st.code_cache.retain(|(k, _)| *k != key);
+            }
+            script
+        }
+        None => {
+            let script = v8::Script::compile(scope, code, Some(&origin))?;
+            // A script seen once is only remembered; the second compile
+            // makes the cache. Before the run: only what V8 compiled
+            // eagerly goes in, so a consumer compiles the rest lazily as
+            // usual.
+            let data = match seen {
+                Some(None) => script
+                    .get_unbound_script(scope)
+                    .create_code_cache()
+                    .map(|d| Rc::<[u8]>::from(&d[..])),
+                _ => None,
+            };
+            if let Some(mut st) = state.as_ref().and_then(|s| s.try_borrow_mut().ok()) {
+                st.code_cache.retain(|(k, _)| *k != key);
+                if st.code_cache.len() >= CODE_CACHE_ENTRIES {
+                    st.code_cache.remove(0);
+                }
+                st.code_cache.push((key, data));
+            }
+            script
+        }
+    };
     script.run(scope)
 }
 

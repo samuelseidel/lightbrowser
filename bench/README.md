@@ -26,6 +26,8 @@ fails or a browser did not render every page.
   and every WebSocket endpoint before use.
 - Proxy variables are removed from the runner's environment and `NO_PROXY` is
   set; Chromium also gets `--no-proxy-server`.
+- `LIGHTPANDA_DISABLE_TELEMETRY=true` is set for the runner and every
+  process it starts (Lightpanda otherwise reports usage to its servers).
 
 ## What it runs
 
@@ -34,7 +36,7 @@ fails or a browser did not render every page.
 | `fetch:lightbrowser` | `lightbrowser fetch URL --dump html`, one process per page |
 | `cdp:lightbrowser` | `lightbrowser serve --port 0`, Playwright `connect_over_cdp` |
 | `cdp:chromium` | headless Chromium (`--headless=new --no-sandbox`), the same Playwright code |
-| `fetch:lightpanda`, `cdp:lightpanda` | only if a `lightpanda` binary is on PATH; skipped with a note otherwise. Untested here (not available offline): `lightpanda fetch --dump URL` and `lightpanda serve --host 127.0.0.1 --port P` are assumed. |
+| `fetch:lightpanda`, `cdp:lightpanda` | only if a `lightpanda` binary is on PATH; skipped with a note otherwise. `lightpanda fetch --dump html URL` (one process per page, like `fetch:lightbrowser`) and `lightpanda serve --host 127.0.0.1 --port P` with the same Playwright code; the runner picks a free loopback port and takes the WebSocket URL from `/json/version` (loopback-checked). Lightpanda's defaults are used: it fetches no images or stylesheets unless `--load-resources` asks for them, where LightBrowser and Chromium fetch both, as Chrome does (the page markers only need the scripts). |
 
 Each repetition runs every target once, in that order, on a fresh process.
 Default is 5 repetitions; the report gives the median and the min-max over

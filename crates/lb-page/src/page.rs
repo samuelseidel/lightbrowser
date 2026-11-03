@@ -22,6 +22,13 @@ use crate::{NavResult, PageObserver, WaitUntil};
 const FRAME_MS: f64 = 1000.0 / 60.0;
 /// Quiet time before `networkIdle`.
 const IDLE_MS: f64 = 500.0;
+/// A page that has been quiet this long (no task, no request in flight, no
+/// timer due within a second) gets one full GC (V8 low-memory
+/// notification). Like V8's memory reducer, which waits for a long idle
+/// period: right after load the GC only costs CPU, the page is usually
+/// still being worked with, and a page that is closed soon is collected
+/// with the worker's GC after close.
+const IDLE_GC_MS: f64 = 2000.0;
 
 /// Lifecycle of the current document.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -170,6 +177,7 @@ impl PageState {
 pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
     let mut next_frame = 0.0f64;
     let mut gc_done = false;
+    let mut quiet_since: Option<f64> = None;
     loop {
         if page.closed.get() {
             return;
@@ -243,6 +251,7 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
         let idle_deadline = track_network_idle(&page, &w);
         if did {
             gc_done = false;
+            quiet_since = None;
             page.turn.notify_waiters();
             tokio::task::yield_now().await;
             continue;
@@ -268,9 +277,18 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             && wins
                 .iter()
                 .all(|x| x.in_flight.get() == 0 && !x.has_tasks());
-        if !gc_done && quiet && deadline.is_none_or(|d| d - now > 1000.0) {
-            ws.with_engine(|e| e.low_memory_notification());
-            gc_done = true;
+        let idle = quiet && deadline.is_none_or(|d| d - now > 1000.0);
+        if !idle {
+            quiet_since = None;
+        } else if !gc_done {
+            let since = *quiet_since.get_or_insert(now);
+            if now - since >= IDLE_GC_MS {
+                ws.with_engine(|e| e.low_memory_notification());
+                gc_done = true;
+            } else if !w.clock.is_virtual() {
+                let at = since + IDLE_GC_MS;
+                deadline = Some(deadline.map_or(at, |d| d.min(at)));
+            }
         }
         if w.clock.is_virtual()
             && quiet

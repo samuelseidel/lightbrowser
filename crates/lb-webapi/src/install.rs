@@ -26,6 +26,7 @@
 //! `Error.prototype` and deletes engine globals Chrome does not expose
 //! (`SharedArrayBuffer` without cross-origin isolation). It leaves no trace.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -104,8 +105,16 @@ struct Inner {
     ids: HashMap<&'static str, InterfaceId>,
     window: InterfaceId,
     fixup: String,
-    /// The global-object part of `fixup`, for snapshot realms.
+    /// The global-object part of `fixup`, for snapshot realms. Returns
+    /// the names it deleted and the final own-property count, one per line.
     globals_fixup: String,
+    /// `L(g, [late globals]);`, the reordering part of `globals_fixup`.
+    globals_reorder: String,
+    /// After the first snapshot realm: `globals_fixup` with the scan for
+    /// engine globals Chrome lacks replaced by deleting the names that
+    /// realm had, and the own-property count it ended with (see
+    /// `run_globals_fixup`).
+    globals_fast: RefCell<Option<(String, f64)>>,
     /// Appended to `fixup` for non-secure realms.
     insecure_fixup: String,
     dom_exceptions: DomExceptions,
@@ -205,7 +214,7 @@ impl Bindings {
         let window = engine.define_interface(spec);
         debug_assert_eq!(ids.get(window_desc.name), Some(&window));
 
-        let (fixup, globals_fixup) = fixup_script(table, &ids);
+        let (fixup, globals_fixup, globals_reorder) = fixup_script(table, &ids);
         let insecure_fixup = insecure_script(table, &ids);
         // With a startup snapshot whose interfaces all matched, window
         // realms are deserialized with the fixup already run.
@@ -216,6 +225,8 @@ impl Bindings {
             window,
             fixup,
             globals_fixup,
+            globals_reorder,
+            globals_fast: RefCell::new(None),
             insecure_fixup,
             dom_exceptions: dom,
         })))
@@ -291,7 +302,7 @@ impl Bindings {
             module_loader: options.module_loader,
         })?;
         let mut result = if engine.is_snapshot_realm(realm) {
-            engine.evaluate(realm, &self.0.globals_fixup, ScriptOrigin::new(""))
+            self.run_globals_fixup(engine, realm)
         } else {
             engine.evaluate(realm, &self.0.fixup, ScriptOrigin::new(""))
         };
@@ -303,6 +314,44 @@ impl Bindings {
             return Err(e);
         }
         Ok(realm)
+    }
+}
+
+impl Bindings {
+    /// The global part of the fixup in a realm deserialized from the
+    /// snapshot. V8 appends the same engine globals to every such realm, so
+    /// after the first one the scan of all ~1,200 names for ones Chrome
+    /// lacks is replaced by deleting the names it found; the realm's
+    /// own-property count must then match, or the full script runs too
+    /// (it is idempotent).
+    fn run_globals_fixup(
+        &self,
+        engine: &mut dyn lb_js::RealmOps,
+        realm: RealmId,
+    ) -> Result<JsValue, JsError> {
+        let fast = self.0.globals_fast.borrow().clone();
+        if let Some((script, count)) = &fast {
+            let r = engine.evaluate(realm, script, ScriptOrigin::new(""))?;
+            if r == JsValue::Number(*count) {
+                return Ok(r);
+            }
+        }
+        let r = engine.evaluate(realm, &self.0.globals_fixup, ScriptOrigin::new(""))?;
+        if fast.is_none()
+            && let JsValue::String(out) = &r
+        {
+            let mut lines: Vec<&str> = out.split('\n').collect();
+            if let Some(count) = lines.pop().and_then(|c| c.parse::<f64>().ok()) {
+                let extra: Vec<&str> = lines.into_iter().filter(|l| !l.is_empty()).collect();
+                let script = format!(
+                    "{GLOBALS_PRELUDE}{}for(const n of {}){{const d=gd(g,n);if(d&&d.configurable)delete g[n];}}return O.getOwnPropertyNames(g).length}})()",
+                    self.0.globals_reorder,
+                    js_list(extra),
+                );
+                *self.0.globals_fast.borrow_mut() = Some((script, count));
+            }
+        }
+        Ok(r)
     }
 }
 
@@ -748,10 +797,11 @@ fn js_list<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
 /// snapshot time, but V8 re-installs its flag-gated globals (`Temporal`,
 /// `DisposableStack`, `Float16Array`, `SharedArrayBuffer`, `WebAssembly`,
 /// ...) at the end of every new context, so the global part runs again.
-fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> (String, String) {
-    const PRELUDE: &str = "(function(){'use strict';const g=globalThis,O=Object,gd=O.getOwnPropertyDescriptor,dp=O.defineProperty;\
-         function L(o,ks){for(const k of ks){const d=gd(o,k);if(d){delete o[k];dp(o,k,d);}}}\
-         function P(n){const d=gd(g,n);return d&&d.value&&d.value.prototype;}";
+fn fixup_script(
+    table: &Table,
+    ids: &HashMap<&'static str, InterfaceId>,
+) -> (String, String, String) {
+    const PRELUDE: &str = GLOBALS_PRELUDE;
     let mut s = String::from(PRELUDE);
     let on_window = |name: &str| {
         table
@@ -799,18 +849,26 @@ fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> (Str
     let late_globals = table.window_props[table.window_late_start.min(table.window_props.len())..]
         .iter()
         .map(GlobalProp::name);
-    let _ = write!(s, "L(g,{});", js_list(late_globals));
+    let reorder = format!("L(g,{});", js_list(late_globals));
+    s.push_str(&reorder);
     // Engine globals Chrome does not expose here (e.g. `SharedArrayBuffer`
-    // outside cross-origin isolation) are removed.
+    // outside cross-origin isolation) are removed. The script's value
+    // lists them and the final own-property count, one per line.
     let _ = write!(
         s,
-        "{{const k=new Set({});for(const n of O.getOwnPropertyNames(g))if(!k.has(n)){{const d=gd(g,n);if(d&&d.configurable)delete g[n];}}}}",
+        "const k=new Set({}),x=[];for(const n of O.getOwnPropertyNames(g))if(!k.has(n)){{const d=gd(g,n);if(d&&d.configurable){{delete g[n];x.push(n+'\\n');}}}}return x.join('')+O.getOwnPropertyNames(g).length",
         js_list(table.window_props.iter().map(GlobalProp::name))
     );
     s.push_str("})()");
     let globals = format!("{PRELUDE}{}", &s[globals_at..]);
-    (s, globals)
+    (s, globals, reorder)
 }
+
+/// Start of the fixup scripts: helpers `L` (move properties to the end,
+/// keeping their descriptors) and `P` (an interface's prototype).
+const GLOBALS_PRELUDE: &str = "(function(){'use strict';const g=globalThis,O=Object,gd=O.getOwnPropertyDescriptor,dp=O.defineProperty;\
+     function L(o,ks){for(const k of ks){const d=gd(o,k);if(d){delete o[k];dp(o,k,d);}}}\
+     function P(n){const d=gd(g,n);return d&&d.value&&d.value.prototype;}";
 
 /// Removes what only secure contexts have.
 fn insecure_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> String {
@@ -875,7 +933,7 @@ mod tests {
         for (i, d) in crate::generated::chromium::INTERFACES.iter().enumerate() {
             ids.insert(d.name, InterfaceId(i as u32));
         }
-        let (s, globals) = fixup_script(&crate::generated::chromium::TABLE, &ids);
+        let (s, globals, _) = fixup_script(&crate::generated::chromium::TABLE, &ids);
         assert!(globals.starts_with("(function(){") && globals.ends_with("})()"));
         assert!(globals.contains("L(g,[") && !globals.contains("XMLHttpRequest\"),["));
         assert!(

@@ -47,7 +47,9 @@ pub(crate) struct FrameInfo {
 #[derive(Debug, Clone)]
 pub(crate) struct WorldEntry {
     pub id: ExecutionContextId,
-    pub realm: RealmId,
+    /// `None` for an isolated world whose realm is not made yet: it is
+    /// reported at once and made on first use ([`Agent::world_realm`]).
+    pub realm: Option<RealmId>,
     /// `None` for the main world.
     pub name: Option<String>,
     /// Frame id in lb-webapi's tree (0: the page's main frame).
@@ -176,11 +178,15 @@ impl Agent {
     pub(crate) fn drop_worlds(&self, ws: &WorkerState) {
         let worlds: Vec<WorldEntry> = self.st.borrow().worlds.clone();
         let rt = ws.runtime().map(|(rt, _)| rt);
-        for wd in worlds.iter().filter(|w| w.name.is_some()) {
+        for realm in worlds
+            .iter()
+            .filter(|w| w.name.is_some())
+            .filter_map(|w| w.realm)
+        {
             if let Some(rt) = &rt {
-                rt.detach(wd.realm);
+                rt.detach(realm);
             }
-            ws.with_engine(|e| e.drop_realm(wd.realm));
+            ws.with_engine(|e| e.drop_realm(realm));
         }
         let mut st = self.st.borrow_mut();
         st.objects.clear();
@@ -225,19 +231,15 @@ impl Agent {
             w.with_layout_engine(|l, _| l.set_viewport(vw as f32, vh as f32));
         }
         // Main world.
-        let main = self.register_world(w.realm(), None, &url, 0);
+        let main = self.register_world(Some(w.realm()), None, &url, 0);
         self.emit(PageEvent::ExecutionContextCreated { context: main });
         // Isolated worlds named by new-document scripts, in order.
-        let mut names: Vec<String> = Vec::new();
-        for (_, _, world) in &self.st.borrow().scripts {
-            if let Some(n) = world
-                && !names.contains(n)
-            {
-                names.push(n.clone());
+        for (n, eager) in self.new_document_worlds() {
+            if eager {
+                let _ = self.create_world(ws, w, &n);
+            } else {
+                self.announce_world(w, &n);
             }
-        }
-        for n in names {
-            let _ = self.create_world(ws, w, &n);
         }
         // New-document scripts.
         let scripts = self.st.borrow().scripts.clone();
@@ -253,7 +255,7 @@ impl Agent {
                     .worlds
                     .iter()
                     .find(|x| x.name.as_deref() == Some(n))
-                    .map(|x| x.realm),
+                    .and_then(|x| x.realm),
             };
             if let Some(realm) = realm {
                 ws.with_engine(|e| {
@@ -268,9 +270,27 @@ impl Agent {
         let _ = page;
     }
 
+    /// Isolated worlds named by new-document scripts, in order, and whether
+    /// each must be made at once: only if one of its scripts has code. A
+    /// world whose scripts are all empty (Playwright's utility world) is
+    /// made on first use; nothing runs in it before that, and making it
+    /// runs nothing the page can see.
+    fn new_document_worlds(&self) -> Vec<(String, bool)> {
+        let mut out: Vec<(String, bool)> = Vec::new();
+        for (_, src, world) in &self.st.borrow().scripts {
+            let Some(n) = world else { continue };
+            let code = !src.trim().is_empty();
+            match out.iter_mut().find(|(x, _)| x == n) {
+                Some(e) => e.1 |= code,
+                None => out.push((n.clone(), code)),
+            }
+        }
+        out
+    }
+
     fn register_world(
         &self,
-        realm: RealmId,
+        realm: Option<RealmId>,
         name: Option<String>,
         url: &url::Url,
         frame: u64,
@@ -314,6 +334,56 @@ impl Agent {
         w: &Rc<Window>,
         name: &str,
     ) -> HostResult<ExecutionContextId> {
+        let id = self.announce_world(w, name);
+        self.make_world(ops, w, id, name)?;
+        Ok(id)
+    }
+
+    /// Register and report an isolated world of `w`'s current document
+    /// without making its realm yet ([`Agent::world_realm`] does, on first
+    /// use).
+    pub(crate) fn announce_world(&self, w: &Rc<Window>, name: &str) -> ExecutionContextId {
+        let frame = frames::frame_id(w);
+        let ctx = self.register_world(
+            None,
+            Some(name.to_string()),
+            &frames::effective_url(w),
+            frame,
+        );
+        let id = ctx.id;
+        self.emit(PageEvent::ExecutionContextCreated { context: ctx });
+        id
+    }
+
+    /// The realm of execution context `ctx`; an announced isolated world
+    /// gets its realm now. `top` is the page's main window.
+    pub(crate) fn world_realm(
+        &self,
+        ops: &mut dyn RealmOps,
+        top: &Rc<Window>,
+        ctx: ExecutionContextId,
+    ) -> HostResult<RealmId> {
+        let entry = self.world(ctx)?;
+        if let Some(realm) = entry.realm {
+            return Ok(realm);
+        }
+        let name = entry
+            .name
+            .ok_or_else(|| HostError::new("Cannot find context with specified id"))?;
+        let w = frames::find(top, entry.frame)
+            .ok_or_else(|| HostError::new("Cannot find context with specified id"))?;
+        self.make_world(ops, &w, ctx, &name)
+    }
+
+    /// Make the realm of announced isolated world `id` in `w` and install
+    /// the bindings that apply to it.
+    fn make_world(
+        &self,
+        ops: &mut dyn RealmOps,
+        w: &Rc<Window>,
+        id: ExecutionContextId,
+        name: &str,
+    ) -> HostResult<RealmId> {
         let bindings = w
             .runtime()
             .bindings()
@@ -321,14 +391,9 @@ impl Agent {
         let realm = w
             .create_isolated_world(ops, &bindings, name)
             .map_err(|e| HostError::new(e.message))?;
-        let frame = frames::frame_id(w);
-        let ctx = self.register_world(
-            realm,
-            Some(name.to_string()),
-            &frames::effective_url(w),
-            frame,
-        );
-        let id = ctx.id;
+        if let Some(e) = self.st.borrow_mut().worlds.iter_mut().find(|x| x.id == id) {
+            e.realm = Some(realm);
+        }
         let names: Vec<String> = self
             .st
             .borrow()
@@ -344,8 +409,7 @@ impl Agent {
         for b in names {
             self.install_binding_with(ops, realm, id, &b);
         }
-        self.emit(PageEvent::ExecutionContextCreated { context: ctx });
-        Ok(id)
+        Ok(realm)
     }
 
     /// Install binding `name` on an isolated world's global.
@@ -489,18 +553,15 @@ impl Agent {
             }
         }
         self.emit(PageEvent::FrameNavigated { frame });
-        let main = self.register_world(child.realm(), None, &frames::effective_url(child), id);
+        let main =
+            self.register_world(Some(child.realm()), None, &frames::effective_url(child), id);
         self.emit(PageEvent::ExecutionContextCreated { context: main });
-        let mut names: Vec<String> = Vec::new();
-        for (_, _, world) in &self.st.borrow().scripts {
-            if let Some(n) = world
-                && !names.contains(n)
-            {
-                names.push(n.clone());
+        for (n, eager) in self.new_document_worlds() {
+            if eager {
+                let _ = self.create_world_with(ops, child, &n);
+            } else {
+                self.announce_world(child, &n);
             }
-        }
-        for n in names {
-            let _ = self.create_world_with(ops, child, &n);
         }
         let scripts = self.st.borrow().scripts.clone();
         for (_, src, world) in scripts {
@@ -515,7 +576,7 @@ impl Agent {
                     .worlds
                     .iter()
                     .find(|x| x.frame == id && x.name.as_deref() == Some(n))
-                    .map(|x| x.realm),
+                    .and_then(|x| x.realm),
             };
             if let Some(realm) = realm {
                 let _ = ops.evaluate(realm, &src, ScriptOrigin::new(""));
@@ -538,7 +599,7 @@ impl Agent {
                 .into_iter()
                 .partition(|w| w.frame == id && id != 0);
             st.worlds = rest;
-            let realms: Vec<RealmId> = mine.iter().map(|w| w.realm).collect();
+            let realms: Vec<RealmId> = mine.iter().filter_map(|w| w.realm).collect();
             st.objects.retain(|_, o| !realms.contains(&o.realm));
             if gone {
                 st.frame_loaders.remove(&id);
@@ -546,9 +607,11 @@ impl Agent {
             mine
         };
         for w in &worlds {
-            if w.name.is_some() {
-                child.runtime().detach(w.realm);
-                ops.drop_realm(w.realm);
+            if w.name.is_some()
+                && let Some(realm) = w.realm
+            {
+                child.runtime().detach(realm);
+                ops.drop_realm(realm);
             }
             self.emit(PageEvent::ExecutionContextDestroyed { context_id: w.id });
         }
@@ -873,18 +936,18 @@ impl Agent {
     pub(crate) fn node_object(
         &self,
         ws: &WorkerState,
-        w: &Window,
+        w: &Rc<Window>,
         n: NodeId,
         ctx: ExecutionContextId,
         group: Option<&str>,
     ) -> HostResult<RemoteObject> {
-        let world = self.world(ctx)?;
         let arg = w.node_arg(0, n);
         ws.with_engine(|e| {
+            let realm = self.world_realm(e, w, ctx)?;
             let h = e
-                .make_handle(world.realm, arg)
+                .make_handle(realm, arg)
                 .map_err(|e| HostError::new(e.message))?;
-            self.remote(e, w, world.realm, ctx, h, false, false, group)
+            self.remote(e, w, realm, ctx, h, false, false, group)
         })
         .ok_or_else(|| HostError::new("Page is closed"))?
     }
@@ -1008,8 +1071,12 @@ pub(crate) async fn run_js(
     let agent = page
         .agent()
         .ok_or_else(|| HostError::new("Page is closed"))?;
-    let world = agent.world(ctx)?;
-    let realm = world.realm;
+    let top = page
+        .window()
+        .ok_or_else(|| HostError::new("Page is closed"))?;
+    let realm = ws
+        .with_engine(|e| agent.world_realm(e, &top, ctx))
+        .ok_or_else(|| HostError::new("Page is closed"))??;
     // The window of the context's frame (main or child).
     let w = ws
         .runtime()
@@ -1059,7 +1126,8 @@ pub(crate) async fn run_js(
             let notified = page.turn.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            let alive = agent.world(ctx).is_ok_and(|x| x.realm == realm) && !page.closed.get();
+            let alive =
+                agent.world(ctx).is_ok_and(|x| x.realm == Some(realm)) && !page.closed.get();
             if !alive {
                 return Err(HostError::new("Execution context was destroyed."));
             }
@@ -1089,7 +1157,7 @@ pub(crate) async fn run_js(
     let w = page
         .window()
         .ok_or_else(|| HostError::new("Page is closed"))?;
-    if agent.world(ctx).map(|x| x.realm) != Ok(realm) {
+    if agent.world(ctx).map(|x| x.realm) != Ok(Some(realm)) {
         return Err(HostError::new("Execution context was destroyed."));
     }
     let group = opts.group.as_deref();

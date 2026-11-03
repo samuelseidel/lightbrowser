@@ -1,6 +1,6 @@
 # ADR 0013: V8 startup snapshot made in memory; binary budget follows the V8 floor
 
-Status: Accepted (2026-11-03); budget back to < 40 MB in revision 2
+Status: Accepted (2026-11-03); budget back to < 40 MB in revision 2; ICU data paged lazily in revision 3
 
 ## Context
 
@@ -94,7 +94,8 @@ The original < 40 MB is still missed, by 4.4 MB.
   itself as a valid, empty ICU package, so the linker never extracts the
   archive's copy (a second copy would be a duplicate-symbol error, not a
   silent fallback). The same bytes are checked in zstd-compressed
-  (`crates/lb-js/icu/icudt78.dat.zst`, level 22, 3.83 MB; the
+  (`crates/lb-js/icu/icudt78.dat.zst`, level 22, 3.83 MB, replaced by
+  `icudt78.dat.zch` in Revision 3; the
   `icu_pack` example rewrites it from the archive) and installed with
   `udata_setCommonData` in `init_v8`, before V8 starts. A test checks the
   file against the archive byte for byte. Intl output is identical: a
@@ -207,3 +208,49 @@ T-010 fp 0, ICU data. Still not applied: `opt-level = "z"` (-0.23 MB,
 slower), `--icf=all`, brotli ICU data, a DNS resolver swap (behaviour
 differs), the binding table as string offsets (about -0.15 MB).
 
+
+## Revision 3: ICU data paged in lazily, realms built in linear time (2026-11-03)
+
+Found while comparing with Lightpanda (`docs/ROADMAP.md`, "M6 status:
+Lightpanda comparison"). The budget stays < 40 MB: 39,628,664 bytes.
+
+- **ICU data decompressed on first touch.** A page load reads about
+  120 KB of the 10.9 MB package (its table of contents, the root locale,
+  time zone data), but the first engine of every process decompressed
+  all of it: ~15 ms and 10.9 MB of resident heap. The data now ships as
+  independent zstd frames of 128 KiB (`icu/icudt78.dat.zch`, 4.26 MB,
+  +0.43 MB of binary). On Linux the package's size is reserved
+  `PROT_NONE`; a `SIGSEGV` handler decompresses the chunk a read falls in
+  into a scratch mapping and `mremap`s it into place (atomic for other
+  threads), so about 5 chunks (0.6 MB, < 1 ms) become resident. Faults
+  outside the package go to the previous handler (crashes stay crashes);
+  without the reservation or the handler, or on other systems, the whole
+  package is decompressed at once as before. Byte-identical data (test
+  against the archive, plus 8 threads reading scattered chunks). Costs:
+  the handler runs on the faulting thread's stack (Rust's alternate
+  signal stacks are too small for zstd), so a stack overflow ends with a
+  plain `SIGSEGV` instead of Rust's message; debuggers stop on these
+  faults (`handle SIGSEGV nostop noprint pass` in gdb).
+  Chunk sizes measured: 64 KiB +0.58 MB, 128 KiB +0.43 MB, 256 KiB
+  +0.35 MB of binary; a 64-256 KB raw dictionary saved < 50 KB.
+- **The window global's members are defined after the context is made.**
+  V8 instantiates a template into a fresh fast-mode object, copying the
+  map's descriptor array for every member: O(n²) for the ~1,200 members
+  of the window global (60 % of a `fetch` process's instructions, 60 MB of
+  garbage per realm). An interface with more than 64 instance members now
+  keeps none on its instance template: interface objects (and their
+  `[LegacyWindowAlias]` names) are defined directly from their function
+  templates, the remaining members are copied in order from chunk
+  templates of 32 (`lb-js` `apply_overflow`). Snapshot creation 130 →
+  92 ms; a realm built without the snapshot 34.7 / 43.5 → 7.0 / 5.7 ms
+  (first / next, `realm_bench`, same machine and session). Order, keys,
+  descriptors and prototype chains of the global and every interface are
+  unchanged, except that the six alias interface objects now have their
+  interface's `name` (`webkitURL.name === "URL"`), as in Chrome 153;
+  before, the alias name leaked into the shared function
+  (`URL.name === "webkitURL"`).
+- Cost: a snapshot realm takes 2.5 ms instead of 2.3 ms (`realm_bench`
+  next realm, same session) and keeps 1.63 MB of V8 heap instead of
+  1.39 MB; where the extra 0.24 MB comes from is not pinned down (not the
+  chunk templates' cached instances, not the code cache, not the template
+  split threshold). Still under the < 5 ms budget.

@@ -83,6 +83,50 @@ class Report(unittest.TestCase):
         bs = run.budgets(s, 40.1, None)
         self.assertEqual({b["budget"]: b["status"] for b in bs}["binary size (stripped)"], "fail")
 
+    def test_budgets_compare_with_lightpanda(self):
+        lb = {"crawl_total_s": {"median": 1.0}, "peak_rss_mb": {"median": 50.0}, "cpu_s": {"median": 2.0}}
+        lp = {"crawl_total_s": {"median": 2.0}, "peak_rss_mb": {"median": 40.0}, "cpu_s": {"median": 2.0}}
+        s = {"fetch:lightbrowser": lb, "fetch:lightpanda": lp}
+        by = {b["budget"]: b["status"] for b in run.budgets(s, 39.0, None)}
+        self.assertEqual(by["crawl wall time vs Lightpanda (fetch)"], "pass")
+        self.assertEqual(by["peak RSS vs Lightpanda (fetch)"], "fail")
+        self.assertEqual(by["CPU time vs Lightpanda (fetch)"], "pass")  # equal counts as <=
+        self.assertEqual(by["CPU time vs Lightpanda (cdp)"], "skip")
+
+    def test_ws_url_from_json_version(self):
+        import http.server
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            ws = "ws://127.0.0.1:1/"
+
+            def do_GET(self):
+                body = json.dumps({"webSocketDebuggerUrl": self.ws}).encode() if self.path == "/json/version" else b""
+                self.send_response(200 if body else 404)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+        class Fake:  # the parts of `Spawned` the helper reads
+            proc = type("P", (), {"poll": lambda self: None, "returncode": None})()
+            tail: list = []
+
+        try:
+            port = srv.server_address[1]
+            self.assertEqual(run.wait_json_version(Fake(), port, timeout=5), "ws://127.0.0.1:1/")
+            H.ws = "ws://example.com:9222/"
+            with self.assertRaises(SystemExit) as cm:
+                run.wait_json_version(Fake(), port, timeout=5)
+            self.assertEqual(cm.exception.code, 2)
+        finally:
+            srv.shutdown()
+
     def test_corpus_server_serves_loopback(self):
         srv = run.Server()
         try:

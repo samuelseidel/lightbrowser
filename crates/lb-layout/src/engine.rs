@@ -6,8 +6,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use lb_css::{
-    ComputedStyle, Display, MediaEnv, Overflow, PointerEvents, Position, StyleEngine, Visibility,
-    computed_value,
+    ComputedStyle, Display, MediaEnv, OsKind, Overflow, PointerEvents, Position, StyleEngine,
+    Visibility, computed_value,
 };
 use lb_dom::{Document, NodeId, NodeType, local_name};
 use lb_persona::PersonaProfile;
@@ -159,14 +159,50 @@ impl std::fmt::Debug for LayoutEngine {
     }
 }
 
+/// What every layout engine for one OS starts from: the bundled font
+/// tables and the parsed UA stylesheet. Making it unpacks and parses both
+/// (about 0.5 ms); clones share them, so a host that lays out many
+/// documents keeps one per OS ([`LayoutEngine::new_with`]).
+#[derive(Clone, Debug)]
+pub struct LayoutBase {
+    os: OsKind,
+    fonts: FontDb,
+    ua: Rc<lb_css::Stylesheet>,
+}
+
+impl LayoutBase {
+    pub fn for_os(os: OsKind) -> LayoutBase {
+        LayoutBase {
+            os,
+            fonts: FontDb::for_os(os),
+            ua: StyleEngine::ua_sheet(os),
+        }
+    }
+
+    pub fn os(&self) -> OsKind {
+        self.os
+    }
+}
+
 impl LayoutEngine {
     /// Layout for a persona: viewport, media, OS fonts and the installed
     /// font list all come from it.
     pub fn new(persona: Arc<PersonaProfile>) -> LayoutEngine {
+        let os = MediaEnv::from_persona(&persona).os;
+        Self::new_with(persona, &LayoutBase::for_os(os))
+    }
+
+    /// [`LayoutEngine::new`] from a [`LayoutBase`] made earlier; one for
+    /// another OS than the persona's is not used.
+    pub fn new_with(persona: Arc<PersonaProfile>, base: &LayoutBase) -> LayoutEngine {
         let env = MediaEnv::from_persona(&persona);
         let available =
             FontAvailability::from_list(persona.fonts.available.iter().map(String::as_str));
-        let mut e = Self::with_env(env);
+        let mut e = if base.os == env.os {
+            Self::with_base(env, base.clone())
+        } else {
+            Self::with_env(env)
+        };
         e.available = available;
         e.persona = Some(persona);
         e
@@ -175,11 +211,15 @@ impl LayoutEngine {
     /// Layout for a bare media environment; every bundled font counts as
     /// installed. For tests and tools.
     pub fn with_env(env: MediaEnv) -> LayoutEngine {
-        let fonts = FontDb::for_os(env.os);
+        let base = LayoutBase::for_os(env.os);
+        Self::with_base(env, base)
+    }
+
+    fn with_base(env: MediaEnv, base: LayoutBase) -> LayoutEngine {
         let viewport = (env.viewport_width, env.viewport_height);
         LayoutEngine {
-            styles: StyleEngine::new(env),
-            fonts,
+            styles: StyleEngine::with_ua(env, base.ua),
+            fonts: base.fonts,
             available: FontAvailability::everything(),
             viewport,
             state: None,

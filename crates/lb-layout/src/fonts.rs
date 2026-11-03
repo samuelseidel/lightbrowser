@@ -241,9 +241,10 @@ impl FontFamily {
 }
 
 /// The metric tables available for one OS, by lowercase family name.
-#[derive(Debug, Default)]
+/// Cheap to clone: clones share the tables until one adds a family.
+#[derive(Debug, Default, Clone)]
 pub struct FontDb {
-    families: HashMap<String, Rc<FontFamily>>,
+    families: Rc<HashMap<String, Rc<FontFamily>>>,
     os: Option<OsKind>,
 }
 
@@ -256,7 +257,7 @@ impl FontDb {
             o => o.as_str(),
         };
         let mut db = FontDb {
-            families: HashMap::new(),
+            families: Rc::new(HashMap::new()),
             os: Some(os),
         };
         let tables = unpack_tables();
@@ -298,8 +299,7 @@ impl FontDb {
     }
 
     fn insert(&mut self, fam: FontFamily) {
-        self.families
-            .insert(fam.name.to_ascii_lowercase(), Rc::new(fam));
+        Rc::make_mut(&mut self.families).insert(fam.name.to_ascii_lowercase(), Rc::new(fam));
     }
 
     pub fn get(&self, name: &str) -> Option<&Rc<FontFamily>> {

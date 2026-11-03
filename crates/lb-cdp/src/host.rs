@@ -365,8 +365,10 @@ pub trait PageHost {
         Err(HostError::unsupported(name))
     }
 
-    /// Creates an isolated world in `frame_id` and returns its realm. The
-    /// realm is also reported with `ExecutionContextCreated`.
+    /// Creates an isolated world in `frame_id` and returns its execution
+    /// context, also reported with `ExecutionContextCreated`. The host may
+    /// make the world's realm only when it is first used (nothing runs in
+    /// it before).
     fn create_isolated_world(
         &self,
         _target_id: &str,
@@ -379,8 +381,9 @@ pub trait PageHost {
 
     /// Registers a script to run in every new document, before its own
     /// scripts. With `world_name`, the host creates that isolated world in
-    /// every new document (even for an empty script) and runs the script
-    /// there; that is how Playwright keeps its utility world.
+    /// every new document (even for an empty script; its realm may then be
+    /// made on first use) and runs the script there; that is how Playwright
+    /// keeps its utility world.
     fn add_script_to_evaluate_on_new_document(
         &self,
         _target_id: &str,

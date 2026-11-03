@@ -248,7 +248,7 @@ fn worker_main(
                 // Let the closed pages' tasks finish unwinding first.
                 tokio::task::yield_now().await;
                 state.gc_pending.set(false);
-                state.with_engine(|e| e.low_memory_notification());
+                state.with_engine(|e| e.reduce_memory());
             }
         }
         // Close every page before the engine goes.

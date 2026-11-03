@@ -9,7 +9,7 @@ use lb_dom::{Document, NodeId, NodeType, local_name, ns};
 use lb_persona::PersonaProfile;
 
 use crate::computed::{ComputeCtx, ComputedStyle, Defaults, compute};
-use crate::media::{MediaEnv, MediaQueryList, MediaQueryResult, match_media};
+use crate::media::{MediaEnv, MediaQueryList, MediaQueryResult, OsKind, match_media};
 use crate::props::{CustomDeclaration, Decl, DeclarationBlock, LonghandId};
 use crate::sheet::{ImportRule, Origin, Stylesheet};
 use crate::ua::ua_stylesheet;
@@ -82,9 +82,21 @@ impl std::fmt::Debug for StyleEngine {
 impl StyleEngine {
     /// An engine for `env` (viewport, DPR, OS).
     pub fn new(env: MediaEnv) -> StyleEngine {
+        let ua = Self::ua_sheet(env.os);
+        Self::with_ua(env, ua)
+    }
+
+    /// The parsed UA stylesheet for `os`, to share between engines
+    /// ([`StyleEngine::with_ua`]).
+    pub fn ua_sheet(os: OsKind) -> Rc<Stylesheet> {
+        Rc::new(Stylesheet::parse(&ua_stylesheet(os), Origin::UserAgent))
+    }
+
+    /// [`StyleEngine::new`] with a UA sheet parsed earlier by
+    /// [`StyleEngine::ua_sheet`] for `env.os`.
+    pub fn with_ua(env: MediaEnv, ua: Rc<Stylesheet>) -> StyleEngine {
         let defaults = Defaults::for_os(env.os);
         let initial = ComputedStyle::initial(&defaults);
-        let ua = Rc::new(Stylesheet::parse(&ua_stylesheet(env.os), Origin::UserAgent));
         StyleEngine {
             env,
             defaults,

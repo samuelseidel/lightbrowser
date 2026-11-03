@@ -15,7 +15,8 @@
 //!   thread (and one per dedicated worker). It is `!Send`: it never leaves the
 //!   thread that made it. The V8 platform is initialised once per process on
 //!   first use ([`init_v8`]), after installing ICU's data, which ships
-//!   zstd-compressed instead of linked raw (`icu_data`, ADR 0013).
+//!   as zstd chunks instead of linked raw and is paged in by chunk on
+//!   first touch (`icu_data`, ADR 0013).
 //!   Several engines may live on one thread; every call enters its own
 //!   isolate.
 //! - **Realm** ([`RealmId`]): one V8 context. One per frame, plus isolated

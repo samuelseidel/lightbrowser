@@ -11,7 +11,7 @@ Each milestone ends with something we can run and measure.
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot (realm 2 ms), memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.17 MB, the original < 40 MB budget is met (ADR 0013); `bench/` runner done (`bench/results/`, Lightpanda not yet compared); service workers open. See "M6 status". |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.63 MB, the < 40 MB budget is met (ADR 0013); `bench/` runner done; Lightpanda compared (user-approved nightly, loopback only): 4 of 6 checks pass, `fetch` CPU and CDP peak RSS still lose; service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
 
@@ -20,17 +20,17 @@ Each milestone ends with something we can run and measure.
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
-| M6 Performance | Snapshot, memory, binary size (39.17 MB, < 40 MB met), `bench/` runner and screenshots done | Lightpanda comparison (no binary here), service workers |
+| M6 Performance | Snapshot, memory, binary size (39.63 MB, < 40 MB met), `bench/` runner, screenshots, Lightpanda comparison (wall time wins in both modes; 4 of 6 checks pass) done | `fetch` CPU and CDP peak RSS vs Lightpanda, service workers |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 10.0 MB (9.9-10.3 MB in earlier runs) | `bench/run.py`, "M6 status: bench runner" |
-| Binary < 40 MB (< 56 MB in between) | Met: 39.17 MB (39,174,008 bytes), 0.83 MB under | "M6 status: binary size, third pass" |
-| Realm creation < 5 ms | Met: 2.39 ms first, 2.06 ms next | `realm_bench`; `bench/run.py` |
+| Idle RSS < 15 MB | Met: 10.2 MB (9.9-10.3 MB in earlier runs) | `bench/run.py`, "M6 status: Lightpanda comparison" |
+| Binary < 40 MB (< 56 MB in between) | Met: 39.63 MB (39,628,664 bytes), 0.37 MB under (39.17 MB before the lazily paged ICU data, +0.43 MB) | "M6 status: binary size, third pass", "M6 status: Lightpanda comparison" |
+| Realm creation < 5 ms | Met: 3.13 ms first, 2.47 ms next (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | Not measured: no `lightpanda` binary on this machine. The runner skips these checks | "M6 status: bench runner" |
+| Wall time, peak RSS and CPU <= Lightpanda | Partly met (Lightpanda 1.1.0-nightly.11582): wall time `fetch` 2.63 vs 3.50 s and CDP 1.32 vs 5.15 s, peak RSS `fetch` 43.8 vs 44.9 MB, CPU CDP 0.99 vs 1.06 s pass; **CPU `fetch` 2.51 vs 1.37 s and peak RSS CDP 42.2 vs 31.4 MB fail** | "M6 status: Lightpanda comparison" |
 
 ## M1 status (2026-11-02)
 
@@ -909,7 +909,7 @@ Goal: the original < 40 MB. Reached 44.37 MB (54.96 before), stripped,
 - ICU: `lb-js` defines the archive's `icudt78_dat` symbol as an empty
   ICU package, so the archive's 10.88 MB copy is not linked; the same
   bytes ship as `crates/lb-js/icu/icudt78.dat.zst` (3.83 MB, `icu_pack`
-  example) and are installed with `udata_setCommonData` before V8 starts.
+  example; now `icudt78.dat.zch` in 128 KiB frames, see ADR 0013 Revision 3) and are installed with `udata_setCommonData` before V8 starts.
   `tests/v8.rs` `icu_data` checks them against the archive byte for byte.
   A 47.8 KB Intl probe (all constructors' supported locales, 40 locales x
   18 formatters and collators, segmentation, calendars, time zones,
@@ -1035,8 +1035,9 @@ loopback-only server. `python3 bench/run.py` runs 5 repetitions of
 `connect_over_cdp`), writes `bench/results/<date>-<sha>.json` and a summary
 table, and exits 1 if a budget fails or a browser did not render every page.
 `fetch:lightpanda` and `cdp:lightpanda` run only if a `lightpanda` binary is
-on PATH; they are untested. `python3 -m unittest discover -s bench` runs the
-tooling tests (10, no browser).
+on PATH (first measured on 2026-11-03, see "M6 status: Lightpanda
+comparison"). `python3 -m unittest discover -s bench` runs the tooling
+tests (12, no browser).
 
 First committed run: `bench/results/2026-11-03-a060281.json`, release binary
 sha256 `e801e8cd2f8ea13d` (54.88 MB, built before the screenshot work; the
@@ -1140,8 +1141,8 @@ downloading one is not allowed here). Peak RSS is about 10-20 MB above the
 not isolated.
 
 After the third binary-size pass (39.17 MB, sha256 `0e2df17d93846b2b`):
-`bench/results/2026-11-03-f2d6632.json`, now the latest in
-`bench/results/README.md`. `fetch` page median 141.6 ms (p90 151.6),
+`bench/results/2026-11-03-f2d6632.json` (the latest is now
+`2026-11-03-ca3f1b4.json`, see "M6 status: Lightpanda comparison"). `fetch` page median 141.6 ms (p90 151.6),
 `cdp` 99.9 ms (p90 103.8), Chromium 193.9 ms; idle RSS 10.0 MB; all
 budgets pass, binary now checked against < 40 MB.
 
@@ -1149,45 +1150,147 @@ Not covered: the crawl is sequential, with no HTTPS, iframes or workers.
 Re-run `python3 bench/run.py` after a rebuild to refresh the numbers; the
 result file is named after HEAD, so identify a run by its binary hash.
 
+## M6 status: Lightpanda comparison (2026-11-03)
+
+PLAN M6 item 2, the budget "crawl benchmark (wall time, peak RSS, CPU)
+<= Lightpanda". Measured against **Lightpanda 1.1.0-nightly.11582+592b76832**
+(binary sha256
+`71ec3bd077e29a13f14b76a97a4a19d1a0fab8153b9af9490d105db4a4ee5118`), a
+nightly the user approved for this comparison. It ran only against the
+loopback corpus server (`bench/serve_corpus.py`, 127.0.0.1) with
+`LIGHTPANDA_DISABLE_TELEMETRY=true` set for every process (`bench/run.py`
+sets it), and is not in the repository.
+
+Runner: `lightpanda fetch --dump html URL` and `lightpanda serve --host
+127.0.0.1 --port P` with the same Playwright code as the other CDP targets;
+the WebSocket URL now comes from `/json/version` (loopback-checked), and
+the Lightpanda binary's sha256 is recorded in the result. Lightpanda runs
+with its defaults, which fetch no images and no stylesheets
+(`--load-resources`); LightBrowser and Chromium fetch both, as Chrome
+does. Lightpanda rendered all 50 pages (markers verified) in both modes.
+
+Recorded run: `bench/results/2026-11-03-ca3f1b4.json`, 5 runs x 50 pages,
+release binary 39,628,664 bytes (sha256 `573c54b604e5669d`, tree
+`ca3f1b4` plus uncommitted work), 4-core Xeon, 16 GB. Median (min-max):
+
+| | fetch: LightBrowser | fetch: Lightpanda | CDP: LightBrowser | CDP: Lightpanda | CDP: Chromium |
+|---|---|---|---|---|---|
+| crawl wall time | **2.63 s** (2.57-2.78) | 3.50 s (3.44-3.61) | **1.32 s** (1.22-1.40) | 5.15 s (5.02-5.24) | 11.4 s |
+| page median / p90 | 50.0 / 61.3 ms | 69.0 / 74.3 ms | 24.0 / 36.0 ms | 103.0 / 107.7 ms | 228 / 248 ms |
+| peak RSS | **43.8 MB** (40.5-46.7) | 44.9 MB (38.5-46.7) | 42.2 MB (42.0-42.6) | **31.4 MB** (31.3-31.4) | 2841 MB (PSS 687) |
+| CPU (user+sys) | 2.51 s (2.45-2.64) | **1.37 s** (1.32-1.44) | **0.99 s** (0.96-1.04) | 1.06 s (0.93-1.12) | 28.8 s |
+| idle RSS (serve) | | | 10.2 MB | 12.4 MB | 1082 MB |
+| first new page / later | | | 121 / 7.1 ms | 4.4 / 4.6 ms | 100 / 80 ms |
+| pages verified | 50/50 | 50/50 | 50/50 | 50/50 | 50/50 |
+
+Budget checks: **4 of 6 pass**. Wall time wins in both modes (fetch 25 %
+faster, CDP 3.9x); peak RSS in `fetch` (43.8 vs 44.9 MB) and CPU in CDP
+(0.99 vs 1.06 s) pass, by margins inside the run-to-run spread. Two fail:
+
+- **`fetch` CPU: 2.51 vs 1.37 s** (about 50 vs 27 ms per process). A
+  `fetch` process builds its window realm without a snapshot (making one
+  costs more than it saves for one page): binding definition ~6 ms,
+  realm ~7 ms, plus V8/isolate start-up and about 13 ms of page-fault
+  (sys) time for ~40 MB touched. Lightpanda deserializes a build-time
+  snapshot. A build-time snapshot embedded in the binary would close most
+  of the gap, but it is about 0.4 MB compressed and the binary has 0.37 MB
+  left under the 40 MB budget (ADR 0013, "Alternatives").
+- **CDP peak RSS: 42.2 vs 31.4 MB.** LightBrowser holds every interface
+  object eagerly in each window realm (1.6 MB of V8 heap per realm, two
+  realms per page now that Playwright's utility world is made on use),
+  the snapshot blob (2.6 MB) and ~23 MB of mapped binary pages. In a
+  `fetch` process Lightpanda's anonymous memory at exit was 2.5 MB against
+  16 MB for LightBrowser (whose V8 heap alone was 9.8 MB). Letting V8 schedule its own full
+  GCs instead of one after each closed page brought CPU to 0.87-0.94 s
+  but peak RSS to 94-124 MB, so it was not kept.
+
+What changed, with the measured effect (same machine; before = the first
+1-run comparison):
+
+| Change | Where | Effect |
+|---|---|---|
+| `TCP_NODELAY` on CDP sockets (an event then a reply were held back by Nagle until the client's delayed ACK, 40 ms) | `lb-cdp` server | CDP page 100 → 31 ms; `page.close()` 44 → 1 ms |
+| Window global's ~1,200 members defined after context creation (interface objects directly, the rest via 32-member chunk templates) instead of one big template (O(n²) map transitions in V8) | `lb-js` (ADR 0013, revision 3) | instructions per `fetch` 1.88G → 0.44G; built realm 35/43 → 7/6 ms; snapshot creation 130 → 92 ms; `fetch` page 157 → 68 ms, peak 113 → 48 MB |
+| ICU data in 128 KiB zstd frames, paged in on first touch (a page reads ~120 KB of 10.9 MB) | `lb-js` `icu_data` (ADR 0013, revision 3) | `fetch` page (p05) 64 → 45 ms, CPU (user+sys) 66 → 49 ms, peak 48 → 39 MB; CDP peak 57 → 49 MB; binary +0.43 MB |
+| Isolated worlds reported at once, realm made on first use (Playwright's utility world is never used in a plain crawl) | `lb-page` CDP agent | CDP CPU 1.47 → 0.97 s, peak 48 → 43 MB |
+| GC after a closed page: one memory-reducing full GC instead of V8's low-memory notification (repeated full GCs, compilation cache dropped) | `lb-page` worker | CDP CPU 1.65 → 1.47 s, same peak |
+| GC of a quiet page after 2 s of quiet instead of at once (like V8's memory reducer) | `lb-page` event loop | no GC while a page is being worked with |
+| V8 code cache for classic scripts >= 16 KB compiled a second time (Playwright's ~100 KB utility script, per document) | `lb-js` `run_script` | CDP CPU about -3 % (noisy), no RSS cost (cache made before the run) |
+| Font tables and UA stylesheet parsed once per worker and OS, not per document | `lb-layout` `LayoutBase`, `lb-css`, `lb-webapi` | ~5.7M instructions per CDP page (callgrind) |
+| Fast global fixup for snapshot realms after the first (known engine extras deleted; full scan as fallback) | `lb-webapi` install | -0.1 ms per realm |
+| Fx-style hasher for the binding registry (static keys) | `lb-webapi` registry | SipHash was ~30M instructions per `fetch` process (callgrind) |
+
+Fidelity is unchanged: the full surface of the global and of every
+interface (order, descriptors, prototype chains) is byte-identical before
+and after in both built and snapshot realms, except the six
+`[LegacyWindowAlias]` interface objects' `name`, which now matches Chrome
+153 (`webkitURL.name === "URL"`, `WebKitCSSMatrix.name === "DOMMatrix"`,
+`FeaturePolicy.name === "PermissionsPolicy"`; before, the alias name
+leaked into the shared function, so `URL.name` was `"webkitURL"`). Checked
+on the final release binary: fingerprint-report 113 ok / 0 mismatch for
+both Chrome reference personas, T-010 fp 0 for both (and beh 0 with
+`--input human`), Playwright 20/20, WPT 2552/2788, Firefox-family tests
+14 pass / 2 ignored, clippy `-D warnings` for both families, fmt.
+
+Costs: snapshot realms take 2.5 ms instead of 2.3 ms (`realm_bench`, same
+session; first realm 3.1 ms) and keep 1.63 MB of V8 heap instead of
+1.39 MB; the binary grew 0.45 MB (39.17 → 39.63 MB). The first CDP page
+still makes the snapshot (121 ms; Lightpanda 4 ms).
+
+Measured and not kept: V8-managed GC (above); a young-generation cap
+(1-8 MB: -1 to -2 MB RSS, more CPU); `MALLOC_ARENA_MAX` and glibc
+trim/mmap thresholds (no change); a growth threshold (8 MB) for the GC after
+close (no measurable CPU gain, peak up to 50 MB); a code cache
+made after the run (+6 MB RSS); HTTP keep-alive (network is ~1 % of CPU
+here; still open).
+
 ## Workspace check (2026-11-03)
 
-Chrome build unless noted, 4 cores. Re-run after the binary-size,
-grid-page/table and M5 macOS fixes; the earlier check of the same day
-(release binary 54.96 MB, macOS T-010 `--input human` beh 35, fail) is
-replaced by this one.
+Chrome build unless noted, 4 cores. Re-run on the final tree after the
+Lightpanda start-up and memory work (`bench/results/2026-11-03-ca3f1b4.json`
+stands as the recorded bench run; `bench/run.py` was not run again). The
+disk could not hold every test binary at once, so tests were run per
+package and per test target, deleting test binaries after each.
 
-- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
-  warnings`: clean. Tests for every workspace crate: 449 pass (including
-  doc tests), 0 fail, 3 ignored. They were run per package and per test
-  target, because the disk could not hold every test binary at once.
+- `cargo fmt --all --check`: clean. `cargo clippy --workspace --all-targets
+  -- -D warnings`: clean.
+- Tests, all pass, 0 fail: `lb-persona`, `lb-behavior`, `lb-css`, `lb-dom`,
+  `lb-layout`, `lb-paint`, `lb-webidl-gen`, `lb-fptest`; `lb-js` (lib 9,
+  `v8` 32, `snapshot` 5); `lb-net` (lib 74, `fingerprint` 2/2);
+  `lb-webapi` (lib 23, `install` 10, `snapshot` 4); `lb-cdp` (13 + 10 + 1);
+  `lb-page` (lib 9, `canvas` 3, `cdp_host` 2, `connections` 1,
+  `fingerprint_surfaces` 2, `human` 2, `navigator` 1, `pages` 19, `tables`
+  3, `wpt`); `lightbrowser` (1 + 5).
+- WPT subset 2552/2788 (51/83 files fully pass, 3 harness errors or
+  timeouts), as before.
 - Firefox: clippy `-D warnings` for `lightbrowser`, `lb-js`, `lb-webapi`,
-  `lb-page`, `lb-cdp`: clean; tests for `lightbrowser`, `lb-js`,
-  `lb-webapi`, `lb-page`: 14 pass, 2 ignored.
-- `lb-net` fingerprint test 2/2; WPT 2552/2788; Playwright 20/20;
-  detect-bench unittest 18 OK; `bench` unittest 10 OK; `sdk/python`
-  pytest 93 pass, 4 skipped (bench scenarios, Python Playwright 1.52 is
-  installed).
-- Release: stripped binary 44,367,736 bytes (44.37 MB, budget < 56 MB;
-  39,174,008 bytes after the third binary-size pass, budget < 40 MB);
-  `realm_bench`: first realm 2.39 ms, next realm 2.07 ms with the snapshot
-  (28.2 / 35.1 ms without).
+  `lb-page`: clean; tests for the same four: 14 pass, 2 ignored.
+- Playwright (`node --test tests/playwright/`, debug build): 20/20.
+  detect-bench unittest 18 OK; `bench` unittest 12 OK; `sdk/python`
+  pytest 93 pass, 4 skipped (the scenarios need Python Playwright >= 1.63;
+  1.52 is installed).
+- Release: stripped binary 39,628,664 bytes (39.63 MB, budget < 40 MB, sha256
+  `573c54b604e5669d`, the same binary as the recorded bench run);
+  `--version` prints `lightbrowser 0.0.1 (chrome)`. `realm_bench` (release):
+  first realm 3.04 ms, next realm 2.43 ms with the snapshot (6.82 / 6.01 ms
+  without); a snapshot realm keeps 1.63 MB of V8 heap.
 - `lightbrowser fingerprint-report` (release): 113 ok, 0 mismatch for both
   Chrome reference personas.
-- `python3 bench/run.py` (5 runs): see "M6 status: bench runner".
-- detect-bench on the release build (`serve --persona`, a fresh `serve`
-  per run, bench on 127.0.0.1, own persona seeds):
+- detect-bench on the debug build (`serve --persona`, a fresh `serve` per
+  run, bench on 127.0.0.1, own persona seeds):
 
 | Run | Windows persona | macOS persona |
 |---|---|---|
-| T-010, Playwright input, `fp<=30` | 92.3, fp 0, pass | 92.3, fp 0, pass |
+| T-010, Playwright input, `fp<=30` | 89.8, fp 0, pass | 89.8, fp 0, pass |
 | T-010, `--input human`, `beh<=30` | 0, beh 0, pass | 0, beh 0, pass |
-| T-001 stock Chromium, `>=90` | 100, pass | |
+| T-001 stock headless Chromium, `>=90` (the bot baseline) | 100, fp 100, pass | |
 
 With Playwright input both personas fire the same behaviour rules
 (`beh_typing_no_keys`, `beh_click_center`, `beh_click_no_path`,
-`beh_click_hold`, `beh_ttfi`, `beh_wheel_pattern`); fp is 0. The macOS
-`--input human` failure is fixed by the longer typed text in the flow
-(see "M5 status").
+`beh_click_hold`, `beh_wheel_pattern`, `page_dwell_short`); fp is 0.
+
+Not green: the two Lightpanda checks that fail in the recorded run (`fetch`
+CPU and CDP peak RSS), see "M6 status: Lightpanda comparison".
 
 ## Risks
 

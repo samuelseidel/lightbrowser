@@ -110,7 +110,9 @@ fn snapshot_realm_matches_built_realm() {
         } => assert!(replayed == total && total > bs.len(), "{replayed}/{total}"),
         s => panic!("{s:?}"),
     }
-    for insecure in [false, true] {
+    // The third realm takes the fast global fixup of later snapshot
+    // realms with the secure options too.
+    for insecure in [false, true, false] {
         let opts = WindowRealmOptions {
             insecure,
             ..Default::default()

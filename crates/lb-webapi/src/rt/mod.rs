@@ -269,6 +269,9 @@ struct RtInner {
     dom: DomExceptions,
     /// `getContext` factories for non-2D kinds (WebGL).
     canvas_factories: canvas::Factories,
+    /// Font tables and UA stylesheet per OS, shared by the layout engines
+    /// of this engine's documents (parsed once, not per document).
+    layout_bases: RefCell<Vec<lb_layout::LayoutBase>>,
 }
 
 /// The implementations of one engine. Cheap to clone.
@@ -284,6 +287,17 @@ impl std::fmt::Debug for Runtime {
 }
 
 impl Runtime {
+    /// The shared layout inputs for `os` (made on first use).
+    pub(crate) fn layout_base(&self, os: lb_css::OsKind) -> lb_layout::LayoutBase {
+        let mut bases = self.0.layout_bases.borrow_mut();
+        if let Some(b) = bases.iter().find(|b| b.os() == os) {
+            return b.clone();
+        }
+        let b = lb_layout::LayoutBase::for_os(os);
+        bases.push(b.clone());
+        b
+    }
+
     /// Register every implementation in `reg`. Call before
     /// `Bindings::define`, then [`Runtime::set_bindings`].
     pub fn new(reg: &mut Registry) -> Runtime {
@@ -293,6 +307,7 @@ impl Runtime {
             ids: RefCell::new(HashMap::new()),
             dom: reg.dom_exceptions(),
             canvas_factories: canvas::Factories::default(),
+            layout_bases: RefCell::new(Vec::new()),
         }));
         dom::register(reg, &rt);
         coll::register(reg, &rt);
@@ -1187,7 +1202,10 @@ impl Window {
         let mut l = self.layout.borrow_mut();
         let created = l.is_none();
         let engine = l.get_or_insert_with(|| match &self.profile {
-            Some(p) => lb_layout::LayoutEngine::new(p.clone()),
+            Some(p) => {
+                let base = self.rt.layout_base(lb_css::MediaEnv::from_persona(p).os);
+                lb_layout::LayoutEngine::new_with(p.clone(), &base)
+            }
             None => lb_layout::LayoutEngine::with_env(lb_css::MediaEnv::default()),
         });
         if created {

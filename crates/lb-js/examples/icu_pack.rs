@@ -1,6 +1,6 @@
-//! Writes `crates/lb-js/icu/icudt78.dat.zst`: the ICU data embedded in the
-//! prebuilt V8 archive, zstd-compressed (ADR 0013). Run after a `v8`
-//! upgrade:
+//! Writes `crates/lb-js/icu/icudt78.dat.zch`: the ICU data embedded in the
+//! prebuilt V8 archive, in independently zstd-compressed chunks
+//! (`lb_js::icu_data::pack`, ADR 0013). Run after a `v8` upgrade:
 //!
 //! ```text
 //! cargo run --release -p lb-js --example icu_pack [-- path/to/librusty_v8.a]
@@ -19,14 +19,8 @@ fn main() {
         .expect("librusty_v8.a not found; pass its path");
     let ar = std::fs::read(&archive).expect("read archive");
     let data = lb_js::icu_data::extract_from_archive(&ar).expect("extract ICU data");
-    let mut c = zstd::bulk::Compressor::new(22).expect("compressor");
-    // A window that covers the whole package (it is ~10.4 MiB), within the
-    // decoder's default limit (2^27).
-    c.set_parameter(zstd::zstd_safe::CParameter::WindowLog(24))
-        .expect("window");
-    c.include_contentsize(true).expect("content size");
-    let packed = c.compress(&data).expect("compress");
-    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("icu/icudt78.dat.zst");
+    let packed = lb_js::icu_data::pack(&data);
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("icu/icudt78.dat.zch");
     std::fs::write(&out, &packed).expect("write");
     println!(
         "{}: {} -> {} bytes ({})",

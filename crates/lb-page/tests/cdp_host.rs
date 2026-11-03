@@ -10,7 +10,8 @@ use std::sync::Arc;
 use common::{Resource, serve};
 use lb_cdp::types::{CallArgument, CookieParam, KeyEvent, MouseEvent, NodeRef};
 use lb_cdp::{
-    CallFunctionRequest, CallTarget, ContextOptions, EvaluateRequest, NavigateRequest, PageHost,
+    BindingScope, CallFunctionRequest, CallTarget, ContextOptions, EvaluateRequest,
+    NavigateRequest, PageHost,
 };
 use lb_page::{CdpHost, CdpHostOptions};
 use lb_persona::PersonaProfile;
@@ -53,6 +54,64 @@ async fn eval(h: &CdpHost, t: &str, expr: &str) -> serde_json::Value {
 const PAGE: &str = "<!DOCTYPE html><title>Host</title><body style='margin:0'>\
     <button id=b style='width:100px;height:40px' onclick=\"this.textContent='done:'+event.isTrusted\">go</button>\
     <input id=i style='width:100px;height:20px'></body>";
+
+// Isolated worlds are reported at once and get their realm on first use:
+// bindings added before that are there, the DOM is shared, globals are not.
+#[test]
+fn isolated_worlds_made_on_first_use() {
+    lb_cdp::block_on_local(async {
+        let s = serve(vec![("/", Resource::html(PAGE))]).await;
+        let h = host();
+        h.create_context("C", ContextOptions::default()).unwrap();
+        h.create_page("C", "T").await.unwrap();
+        h.add_script_to_evaluate_on_new_document("T", "", Some("auto"), false)
+            .unwrap();
+        h.navigate(
+            "T",
+            NavigateRequest {
+                url: s.url("/"),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        eval(&h, "T", "window.mainOnly = 1").await;
+        let frame = h.frame_tree("T").unwrap().frame.id;
+        let w = h.create_isolated_world("T", &frame, "util", true).unwrap();
+        h.add_binding("T", "pwBinding", BindingScope::AllIsolatedWorlds)
+            .unwrap();
+        let ev = |expr: &str| EvaluateRequest {
+            context_id: w,
+            expression: expr.into(),
+            return_by_value: true,
+            ..Default::default()
+        };
+        let r = h
+            .evaluate(
+                "T",
+                ev("[typeof pwBinding, document.title, typeof mainOnly, \
+                    document.getElementById('b').textContent, typeof HTMLDivElement]"),
+            )
+            .await
+            .unwrap();
+        assert!(r.exception_details.is_none(), "{:?}", r.exception_details);
+        assert_eq!(
+            r.result.value,
+            Some(json!(["function", "Host", "undefined", "go", "function"]))
+        );
+        // The same realm on later use.
+        h.evaluate("T", ev("globalThis.kept = 7")).await.unwrap();
+        let r = h.evaluate("T", ev("kept")).await.unwrap();
+        assert_eq!(r.result.value, Some(json!(7)));
+        // The main world never sees the isolated world's globals.
+        assert_eq!(
+            eval(&h, "T", "typeof kept + typeof pwBinding").await,
+            json!("undefinedundefined")
+        );
+        h.close_page("T").unwrap();
+    })
+    .unwrap();
+}
 
 #[test]
 fn runtime_dom_input_and_cookies() {

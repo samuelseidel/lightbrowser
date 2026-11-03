@@ -466,16 +466,15 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
     let expect_after = r.meta.cb_after[i] as usize;
     r.next += 1;
     let split = template_split(spec.instance.len());
-    let key_chunks = spec.instance[split..].chunks(OVERFLOW_CHUNK);
-    if key_chunks.len() != overflow.len() {
+    let (items, plan) = overflow_plan(&spec.instance[split..]);
+    if plan.len() != overflow.len() {
         r.diverged = true;
         return None;
     }
-    let overflow = overflow
-        .into_iter()
-        .zip(key_chunks)
-        .map(|(ot, chunk)| (ot, chunk.iter().map(|m| m.key.clone()).collect()))
-        .collect();
+    let overflow = Overflow {
+        chunks: overflow,
+        items,
+    };
     let parent = spec.parent;
     push_spec_callbacks(st, spec.clone());
     // The replay mirrors the builder; a count mismatch is a bug in this
@@ -701,7 +700,7 @@ fn fill_snapshot(
     }
     for entry in &st.interfaces {
         let mut first = u32::MAX;
-        for (j, (ot, _)) in entry.overflow.iter().enumerate() {
+        for (j, ot) in entry.overflow.chunks.iter().enumerate() {
             let t = v8::Local::new(scope, ot);
             let at = scope.add_isolate_data(t) as u32;
             if j == 0 {
@@ -711,7 +710,7 @@ fn fill_snapshot(
             }
         }
         meta.overflow_index.push(first);
-        meta.overflow_count.push(entry.overflow.len() as u32);
+        meta.overflow_count.push(entry.overflow.chunks.len() as u32);
     }
     Ok(meta)
 }

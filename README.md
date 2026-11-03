@@ -17,12 +17,15 @@ routing, screenshots). On our own detection bench, fingerprint rules score 0
 for both reference Chrome personas. With `LightBrowser.human*` input both
 personas score 0 on behaviour rules on their own seeds (seed sweeps: 20/20
 Windows, 19/20 macOS).
-Idle RSS is 10.0 MB, realm creation 2.1 ms, and the release binary
-39.2 MB (budget < 40 MB, ADR 0013). On the `bench/` corpus every
-LightBrowser page is faster than headless Chromium's median (see
-`bench/results/README.md`).
+Idle RSS is 10.2 MB, realm creation 2.5 ms, and the release binary
+39.6 MB (budget < 40 MB, ADR 0013). On the `bench/` corpus every
+LightBrowser page is faster than headless Chromium's median, and the
+crawl is faster than Lightpanda's (a user-approved 1.1.0 nightly, run on
+loopback with telemetry off) in both `fetch` and CDP mode; 4 of the 6
+Lightpanda checks pass (see `bench/results/README.md`).
 Not done: Firefox (M4b, no SpiderMonkey backend yet), workers and service
-workers, and the comparison with Lightpanda (no binary on the bench machine).
+workers, and two Lightpanda gaps: CPU per `fetch` process and peak RSS in
+CDP mode.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only
@@ -39,7 +42,7 @@ distribute binaries or push them to public repos or registries.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | <= Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 40 MB (ADR 0013); Chrome measured 39.2 MB |
+| Binary size (per family, stripped) | < 40 MB (ADR 0013); Chrome measured 39.6 MB |
 | Disk writes during a session | none by default |
 | Isolate/realm creation | < 5 ms (startup snapshot) |
 
@@ -129,7 +132,7 @@ crates/             lb-persona, lb-js, lb-net, lb-dom, lb-css, lb-layout,
                     lb-behavior (see CLAUDE.md for the crate map)
 sdk/python/         Python launcher + persona + human_* helpers
 profiles/           personas and TLS profiles (profiles/tls/)
-bench/              crawl benchmark vs headless Chromium (and Lightpanda if installed)
+bench/              crawl benchmark vs headless Chromium and Lightpanda (if on PATH)
 tests/              Playwright, WPT and detection-bench suites
 docs/               architecture, roadmap, ADRs
 ```

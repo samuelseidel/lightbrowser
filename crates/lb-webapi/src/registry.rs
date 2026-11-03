@@ -7,6 +7,7 @@
 //! templates there.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::rc::Rc;
 
 use lb_js::{
@@ -37,17 +38,58 @@ pub enum ImplKind {
     LegacyFactory,
 }
 
+/// Hasher for the registry's keys: the multiply-rotate hash of rustc's
+/// `FxHasher`. The keys are the binary's own interface and member names
+/// (no outside input), so SipHash's flooding resistance buys nothing, and
+/// it was a fifth of a `fetch` process's binding setup (~4,000 inserts and
+/// lookups per engine).
+#[derive(Default, Clone, Copy)]
+pub struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            self.add(u64::from_le_bytes(c.try_into().expect("8 bytes")));
+        }
+        for &b in chunks.remainder() {
+            self.add(u64::from(b));
+        }
+    }
+
+    fn write_u8(&mut self, i: u8) {
+        self.add(u64::from(i));
+    }
+
+    fn write_usize(&mut self, i: usize) {
+        self.add(i as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+impl KeyHasher {
+    #[inline]
+    fn add(&mut self, w: u64) {
+        self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+type KeyMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
+
 /// Registered implementations. Cheap to build; one per engine.
 #[derive(Clone, Default)]
 pub struct Registry {
-    fns: HashMap<(&'static str, &'static str, ImplKind), HostFn>,
-    named: HashMap<&'static str, NamedGetter>,
-    indexed: HashMap<&'static str, IndexedGetter>,
-    named_set: HashMap<&'static str, NamedSetter>,
-    named_delete: HashMap<&'static str, NamedDeleter>,
-    named_enum: HashMap<&'static str, NamedEnumerator>,
-    indexed_len: HashMap<&'static str, IndexedLength>,
-    unenumerable: std::collections::HashSet<&'static str>,
+    fns: KeyMap<(&'static str, &'static str, ImplKind), HostFn>,
+    named: KeyMap<&'static str, NamedGetter>,
+    indexed: KeyMap<&'static str, IndexedGetter>,
+    named_set: KeyMap<&'static str, NamedSetter>,
+    named_delete: KeyMap<&'static str, NamedDeleter>,
+    named_enum: KeyMap<&'static str, NamedEnumerator>,
+    indexed_len: KeyMap<&'static str, IndexedLength>,
+    unenumerable: std::collections::HashSet<&'static str, BuildHasherDefault<KeyHasher>>,
     dom_exceptions: DomExceptions,
 }
 

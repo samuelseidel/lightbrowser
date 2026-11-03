@@ -19,16 +19,20 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | ≤ Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 40 MB (ADR 0013). Chrome: 39.17 MB with the prebuilt V8 (code that only off-by-default V8 flags reach is not linked) |
+| Binary size (per family, stripped) | < 40 MB (ADR 0013). Chrome: 39.63 MB with the prebuilt V8 (code that only off-by-default V8 flags reach is not linked; ICU data in lazily paged zstd chunks) |
 | Disk writes during a session | none by default |
 | Isolate/realm creation | < 5 ms (startup snapshot, ADR 0013) |
 
 `bench/run.py` measures these (see the "Bench runner" row in the Stack table). Measured on
-2026-11-03 (`bench/results/2026-11-03-f2d6632.json`): idle RSS 10.0 MB,
-binary 39.17 MB (39,174,008 bytes), first/next realm 2.4/2.1 ms, no disk
-writes. The Lightpanda comparison is not
-measured yet (no binary on the bench machine). Details: `docs/ROADMAP.md`,
-"M6 status".
+2026-11-03 (`bench/results/2026-11-03-ca3f1b4.json`, 5 runs x 50 pages):
+idle RSS 10.2 MB, binary 39.63 MB (39,628,664 bytes), first/next realm
+3.1/2.5 ms, no disk writes. Against Lightpanda 1.1.0-nightly.11582 (a
+user-approved nightly, run on loopback with telemetry off) 4 of the 6
+checks pass: wall time `fetch` 2.63 vs 3.50 s and CDP 1.32 vs 5.15 s,
+peak RSS `fetch` 43.8 vs 44.9 MB, CPU CDP 0.99 vs 1.06 s. Two fail:
+CPU `fetch` 2.51 vs 1.37 s (no snapshot in a one-page process) and peak
+RSS CDP 42.2 vs 31.4 MB (eager interface objects per realm). Details:
+`docs/ROADMAP.md`, "M6 status: Lightpanda comparison".
 
 ## Decisions (see `docs/adr/`)
 
@@ -46,7 +50,7 @@ measured yet (no binary on the bench machine). Details: `docs/ROADMAP.md`,
 | 0010 | Own box tree over taffy; font metric tables compiled in from `profiles/fonts` |
 | 0011 | Request headers per destination from `profiles/headers`, captured from local Chromium; own HTTP/1.1 writer |
 | 0012 | Each frame is a realm in the page's engine, built synchronously through `lb_js::RealmOps`; origins via V8 security tokens |
-| 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary < 40 MB: ICU data compressed, no unwind tables, V8 code that only off-by-default flags reach not linked |
+| 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary < 40 MB: ICU data compressed in chunks and paged in on first touch, no unwind tables, V8 code that only off-by-default flags reach not linked; the window global's members are defined after context creation (linear, not V8's O(n²) template instantiation) |
 | 0014 | Page screenshots painted on demand from a per-capture display list (no retained paint state, never noised) |
 
 ## Layers
@@ -113,7 +117,7 @@ browser context. Nothing reads a global.
 | Python SDK | `sdk/python/lightbrowser`: launches `lightbrowser serve --port 0` with a persona, connects stock Playwright over CDP and returns stock `Page` objects with `human_move/click/type/scroll` and `verify_fingerprint()` bound on; sync and async APIs; scenarios T-001 to T-007 against the bench. Loopback only. Needs Python Playwright >= 1.63: older versions put `__pwInitScripts` in the page's main world, which the browser cannot hide. | Replaces the GeckoPhantom SDK; control stays CDP only. |
 | Bench runner | `bench/run.py`: 50-page generated corpus served on loopback; `fetch` and CDP crawls of LightBrowser and headless Chromium (and Lightpanda if on PATH); wall time, p50/p90 page time, peak RSS/PSS, CPU, idle RSS, startup, binary size, realm creation and disk writes, checked against the budgets above. Results in `bench/results/`. | Makes the budgets measurable and repeatable. |
 | Runtime | Thread per core. Each thread runs a tokio `current_thread` runtime and owns its JS engine instances. | JS engines are single-threaded, so there's no locking. |
-| Allocator | glibc malloc (mimalloc measured worse for idle and multi-page RSS, ADR 0013). Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped, `opt-level = "s"` for the root crate (the LTO pipeline), the bindings and non-hot crates, linked with `--icf=safe`, packed relative relocations and no `.eh_frame`; V8's ICU data is embedded zstd-compressed and decompressed once when the first engine starts; V8 objects that only off-by-default flags reach are not linked (`lb-js` `unused_v8`); font tables and glyph packs embedded zstd-compressed (ADR 0013) | Speed and size. |
+| Allocator | glibc malloc (mimalloc measured worse for idle and multi-page RSS, ADR 0013). Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped, `opt-level = "s"` for the root crate (the LTO pipeline), the bindings and non-hot crates, linked with `--icf=safe`, packed relative relocations and no `.eh_frame`; V8's ICU data is embedded as 128 KiB zstd chunks, each decompressed the first time ICU reads it (Linux; a `SIGSEGV` handler on a `PROT_NONE` reservation, else all at once); V8 objects that only off-by-default flags reach are not linked (`lb-js` `unused_v8`); font tables and glyph packs embedded zstd-compressed (ADR 0013) | Speed and size. |
 | Control | Own CDP server (`tokio-tungstenite`) | Playwright `connectOverCDP` works unchanged for both families. |
 
 ## Browser families
@@ -151,7 +155,10 @@ The existing GeckoPhantom personas (`persona_v1`, Firefox 128) load as
   page's event loop runs every window of the frame tree. An iframe's
   `about:blank` window is built while the inserting script runs (ADR 0012).
   CDP utility code (Playwright's injected script) runs in an isolated world, so
-  nothing is ever installed in the page's main world.
+  nothing is ever installed in the page's main world. An isolated world is
+  reported to the client at once and its realm is made on first use
+  (nothing runs in it before; worlds with a non-empty new-document script
+  are made at once).
 - **Workers.** Not built yet. Dedicated workers will get their own engine
   instance on the same thread pool. Service workers are still open (M6).
 - **Crash isolation.** `--process-per-context` is an option for later. The
@@ -260,8 +267,10 @@ process and is controlled over CDP.
 - One arena per document. Node structs are kept small (≤ 64 bytes). Attribute and text storage use interned atoms.
 - No layout or style data until something asks for it. `lb_layout::LayoutEngine::drop_layout` frees it; dropping it under memory pressure is not wired up yet.
 - No paint layers or compositor. A screenshot builds a display list from the current layout, paints it and drops it (ADR 0014).
-- JS heap cap per engine (512 MB). The engine gets a low-memory notification when a page's event loop goes idle and when a worker's queue drains after a page closed.
-- Window realms come from the startup snapshot: about 1.4 MB of V8 heap each, with far less garbage than building them (one local page in `serve`: 67 MB RSS instead of 152 MB).
+- JS heap cap per engine (512 MB). The engine gets a low-memory notification when a page's event loop has been quiet for 2 s, and one memory-reducing full GC (V8's critical memory-pressure path) when a worker's queue drains after a page closed.
+- Window realms come from the startup snapshot: about 1.6 MB of V8 heap each, with far less garbage than building them. A realm built without the snapshot (one-page `fetch`) defines the global's ~1,200 members after context creation, which is linear; V8's template instantiation of them was O(n²).
+- ICU data (10.9 MB) is paged in by 128 KiB chunk when ICU first reads it; a page load makes about 0.6 MB resident.
+- Font metric tables and the UA stylesheet are parsed once per worker and OS (`lb_layout::LayoutBase`), not per document.
 - HTTP cache in memory, bounded LRU, partitioned per context. Nothing goes to disk unless `--cache-dir` is given.
 - Fonts: metric tables only (advance widths, ascent/descent) for persona fonts. Glyph outline packs (205 KB, compiled in) are parsed only when a canvas draws or measures text.
 - Images: `<img>` loads keep the encoded bytes and their size; pixels are decoded on first `drawImage`.

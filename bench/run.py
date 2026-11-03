@@ -657,7 +657,9 @@ def render_readme(result: dict, history: list[dict]) -> str:
         f"{' (dirty tree)' if v['git_dirty'] else ''}, binary sha256 `{v['lightbrowser_binary_sha256']}`, "
         f"{result['runs']} runs x {result['pages']} pages.", "",
         f"Machine: {v['cpu']}, {v['cores']} cores, {v['mem_mb']} MB RAM, kernel {v['kernel']}. "
-        f"Chromium `{v.get('chromium', 'n/a')}`, Playwright (python) {v['playwright_python']}, {v['rustc']}.", "",
+        f"Chromium `{v.get('chromium', 'n/a')}`, Playwright (python) {v['playwright_python']}, {v['rustc']}."
+        + (f" Lightpanda `{v['lightpanda']}` (binary sha256 `{v.get('lightpanda_binary_sha256', '?')}`), run with telemetry disabled."
+           if v.get("lightpanda") else ""), "",
         "## Crawl", "", "| metric | " + " | ".join(cols) + " |", "|---|" + "---|" * len(cols),
     ]
     for key, label in REPORT_KEYS:
