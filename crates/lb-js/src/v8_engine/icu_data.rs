@@ -23,10 +23,11 @@
 //! each chunk is decompressed the first time ICU touches it (see `lazy`),
 //! like a file mapping that pages in on demand: a page load reads about
 //! 120 KB of it (the table of contents and a few items such as the root
-//! locale and time zone data), so about 5 chunks (0.6 MB, < 1 ms) become
-//! resident instead of all of it (10.9 MB, ~15 ms). If the reservation or
-//! the fault handler cannot be set up, or on other systems, the whole
-//! package is decompressed into the heap at once.
+//! locale and time zone data), so about 27 chunks of 4 KiB (0.1 MB, < 1 ms)
+//! become resident instead of all of it (10.9 MB, ~15 ms). If the
+//! reservation or the fault handler cannot be set up, if the system's page
+//! size does not divide [`CHUNK`], or on other systems, the whole package
+//! is decompressed into the heap at once.
 
 use std::sync::OnceLock;
 
@@ -40,11 +41,12 @@ pub const MEMBER: &str = "icudtl_dat.o";
 /// The archive's ICU data in chunks (see [`pack`]).
 pub const PACKED: &[u8] = include_bytes!("../../icu/icudt78.dat.zch");
 
-/// Bytes of ICU data per compressed frame (a multiple of the page size).
-/// Smaller chunks keep less of the package resident but compress worse:
-/// 128 KiB costs 0.43 MB of binary over one frame for the whole package
-/// (64 KiB: 0.58 MB, 256 KiB: 0.35 MB).
-pub const CHUNK: usize = 128 * 1024;
+/// Bytes of ICU data per compressed frame: one 4 KiB page, so only the
+/// pages ICU reads become resident. Smaller chunks compress worse: 4 KiB
+/// frames take 4.92 MB, 0.66 MB more than 128 KiB frames (4.26 MB; 16 KiB:
+/// 4.60 MB), and a typical page keeps ~0.1 MB of the package resident
+/// instead of ~0.6 MB (ADR 0013, revision 4).
+pub const CHUNK: usize = 4 * 1024;
 
 const MAGIC: &[u8; 8] = b"LBICUZC1";
 
@@ -185,6 +187,30 @@ pub fn data() -> &'static [u8] {
     })
 }
 
+/// Drops the pages of [`PACKED`] that reading compressed frames mapped
+/// (the kernel maps up to 64 KB of the binary around each fault) from this
+/// process's RSS: `madvise(MADV_DONTNEED)` on the whole pages inside it.
+/// They are clean pages of the read-only executable mapping, so this only
+/// unmaps them; a later read maps them again from the page cache.
+/// Async-signal-safe (one system call), so the lazy fault handler calls it
+/// after each chunk.
+fn release_packed() {
+    #[cfg(target_os = "linux")]
+    {
+        let start = PACKED.as_ptr() as usize;
+        let first = start.next_multiple_of(4096);
+        let last = (start + PACKED.len()) & !4095;
+        if last > first {
+            // SAFETY: whole pages inside the immutable `PACKED` static;
+            // MADV_DONTNEED on a private file mapping that was never
+            // written leaves its contents unchanged.
+            unsafe {
+                libc::madvise(first as *mut libc::c_void, last - first, libc::MADV_DONTNEED);
+            }
+        }
+    }
+}
+
 /// The whole package decompressed into a new heap buffer (u128s: ICU
 /// wants 16-byte alignment). The eager path of [`data`]; tests compare
 /// the lazy one against it.
@@ -202,6 +228,7 @@ pub fn decompress_all() -> Box<[u128]> {
             .expect("ICU data decompresses");
         assert_eq!(n, p.chunk_len(i), "ICU data chunk {i} length");
     }
+    release_packed();
     words
 }
 
@@ -233,8 +260,8 @@ mod lazy {
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
-    /// More than enough for the 10.9 MB package (84 chunks).
-    const MAX_CHUNKS: usize = 256;
+    /// More than enough for the 10.9 MB package (2,656 chunks).
+    const MAX_CHUNKS: usize = 4096;
 
     static BASE: AtomicUsize = AtomicUsize::new(0);
     static SPAN: AtomicUsize = AtomicUsize::new(0);
@@ -258,7 +285,9 @@ mod lazy {
     /// Reserve the package and install the fault handler. `None` if either
     /// fails (the caller decompresses eagerly instead).
     pub(super) fn map(packed: Packed) -> Option<&'static [u8]> {
-        if packed.count > MAX_CHUNKS {
+        // SAFETY: sysconf has no preconditions.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if packed.count > MAX_CHUNKS || page <= 0 || CHUNK % page as usize != 0 {
             return None;
         }
         let dctx = zstd::bulk::Decompressor::new().ok()?;
@@ -432,6 +461,7 @@ mod lazy {
                 libc::munmap(scratch, CHUNK);
                 return false;
             }
+            super::release_packed();
             let target = (base + i * CHUNK) as *mut libc::c_void;
             let moved = libc::mremap(
                 scratch,
