@@ -16,7 +16,11 @@ and most of M6 (snapshot, memory, binary size, `bench/` runner, screenshots).
 routing, screenshots). On our own detection bench, fingerprint rules score 0
 for both reference Chrome personas. With `LightBrowser.human*` input both
 personas score 0 on behaviour rules on their own seeds (seed sweeps: 20/20
-Windows, 19/20 macOS).
+Windows, 19/20 macOS). M7 adds eight desktop OS personas (Windows 10/11,
+macOS Intel and Apple Silicon, Ubuntu X11, Fedora Wayland), each scoring
+fp 0 and beh 0 on the bench with all OS rules in force (Linux values
+captured, Windows and macOS from a reference; TCP/IP signals are the
+host's).
 Idle RSS is 10.2 MB, realm creation 2.5 ms, and the release binary
 39.6 MB (budget < 40 MB, ADR 0013). On the `bench/` corpus every
 LightBrowser page is faster than headless Chromium's median, and the
@@ -140,5 +144,5 @@ docs/               architecture, roadmap, ADRs
 ## Docs
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): layers, stack, fingerprint surface, CDP surface
-- [docs/ROADMAP.md](docs/ROADMAP.md): milestones M0 to M6 and risks
+- [docs/ROADMAP.md](docs/ROADMAP.md): milestones M0 to M7 and risks
 - [docs/adr/](docs/adr/): architecture decision records

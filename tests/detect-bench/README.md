@@ -349,7 +349,10 @@ captured; rules that rest only on them are marked below or start at weight
 Stock check (2026-11-03): T-010 with stock Chrome 153 over CDP, headed
 under `xvfb-run` and `--headless=new`, fires no OS rule, also with the info
 rules at their target weights; T-001/T-003 still score 100. The Critical-CH
-retry leaves `header_order` and `cookie_not_echoed` quiet.
+retry leaves `header_order` and `cookie_not_echoed` quiet. Re-checked at the
+M7 close-out (after WP-E): still no OS rule fires, and all eight reference
+LightBrowser personas score fp 0 (Playwright input) and beh 0 (`--input
+human`) with the three info rules at their target weights.
 
 ## What LightBrowser needs from this bench
 

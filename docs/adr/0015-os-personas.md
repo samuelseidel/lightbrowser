@@ -160,3 +160,12 @@ capped at 8, one wheel notch is 120 px).
   Windows 11 fonts got derived entries.
 - A passive TCP/IP fingerprint can still contradict a Windows or macOS
   persona (Risks in `docs/ROADMAP.md`).
+
+## Verification (2026-11-03)
+
+Re-run at the M7 close-out: all 8 reference personas pass `fingerprint-report`
+(0 mismatch), T-010 `fp<=30` (fp 0) and `--input human` `beh<=30` (beh 0)
+with every OS rule at full weight; each adversarial persona fails with its
+one rule; stock Chrome 153 fires no OS rule. Windows and macOS values are
+not captured (see Consequences). Details: "M7 status: verification and
+close-out" in `docs/ROADMAP.md`. No TCP/IP-level code exists by decision.

@@ -136,8 +136,9 @@ python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (33)
 ```
 
 Since M7 the bench also has OS rules (`scoring.py`, "OS rules (M7)" in its
-README). With them the eight Chrome reference personas score fp 40 after
-WP-D (only `ch_high_entropy`, until WP-E lands); see "M7 status" in
+README). With them all eight Chrome reference personas score fp 0 and,
+with `--input human`, beh 0 (checked again at the M7 close-out); stock
+Chrome 153, headed and `--headless=new`, fires none of them; see "M7 status" in
 `docs/ROADMAP.md`. Rendering per OS is checked without the bench by `cargo
 test -p lb-layout --test os` (scrollbars for every reference persona; Linux
 font widths, scrollbars and emoji against the capture in

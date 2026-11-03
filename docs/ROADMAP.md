@@ -1708,6 +1708,91 @@ not done: `Sec-Fetch-Storage-Access` on cross-site frames of an https page,
 click in the bench; LightBrowser does not, ADR 0011). Windows and macOS
 hint values are the persona's (surface reference, not captured).
 
+## M7 status: verification and close-out (2026-11-03)
+
+An independent re-run of every check on the tree after WP-E (debug build,
+loopback only, 4 cores; the disk holds one test binary set at a time, so
+tests ran per package and per test target).
+
+**M7 acceptance.** Every reference Chrome persona: `fingerprint-report`
+0 mismatch and 0 unimplemented; T-010 `fp<=30` with Playwright input and
+`beh<=30` with `--input human`, with every OS rule of the bench at full
+weight (`codecs_os` 15, `screen_os` 15, `wheel_os` 20); each adversarial
+persona fails `validate` with exactly its rule; stock Chrome 153 (headed
+under `xvfb-run`, and `--headless=new`) fires no OS rule; no existing
+bench rule, weight, threshold or probe weakened; binary < 40,000,000 bytes;
+realm < 5 ms. Status: all met, with the caveats under "Residual risks".
+
+| Persona | fp, Playwright input (`fp<=30`) | score / beh, `--input human` (`beh<=30`) |
+|---|---|---|
+| Windows 10, RTX 3060 | 0, pass | 0 / 0, pass |
+| Windows 11 24H2, RTX 4060 | 0, pass | 0 / 0, pass |
+| Windows 11 23H2, Iris Xe laptop 1536x864 | 0, pass | 0 / 0, pass |
+| macOS 14, Intel Iris Plus | 0, pass | 0 / 0, pass |
+| macOS 15, Apple M2 | 0, pass | 0 / 0, pass |
+| macOS 26, Apple M4 | 0, pass | 0 / 0, pass |
+| Ubuntu 24.04 X11, Intel UHD 630 | 0, pass | 0 / 0, pass |
+| Fedora 42 Wayland, AMD RX 6600 | 0, pass | 0 / 0, pass |
+
+A fresh `serve` and a fresh bench server per run, each persona on its own
+seed. With Playwright input the behaviour rules still fire (score 88 to
+89.8), so the bench keeps catching naive automation.
+
+- `cargo fmt --all --check` and `cargo clippy --workspace --all-targets
+  -- -D warnings`: clean. Tests, all 14 workspace packages, 0 fail:
+  `lb-behavior` 66+1+1, `lb-cdp` 13+10+1, `lb-css` 13+6, `lb-dom` 9+7+9+11,
+  `lb-persona` 13+41, `lb-layout` 7+10+7, `lb-fptest` 22, `lb-js` 9+5+32,
+  `lb-net` 79+5+3 (includes the `accept_ch` golden test), `lb-paint` 26,
+  `lb-webapi` 26+11+4, `lb-webidl-gen` 1+7, `lightbrowser` 6, `lb-page`
+  (lib 9, canvas 3, cdp_host 2, client_hints 1, connections 1,
+  fingerprint_surfaces 2, human 3, navigator 1, os_apis 1, pages 19 with
+  the report gate over all 8 personas, tables 3, wpt 1).
+- Firefox: clippy on `lightbrowser lb-js lb-webapi lb-page` clean; tests
+  15 pass, 2 ignored.
+- `lightbrowser validate`: the 8 reference personas OK with 0 warnings; the
+  13 adversarial personas each report their one rule (11 M7 personas plus
+  the two older ones); the 15 generated personas are OK.
+- WPT subset 2552/2788 (unchanged); Playwright 20/20; detect-bench
+  `unittest` 33 OK; `bench` `unittest` OK; `sdk/python` 93 passed, 4
+  skipped.
+- Stock Chrome 153 (Chrome for Testing, `/opt/pw-browsers/chromium`)
+  through T-010 over CDP, headed and `--headless=new`, scored with the
+  three info rules at full weight: no OS rule fires, and `header_order`
+  and `cookie_not_echoed` stay quiet. (Old rules such as `ua_headless` and
+  `webgl_software` fire as before.)
+- Release binary, stripped: 39,841,656 bytes (< 40,000,000; 158,344
+  bytes left); `--version` prints chrome. `realm_bench`: first realm
+  3.19 ms, next 2.50 ms with the snapshot (976 of 976 templates restored).
+- Diff review since M6 (`1954be3`): the existing rules, weights, thresholds
+  and probes in `tests/detect-bench` are unchanged (the only edited
+  existing line is the response-header dict in `server.py`); no test lost
+  an assertion except where a captured fact or a documented change
+  replaced it (Windows monospace is Consolas, an emoji advances by the
+  emoji font, h2 `cookie` precedes `priority`, R12's checks moved to
+  R17/R18); no code touches IP_TTL, socket options or other TCP/IP
+  values; no binary or downloaded file is committed.
+
+**Residual risks.**
+
+- TCP/IP-level signals (SYN TTL, TCP options, window scale) always come
+  from the host OS and can contradict a Windows or macOS persona. Not
+  modelled, on purpose.
+- Windows and macOS ground truth was not captured here. Their values
+  (platform versions, GPU and WebGL limits, codec answers, WebGPU limits,
+  wheel ratios, emoji and system-font metrics, voice lists, scrollbar
+  widths) are the M7 surface reference, medium confidence; two of its claims
+  proved wrong against the Linux capture. `codecs_os`, `screen_os` and
+  `wheel_os` are info-only in the bench until internal captures exist. An
+  internal Windows or macOS capture with `tools/os_truth` is the next step.
+- No GPU on this machine: WebGL and WebGPU were not captured, and the Linux
+  bench fixture has no WebGL data. Mesa renderer strings and GL limits for
+  Linux are reference values.
+- Linux distro fonts (Ubuntu Sans, Cantarell, Adwaita, Noto text fonts)
+  were not available locally; their metrics are derived estimates.
+  Wayland and speech voices were not captured.
+- Emoji are flat stand-in shapes in canvas and screenshots; WebGPU cannot
+  create a device; `AudioContext.resume()` without a gesture still runs.
+
 ## Workspace check (2026-11-03)
 
 Chrome build unless noted, 4 cores. Re-run on the final tree after the
@@ -1760,7 +1845,11 @@ CPU and CDP peak RSS), see "M6 status: Lightpanda comparison".
 
 - **TCP/IP fingerprint.** SYN TTL and TCP options always come from the host
   OS, so a passive TCP/IP fingerprint can contradict a Windows or macOS
-  persona; LightBrowser does not change them.
+  persona; LightBrowser does not change them (not modelled, on purpose).
+- **Windows and macOS ground truth.** M7's Windows and macOS values come from
+  a surface reference, not captures (only Linux was captured, on a machine
+  without a GPU). They need internal captures; see "M7 status: verification
+  and close-out".
 - **WebIDL breadth.** Chrome exposes 1,000+ interfaces. We generate all of them
   from IDL, but each needs an implementation or a spec-shaped stub. Plan: stub
   first, implement in order of what the detection engine and real pages touch.

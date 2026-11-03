@@ -173,9 +173,12 @@ OpenGL on Mesa or NVIDIA, Vulkan).
 
 Linux defaults were captured from the local Chrome for Testing 153;
 Windows and macOS defaults are the M7 surface reference (not captured).
-Chrome's TLS and H2 fingerprints do not depend on the OS (one
-`chrome_153_linux` profile for every Chrome persona); TCP/IP-level values
-(TTL, TCP options) are the host's and are not modelled.
+TLS and H2 are OS-independent: Chrome's ClientHello and H2 settings are the
+same on every OS, so one `chrome_153_linux` profile serves every Chrome
+persona (a test checks that all reference personas match it exactly).
+TCP/IP is the host's: TTL and TCP options come from the OS under the
+process, are not modelled, and are a residual risk for Windows and macOS
+personas (ROADMAP, Risks).
 
 ## Process and threading model
 
@@ -240,6 +243,9 @@ timing.
 | Permissions, battery, media devices, speech voices | lb-webapi | persona |
 | `performance.now` resolution | lb-webapi (`coarse_time`) | Chrome 100 µs with Blink's jittered tick / Firefox 1 ms (RFP off: 20 µs) |
 | Automation tells (`webdriver`, CDP leaks) | lb-cdp, lb-page | never exposed to the page world |
+| Scrollbar width, default and generic fonts, emoji font, `font:` system keywords | lb-css, lb-layout, lb-paint | persona OS accessors (`scrollbar_width`, `font_defaults`, `font_aliases`), see "OS axis" |
+| High-entropy `Sec-CH-UA-*` request headers | lb-net (`client_hints`, `header_profile`) | persona `high_entropy_hints()`; `Accept-CH` / `Critical-CH` per origin; order from `captures/chrome_153_linux_accept_ch.jsonl` |
+| TCP/IP (TTL, TCP options) | none | the host OS; not modelled |
 | Mouse/keyboard dynamics | lb-behavior, replayed by lb-page (`cdp/human.rs`) | persona `behavior` (preset, seed, pointing device) and `wheel()` (detent, `wheelDelta` ratio) |
 
 ## Network fingerprint testing (`lb-fptest`)
