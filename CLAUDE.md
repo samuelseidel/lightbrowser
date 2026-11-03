@@ -17,9 +17,10 @@ reference Chrome personas. With `--input human` (`LightBrowser.human*`)
 both reference personas score beh 0 on their own seeds (seeds 1-20: 20/20
 Windows, 19/20 macOS), see "M5 status" in `docs/ROADMAP.md`. M6: V8 startup
 snapshot (realm 2.1 ms), idle RSS 10.3 MB, `bench/` runner (every corpus
-page faster than headless Chromium's median), release binary 44.4 MB
-against < 56 MB (ADR 0013; ICU data shipped zstd-compressed, no unwind
-tables; the original < 40 MB is still missed). Open: Firefox (M4b: no
+page faster than headless Chromium's median), release binary 39.2 MB
+against < 40 MB (ADR 0013; ICU data shipped zstd-compressed, no unwind
+tables, V8 code only off-by-default flags reach not linked, root crate
+and bindings at `opt-level = "s"`). Open: Firefox (M4b: no
 SpiderMonkey backend, TLS gaps in ADR 0003), workers and service workers,
 shader execution in WebGL, the Lightpanda comparison (no binary on this
 machine), HTTP keep-alive, stylesheets blocking scripts, and CSS
@@ -35,7 +36,7 @@ sections in `docs/ROADMAP.md`.
 | Crate | Role | State |
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R16, sfc32 done; optional `preferences`, media devices, battery |
-| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (startup snapshot made in memory, ADR 0013; ICU data shipped zstd-compressed, `v8_engine/icu_data.rs`; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
+| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (startup snapshot made in memory, ADR 0013; ICU data shipped zstd-compressed, `v8_engine/icu_data.rs`; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
 | `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`) | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open (`lb-page` caps 6 connections per origin) |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done; no shadow DOM, form owner, custom elements |

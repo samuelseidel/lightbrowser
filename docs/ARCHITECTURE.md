@@ -19,14 +19,14 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | ≤ Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8 (ADR 0013; was < 40 MB). Measured 44.4 MB; V8 plus its ICU data alone is 30.7 MB |
+| Binary size (per family, stripped) | < 40 MB (ADR 0013). Chrome: 39.17 MB with the prebuilt V8 (code that only off-by-default V8 flags reach is not linked) |
 | Disk writes during a session | none by default |
 | Isolate/realm creation | < 5 ms (startup snapshot, ADR 0013) |
 
 `bench/run.py` measures these (see the "Bench runner" row in the Stack table). Measured on
-2026-11-03 (`bench/results/2026-11-03-ebe5f36.json`): idle RSS 10.3 MB,
-binary 44.37 MB (the original < 40 MB is missed by 4.4 MB), first/next
-realm 2.4/2.1 ms, no disk writes. The Lightpanda comparison is not
+2026-11-03 (`bench/results/2026-11-03-f2d6632.json`): idle RSS 10.0 MB,
+binary 39.17 MB (39,174,008 bytes), first/next realm 2.4/2.1 ms, no disk
+writes. The Lightpanda comparison is not
 measured yet (no binary on the bench machine). Details: `docs/ROADMAP.md`,
 "M6 status".
 
@@ -46,7 +46,7 @@ measured yet (no binary on the bench machine). Details: `docs/ROADMAP.md`,
 | 0010 | Own box tree over taffy; font metric tables compiled in from `profiles/fonts` |
 | 0011 | Request headers per destination from `profiles/headers`, captured from local Chromium; own HTTP/1.1 writer |
 | 0012 | Each frame is a realm in the page's engine, built synchronously through `lb_js::RealmOps`; origins via V8 security tokens |
-| 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary budget follows the V8 floor |
+| 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary < 40 MB: ICU data compressed, no unwind tables, V8 code that only off-by-default flags reach not linked |
 | 0014 | Page screenshots painted on demand from a per-capture display list (no retained paint state, never noised) |
 
 ## Layers
@@ -113,7 +113,7 @@ browser context. Nothing reads a global.
 | Python SDK | `sdk/python/lightbrowser`: launches `lightbrowser serve --port 0` with a persona, connects stock Playwright over CDP and returns stock `Page` objects with `human_move/click/type/scroll` and `verify_fingerprint()` bound on; sync and async APIs; scenarios T-001 to T-007 against the bench. Loopback only. Needs Python Playwright >= 1.63: older versions put `__pwInitScripts` in the page's main world, which the browser cannot hide. | Replaces the GeckoPhantom SDK; control stays CDP only. |
 | Bench runner | `bench/run.py`: 50-page generated corpus served on loopback; `fetch` and CDP crawls of LightBrowser and headless Chromium (and Lightpanda if on PATH); wall time, p50/p90 page time, peak RSS/PSS, CPU, idle RSS, startup, binary size, realm creation and disk writes, checked against the budgets above. Results in `bench/results/`. | Makes the budgets measurable and repeatable. |
 | Runtime | Thread per core. Each thread runs a tokio `current_thread` runtime and owns its JS engine instances. | JS engines are single-threaded, so there's no locking. |
-| Allocator | glibc malloc (mimalloc measured worse for idle and multi-page RSS, ADR 0013). Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped, `opt-level = "s"` for non-hot crates, linked with `--icf=safe`, packed relative relocations and no `.eh_frame`; V8's ICU data is embedded zstd-compressed and decompressed once when the first engine starts (ADR 0013) | Speed and size. |
+| Allocator | glibc malloc (mimalloc measured worse for idle and multi-page RSS, ADR 0013). Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped, `opt-level = "s"` for the root crate (the LTO pipeline), the bindings and non-hot crates, linked with `--icf=safe`, packed relative relocations and no `.eh_frame`; V8's ICU data is embedded zstd-compressed and decompressed once when the first engine starts; V8 objects that only off-by-default flags reach are not linked (`lb-js` `unused_v8`); font tables and glyph packs embedded zstd-compressed (ADR 0013) | Speed and size. |
 | Control | Own CDP server (`tokio-tungstenite`) | Playwright `connectOverCDP` works unchanged for both families. |
 
 ## Browser families

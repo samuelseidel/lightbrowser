@@ -75,12 +75,12 @@ class Report(unittest.TestCase):
     def test_budgets_skip_without_lightpanda(self):
         s = {"cdp:lightbrowser": {"idle_rss_mb": {"median": 10.0}, "disk_files_created": {"max": 0}, "disk_write_bytes": {"max": 0},
                                  "crawl_total_s": {"median": 1}, "peak_rss_mb": {"median": 1}, "cpu_s": {"median": 1}}}
-        bs = run.budgets(s, 54.9, {"first_realm_ms": {"median": 2.4}, "next_realm_ms": {"median": 2.1}})
+        bs = run.budgets(s, 39.2, {"first_realm_ms": {"median": 2.4}, "next_realm_ms": {"median": 2.1}})
         by = {b["budget"]: b["status"] for b in bs}
         self.assertEqual(by["binary size (stripped)"], "pass")
         self.assertEqual(by["idle RSS (serve, no client, 1 s after listen)"], "pass")
         self.assertTrue(all(v == "skip" for k, v in by.items() if "Lightpanda" in k))
-        bs = run.budgets(s, 60.0, None)
+        bs = run.budgets(s, 40.1, None)
         self.assertEqual({b["budget"]: b["status"] for b in bs}["binary size (stripped)"], "fail")
 
     def test_corpus_server_serves_loopback(self):

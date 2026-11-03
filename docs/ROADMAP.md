@@ -11,7 +11,7 @@ Each milestone ends with something we can run and measure.
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot (realm 2 ms), memory tuning, binary size and screenshots (ADR 0014) done for Chrome; the size budget is now < 56 MB (ADR 0013), binary 44.4 MB; `bench/` runner done (`bench/results/`, Lightpanda not yet compared); service workers open. See "M6 status". |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot (realm 2 ms), memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.17 MB, the original < 40 MB budget is met (ADR 0013); `bench/` runner done (`bench/results/`, Lightpanda not yet compared); service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
 
@@ -20,15 +20,15 @@ Each milestone ends with something we can run and measure.
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
-| M6 Performance | Snapshot, memory, binary size, `bench/` runner and screenshots done | Lightpanda comparison (no binary here), service workers, the original < 40 MB binary budget (44.4 MB now, 4.4 MB over; further cuts mean dropping Rust features or building V8 from source, ADR 0013) |
+| M6 Performance | Snapshot, memory, binary size (39.17 MB, < 40 MB met), `bench/` runner and screenshots done | Lightpanda comparison (no binary here), service workers |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 10.3 MB (9.9 MB in earlier runs) | `bench/run.py`, "M6 status: bench runner" |
-| Binary < 56 MB (was < 40 MB) | Met: 44.37 MB. The original < 40 MB is missed by 4.4 MB: V8 plus its ICU data alone is 30.7 MB | "M6 status: binary size, second pass" |
-| Realm creation < 5 ms | Met: 2.39 ms first, 2.07 ms next | `realm_bench`; `bench/run.py` |
+| Idle RSS < 15 MB | Met: 10.0 MB (9.9-10.3 MB in earlier runs) | `bench/run.py`, "M6 status: bench runner" |
+| Binary < 40 MB (< 56 MB in between) | Met: 39.17 MB (39,174,008 bytes), 0.83 MB under | "M6 status: binary size, third pass" |
+| Realm creation < 5 ms | Met: 2.39 ms first, 2.06 ms next | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
 | Wall time, peak RSS and CPU <= Lightpanda | Not measured: no `lightpanda` binary on this machine. The runner skips these checks | "M6 status: bench runner" |
 
@@ -924,7 +924,7 @@ Goal: the original < 40 MB. Reached 44.37 MB (54.96 before), stripped,
   113 ms, 2.57 MB. `lightbrowser fingerprint-report`: 113 ok, 0 mismatch
   for both Chrome reference personas.
 
-Still over 40 MB by 4.4 MB. From the release link map: V8 C++ 26.6 MB,
+Still over 40 MB by 4.4 MB at that point (the third pass below gets under). From the release link map: V8 C++ 26.6 MB,
 ICU data 3.8 MB, Rust std 1.3 MB, our crates and their Rust deps 7.0 MB of
 code plus 2.0 MB of constant data, BoringSSL 1.7 MB, zstd 0.4 MB, the rest
 1.4 MB. The measured further steps (brotli for ICU -0.33 MB but +37 ms,
@@ -932,6 +932,65 @@ root crate at `opt-level = "s"` -0.77 MB, `--icf=all` -0.22 MB, binding
 table as string offsets about -0.5 MB) add up to about -1.8 MB; the rest
 would mean dropping Rust features or building V8 from source. See
 ADR 0013.
+
+## M6 status: binary size, third pass (2026-11-03)
+
+Goal: the original < 40 MB without losing anything a page, a fingerprint
+or a CLI user can observe. Reached **39,174,008 bytes (39.17 MB)**,
+stripped, `cargo build --release -p lightbrowser` (44,367,736 before).
+ADR 0013, second revision. Each step was measured with a fresh release
+link; the link maps came from `LB_LINK_MAP=<path>` (`bin/lightbrowser/build.rs`).
+
+| cut | size after | saved | cost |
+|---|---|---|---|
+| before | 44,367,736 | | |
+| V8: Turbolev, flag-gated Turboshaft phases, Wasm revectorizer and fuzzing module generator not linked (`lb-js` `unused_v8`) | 41,189,240 | 3,178,496 | none: off by default, never turned on |
+| `lb_net::fetch` returns a boxed future: the network stack (TLS, h1/h2, DNS) is compiled once, not once per crate that awaits it | 40,824,696 | 364,544 | one allocation per fetch |
+| root crate `opt-level = "s"` (the fat-LTO pipeline for all Rust code) | 40,144,760 | 679,936 | see below |
+| `rt::Runtime::win` not inlined into the 1,084 binding closures | 40,083,320 | 61,440 | one call per binding call |
+| font metric tables (114 KB JSON) and glyph outline packs (210 KB) embedded zstd-compressed by `build.rs` (7 KB and 103 KB) | 39,874,424 | 208,896 | unpacked per use: < 0.2 ms |
+| V8: LiveEdit, debug coverage, three compiler verifiers, Turboshaft JSON graph tracing not linked | 39,718,776 | 155,648 | none (as above) |
+| V8: experimental (linear-time) regexp engine not linked (~38 KB), and `lb-webapi` at `opt-level = "s"` before LTO (~507 KB) | 39,174,008 | 544,768 | define +0.7 ms |
+
+- `unused_v8`: each stub carries the mangled name of the only strong
+  global symbols of one archive object, so the linker never extracts that
+  object (same mechanism as the ICU data). If anything else needed the
+  object, the link would fail with a duplicate symbol; nothing can be
+  dropped silently. Every stubbed path needs a V8 flag that is off by
+  default (Turbolev, `--turboshaft-assert-types`, typed and loop
+  optimisation, random rescheduling, `--turbo-profiling` in mksnapshot,
+  `--wasm-revectorize`, `--turbo-verify*`, `--verify-simplified-lowering`,
+  `--trace-turbo`, the experimental regexp engine) or the natives syntax
+  or the inspector (LiveEdit, coverage), none of which LightBrowser uses:
+  V8 gets no flags from the CLI or pages, `init_v8` panics on the flags
+  that would reach a stub, and V8 freezes its flags at initialisation. A
+  stub aborts with the path's name. Tests: `tests/v8.rs` `unused_v8`
+  (every stub names a symbol of the archive; hot JS, Maglev/Turbofan with
+  OSR, a JS-to-Wasm call in a hot loop, regexps), lb-js unit test for the
+  flag check.
+- Not observable: fingerprint-report 113 ok / 0 mismatch for both Chrome
+  reference personas; `lb-net` fingerprint test 2/2; WPT 2552/2788;
+  Playwright 20/20 (release binary); T-010 fp 0 for both personas, and
+  beh 0 for both with `--input human`; ICU data unchanged; all
+  subcommands, content encodings and codecs unchanged.
+- Cost (`bench/results/2026-11-03-f2d6632.json`, release, 5 x 50 pages,
+  against `2026-11-03-ebe5f36.json`): `fetch` page median 140.0 → 141.6 ms,
+  p90 146.8 → 151.6 ms, CPU 10.0 → 10.4 s; `cdp` page median 98.5 →
+  99.9 ms, p90 103.9 → 103.8 ms, CPU 1.33 → 1.35 s; idle RSS 10.0 MB;
+  `realm_bench` first/next realm 2.39 / 2.06 ms (unchanged), engine
+  2.78 ms, registry + define 5.35 → 6.09 ms. Every page's median is below
+  Chromium's median page (153 ms `fetch`, 104 ms `cdp` vs 194 ms); single
+  `fetch` samples reached 198 ms once in 250 (noise: a different page in
+  each of three runs).
+- Measured, not applied: root `opt-level = "z"` (another -225 KB, slower
+  everywhere); `--icf=all` (-0.22 MB earlier; breaks function-pointer identity,
+  not shown safe for V8); brotli for the ICU data (+37 ms at start); hickory replaced by
+  `getaddrinfo` (different behaviour: hosts file, nsswitch, address
+  order); the binding table as string offsets (about -150 KB, large
+  refactor). Next candidates if the binary grows again: more V8 printers
+  and tracers (Maglev graph printer, Turbofan graph visualizer, about
+  130 KB, each needs its call sites checked), `__cxa_demangle` (115 KB,
+  changes crash output).
 
 ## M6 status: screenshots (2026-11-03)
 
@@ -1080,6 +1139,12 @@ downloading one is not allowed here). Peak RSS is about 10-20 MB above the
 `a060281` run: `fetch` no longer uses the snapshot, and the CDP peak was
 not isolated.
 
+After the third binary-size pass (39.17 MB, sha256 `0e2df17d93846b2b`):
+`bench/results/2026-11-03-f2d6632.json`, now the latest in
+`bench/results/README.md`. `fetch` page median 141.6 ms (p90 151.6),
+`cdp` 99.9 ms (p90 103.8), Chromium 193.9 ms; idle RSS 10.0 MB; all
+budgets pass, binary now checked against < 40 MB.
+
 Not covered: the crawl is sequential, with no HTTPS, iframes or workers.
 Re-run `python3 bench/run.py` after a rebuild to refresh the numbers; the
 result file is named after HEAD, so identify a run by its binary hash.
@@ -1102,7 +1167,8 @@ replaced by this one.
   detect-bench unittest 18 OK; `bench` unittest 10 OK; `sdk/python`
   pytest 93 pass, 4 skipped (bench scenarios, Python Playwright 1.52 is
   installed).
-- Release: stripped binary 44,367,736 bytes (44.37 MB, budget < 56 MB);
+- Release: stripped binary 44,367,736 bytes (44.37 MB, budget < 56 MB;
+  39,174,008 bytes after the third binary-size pass, budget < 40 MB);
   `realm_bench`: first realm 2.39 ms, next realm 2.07 ms with the snapshot
   (28.2 / 35.1 ms without).
 - `lightbrowser fingerprint-report` (release): 113 ok, 0 mismatch for both

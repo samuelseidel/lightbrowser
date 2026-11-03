@@ -59,7 +59,7 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 # Budgets from docs/ARCHITECTURE.md ("Goals and budgets").
 BUDGET_IDLE_RSS_MB = 15.0
-BUDGET_BINARY_MB = 56.0
+BUDGET_BINARY_MB = 40.0
 BUDGET_REALM_MS = 5.0
 
 
@@ -300,7 +300,9 @@ class Spawned:
 
 def clean_env(tmp: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
-    env.update(HOME=tmp, TMPDIR=tmp, XDG_CACHE_HOME=tmp, XDG_CONFIG_HOME=tmp, NO_PROXY="127.0.0.1,localhost,::1", no_proxy="127.0.0.1,localhost,::1")
+    env.update(HOME=tmp, TMPDIR=tmp, XDG_CACHE_HOME=tmp, XDG_CONFIG_HOME=tmp, NO_PROXY="127.0.0.1,localhost,::1", no_proxy="127.0.0.1,localhost,::1",
+               # Lightpanda reports usage to its servers unless told not to; the bench stays on loopback.
+               LIGHTPANDA_DISABLE_TELEMETRY="true")
     return env
 
 
@@ -344,7 +346,7 @@ def chromium_target(binary: str) -> Target:
 def lightpanda_target(binary: str) -> Target:
     return Target(
         "lightpanda", binary,
-        lambda url: [binary, "fetch", "--dump", url],
+        lambda url: [binary, "fetch", "--dump", "html", url],
         lambda port: [binary, "serve", "--host", "127.0.0.1", "--port", str(port)],
         ws_from_port=True,
     )

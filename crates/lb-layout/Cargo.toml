@@ -11,7 +11,13 @@ lb-dom = { path = "../lb-dom" }
 lb-persona = { path = "../lb-persona" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Unpacks the bundled font tables (build.rs, ADR 0013); linked anyway by lb-net.
+zstd = { version = "0.13", default-features = false }
 taffy = { version = "0.15.1", default-features = false, features = ["std", "block_layout", "flexbox", "grid", "float_layout", "calc", "content_size"] }
+
+[build-dependencies]
+# Packs the bundled font tables into one frame.
+zstd = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 # Only the font table generator example uses skrifa; it never runs in the

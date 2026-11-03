@@ -339,6 +339,10 @@ impl Runtime {
         self.0.windows.borrow().get(&realm).cloned()
     }
 
+    /// Not inlined: every binding closure made by [`wf`] calls it, and
+    /// one shared copy keeps the map lookup out of each of them (M6
+    /// binary size).
+    #[inline(never)]
     pub(crate) fn win(&self, realm: RealmId) -> Result<Rc<Window>, HostError> {
         self.window(realm)
             .ok_or_else(|| HostError::type_error("Illegal invocation"))

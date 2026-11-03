@@ -1,6 +1,6 @@
 # ADR 0013: V8 startup snapshot made in memory; binary budget follows the V8 floor
 
-Status: Accepted (2026-11-03)
+Status: Accepted (2026-11-03); budget back to < 40 MB in revision 2
 
 ## Context
 
@@ -150,3 +150,60 @@ Together these give about -1.8 MB (42.5 MB). Below that, Rust code we
 use would have to go (e.g. the hickory DNS resolver, image codecs), or V8
 itself: only a from-source V8 can drop code, and its ICU data is already
 Chromium's filtered desktop set.
+
+## Revision 2: unused V8 code not linked, original < 40 MB met (2026-11-03)
+
+The budget goes back to **< 40 MB**: the binary is 39,174,008 bytes
+(39.17 MB, 44.37 before), with nothing a page, a fingerprint or a CLI
+user can observe removed. The < 56 MB step above is history.
+
+- **V8 code behind off-by-default flags is not linked**
+  (`lb-js` `v8_engine/unused_v8.rs`), 3.37 MB. The prebuilt archive
+  links whole objects that only flag-gated paths reach: Turbolev
+  (`--turbolev`) and its Wasm-in-JS inlining, the Turboshaft
+  type-assertion, typed-optimisation, loop-optimisation and
+  random-rescheduling phases, block instrumentation (`--turbo-profiling`,
+  mksnapshot only), the Wasm SIMD revectorizer, the fuzzer's random Wasm
+  module generator, LiveEdit and code coverage (inspector and test
+  natives only), three compiler verifiers, Turboshaft JSON graph tracing
+  and the experimental regexp engine. For each, `lb-js` defines the
+  object's strong global symbols (mangled C++ names) as functions that
+  abort; the linker then never extracts the object. As with `icudt78_dat`
+  this cannot fail silently: if anything else needs such an object, the
+  link fails with a duplicate symbol. LightBrowser passes V8 no flags
+  from the CLI or pages, `init_v8` panics on any flag that would reach a
+  stub (`REFUSED_FLAGS`), and V8 freezes its flags at initialisation. A
+  test checks every stub against the archive's symbol index, so a `v8`
+  upgrade that renames one shows up as a test failure (the object would
+  otherwise come back and only cost size).
+- **Rust code**: the root crate at `opt-level = "s"`, which is the level
+  of the fat-LTO pipeline for all Rust code (-0.68 MB), and `lb-webapi`
+  (binding glue) at `"s"` before LTO (about -0.5 MB). `lb_net::fetch`
+  returns a boxed future, so the network stack's state machines are
+  compiled once instead of once per crate that awaits them (-0.36 MB);
+  `rt::Runtime::win` is no longer inlined into 1,084 binding closures
+  (-0.06 MB).
+- **Embedded data compressed** with the zstd already linked: font metric
+  tables and glyph outline packs (`lb-layout`/`lb-paint` `build.rs`,
+  -0.21 MB), unpacked per use (< 0.2 ms), byte-identical.
+
+| step | bytes |
+|---|---|
+| before | 44,367,736 |
+| V8 stubs (Turbolev, phases, revectorizer, fuzzer) | 41,189,240 |
+| boxed `lb_net::fetch` | 40,824,696 |
+| root crate `opt-level = "s"` | 40,144,760 |
+| `Runtime::win` not inlined | 40,083,320 |
+| compressed font tables and glyph packs | 39,874,424 |
+| V8 stubs (LiveEdit, coverage, verifiers, JSON tracing) | 39,718,776 |
+| V8 stubs (experimental regexp) + `lb-webapi` at `"s"` | 39,174,008 |
+
+Cost: `realm_bench` first/next realm 2.39 / 2.06 ms (unchanged),
+registry + define 5.35 → 6.09 ms. `bench/run.py`: `fetch` page median
+140.0 → 141.6 ms, `cdp` 98.5 → 99.9 ms, CPU +3 %; idle RSS 10.0 MB.
+Unchanged: fingerprint-report 113 ok / 0 mismatch for both Chrome
+personas, TLS/H2 fingerprint test, WPT 2552/2788, Playwright 20/20,
+T-010 fp 0, ICU data. Still not applied: `opt-level = "z"` (-0.23 MB,
+slower), `--icf=all`, brotli ICU data, a DNS resolver swap (behaviour
+differs), the binding table as string offsets (about -0.15 MB).
+

@@ -13,113 +13,19 @@ use std::rc::Rc;
 use lb_css::{ComputedStyle, FamilyName, FontStyle, OsKind};
 use serde::Deserialize;
 
-/// Bundled tables, by OS directory.
-const BUNDLED: &[(&str, &str)] = &[
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/arial.json"),
-    ),
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/times_new_roman.json"),
-    ),
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/courier_new.json"),
-    ),
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/verdana.json"),
-    ),
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/tahoma.json"),
-    ),
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/georgia.json"),
-    ),
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/calibri.json"),
-    ),
-    (
-        "windows",
-        include_str!("../../../profiles/fonts/windows/segoe_ui.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/arial.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/times_new_roman.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/courier_new.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/verdana.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/tahoma.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/georgia.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/helvetica.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/helvetica_neue.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/times.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/courier.json"),
-    ),
-    (
-        "macos",
-        include_str!("../../../profiles/fonts/macos/system-ui.json"),
-    ),
-    (
-        "linux",
-        include_str!("../../../profiles/fonts/linux/liberation_sans.json"),
-    ),
-    (
-        "linux",
-        include_str!("../../../profiles/fonts/linux/liberation_serif.json"),
-    ),
-    (
-        "linux",
-        include_str!("../../../profiles/fonts/linux/liberation_mono.json"),
-    ),
-    (
-        "linux",
-        include_str!("../../../profiles/fonts/linux/dejavu_sans.json"),
-    ),
-    (
-        "linux",
-        include_str!("../../../profiles/fonts/linux/dejavu_serif.json"),
-    ),
-    (
-        "linux",
-        include_str!("../../../profiles/fonts/linux/dejavu_sans_mono.json"),
-    ),
-];
+// The tables (`profiles/fonts/<os>/*.json` and `derived.json`) are
+// embedded as one zstd frame made by `build.rs` (M6 binary size, ADR
+// 0013): 114 KB of JSON become about 8 KB. `build.rs` lists the files.
+include!(concat!(env!("OUT_DIR"), "/font_tables.rs"));
 
-/// Approximate tables for persona fonts without a metric table (scaled
-/// copies of a similar bundled table; `profiles/fonts/derived.json`).
-const DERIVED: &str = include_str!("../../../profiles/fonts/derived.json");
+/// The bundled JSON, decompressed (one frame; [`BUNDLED`] and
+/// [`DERIVED`] are byte ranges into it). Decompressed per [`FontDb::for_os`]
+/// call and dropped with it: about 0.1 ms, next to the JSON parsing.
+fn unpack_tables() -> String {
+    let raw = zstd::bulk::decompress(PACKED_TABLES, PACKED_TABLES_LEN)
+        .expect("bundled font tables decompress");
+    String::from_utf8(raw).expect("bundled font tables are UTF-8")
+}
 
 #[derive(Deserialize)]
 struct DerivedFile {
@@ -353,13 +259,16 @@ impl FontDb {
             families: HashMap::new(),
             os: Some(os),
         };
-        for (d, json) in BUNDLED {
+        let tables = unpack_tables();
+        for (d, range) in BUNDLED {
             if *d == dir {
-                let fam = FontFamily::from_json(json).expect("bundled font table");
+                let fam =
+                    FontFamily::from_json(&tables[range.clone()]).expect("bundled font table");
                 db.insert(fam);
             }
         }
-        let derived: DerivedFile = serde_json::from_str(DERIVED).expect("derived font list");
+        let derived: DerivedFile =
+            serde_json::from_str(&tables[DERIVED]).expect("derived font list");
         debug_assert_eq!(derived.format, 1);
         for e in derived.families.iter().filter(|e| e.os == dir) {
             if db.get(&e.family).is_some() {

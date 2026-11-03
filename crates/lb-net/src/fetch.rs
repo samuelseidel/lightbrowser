@@ -4,6 +4,7 @@
 //! Owner: M1 task 5.
 
 use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -259,7 +260,18 @@ impl NetContext {
 /// returned as received, so `content-encoding` and `content-length` still
 /// describe the wire form. `max_body` limits both sizes. Every redirect that
 /// was followed is in [`Response::redirects`].
-pub async fn fetch(ctx: &mut NetContext, req: Request) -> Result<Response, NetError> {
+///
+/// The future is boxed here so that its state machine (and everything it
+/// polls: TLS, h1/h2, DNS) is compiled once, in this crate, instead of once
+/// per crate that awaits it (M6 binary size, ADR 0013).
+pub fn fetch(
+    ctx: &mut NetContext,
+    req: Request,
+) -> Pin<Box<dyn Future<Output = Result<Response, NetError>> + Send + '_>> {
+    Box::pin(fetch_chain(ctx, req))
+}
+
+async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, NetError> {
     let mut req = req;
     let mut redirects: Vec<RedirectHop> = Vec::new();
     let initiator = req.meta.as_ref().and_then(|m| m.initiator.clone());

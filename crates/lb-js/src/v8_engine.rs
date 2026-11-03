@@ -25,6 +25,8 @@ pub mod icu_data;
 mod inspect;
 mod realm_ops;
 mod snapshot;
+#[doc(hidden)]
+pub mod unused_v8;
 pub use inspect::{Caught, Inspected, InspectedObject, PromiseOutcome, PropertyEntry};
 pub use realm_ops::RealmOps;
 pub use snapshot::SnapshotStatus;
@@ -46,8 +48,16 @@ static V8_FLAGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// Initialise the V8 platform once per process. `flags` (e.g. `--jitless`)
 /// only apply if this is the first call; [`Engine::new`] calls it with no
 /// flags. Returns whether this call did the initialisation.
+///
+/// Panics on a flag that would reach V8 code the binary does not link
+/// ([`unused_v8::REFUSED_FLAGS`], ADR 0013).
 pub fn init_v8(flags: &str) -> bool {
     let mut did = false;
+    let refused = unused_v8::refused_flags(flags);
+    assert!(
+        refused.is_empty(),
+        "init_v8: {refused:?} would reach V8 code that is not linked (lb-js unused_v8)"
+    );
     V8_INIT.call_once(|| {
         let _ = V8_FLAGS.set(flags.to_owned());
         if !flags.is_empty() {

@@ -1066,3 +1066,70 @@ mod icu_data {
         );
     }
 }
+
+// V8 code that is not linked (`unused_v8`, ADR 0013): the stubs name real
+// symbols of the archive, and default V8 never reaches them.
+mod unused_v8 {
+    use super::*;
+    use lb_js::{icu_data, unused_v8};
+
+    /// The global symbol names of the archive's index (GNU `/` member).
+    fn archive_symbols() -> std::collections::HashSet<Vec<u8>> {
+        let exe = std::env::current_exe().unwrap();
+        let archive = icu_data::find_archive(&exe).expect("librusty_v8.a (RUSTY_V8_ARCHIVE)");
+        let ar = std::fs::read(&archive).unwrap();
+        assert!(ar.starts_with(b"!<arch>\n"));
+        let hdr = &ar[8..68];
+        assert_eq!(&hdr[..2], b"/ ", "first member is the symbol index");
+        let size: usize = std::str::from_utf8(&hdr[48..58])
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let body = &ar[68..68 + size];
+        let count = u32::from_be_bytes(body[..4].try_into().unwrap()) as usize;
+        body[4 + 4 * count..]
+            .split(|&b| b == 0)
+            .map(<[u8]>::to_vec)
+            .collect()
+    }
+
+    #[test]
+    fn stubs_name_archive_symbols() {
+        let syms = archive_symbols();
+        for (path, names) in unused_v8::STUBS {
+            for n in *names {
+                assert!(
+                    syms.contains(n.as_bytes()),
+                    "{path}: {n} is not in the V8 archive (renamed? update unused_v8.rs)"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn optimizing_tiers_and_wasm_run() {
+        let mut e = engine();
+        let r = plain_realm(&mut e);
+        // Hot JS (Sparkplug, Maglev, Turbofan with OSR), a JS-to-Wasm call
+        // in a hot loop (Liftoff, then optimized Wasm), regexps, JSON.
+        let v = eval(
+            &mut e,
+            r,
+            r#"
+            const bytes = new Uint8Array([0,97,115,109,1,0,0,0,1,7,1,96,2,127,127,1,127,
+              3,2,1,0,7,7,1,3,97,100,100,0,0,10,9,1,7,0,32,0,32,1,106,11]);
+            const add = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports.add;
+            function step(o, i) { return { x: o.x + (i & 7), y: add(o.y, 1) | 0 }; }
+            let o = { x: 0, y: 0 }, hits = 0;
+            for (let round = 0; round < 4; round++) {
+              for (let i = 0; i < 300000; i++) o = step(o, i);
+              for (let i = 0; i < 20000; i++) if (/^(\d+)-([a-z]+)$/.test(i + '-ab')) hits++;
+              JSON.parse(JSON.stringify(o));
+            }
+            [o.x, o.y, hits].join()
+            "#,
+        );
+        assert_eq!(v, JsValue::String("4200000,1200000,80000".into()));
+    }
+}

@@ -19,7 +19,18 @@ strip = true
 
 # Binary size (M6, ADR 0013): code that is not on a hot path (CDP and
 # JSON, network and DNS, cookies, CLI, image codecs, decompressors) is
-# optimised for size. DOM, JS bindings, style, layout and raster stay at 3.
+# optimised for size. With fat LTO the root crate's level is the level of
+# the LTO pipeline for all Rust code, so `lightbrowser` at "s" sizes the
+# whole binary (-0.68 MB); the other crates' levels apply before LTO. The
+# JS bindings (`lb-webapi`, glue around V8) are at "s" too (-0.5 MB; realm
+# creation unchanged, binding definition +0.7 ms). DOM, style, layout and
+# raster keep 3 before LTO. A package override drops the profile's
+# `strip`, so it is repeated here.
+[profile.release.package.lightbrowser]
+opt-level = "s"
+strip = true
+[profile.release.package.lb-webapi]
+opt-level = "s"
 [profile.release.package.lb-cdp]
 opt-level = "s"
 [profile.release.package.lb-net]

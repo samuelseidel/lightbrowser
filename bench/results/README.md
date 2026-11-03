@@ -2,7 +2,7 @@
 
 Written by `bench/run.py`. Each cell is the median over runs, with min-max in brackets. Loopback corpus, sequential crawl, see `bench/README.md` for definitions.
 
-Latest: `2026-11-03-ebe5f36.json` -- 2026-11-03, LightBrowser `ebe5f36` (dirty tree), binary sha256 `6aa2ebe44ac8b5a2`, 5 runs x 50 pages.
+Latest: `2026-11-03-f2d6632.json` -- 2026-11-03, LightBrowser `f2d6632` (dirty tree), binary sha256 `0e2df17d93846b2b`, 5 runs x 50 pages.
 
 Machine: Intel(R) Xeon(R) Processor, 4 cores, 16091 MB RAM, kernel 6.18.44-fc-v230. Chromium `Google Chrome for Testing 153.0.8010.12`, Playwright (python) 1.52.0, rustc 1.97.0 (2d8144b78 2026-07-07).
 
@@ -10,18 +10,18 @@ Machine: Intel(R) Xeon(R) Processor, 4 cores, 16091 MB RAM, kernel 6.18.44-fc-v2
 
 | metric | fetch:lightbrowser | cdp:lightbrowser | cdp:chromium |
 |---|---|---|---|
-| crawl total (s) | 7.01 (6.92-7.12) | 4.94 (4.80-5.01) | 9.72 (9.62-10.12) |
-| page median (ms) | 140.0 (137.5-142.6) | 98.5 (96.0-100.0) | 193.1 (192.8-202.5) |
-| page p90 (ms) | 146.8 (146.1-151.0) | 103.9 (100.0-104.0) | 206.0 (202.3-219.0) |
-| peak RSS (MB) | 115.2 (115.0-120.7) | 105.9 (105.6-106.3) | 2820.4 (2811.4-2850.8) |
-| peak PSS (MB, sampled) | - | 55.3 (55.2-55.3) | 687.0 (678.7-691.8) |
-| CPU (s) | 10.0 (9.8-10.1) | 1.33 (1.28-1.37) | 23.4 (23.0-23.8) |
-| idle RSS (MB) | - | 10.3 (10.2-10.4) | 1083.2 (1079.0-1083.6) |
-| idle PSS (MB) | - | 7.54 (7.50-7.62) | 376.6 (375.9-377.2) |
-| start to listening (ms) | - | 3.99 (3.74-5.71) | 106.5 (100.6-116.3) |
-| start to CDP connect (ms) | - | 9.52 (8.20-19.00) | 119.5 (118.1-128.6) |
-| first new page (ms) | - | 165.9 (165.5-171.2) | 79.5 (75.9-91.5) |
-| new page, median (ms) | - | 5.73 (5.50-6.90) | 62.9 (60.8-64.8) |
+| crawl total (s) | 7.18 (7.05-7.25) | 4.96 (4.89-5.05) | 9.71 (9.67-9.93) |
+| page median (ms) | 141.6 (140.1-143.8) | 99.9 (96.0-100.0) | 193.9 (192.2-197.9) |
+| page p90 (ms) | 151.6 (149.5-152.6) | 103.8 (100.0-104.0) | 206.3 (203.4-214.2) |
+| peak RSS (MB) | 113.9 (113.8-114.2) | 105.3 (104.4-105.6) | 2821.8 (2811.3-2828.5) |
+| peak PSS (MB, sampled) | - | 54.0 (53.1-54.3) | 687.9 (683.2-694.1) |
+| CPU (s) | 10.4 (10.1-10.6) | 1.35 (1.33-1.38) | 23.4 (23.1-23.9) |
+| idle RSS (MB) | - | 10.0 (9.8-10.2) | 1079.7 (1075.8-1086.7) |
+| idle PSS (MB) | - | 7.33 (7.07-7.44) | 377.0 (376.5-379.9) |
+| start to listening (ms) | - | 3.92 (3.88-3.96) | 104.3 (96.8-112.9) |
+| start to CDP connect (ms) | - | 8.86 (8.18-19.41) | 116.8 (108.5-125.7) |
+| first new page (ms) | - | 167.6 (164.3-174.4) | 75.9 (74.0-84.2) |
+| new page, median (ms) | - | 5.56 (5.43-6.32) | 64.0 (59.7-67.1) |
 | pages verified | 50/50 | 50/50 | 50/50 |
 
 Fetch rows time one process per page, so they include process start. RSS sums over Chromium's processes count shared pages once per process; PSS counts them once. Peak RSS for fetch is the largest single process; for CDP it is the sum of the process tree's own high-water marks (`VmHWM`, read every 50 ms from spawn), which is exact for LightBrowser's single process.
@@ -30,14 +30,14 @@ Fetch rows time one process per page, so they include process start. RSS sums ov
 
 | target | MB |
 |---|---|
-| lightbrowser | 44.4 |
+| lightbrowser | 39.2 |
 | chromium (chrome binary only) | 293.3 |
 
 ## Realm creation (snapshot, release, ms)
 
 | engine | define | first realm | next realm |
 |---|---|---|---|
-| 2.81 (2.77-2.84) | 5.35 (5.28-5.37) | 2.39 (2.34-2.42) | 2.07 (2.05-2.18) |
+| 2.78 (2.76-2.81) | 6.09 (6.08-6.15) | 2.39 (2.36-2.46) | 2.06 (2.03-2.14) |
 
 ## Skipped
 
@@ -47,16 +47,16 @@ Fetch rows time one process per page, so they include process start. RSS sums ov
 
 | budget | target | measured | result |
 |---|---|---|---|
-| idle RSS (serve, no client, 1 s after listen) | < 15 MB | 10.258 | **pass** |
-| binary size (stripped) | < 56 MB | 44.37 | **pass** |
-| realm creation (first / next, snapshot) | < 5 ms | 2.39 / 2.07 | **pass** - lb-webapi example realm_bench |
+| idle RSS (serve, no client, 1 s after listen) | < 15 MB | 10.035 | **pass** |
+| binary size (stripped) | < 40 MB | 39.17 | **pass** |
+| realm creation (first / next, snapshot) | < 5 ms | 2.39 / 2.06 | **pass** - lb-webapi example realm_bench |
 | disk writes (default run) | none | files 0/0, write_bytes 0 | **pass** - files left in cwd/HOME/TMPDIR; /proc/PID/io write_bytes during crawl |
-| crawl wall time vs Lightpanda (fetch) | <= Lightpanda | 7.014 | **skip** - lightpanda not available on this machine |
-| peak RSS vs Lightpanda (fetch) | <= Lightpanda | 115.227 | **skip** - lightpanda not available on this machine |
-| CPU time vs Lightpanda (fetch) | <= Lightpanda | 10.004 | **skip** - lightpanda not available on this machine |
-| crawl wall time vs Lightpanda (cdp) | <= Lightpanda | 4.937 | **skip** - lightpanda not available on this machine |
-| peak RSS vs Lightpanda (cdp) | <= Lightpanda | 105.941 | **skip** - lightpanda not available on this machine |
-| CPU time vs Lightpanda (cdp) | <= Lightpanda | 1.33 | **skip** - lightpanda not available on this machine |
+| crawl wall time vs Lightpanda (fetch) | <= Lightpanda | 7.184 | **skip** - lightpanda not available on this machine |
+| peak RSS vs Lightpanda (fetch) | <= Lightpanda | 113.938 | **skip** - lightpanda not available on this machine |
+| CPU time vs Lightpanda (fetch) | <= Lightpanda | 10.363 | **skip** - lightpanda not available on this machine |
+| crawl wall time vs Lightpanda (cdp) | <= Lightpanda | 4.957 | **skip** - lightpanda not available on this machine |
+| peak RSS vs Lightpanda (cdp) | <= Lightpanda | 105.285 | **skip** - lightpanda not available on this machine |
+| CPU time vs Lightpanda (cdp) | <= Lightpanda | 1.35 | **skip** - lightpanda not available on this machine |
 
 ## History
 
@@ -64,3 +64,4 @@ Fetch rows time one process per page, so they include process start. RSS sums ov
 |---|---|---|---|---|---|---|
 | 2026-11-03-a060281.json | a060281 | 14.2 (13.8-15.0) | 100.0 (100.0-103.7) | 95.3 (95.0-95.9) | 9.95 (9.87-10.44) | 54.9 |
 | 2026-11-03-ebe5f36.json | ebe5f36 | 4.94 (4.80-5.01) | 98.5 (96.0-100.0) | 105.9 (105.6-106.3) | 10.3 (10.2-10.4) | 44.4 |
+| 2026-11-03-f2d6632.json | f2d6632 | 4.96 (4.89-5.05) | 99.9 (96.0-100.0) | 105.3 (104.4-105.6) | 10.0 (9.8-10.2) | 39.2 |

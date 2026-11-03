@@ -15,13 +15,16 @@
 //!   for anyway. Set `LB_KEEP_UNWIND=1` to keep them.
 //!
 //! All need lld, the default linker of `x86_64-unknown-linux-gnu` since
-//! Rust 1.90. Set `LB_PLAIN_LINK=1` to link without any of them.
+//! Rust 1.90. Set `LB_PLAIN_LINK=1` to link without any of them. For size
+//! work, `LB_LINK_MAP=<path>` also writes lld's link map there (about
+//! 60 MB; only the final link reruns).
 
 use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=LB_PLAIN_LINK");
     println!("cargo:rerun-if-env-changed=LB_KEEP_UNWIND");
+    println!("cargo:rerun-if-env-changed=LB_LINK_MAP");
     let release = std::env::var("PROFILE").is_ok_and(|p| p == "release");
     let target = std::env::var("TARGET").unwrap_or_default();
     if !release
@@ -29,6 +32,13 @@ fn main() {
         || std::env::var_os("LB_PLAIN_LINK").is_some()
     {
         return;
+    }
+    if let Some(map) = std::env::var_os("LB_LINK_MAP") {
+        // Size work only: write a link map to this path.
+        println!(
+            "cargo:rustc-link-arg-bins=-Wl,-Map={}",
+            map.to_string_lossy()
+        );
     }
     println!("cargo:rustc-link-arg-bins=-Wl,--icf=safe");
     println!("cargo:rustc-link-arg-bins=-Wl,-z,pack-relative-relocs");

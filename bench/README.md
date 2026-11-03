@@ -83,7 +83,7 @@ must be 50/50 for LightBrowser and Chromium. `gen_corpus.py` is deterministic
   `TMPDIR`; the budget passes if nothing is created there and
   `/proc/PID/io` `write_bytes` stays 0 during the crawl.
 
-**Budgets** checked (from ARCHITECTURE): idle RSS < 15 MB, binary < 56 MB,
+**Budgets** checked (from ARCHITECTURE): idle RSS < 15 MB, binary < 40 MB,
 realm creation < 5 ms, no disk writes, and wall time / peak RSS / CPU no worse
 than Lightpanda (status `skip` while Lightpanda is absent).
 

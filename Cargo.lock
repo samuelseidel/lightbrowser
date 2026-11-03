@@ -1312,6 +1312,7 @@ dependencies = [
  "serde_json",
  "skrifa",
  "taffy",
+ "zstd",
 ]
 
 [[package]]
@@ -1376,6 +1377,7 @@ dependencies = [
  "lb-persona",
  "skrifa",
  "tiny-skia",
+ "zstd",
 ]
 
 [[package]]

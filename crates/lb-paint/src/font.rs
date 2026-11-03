@@ -26,18 +26,20 @@ use tiny_skia::Transform;
 
 use crate::path::{PathData, map};
 
-const PACKS: [&[u8]; 6] = [
-    include_bytes!("../../../profiles/fonts/outlines/sans-regular.lbgp"),
-    include_bytes!("../../../profiles/fonts/outlines/sans-bold.lbgp"),
-    include_bytes!("../../../profiles/fonts/outlines/serif-regular.lbgp"),
-    include_bytes!("../../../profiles/fonts/outlines/serif-bold.lbgp"),
-    include_bytes!("../../../profiles/fonts/outlines/mono-regular.lbgp"),
-    include_bytes!("../../../profiles/fonts/outlines/mono-bold.lbgp"),
-];
+// The packs (`profiles/fonts/outlines/*.lbgp`) are embedded
+// zstd-compressed by `build.rs` (M6 binary size, ADR 0013): 210 KB become
+// about 90 KB. A pack is unpacked the first time a renderer draws with it.
+include!(concat!(env!("OUT_DIR"), "/glyph_packs.rs"));
+
+/// Pack `idx`, unpacked.
+fn unpack(idx: usize) -> Vec<u8> {
+    let (packed, len) = PACKS[idx];
+    zstd::bulk::decompress(packed, len).expect("bundled glyph pack decompresses")
+}
 
 /// Total size of the bundled outline packs in bytes.
 pub fn bundled_outline_bytes() -> usize {
-    PACKS.iter().map(|p| p.len()).sum()
+    PACKS.iter().map(|p| p.1).sum()
 }
 
 /// Synthetic italic skew (Skia's fake italic).
@@ -55,11 +57,12 @@ struct Glyph {
 pub struct GlyphPack {
     upem: f32,
     glyphs: HashMap<u32, Glyph>,
-    data: &'static [u8],
+    data: Box<[u8]>,
 }
 
 impl GlyphPack {
-    fn parse(b: &'static [u8]) -> Option<GlyphPack> {
+    fn parse(data: Vec<u8>) -> Option<GlyphPack> {
+        let b = &data[..];
         let u16_at = |i: usize| Some(u16::from_le_bytes(b.get(i..i + 2)?.try_into().ok()?));
         let u32_at = |i: usize| Some(u32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?));
         if b.get(..4)? != b"LBGP" || u16_at(4)? != 1 {
@@ -85,7 +88,7 @@ impl GlyphPack {
         Some(GlyphPack {
             upem,
             glyphs,
-            data: b,
+            data: data.into_boxed_slice(),
         })
     }
 
@@ -432,7 +435,7 @@ impl FontSet {
         };
         let idx = class * 2 + usize::from(tf.weight >= 600.0);
         self.packs[idx]
-            .get_or_init(|| GlyphPack::parse(PACKS[idx]))
+            .get_or_init(|| GlyphPack::parse(unpack(idx)))
             .as_ref()
     }
 
@@ -575,8 +578,8 @@ mod tests {
 
     #[test]
     fn packs_parse() {
-        for p in PACKS {
-            let g = GlyphPack::parse(p).expect("pack");
+        for idx in 0..PACKS.len() {
+            let g = GlyphPack::parse(unpack(idx)).expect("pack");
             assert!(g.glyph('A').is_some() && g.glyph('é').is_some());
             assert!(g.glyph('\u{1F600}').is_none());
         }

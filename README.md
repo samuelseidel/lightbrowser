@@ -17,10 +17,10 @@ routing, screenshots). On our own detection bench, fingerprint rules score 0
 for both reference Chrome personas. With `LightBrowser.human*` input both
 personas score 0 on behaviour rules on their own seeds (seed sweeps: 20/20
 Windows, 19/20 macOS).
-Idle RSS is 10.3 MB, realm creation 2.1 ms, and the release binary 44.4 MB
-(budget < 56 MB with the prebuilt V8, ADR 0013; the original < 40 MB is
-still missed). On the `bench/` corpus every LightBrowser page is faster
-than headless Chromium's median (see `bench/results/README.md`).
+Idle RSS is 10.0 MB, realm creation 2.1 ms, and the release binary
+39.2 MB (budget < 40 MB, ADR 0013). On the `bench/` corpus every
+LightBrowser page is faster than headless Chromium's median (see
+`bench/results/README.md`).
 Not done: Firefox (M4b, no SpiderMonkey backend yet), workers and service
 workers, and the comparison with Lightpanda (no binary on the bench machine).
 See [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -39,7 +39,7 @@ distribute binaries or push them to public repos or registries.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | <= Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8 (was < 40 MB, ADR 0013); measured 44.4 MB |
+| Binary size (per family, stripped) | < 40 MB (ADR 0013); Chrome measured 39.2 MB |
 | Disk writes during a session | none by default |
 | Isolate/realm creation | < 5 ms (startup snapshot) |
 
