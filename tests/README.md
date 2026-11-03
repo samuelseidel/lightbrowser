@@ -109,8 +109,14 @@ curl -s http://127.0.0.1:19222/json/version      # webSocketDebuggerUrl
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --expect 'fp<=30'
 # stop both servers afterwards
-python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (18)
+python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (33)
 ```
+
+Since M7 the bench also has OS rules (`scoring.py`, "OS rules (M7)" in its
+README). With them both reference personas score fp 88.0 / 83.9 until
+WP-B..E land; see "M7 status" in `docs/ROADMAP.md`. To serve a persona that
+breaks the consistency rules (adversarial bench tests only), use the
+hidden `lightbrowser serve --unchecked-persona FILE`.
 
 Use a fresh `serve` per run. M5 target, the same flow through
 `LightBrowser.human*` (`--seed N` fixes the reading pauses):
@@ -126,6 +132,15 @@ both reference personas score beh 0 on their own seeds. Seeds 1-20 pass
 "M5 status" in `docs/ROADMAP.md`. With the default `--input playwright`
 both score beh 92.3, and stock Chromium (T-001, T-003) scores 100, so the
 bench still catches naive automation.
+
+## OS ground truth (M7)
+
+`tools/os_truth` captures the OS-dependent surface of the local Chrome for
+Testing 153 on loopback (headed under `xvfb-run` and `--headless=new`) into
+`tests/fixtures/os/*.json`, each with a `provenance` block and this
+machine's limits (no GPU, audio server or voices; container fonts; no window
+manager; X11 only). Windows and macOS cannot be captured here. See
+`tools/os_truth/README.md`.
 
 ## Python SDK suite (M5)
 

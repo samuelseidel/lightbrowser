@@ -67,3 +67,12 @@ and a Playwright scenario runner. Stock headless Chromium scores 100 (bot).
   six-letter word, for both input modes. With six keys the per-page key
   spread rules fire by chance on human-like typing, about 26 % of the time.
   No rule changed. Results are in `ROADMAP.md`, "M5 status: human input".
+- M7 (2026-11-03) added OS rules: info probes carry raw values and
+  `scoring.py` judges them, so each rule has unit tests on per-OS fixtures
+  (`fixtures/os_*_chrome.json`). Every new rule was first shown not to fire
+  on stock Chrome 153 (headed under `xvfb-run` and `--headless=new`);
+  rules that rest only on uncaptured Windows/macOS values start at weight 0.
+  `server.py` now sends `Accept-CH`/`Critical-CH`; stock Chrome retries the
+  first navigation once, which no existing rule minds. LightBrowser's T-010
+  fp moved from 0 to 88.0 (Windows) and 83.9 (macOS); the list of rules it
+  trips is in `ROADMAP.md`, "M7 status".

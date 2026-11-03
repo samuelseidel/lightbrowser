@@ -310,6 +310,431 @@ def chk_page_dwell_short(s, cfg):
     return "left after " + ", ".join(short) if short else None
 
 
+# ---- OS consistency (M7) ------------------------------------------------------
+# These read the info probes `os_surface`, `os_media` and `beh_wheel_deltas`
+# (collector.js) and the document headers. Ground truth: Linux values were
+# captured from the local Chrome for Testing 153 (tests/fixtures/os/, made by
+# tools/os_truth); Windows and macOS values come from the surface reference
+# in docs/ROADMAP.md ("M7 status") and are not captured yet. The per-OS
+# real-Chrome-shaped sessions are fixtures/os_{windows,mac,linux}_chrome.json.
+
+def ua_os(ua: str) -> str:
+    if "Windows NT" in ua:
+        return "windows"
+    if "Android" in ua:
+        return "android"
+    if "CrOS" in ua:
+        return "chromeos"
+    if "Macintosh" in ua or "Mac OS X" in ua:
+        return "mac"
+    if "Linux" in ua or "X11" in ua:
+        return "linux"
+    return "other"
+
+
+def probe_value(s: dict, pid: str) -> dict | None:
+    """First usable value of an info probe, pages in arrival order."""
+    for pg in sorted(s.get("pages", {}).values(), key=lambda p: p.get("received", 0)):
+        p = pg.get("probes", {}).get(pid)
+        v = p.get("value") if isinstance(p, dict) else None
+        if isinstance(v, dict) and not v.get("timeout") and "error" not in v:
+            return v
+    return None
+
+
+def _chrome_os(s):
+    """(os, ua) when the session claims desktop Chrome, else (None, ua)."""
+    ua = doc_ua(s)
+    if ua_family(ua) != "chrome":
+        return None, ua
+    o = ua_os(ua)
+    return (o if o in ("windows", "mac", "linux") else None), ua
+
+
+def _version(v):
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", v or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+# macOS majors Chrome 153 can run on (12 Monterey .. 15 Sequoia, then 26 Tahoe;
+# 27 is the next one). macOS 27 drops Intel Macs.
+MAC_MAJORS = {12, 13, 14, 15, 26, 27}
+
+
+def chk_uach_platform_version(s, cfg):
+    o, _ = _chrome_os(s)
+    m = probe_value(s, "os_media")
+    if not o or not m or not isinstance(m.get("high"), dict) or "platformVersion" not in m["high"]:
+        return None
+    pv = m["high"]["platformVersion"]
+    if o == "linux":
+        # Chrome 153 on Linux reports "" (captured, headed and headless).
+        return f"Linux platformVersion {pv!r}, Chrome sends \"\"" if pv != "" else None
+    v = _version(pv)
+    if v is None:
+        return f"platformVersion {pv!r} is not N.N.N"
+    if o == "windows":
+        # Windows 10: 1.0.0 .. 10.0.0; Windows 11: 13.0.0 and up.
+        if v[1:] != (0, 0) or not (1 <= v[0] <= 10 or 13 <= v[0] <= 30):
+            return f"Windows platformVersion {pv}"
+    if o == "mac" and v[0] not in MAC_MAJORS:
+        return f"macOS platformVersion {pv}"
+    return None
+
+
+APPLE_GPU = re.compile(r"Apple (M\d|GPU)|Apple, ANGLE Metal Renderer: Apple", re.I)
+
+
+def chk_uach_arch_gpu(s, cfg):
+    o, _ = _chrome_os(s)
+    m = probe_value(s, "os_media")
+    if not o or not m or not isinstance(m.get("high"), dict):
+        return None
+    h = m["high"]
+    arch, bits, wow = h.get("architecture"), h.get("bitness"), h.get("wow64")
+    reasons = []
+    if arch is not None and arch not in ("x86", "arm"):
+        reasons.append(f"architecture {arch!r}")
+    if bits is not None and bits not in ("32", "64"):
+        reasons.append(f"bitness {bits!r}")
+    if o != "windows" and wow:
+        reasons.append(f"wow64 on {o}")
+    if o != "windows" and bits == "32":
+        reasons.append(f"32-bit Chrome on {o}")
+    if o == "mac":
+        gl = (probe_value(s, "os_surface") or {}).get("gl") or {}
+        r = gl.get("renderer") or ""
+        if arch == "arm" and r and not APPLE_GPU.search(r):
+            reasons.append("arm Mac with a non-Apple GPU")
+        if arch == "x86" and APPLE_GPU.search(r):
+            reasons.append("Apple GPU with x86")
+        v = _version(h.get("platformVersion"))
+        if arch == "x86" and v and v[0] >= 27:
+            reasons.append(f"Intel Mac on macOS {v[0]}")
+    return "; ".join(reasons) or None
+
+
+# Header -> getHighEntropyValues key, for the hints server.py asks for.
+CH_HINTS = {
+    "sec-ch-ua-platform-version": "platformVersion", "sec-ch-ua-arch": "architecture",
+    "sec-ch-ua-bitness": "bitness", "sec-ch-ua-full-version-list": "fullVersionList",
+    "sec-ch-ua-model": "model", "sec-ch-ua-wow64": "wow64", "sec-ch-ua-form-factors": "formFactors",
+}
+
+
+def _sf_value(key, v):
+    """A structured-field header value in getHighEntropyValues' shape."""
+    v = v.strip()
+    if key == "wow64":
+        return v == "?1"
+    if key == "fullVersionList":
+        return sorted(re.findall(r'"([^"]*)";\s*v="([^"]*)"', v))
+    if key == "formFactors":
+        return re.findall(r'"([^"]*)"', v)
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] == '"' else v
+
+
+def chk_ch_high_entropy(s, cfg):
+    """After Accept-CH, later documents must carry the hints, equal to JS."""
+    o, _ = _chrome_os(s)
+    asked = [h.lower() for h in s.get("accept_ch", [])]
+    docs = s.get("documents", [])
+    if not o or not asked or len(docs) < 2:
+        return None
+    m = probe_value(s, "os_media") or {}
+    js = m.get("high") if isinstance(m.get("high"), dict) else {}
+    for d in docs[1:]:
+        h = d.get("headers", {})
+        missing = [n for n in asked if n in CH_HINTS and n not in h]
+        if missing:
+            return f"{d.get('path')}: no {','.join(missing)}"
+        for n in asked:
+            key = CH_HINTS.get(n)
+            if not key or key not in js:
+                continue
+            want = js[key]
+            if key == "fullVersionList":
+                want = sorted((b.get("brand"), b.get("version")) for b in want)
+                want = [list(x) for x in want]
+                got = [list(x) for x in _sf_value(key, h[n])]
+            else:
+                got = _sf_value(key, h[n])
+            if got != want:
+                return f"{n} {h[n]!r} vs JS {js[key]!r}"
+    return None
+
+
+def chk_os_api_surface(s, cfg):
+    o, _ = _chrome_os(s)
+    v = probe_value(s, "os_surface")
+    if not o or not v or not isinstance(v.get("apis"), dict):
+        return None
+    a = v["apis"]
+    want = o in ("windows", "mac")  # Web Share: Windows and macOS, not Linux
+    bad = [k for k in ("share", "canShare") if k in a and a[k] != want]
+    return f"navigator.{'/'.join(bad)} {'missing' if want else 'present'} on {o}" if bad else None
+
+
+def chk_os_bluetooth(s, cfg):
+    o, _ = _chrome_os(s)
+    v = probe_value(s, "os_surface")
+    if not o or not v or not isinstance(v.get("apis"), dict):
+        return None
+    a = v["apis"]
+    want = o in ("windows", "mac")  # Web Bluetooth: Windows and macOS; off on Linux
+    bad = [k for k in ("bluetooth", "Bluetooth") if k in a and a[k] != want]
+    return f"{'/'.join(bad)} {'missing' if want else 'present'} on {o}" if bad else None
+
+
+# Errors real Chrome can give for these calls in a normal page.
+API_OK_ERRORS = {"getLayoutMap": {"InvalidStateError", "SecurityError", "NotAllowedError"}}
+
+
+# APIs desktop Chrome 153 has in a secure context on every OS (captured on
+# Linux headed and headless; navigator.gpu is there even without a GPU).
+CHROME_SECURE_APIS = ("mediaCapabilities", "MediaSource", "MediaRecorder", "keyboard", "gpu", "speechSynthesis")
+
+
+def chk_api_throws(s, cfg):
+    o, _ = _chrome_os(s)
+    m = probe_value(s, "os_media")
+    if not o or not m or not isinstance(m.get("throws"), dict):
+        return None
+    bad = [f"{k}: {e}" for k, e in m["throws"].items() if e and e not in API_OK_ERRORS.get(k, ())]
+    present = m.get("present") or {}
+    if m.get("secure"):
+        bad += [f"{k} missing" for k in CHROME_SECURE_APIS if present.get(k) is False]
+    return "; ".join(bad) or None
+
+
+def chk_codecs_os(s, cfg):
+    o, _ = _chrome_os(s)
+    m = probe_value(s, "os_media")
+    if not o or not m or not isinstance(m.get("codecs"), dict):
+        return None
+    c = m["codecs"]
+    r = ((probe_value(s, "os_surface") or {}).get("gl") or {}).get("renderer") or ""
+    if o == "linux" and c.get("hevcCanPlay") == "probably" and "Mesa" in r:
+        return "HEVC 'probably' on Linux with a Mesa GPU"
+    h264 = c.get("h264") or {}
+    hw = r and not re.search(r"SwiftShader|llvmpipe|Basic Render", r)
+    if o in ("windows", "mac") and hw and h264.get("supported") and h264.get("powerEfficient") is False:
+        return f"H.264 1080p not power efficient on {o} with {r[:60]}"
+    return None
+
+
+def chk_scrollbar_os(s, cfg):
+    o, _ = _chrome_os(s)
+    v = probe_value(s, "os_surface")
+    sb = (v or {}).get("scrollbar")
+    if not o or not isinstance(sb, dict) or not isinstance(sb.get("div"), (int, float)):
+        return None
+    div = sb["div"]
+    # Windows 10: 17 (classic; 16 after rounding at some scales). Windows 11
+    # (platformVersion >= 13) is not captured yet: Fluent scrollbars may be
+    # thinner or overlay, so 0 and 15-17 pass. macOS: 0 (overlay) or 15
+    # (legacy, mouse attached). Linux: 15 (captured, headed and headless).
+    pv = _version(((probe_value(s, "os_media") or {}).get("high") or {}).get("platformVersion"))
+    win11 = pv is not None and pv[0] >= 13
+    ok = {"windows": {0, 15, 16, 17} if win11 else {16, 17}, "mac": {0, 15}, "linux": {14, 15, 16}}[o]
+    if div not in ok:
+        return f"scrollbar {div}px on {o}"
+    if (div > 0 and sb.get("overflows") and sb.get("root") == 0
+            and sb.get("rootOverflowY") in ("visible", "auto", "scroll")
+            and sb.get("bodyOverflowY") in ("visible", "auto", "scroll", None)):
+        return f"{div}px scrollbars, but the overflowing root has none"
+    return None
+
+
+FONT_MARKERS = {
+    "windows": ["Segoe UI", "Segoe UI Variable Text", "Segoe UI Variable Display", "Segoe Fluent Icons",
+                "Consolas", "Segoe UI Emoji"],
+    "mac": ["Helvetica Neue", "Menlo", "Apple Color Emoji", "Lucida Grande", "Geneva", "SF Pro"],
+    "linux": ["DejaVu Sans", "DejaVu Sans Mono", "Cantarell", "Ubuntu", "Ubuntu Sans", "Adwaita Sans",
+              "Noto Color Emoji"],
+}
+# Markers that count against each OS. Office for Mac brings Consolas and
+# friends to macOS, so only Windows 11 UI fonts count there.
+FOREIGN_MARKERS = {
+    "windows": FONT_MARKERS["mac"] + FONT_MARKERS["linux"],
+    "mac": FONT_MARKERS["linux"] + ["Segoe UI Variable Text", "Segoe UI Variable Display", "Segoe Fluent Icons"],
+    "linux": FONT_MARKERS["windows"] + FONT_MARKERS["mac"],
+}
+
+
+def _real_fonts(fonts: dict) -> dict:
+    """Detected fonts that are not aliases: no other detected font has the
+    same size (fontconfig maps e.g. "Segoe UI" or "Helvetica Neue" to the
+    local sans on some Linux setups; that is not the real font)."""
+    det = fonts.get("detected") or {}
+    out = {}
+    for f, d in det.items():
+        if not any(g != f and list(e) == list(d) for g, e in det.items()):
+            out[f] = d
+    return out
+
+
+def chk_fonts_os_markers(s, cfg):
+    o, _ = _chrome_os(s)
+    fonts = ((probe_value(s, "os_surface") or {}).get("fonts")) or {}
+    if not o or not isinstance(fonts.get("detected"), dict):
+        return None
+    det = fonts["detected"]
+    real = _real_fonts(fonts) if o == "linux" else det
+    foreign = [f for f in FOREIGN_MARKERS[o] if f in real]
+    reasons = []
+    if foreign:
+        reasons.append(f"{o} with {', '.join(foreign)}")
+    if o == "windows" and ("Segoe UI Variable Text" in det or "Segoe UI Variable Display" in det):
+        m = probe_value(s, "os_media") or {}
+        v = _version((m.get("high") or {}).get("platformVersion"))
+        if v and v[0] < 13:
+            reasons.append("Windows 11 font Segoe UI Variable with a Windows 10 platformVersion")
+    return "; ".join(reasons) or None
+
+
+def chk_generic_fonts_os(s, cfg):
+    o, _ = _chrome_os(s)
+    fonts = ((probe_value(s, "os_surface") or {}).get("fonts")) or {}
+    gen, det = fonts.get("generic") or {}, fonts.get("detected")
+    if not o or not isinstance(det, dict) or not gen:
+        return None
+    same = lambda a, b: a is not None and b is not None and list(a) == list(b)  # noqa: E731
+    reasons = []
+    segoe = det.get("Segoe UI")
+    if o == "windows" and segoe and not same(gen.get("system-ui"), segoe):
+        reasons.append("system-ui is not Segoe UI on Windows")
+    if o != "windows" and "Segoe UI" in _real_fonts(fonts) and same(gen.get("system-ui"), segoe):
+        reasons.append(f"system-ui is Segoe UI on {o}")
+    # Chrome's default sans-serif/serif fonts: Arial / Times New Roman on
+    # Windows and Linux (fontconfig maps them to Liberation), Helvetica /
+    # Times on macOS.
+    sans, serif = ("Helvetica", "Times") if o == "mac" else ("Arial", "Times New Roman")
+    if det.get(sans) and not same(gen.get("sans-serif"), det[sans]):
+        reasons.append(f"sans-serif is not {sans}")
+    if det.get(serif) and not same(gen.get("serif"), det[serif]):
+        reasons.append(f"serif is not {serif}")
+    if o == "linux" and "Arial" not in det:
+        # Chrome's Linux packages depend on Liberation fonts, which stand in for Arial.
+        reasons.append("no Arial (Liberation Sans) on Linux")
+    return "; ".join(reasons) or None
+
+
+def chk_emoji_render(s, cfg):
+    o, _ = _chrome_os(s)
+    e = (probe_value(s, "os_surface") or {}).get("emoji")
+    if not o or not isinstance(e, dict) or "colored" not in e:
+        return None
+    if e["colored"] == 0:
+        return f"emoji drawn without colour ({e.get('inked')} inked px)"
+    return None
+
+
+APPLE_VOICES = {"Samantha", "Alex", "Daniel", "Karen", "Moira", "Fred", "Albert", "Bad News", "Bahh", "Bells",
+                "Boing", "Bubbles", "Cellos", "Good News", "Jester", "Organ", "Superstar", "Trinoids", "Whisper",
+                "Wobble", "Zarvox", "Junior", "Ralph", "Kathy", "Rishi", "Tessa", "Veena", "Amélie", "Thomas",
+                "Anna", "Alice", "Yuna", "Kyoko", "Tingting", "Milena", "Monica", "Paulina"}
+
+
+def chk_voices_os(s, cfg):
+    o, _ = _chrome_os(s)
+    # The fullest list any beacon saw (voices load after the page starts).
+    lists = [(pg.get("probes", {}).get("os_voices") or {}).get("value") for pg in s.get("pages", {}).values()]
+    lists = [v for v in lists if isinstance(v, dict) and v.get("count")]
+    vo = max(lists, key=lambda v: v["count"]) if lists else None
+    if not o or not vo:
+        return None
+    names = vo.get("localNames") or []
+    reasons = []
+    ms = [n for n in names if n.startswith("Microsoft ")]
+    if ms and o != "windows":
+        reasons.append(f"Microsoft voices on {o}: {', '.join(ms[:3])}")
+    apple = [n for n in names if n.split(" (")[0] in APPLE_VOICES]
+    if apple and o != "mac":
+        reasons.append(f"Apple voices on {o}: {', '.join(apple[:3])}")
+    if o in ("windows", "mac") and vo.get("local") == 0:
+        reasons.append(f"no local voices on {o}")
+    return "; ".join(reasons) or None
+
+
+def chk_webgl_backend_os(s, cfg):
+    o, _ = _chrome_os(s)
+    gl = (probe_value(s, "os_surface") or {}).get("gl")
+    if not o or not isinstance(gl, dict) or not gl.get("renderer"):
+        return None
+    r = gl["renderer"]
+    reasons = []
+    if o in ("windows", "mac") and re.search(r"OpenGL", r) and "SwiftShader" not in r:
+        reasons.append(f"OpenGL ANGLE backend on {o}")
+    if o == "linux" and re.search(r"Direct3D|D3D11|Metal", r):
+        reasons.append("Direct3D/Metal backend on Linux")
+    lw = gl.get("lineWidth") or []
+    vp = gl.get("viewport") or []
+    if re.search(r"Direct3D11|D3D11", r):
+        if len(lw) == 2 and lw[1] > 1:
+            reasons.append(f"D3D11 with line width {lw}")
+        if vp and vp[0] < 16384:
+            reasons.append(f"D3D11 with MAX_VIEWPORT_DIMS {vp}")
+    if "Metal" in r:
+        if len(lw) == 2 and lw[1] > 1:
+            reasons.append(f"Metal with line width {lw}")
+        if vp and vp[0] > 16384:
+            reasons.append(f"Metal with MAX_VIEWPORT_DIMS {vp}")
+    return "; ".join(reasons) or None
+
+
+GPU_VENDORS = {"nvidia": r"NVIDIA|GeForce|Quadro", "amd": r"AMD|Radeon|ATI", "intel": r"Intel",
+               "apple": r"Apple", "qualcomm": r"Qualcomm|Adreno"}
+
+
+def chk_webgpu_os(s, cfg):
+    o, _ = _chrome_os(s)
+    m = probe_value(s, "os_media") or {}
+    ad = (m.get("gpu") or {}).get("adapter")
+    gl = (probe_value(s, "os_surface") or {}).get("gl") or {}
+    if not o or not isinstance(ad, dict) or not ad.get("vendor") or not gl.get("renderer"):
+        return None
+    pat = GPU_VENDORS.get(ad["vendor"].lower())
+    if pat and not re.search(pat, f"{gl.get('vendor')} {gl['renderer']}", re.I):
+        return f"WebGPU adapter {ad['vendor']} vs WebGL {gl['renderer'][:60]}"
+    return None
+
+
+def chk_wheel_os(s, cfg):
+    """wheelDeltaY / deltaY per notch: Linux -1 (captured: deltaY 120,
+    wheelDeltaY -120), Windows -1.2 at 100% (deltaY 100, 120), macOS -3."""
+    o, _ = _chrome_os(s)
+    if not o:
+        return None
+    pairs = []
+    for pg in s.get("pages", {}).values():
+        v = (pg.get("probes", {}).get("beh_wheel_deltas") or {}).get("value") or {}
+        pairs += [p for p in v.get("pairs") or [] if isinstance(p, list) and len(p) == 3 and p[0] and p[2] == 0]
+    if len(pairs) < 3:
+        return None
+    ratios = sorted({round(-p[1] / p[0], 2) for p in pairs if p[1]})
+    want = {"linux": 1.0, "windows": 1.2, "mac": 3.0}[o]
+    if ratios and all(abs(r - want) > 0.15 * want for r in ratios):
+        return f"wheelDeltaY/deltaY {ratios[:4]} on {o} (want about -{want})"
+    return None
+
+
+def chk_screen_os(s, cfg):
+    o, _ = _chrome_os(s)
+    sc = (probe_value(s, "os_surface") or {}).get("screen")
+    if not o or not isinstance(sc, dict) or not sc.get("height"):
+        return None
+    band_h = sc["height"] - sc.get("availHeight", sc["height"])
+    top = sc.get("availTop") or 0
+    if o == "mac" and band_h > 0 and not (23 <= top <= 25 or 30 <= top <= 39):
+        return f"macOS menu bar {top}px"
+    if o == "windows" and band_h > 0 and top == 0:
+        dpr = sc.get("dpr") or 1
+        if not any(abs(band_h - b / dpr) <= 1 for b in (40, 48)):
+            return f"Windows taskbar {band_h}px at DPR {dpr}"
+    return None
+
+
 # ---- the catalogue ----------------------------------------------------------
 
 def P(id_, weight, cat, why, probe=None):
@@ -400,6 +825,44 @@ RULES: list[dict] = [
     S("accept_mismatch", 20, "server", chk_accept_mismatch, "Navigation Accept header differs from the claimed browser."),
     S("page_dwell_short", 15, "behavior", chk_page_dwell_short, "Left a page within 1.5 s of navigation after clicking."),
     S("favicon_missing", 10, "server", chk_favicon_missing, "No favicon request (headless Chrome skips it)."),
+
+    # OS consistency (M7): the claimed OS against OS-specific surfaces. Info
+    # probes carry the raw values; the checks above judge them.
+    P("os_surface", 0, "consistency", "Info only: scrollbars, OS-gated APIs, fonts, emoji, WebGL limits, screen."),
+    P("os_media", 0, "consistency", "Info only: high-entropy UA-CH, codecs, WebGPU, keyboard map, API errors."),
+    P("beh_wheel_deltas", 0, "behavior", "Info only: deltaY and wheelDeltaY of trusted wheel events."),
+    P("os_voices", 0, "consistency", "Info only: speech voices (count, local names), read at every beacon."),
+    S("uach_platform_version", 40, "consistency", chk_uach_platform_version,
+      "UA-CH platformVersion impossible for the OS (Linux Chrome sends \"\")."),
+    S("uach_arch_gpu", 40, "consistency", chk_uach_arch_gpu,
+      "UA-CH architecture/bitness/wow64 contradict the OS or GPU (arm Mac with Intel GPU, ...)."),
+    S("ch_high_entropy", 40, "server", chk_ch_high_entropy,
+      "High-entropy Sec-CH-UA-* headers missing after Accept-CH, or different from JS."),
+    S("api_throws", 40, "consistency", chk_api_throws,
+      "canPlayType, isTypeSupported, decodingInfo, getLayoutMap or requestAdapter threw."),
+    S("webgl_backend_os", 35, "consistency", chk_webgl_backend_os,
+      "WebGL backend or its limits do not fit the OS (OpenGL on Windows, D3D11 limits off)."),
+    S("fonts_os_markers", 35, "consistency", chk_fonts_os_markers,
+      "Fonts only another OS has (DejaVu on Windows, Segoe UI on Linux, Win11 fonts on Win10)."),
+    S("os_api_surface", 30, "consistency", chk_os_api_surface,
+      "navigator.share/canShare present on Linux or missing on Windows/macOS."),
+    S("generic_fonts_os", 30, "consistency", chk_generic_fonts_os,
+      "system-ui, sans-serif or serif resolve to fonts Chrome does not use on that OS."),
+    S("voices_os", 30, "consistency", chk_voices_os,
+      "Speech voices of another OS, or no local voices on Windows/macOS."),
+    S("scrollbar_os", 25, "consistency", chk_scrollbar_os,
+      "Scrollbar width of another OS, or an overflowing root without a scrollbar."),
+    S("emoji_render", 25, "fingerprint", chk_emoji_render,
+      "Emoji drawn without colour: no colour emoji font."),
+    S("webgpu_os", 25, "consistency", chk_webgpu_os, "WebGPU adapter vendor differs from the WebGL GPU."),
+    S("os_bluetooth", 15, "consistency", chk_os_bluetooth,
+      "navigator.bluetooth present on Linux or missing on Windows/macOS."),
+    S("codecs_os", 0, "consistency", chk_codecs_os,
+      "Info until Windows/macOS captures (target 15): HEVC or H.264 power efficiency contradicts OS and GPU."),
+    S("screen_os", 0, "consistency", chk_screen_os,
+      "Info until captures (target 15): taskbar or menu bar size impossible for the OS."),
+    S("wheel_os", 0, "behavior", chk_wheel_os,
+      "Info until captures (target 20): wheelDeltaY/deltaY ratio of another OS."),
 ]
 
 RULE_IDS = {r["id"] for r in RULES}

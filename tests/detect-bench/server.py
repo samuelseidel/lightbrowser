@@ -60,6 +60,15 @@ PRODUCTS = [
     ("Insulated Bottle", "Accessories", 29.0),
     ("Hiking Boot Pro", "Shoes", 179.0),
 ]
+# High-entropy client hints the bench asks for on every document (Accept-CH),
+# and the one it insists on (Critical-CH: the browser retries the navigation
+# once with it). Browsers only honour these on secure origins; loopback
+# http counts. `ch_high_entropy` in scoring.py checks the later requests.
+ACCEPT_CH = [
+    "Sec-CH-UA-Platform-Version", "Sec-CH-UA-Arch", "Sec-CH-UA-Bitness", "Sec-CH-UA-Full-Version-List",
+    "Sec-CH-UA-Model", "Sec-CH-UA-WoW64", "Sec-CH-UA-Form-Factors",
+]
+CRITICAL_CH = ["Sec-CH-UA-Platform-Version"]
 PALETTE = ["#d1495b", "#edae49", "#00798c", "#30638e", "#003d5b", "#6a4c93"]
 
 
@@ -262,6 +271,7 @@ class Handler(BaseHTTPRequestHandler):
             if tls:
                 doc["tls"] = tls
             s["documents"].append(doc)
+            s.setdefault("accept_ch", ACCEPT_CH)
             self.note_ua(s)
             store.flush()
         sid = s["sid"]
@@ -290,7 +300,8 @@ class Handler(BaseHTTPRequestHandler):
             .replace("{{PRODUCTS}}", results)
             .replace("{{COUNT}}", str(len(PRODUCTS)))
         ).encode()
-        extra = {"Cache-Control": "no-store"}
+        extra = {"Cache-Control": "no-store", "Accept-CH": ", ".join(ACCEPT_CH),
+                 "Critical-CH": ", ".join(CRITICAL_CH)}
         if fresh:
             extra["Set-Cookie"] = f"{COOKIE}={sid}; Path=/; SameSite=Lax; HttpOnly"
         self.send_body(200, body, "text/html; charset=utf-8", extra)

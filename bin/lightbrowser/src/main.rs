@@ -146,6 +146,12 @@ fn reference_persona_path(family: lb_persona::BrowserFamily) -> Result<PathBuf, 
 /// reference persona (default: the compiled family). It is checked against
 /// the consistency rules and must match the compiled engine family.
 fn select_persona(name: Option<&str>) -> Result<PersonaProfile, String> {
+    load_persona(name, true)
+}
+
+/// [`select_persona`], optionally without the consistency rules (only for
+/// the hidden `serve --unchecked-persona`; the family must still match).
+fn load_persona(name: Option<&str>, checked: bool) -> Result<PersonaProfile, String> {
     let compiled = lb_js::COMPILED_FAMILY.ok_or("this build has no JS engine family enabled")?;
     let path = match name {
         Some("chrome") => reference_persona_path(lb_persona::BrowserFamily::Chrome)?,
@@ -153,8 +159,12 @@ fn select_persona(name: Option<&str>) -> Result<PersonaProfile, String> {
         Some(path) => PathBuf::from(path),
         None => reference_persona_path(compiled)?,
     };
-    let p = PersonaProfile::from_path_checked(&path)
-        .map_err(|e| format!("loading {}: {e}", path.display()))?;
+    let p = if checked {
+        PersonaProfile::from_path_checked(&path)
+    } else {
+        PersonaProfile::from_path(&path)
+    }
+    .map_err(|e| format!("loading {}: {e}", path.display()))?;
     if p.browser.family != compiled {
         return Err(format!(
             "persona family {} does not match this build ({compiled}); rebuild with {}",
@@ -492,6 +502,10 @@ fn run_report(_args: &ReportArgs) -> Result<bool, String> {
 struct ServeArgs {
     port: u16,
     persona: Option<PathBuf>,
+    /// Set by the hidden `--unchecked-persona FILE`: serve `persona` even if
+    /// it breaks the consistency rules. Only for detect-bench tests with
+    /// deliberately inconsistent (adversarial) personas; not in USAGE.
+    unchecked: bool,
     allow_origins: Vec<String>,
     profiles_dir: Option<PathBuf>,
     insecure: bool,
@@ -502,6 +516,7 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
     let mut out = ServeArgs {
         port: 9222,
         persona: None,
+        unchecked: false,
         allow_origins: Vec::new(),
         profiles_dir: None,
         insecure: false,
@@ -526,6 +541,10 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
                     .map_err(|_| "--port needs a port number".to_owned())?
             }
             "--persona" => out.persona = Some(PathBuf::from(value("--persona")?)),
+            "--unchecked-persona" => {
+                out.persona = Some(PathBuf::from(value("--unchecked-persona")?));
+                out.unchecked = true;
+            }
             "--profiles-dir" => out.profiles_dir = Some(PathBuf::from(value("--profiles-dir")?)),
             "--insecure" => out.insecure = true,
             "--workers" => {
@@ -571,8 +590,23 @@ fn serve_persona(path: Option<&Path>) -> Result<PersonaProfile, String> {
     select_persona(path.map(|p| p.to_str().unwrap_or_default()))
 }
 
+/// [`serve_persona`] without the consistency rules, for the hidden
+/// `--unchecked-persona`. Violations are printed, not refused.
+fn serve_unchecked_persona(path: &Path) -> Result<PersonaProfile, String> {
+    let p = load_persona(Some(path.to_str().unwrap_or_default()), false)?;
+    let report = lb_persona::consistency::validate(&p);
+    if !report.is_valid() {
+        let why = lb_persona::PersonaError::Inconsistent(report);
+        eprintln!("warning: --unchecked-persona (bench tests only): {why}");
+    }
+    Ok(p)
+}
+
 fn run_serve(args: &ServeArgs) -> Result<(), String> {
-    let persona = serve_persona(args.persona.as_deref())?;
+    let persona = match (&args.persona, args.unchecked) {
+        (Some(path), true) => serve_unchecked_persona(path)?,
+        (path, _) => serve_persona(path.as_deref())?,
+    };
     let tls_dir = match &args.profiles_dir {
         Some(d) => d.clone(),
         None => find_profiles_dir().ok_or(
@@ -794,8 +828,39 @@ mod tests {
         assert_eq!(p.port, 0);
         assert_eq!(p.persona.as_deref(), Some(Path::new("p.json")));
         assert_eq!(p.allow_origins, ["http://a", "http://b"]);
+        assert!(!p.unchecked);
         assert!(a(&["--port", "x"]).is_err());
         assert!(a(&["--bogus"]).is_err());
+        let u = a(&["--unchecked-persona", "bad.json"]).unwrap();
+        assert!(u.unchecked);
+        assert_eq!(u.persona.as_deref(), Some(Path::new("bad.json")));
+    }
+
+    #[test]
+    fn unchecked_persona_skips_only_the_consistency_rules() {
+        // An inconsistent persona is refused by --persona and served by
+        // --unchecked-persona.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles/reference");
+        let file = match lb_js::COMPILED_FAMILY {
+            Some(lb_persona::BrowserFamily::Chrome) => "chrome/chrome153_win10_rtx3060_1080p.json",
+            _ => "firefox/win10_rtx3060_1080p.json",
+        };
+        // A Windows UA with navigator.platform MacIntel breaks rule R01.
+        let (from, to) = ("\"platform\": \"Win32\"", "\"platform\": \"MacIntel\"");
+        let json = std::fs::read_to_string(root.join(file)).unwrap();
+        assert!(json.contains(from), "{file} has no {from}");
+        let dir = std::env::temp_dir().join(format!("lb-unchecked-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bad = dir.join("bad.json");
+        std::fs::write(&bad, json.replacen(from, to, 1)).unwrap();
+        let checked = serve_persona(Some(&bad));
+        let unchecked = serve_unchecked_persona(&bad);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(checked.unwrap_err().contains("bad.json"));
+        assert_eq!(
+            unchecked.unwrap().browser.family,
+            lb_js::COMPILED_FAMILY.unwrap()
+        );
     }
 
     #[test]

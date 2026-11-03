@@ -752,6 +752,159 @@
       dischargingTime: b.dischargingTime }, false];
   });
 
+  // ---- OS-consistency probes (info only; scoring.py judges them) ----------
+  // Raw values for the OS rules in scoring.py (uach_*, os_api_surface,
+  // api_throws, scrollbar_os, fonts_os_markers, generic_fonts_os, ...).
+  // Ground truth: tests/fixtures/os/ (tools/os_truth) and
+  // fixtures/os_*_chrome.json.
+
+  const OS_FONTS = ['Segoe UI', 'Segoe UI Variable Text', 'Segoe UI Variable Display', 'Segoe Fluent Icons',
+    'Consolas', 'Segoe UI Emoji', 'Helvetica Neue', 'Menlo', 'Apple Color Emoji', 'Lucida Grande', 'Geneva',
+    'SF Pro', 'DejaVu Sans', 'DejaVu Sans Mono', 'Cantarell', 'Ubuntu', 'Ubuntu Sans', 'Adwaita Sans',
+    'Noto Color Emoji', 'Liberation Sans', 'Liberation Serif', 'Liberation Mono', 'Arial', 'Helvetica',
+    'Times New Roman', 'Times', 'Courier New', 'Inter', 'Noto Sans', 'Roboto', 'Open Sans', 'FreeSans', 'Carlito',
+    'Verdana', 'Tahoma', 'Georgia'];
+
+  function osFonts() {
+    const span = document.createElement('span');
+    span.style.cssText = 'position:absolute;left:-9999px;top:0;font-size:72px;white-space:nowrap';
+    span.textContent = 'mmmmmmmmmmlli1WQ@#é';
+    document.body.appendChild(span);
+    const dims = (ff) => { span.style.fontFamily = ff; return [span.offsetWidth, span.offsetHeight]; };
+    const bases = ['monospace', 'serif', 'sans-serif'];
+    const base = {};
+    for (const b of bases) base[b] = dims(b);
+    const generic = {};
+    for (const g of ['system-ui', 'sans-serif', 'serif', 'monospace']) generic[g] = dims(g);
+    const detected = {};
+    for (const f of OS_FONTS) {
+      for (const b of bases) {
+        const d = dims(`"${f}", ${b}`);
+        if (d[0] !== base[b][0] || d[1] !== base[b][1]) { detected[f] = d; break; }
+      }
+    }
+    span.remove();
+    return { base, generic, detected };
+  }
+
+  function osEmoji() {
+    const c = document.createElement('canvas');
+    c.width = 80; c.height = 70;
+    const x = c.getContext('2d');
+    x.fillStyle = '#000';
+    x.textBaseline = 'top';
+    x.font = '56px sans-serif';
+    x.fillText('\u{1F600}', 4, 4);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let inked = 0, colored = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      inked++;
+      if (Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]) > 40) colored++;
+    }
+    return { inked, colored };
+  }
+
+  function osGl() {
+    const c = document.createElement('canvas');
+    const g = c.getContext('webgl');
+    if (!g) return null;
+    const dbg = g.getExtension('WEBGL_debug_renderer_info');
+    const arr = (p) => Array.from(g.getParameter(p) || []);
+    return {
+      vendor: dbg ? g.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null,
+      renderer: dbg ? g.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
+      viewport: arr(g.MAX_VIEWPORT_DIMS), lineWidth: arr(g.ALIASED_LINE_WIDTH_RANGE),
+      pointSize: arr(g.ALIASED_POINT_SIZE_RANGE), texture: g.getParameter(g.MAX_TEXTURE_SIZE),
+      vertexUniforms: g.getParameter(g.MAX_VERTEX_UNIFORM_VECTORS),
+    };
+  }
+
+  probe('os_surface', 'consistency', 0, () => {
+    const v = { os: uaOs };
+    const root = document.documentElement;
+    const d = document.createElement('div');
+    d.style.cssText = 'position:absolute;left:-9999px;top:0;width:100px;height:100px;overflow:scroll';
+    document.body.appendChild(d);
+    v.scrollbar = { div: d.offsetWidth - d.clientWidth, root: innerWidth - root.clientWidth,
+      overflows: root.scrollHeight > innerHeight, rootOverflowY: getComputedStyle(root).overflowY,
+      bodyOverflowY: getComputedStyle(document.body).overflowY };
+    d.remove();
+    v.apis = { share: 'share' in navigator, canShare: 'canShare' in navigator, bluetooth: 'bluetooth' in navigator,
+      Bluetooth: 'Bluetooth' in window };
+    try { v.fonts = osFonts(); } catch (e) { v.fonts = { error: String(e.message) }; }
+    try { v.emoji = osEmoji(); } catch (e) { v.emoji = { error: String(e.message) }; }
+    try { v.gl = osGl(); } catch (e) { v.gl = { error: String(e.message) }; }
+    v.hw = { deviceMemory: navigator.deviceMemory, hardwareConcurrency: navigator.hardwareConcurrency };
+    v.screen = { width: screen.width, height: screen.height, availWidth: screen.availWidth,
+      availHeight: screen.availHeight, availLeft: screen.availLeft, availTop: screen.availTop, dpr: devicePixelRatio,
+      screenX, screenY, outerWidth, outerHeight, innerWidth, innerHeight };
+    return [v, false];
+  });
+
+  // Run `fn`; the error name if it throws or rejects, else null.
+  async function osThrows(fn) {
+    try { await fn(); return null; } catch (e) { return (e && e.name) || 'Error'; }
+  }
+
+  probe('os_media', 'consistency', 0, async () => {
+    const t0 = now();
+    const v = { os: uaOs, secure: isSecureContext, throws: {} };
+    v.present = { mediaCapabilities: !!navigator.mediaCapabilities, MediaSource: !!window.MediaSource,
+      MediaRecorder: !!window.MediaRecorder, keyboard: !!(navigator.keyboard && navigator.keyboard.getLayoutMap),
+      gpu: !!navigator.gpu, speechSynthesis: !!window.speechSynthesis };
+    const d = navigator.userAgentData;
+    if (d && d.getHighEntropyValues) {
+      try {
+        v.high = await d.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion',
+          'fullVersionList', 'wow64', 'formFactors']);
+      } catch (e) { v.high = { error: (e && e.name) || 'Error' }; }
+    }
+    const video = document.createElement('video');
+    const h264 = 'video/mp4; codecs="avc1.640028"';
+    const hevc = 'video/mp4; codecs="hvc1.1.6.L93.B0"';
+    v.throws.canPlayType = await osThrows(() => video.canPlayType(h264));
+    if (window.MediaSource) v.throws.mseIsTypeSupported = await osThrows(() => MediaSource.isTypeSupported(h264));
+    if (window.MediaRecorder) v.throws.recorderIsTypeSupported = await osThrows(() => MediaRecorder.isTypeSupported('video/webm;codecs=vp8'));
+    const cfg = (contentType) => ({ type: 'file', video: { contentType, width: 1920, height: 1080, bitrate: 5000000, framerate: 30 } });
+    v.codecs = {};
+    try { v.codecs.hevcCanPlay = video.canPlayType(hevc); } catch (_) { /* in throws */ }
+    if (navigator.mediaCapabilities) {
+      v.throws.decodingInfo = await osThrows(async () => {
+        const r = await navigator.mediaCapabilities.decodingInfo(cfg(h264));
+        v.codecs.h264 = { supported: r.supported, powerEfficient: r.powerEfficient };
+        const h = await navigator.mediaCapabilities.decodingInfo(cfg('video/mp4; codecs="hvc1.1.6.L120.90"'));
+        v.codecs.hevc = { supported: h.supported, powerEfficient: h.powerEfficient };
+      });
+    }
+    if (navigator.keyboard && navigator.keyboard.getLayoutMap) {
+      v.throws.getLayoutMap = await osThrows(async () => { v.keyboardSize = (await navigator.keyboard.getLayoutMap()).size; });
+    }
+    if (navigator.gpu) {
+      v.gpu = { present: true, adapter: null };
+      v.throws.requestAdapter = await osThrows(async () => {
+        const a = await navigator.gpu.requestAdapter();
+        if (a) v.gpu.adapter = { vendor: (a.info || {}).vendor, architecture: (a.info || {}).architecture };
+      });
+    }
+    v.ms = Math.round(now() - t0);
+    return [v, false];
+  });
+
+  // Voices load asynchronously; read them at every beacon (os_voices below).
+  let voiceList = [];
+  const readVoices = () => { try { voiceList = speechSynthesis.getVoices(); } catch (_) { /* none */ } };
+  if (window.speechSynthesis) {
+    readVoices();
+    speechSynthesis.addEventListener('voiceschanged', readVoices);
+  }
+
+  // wheelDelta next to deltaY for the wheel_os rule (the trace keeps deltaY only).
+  const wheelPairs = [];
+  addEventListener('wheel', (e) => {
+    if (e.isTrusted && wheelPairs.length < 400) wheelPairs.push([r1(e.deltaY), e.wheelDeltaY, e.deltaMode]);
+  }, { capture: true, passive: true });
+
   // ---- behavioural probes (recomputed for every beacon) -------------------
 
   function behaviorProbes() {
@@ -957,6 +1110,16 @@
     // Key or button input while the document claims not to have focus.
     const unfocused = tr.filter((e) => (e.type === 'keydown' || e.type === 'mousedown') && e.f === 0).length;
     add('beh_input_without_focus', 30, unfocused, unfocused > 0);
+
+    // Info for wheel_os: [deltaY, wheelDeltaY, deltaMode] of trusted wheels.
+    add('beh_wheel_deltas', 0, { n: wheelPairs.length, pairs: wheelPairs.slice(0, 40) }, false);
+    // Info for voices_os (an OS probe, recomputed here because voices load late).
+    if (window.speechSynthesis) {
+      readVoices();
+      const local = voiceList.filter((x) => x.localService);
+      add('os_voices', 0, { count: voiceList.length, local: local.length,
+        localNames: local.map((x) => x.name).slice(0, 80) }, false);
+    }
 
     return out;
   }

@@ -11,6 +11,7 @@ Each milestone ends with something we can run and measure.
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
+| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules) done; WP-B..E open. See "M7 status" |
 | **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.63 MB, the < 40 MB budget is met (ADR 0013); `bench/` runner done; Lightpanda compared (user-approved nightly, loopback only): 4 of 6 checks pass, `fetch` CPU and CDP peak RSS still lose; service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
@@ -20,6 +21,7 @@ Each milestone ends with something we can run and measure.
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
+| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona` | WP-B..E; with the OS rules T-010 scores fp 88.0 (Windows) and 83.9 (macOS), see "M7 status" |
 | M6 Performance | Snapshot, memory, binary size (39.63 MB, < 40 MB met), `bench/` runner, screenshots, Lightpanda comparison (wall time wins in both modes; 4 of 6 checks pass) done | `fetch` CPU and CDP peak RSS vs Lightpanda, service workers |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
@@ -1244,6 +1246,89 @@ close (no measurable CPU gain, peak up to 50 MB); a code cache
 made after the run (+6 MB RSS); HTTP keep-alive (network is ~1 % of CPU
 here; still open).
 
+## M7 status: WP-A, Linux ground truth and OS rules (2026-11-03)
+
+**Ground truth.** `tools/os_truth` (`capture.js`, `page.html`, `xtest.py`,
+`fontconf/`) captures the OS-dependent surface of the local Chrome for
+Testing 153.0.8010.12 on loopback, without CDP or automation flags:
+`tests/fixtures/os/linux_x11_cft153.json` (headed under `xvfb-run`,
+1920x1080x24, 96 dpi), `_ubuntu24fonts` and `_fedora42fonts` (headed, with
+distro-like fontconfig and GTK font) and `_headless` (`--headless=new`).
+Limits, recorded in each file: no GPU, no audio server, no voices,
+container fonts (Inter is the default sans; Ubuntu/Cantarell/Adwaita/Noto
+text fonts not installed), no window manager, X11 only. Windows and macOS
+are not captured here; their values below are the surface reference from
+the M7 plan (confidence medium unless noted) and are marked
+`"captured": false` wherever used.
+
+Captured on Linux, and where the plan's assumptions were wrong:
+
+| Surface | Chrome 153 on Linux (captured) | Consequence |
+|---|---|---|
+| UA-CH `platformVersion` | `""` in JS and in `Sec-CH-UA-Platform-Version`, headed and headless (kernel 6.18.44 here) | Linux personas must report `""`, not the kernel version (WP-B/WP-D/WP-E) |
+| `navigator.deviceMemory` | 16 (15 GB RAM) | Chrome 153 does not cap at 8: no `device_memory <= 8` rule (WP-B R25 must allow 16 and 32) |
+| Wheel, one X11 notch | `deltaY` 120, `wheelDeltaY` -120, `deltaMode` 0 | Linux notch is 120 px, ratio -1 (the plan guessed 53 px) |
+| Scrollbars | 15 px (div and root, headed and headless); Playwright's headless shell: 0 | |
+| OS-gated APIs | no `share`, `canShare`, `bluetooth`, `Bluetooth*`; `keyboard` (layout map 48-49 keys), `gpu` (adapter `null`), `mediaCapabilities`, `hid`, `serial`, `usb` present | |
+| Codecs | H.264/AAC `probably`, HEVC `""`, VP9/AV1 `probably`; `decodingInfo` H.264 1080p supported, not power efficient (no GPU) | |
+| Fonts | `sans-serif` = Arial (Liberation Sans), `serif` = Times New Roman (Liberation Serif), `monospace` = DejaVu Sans Mono; `system-ui` = fontconfig/GTK sans (Inter here, DejaVu Sans with the distro configs); `font: caption` etc. = Arial 16px; colour emoji (Noto Color Emoji) | |
+| Audio | 44100 Hz, `baseLatency` 0.01, `outputLatency` 0, 2 channels (no audio server) | not representative of PipeWire desktops |
+| Window | headed without a WM: outer width = inner width, outer height - inner height = 87, `screenX/Y` 10 | |
+| Accept-CH | Critical-CH retries the first navigation once, cookie kept; hints follow `Accept` on the retry and `sec-ch-ua-mobile` on later navigations, in the order arch, platform, platform-version, model, bitness, wow64, full-version-list, form-factors | header order for WP-E |
+
+Windows/macOS reference used by the bench fixtures (not captured):
+`platformVersion` Windows 10 `10.0.0`, Windows 11 `13.0.0`+ (24H2
+`19.0.0`), macOS three parts (`15.1.0`); arm on Apple Silicon; scrollbars
+Windows 10 17 px (high), macOS 0 (overlay) or 15; `share`/`canShare`
+present on Windows (high) and macOS, `bluetooth` present; WebGL D3D11
+(`MAX_VIEWPORT_DIMS` 32767, line width [1,1], point size [1,1024]) and Metal
+(16384, [1,1], [1,511]); HEVC `probably` and H.264 power efficient with a
+GPU; wheel Windows `deltaY` 100 / `wheelDeltaY` 120, macOS ratio -3; local
+voices Microsoft David/Mark/Zira on Windows, Apple voices on macOS.
+
+**Bench.** New info probes (`os_surface`, `os_media`, `os_voices`,
+`beh_wheel_deltas`) and 16 rules in `scoring.py` (`uach_platform_version`,
+`uach_arch_gpu`, `ch_high_entropy`, `api_throws`, `webgl_backend_os`,
+`fonts_os_markers`, `os_api_surface`, `generic_fonts_os`, `voices_os`,
+`scrollbar_os`, `emoji_render`, `webgpu_os`, `os_bluetooth`; info until
+Windows/macOS captures: `codecs_os`, `screen_os`, `wheel_os`). `server.py`
+sends `Accept-CH` and `Critical-CH`. Existing rules, weights, thresholds and
+probes are unchanged. Per-OS fixtures `tests/detect-bench/fixtures/os_*_chrome.json`
+(Linux captured, Windows/macOS not) and 15 new unit tests; `python3 -m
+unittest` 33 OK. Stock Chrome 153 over CDP, headed under `xvfb-run` and
+`--headless=new`, fires no OS rule (also with the info rules at target
+weights); T-001/T-003 still 100 (the headless shell now also fires
+`scrollbar_os`: it hides scrollbars).
+
+**`serve --unchecked-persona FILE`** (hidden, not in USAGE) serves a persona
+that breaks the consistency rules and prints the violations, for bench
+tests with adversarial personas. Example: the macOS persona with an
+NVIDIA OpenGL renderer (R02 violation) is refused by `--persona`, served by
+`--unchecked-persona`, and fires `webgl_backend_os` and `uach_arch_gpu`.
+The same persona with `architecture` `x86` and the Apple M2 GPU only warns
+in `validate` (R12) but fires `uach_arch_gpu`.
+
+**LightBrowser against the OS rules** (debug build, fresh `serve` per run,
+T-010, loopback). This is the to-do list for WP-B..E; nothing was fixed in
+WP-A.
+
+| Rule | Windows 10 persona | macOS 15 persona | What fires | WP |
+|---|---|---|---|---|
+| `ch_high_entropy` (40) | fires | fires | no high-entropy `Sec-CH-UA-*` after `Accept-CH` | E |
+| `api_throws` (40) | fires | fires | `canPlayType`, `MediaSource.isTypeSupported`, `MediaRecorder.isTypeSupported` throw `NotSupportedError`; `navigator.mediaCapabilities`, `keyboard`, `gpu` missing | D |
+| `os_api_surface` (30) | fires | fires | `share`/`canShare` missing | D |
+| `scrollbar_os` (25) | fires | quiet | 0 px on Windows 10 (want 17) | C |
+| `emoji_render` (25) | fires | fires | canvas emoji draws no pixels | C |
+| `os_bluetooth` (15) | fires | fires | `bluetooth` missing | D |
+| `wheel_os` (info) | quiet | fires (human input) | `wheelDeltaY/deltaY` -1.0 to -1.18 on macOS (want about -3) | D |
+
+Scores: Playwright input fp 88.0 (Windows) and 83.9 (macOS), was 0 for
+both; `--input human` fp 88.0 / 83.9, beh 0 for both (the info rule
+`wheel_os` counts 0). Quiet for both: `uach_platform_version`,
+`uach_arch_gpu`, `webgl_backend_os`, `fonts_os_markers`,
+`generic_fonts_os`, `voices_os`, `webgpu_os` (no WebGPU), `codecs_os`
+(codecs throw), `screen_os`.
+
 ## Workspace check (2026-11-03)
 
 Chrome build unless noted, 4 cores. Re-run on the final tree after the
@@ -1294,6 +1379,9 @@ CPU and CDP peak RSS), see "M6 status: Lightpanda comparison".
 
 ## Risks
 
+- **TCP/IP fingerprint.** SYN TTL and TCP options always come from the host
+  OS, so a passive TCP/IP fingerprint can contradict a Windows or macOS
+  persona; LightBrowser does not change them.
 - **WebIDL breadth.** Chrome exposes 1,000+ interfaces. We generate all of them
   from IDL, but each needs an implementation or a spec-shaped stub. Plan: stub
   first, implement in order of what the detection engine and real pages touch.

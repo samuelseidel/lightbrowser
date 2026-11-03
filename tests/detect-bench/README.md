@@ -28,6 +28,7 @@ against.
 | `test_scoring.py`, `test_server.py` | Unit tests, using `fixtures/`. |
 | `fixtures/T-*.json` | Sessions recorded by `run.js --save-fixtures`. |
 | `fixtures/synthetic-human-trace.json` | Synthetic human-like trace for T-020 (curved paths, minimum-jerk speed, varied timing). Not a real person. |
+| `fixtures/os_{linux,windows,mac}_chrome.json` | Real-Chrome-shaped sessions for the OS rules, made by `tools/os_truth/bench_fixtures.py`. Linux is a captured stock Chrome 153 session (headed, loopback); Windows 10 and macOS 15 are not captured (values from the M7 surface reference; see each file's `provenance`). |
 
 ## Quick start
 
@@ -64,6 +65,13 @@ python3 server.py --port 8765 [--host ::1] [--tls] [--config cfg.json] [--result
   ClientHello and HTTP/2 fingerprints (JA3/JA4, Akamai H2) use `lb-fptest`
   (see `tests/README.md`).
 - `--config` overrides thresholds and weights (see "Scoring").
+
+Every page response carries `Accept-CH` for the high-entropy client hints
+(`Sec-CH-UA-Platform-Version`, `-Arch`, `-Bitness`, `-Full-Version-List`,
+`-Model`, `-WoW64`, `-Form-Factors`) and `Critical-CH:
+Sec-CH-UA-Platform-Version`, and the session records `accept_ch`. Stock
+Chrome 153 retries the first navigation once with the hints (so a session
+has one more document) and sends them on every later request.
 
 ### Endpoints
 
@@ -264,6 +272,26 @@ contradict the claimed browser or OS), `fingerprint` (device surfaces),
 | `accept_encoding_mismatch` | 25 | server | Accept-Encoding differs from the claimed browser. |
 | `accept_mismatch` | 20 | server | Navigation Accept header differs from the claimed browser. |
 | `favicon_missing` | 10 | server | No favicon request (headless Chrome skips it). |
+| `uach_platform_version` | 40 | consistency | UA-CH `platformVersion` impossible for the OS: Linux must be `""` (captured); Windows 1-10.0.0 or 13+.0.0; macOS 12-15, 26, 27. |
+| `uach_arch_gpu` | 40 | consistency | UA-CH architecture/bitness/wow64 contradict the OS or GPU: arm Mac with a non-Apple GPU, Apple GPU with x86, Intel Mac on macOS 27, wow64 off Windows. |
+| `ch_high_entropy` | 40 | server | After `Accept-CH`, a later document lacks the high-entropy `Sec-CH-UA-*` headers or they differ from `getHighEntropyValues`. |
+| `api_throws` | 40 | consistency | `canPlayType`, `isTypeSupported`, `decodingInfo`, `getLayoutMap` or `requestAdapter` threw, or `mediaCapabilities`/`keyboard`/`gpu`/`MediaSource`/`MediaRecorder`/`speechSynthesis` is missing in a secure context. |
+| `webgl_backend_os` | 35 | consistency | ANGLE backend or limits do not fit the OS: OpenGL on Windows/macOS, D3D11/Metal on Linux, D3D11 with line width > 1 or viewport < 16384, Metal with viewport > 16384 (Windows/macOS limits not captured). |
+| `fonts_os_markers` | 35 | consistency | Fonts only another OS has: Linux fonts on Windows/macOS, real (non-alias) Windows/macOS fonts on Linux, Segoe UI Variable with a Windows 10 `platformVersion`. |
+| `os_api_surface` | 30 | consistency | `navigator.share`/`canShare` present on Linux (captured) or missing on Windows/macOS (not captured). |
+| `generic_fonts_os` | 30 | consistency | `system-ui` is not Segoe UI on Windows or is a real Segoe UI elsewhere; `sans-serif`/`serif` not Arial/Times New Roman (Helvetica/Times on macOS); no Arial (Liberation) on Linux. |
+| `voices_os` | 30 | consistency | Microsoft voices off Windows, Apple voices off macOS, or no local voices on Windows/macOS. |
+| `scrollbar_os` | 25 | consistency | Scrollbar width of another OS (Windows 10 16-17, Windows 11 0/15-17, macOS 0/15, Linux 15 captured), or scrollbars but none on an overflowing root. |
+| `emoji_render` | 25 | fingerprint | An emoji drawn on a canvas has no coloured pixels: no colour emoji font. |
+| `webgpu_os` | 25 | consistency | WebGPU adapter vendor differs from the WebGL GPU vendor. |
+| `os_bluetooth` | 15 | consistency | `navigator.bluetooth`/`Bluetooth` present on Linux (captured) or missing on Windows/macOS (not captured). |
+| `codecs_os` | 0 | consistency | Info until Windows/macOS captures (target 15): HEVC "probably" on Linux with Mesa, or H.264 1080p not power efficient on Windows/macOS with a GPU. |
+| `screen_os` | 0 | consistency | Info until captures (target 15): macOS menu bar not 23-25/30-39 px, Windows taskbar not 40/48 px at the DPR. |
+| `wheel_os` | 0 | behavior | Info until Windows/macOS captures (target 20): `wheelDeltaY/deltaY` not about -1 (Linux, captured), -1.2 (Windows) or -3 (macOS). |
+| `os_surface` | 0 | consistency | Info only: scrollbars, OS-gated APIs, fonts, emoji, WebGL limits, screen. |
+| `os_media` | 0 | consistency | Info only: high-entropy UA-CH, codecs, WebGPU, keyboard map, API errors. |
+| `os_voices` | 0 | consistency | Info only: speech voices, read at every beacon (they load late). |
+| `beh_wheel_deltas` | 0 | behavior | Info only: `deltaY` and `wheelDeltaY` of trusted wheel events. |
 
 Notes:
 
@@ -286,6 +314,42 @@ Notes:
 - Fonts: on Linux, metric-compatible fonts (Carlito, Caladea) make Windows
   fonts look installed, so foreign fonts only count against Windows/macOS
   UAs.
+
+## OS rules (M7)
+
+The OS rules check the claimed OS (from the User-Agent) against surfaces
+that differ between Windows, macOS and Linux. Info probes carry raw
+values (`os_surface`, `os_media`, `os_voices`, plus `beh_wheel_deltas`) and
+the `chk_*` functions in `scoring.py` judge them, so every rule has unit
+tests on `fixtures/os_*_chrome.json`. Existing rules and probes are
+unchanged.
+
+Ground truth. Linux comes from the local Chrome for Testing 153, headed
+under `xvfb-run` and `--headless=new`, captured on loopback by
+`tools/os_truth` (`tests/fixtures/os/`). Windows and macOS values are from
+the surface reference in `docs/ROADMAP.md` ("M7 status") and are not
+captured; rules that rest only on them are marked below or start at weight
+0. Captured facts that shaped the rules:
+
+- Linux Chrome 153 reports `platformVersion` `""` (JS and
+  `Sec-CH-UA-Platform-Version`), not the kernel version.
+- `navigator.deviceMemory` is 16 on this 15 GB machine: Chrome 153 does not
+  cap it at 8, so there is no cap rule.
+- Linux scrollbars are 15 px; Playwright's headless shell hides them (0 px),
+  which `scrollbar_os` catches.
+- X11 wheel notches give `deltaY` 120 and `wheelDeltaY` -120.
+- `navigator.share`, `canShare`, `bluetooth` are absent on Linux;
+  `navigator.keyboard`, `gpu` (adapter `null` without a GPU),
+  `mediaCapabilities` are present; none of the media/keyboard/WebGPU calls
+  throw.
+- This container's fontconfig maps "Segoe UI" and "Helvetica Neue" to Inter,
+  so on Linux a foreign font only counts when its size differs from every
+  other detected font (an alias has the same size as the font it maps to).
+
+Stock check (2026-11-03): T-010 with stock Chrome 153 over CDP, headed
+under `xvfb-run` and `--headless=new`, fires no OS rule, also with the info
+rules at their target weights; T-001/T-003 still score 100. The Critical-CH
+retry leaves `header_order` and `cookie_not_echoed` quiet.
 
 ## What LightBrowser needs from this bench
 
