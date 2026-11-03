@@ -108,9 +108,11 @@ pub(crate) struct Meta {
     pub digests: Vec<u64>,
     pub cb_before: Vec<u32>,
     pub cb_after: Vec<u32>,
-    /// Per interface: isolate data index of the overflow template, or
-    /// `u32::MAX`.
+    /// Per interface: isolate data index of the first overflow chunk
+    /// template (`u32::MAX` if none) and the number of chunks, which sit
+    /// at consecutive indexes.
     pub overflow_index: Vec<u32>,
+    pub overflow_count: Vec<u32>,
 }
 
 impl Meta {
@@ -126,6 +128,7 @@ impl Meta {
             put_u32(out, self.cb_before[i]);
             put_u32(out, self.cb_after[i]);
             put_u32(out, self.overflow_index[i]);
+            put_u32(out, self.overflow_count[i]);
         }
         // Keep V8's data 8-byte aligned relative to the blob start.
         while !out.len().is_multiple_of(8) {
@@ -152,6 +155,7 @@ impl Meta {
             m.cb_before.push(r.u32()?);
             m.cb_after.push(r.u32()?);
             m.overflow_index.push(r.u32()?);
+            m.overflow_count.push(r.u32()?);
         }
         let at = r.at.next_multiple_of(8);
         let rest = blob.get(at..).ok_or("truncated snapshot")?;
@@ -213,7 +217,7 @@ pub(super) struct Restore {
     pub meta: Meta,
     /// Templates from the blob, taken as their interfaces are replayed.
     pub templates: Vec<Option<v8::Global<v8::FunctionTemplate>>>,
-    pub overflows: Vec<Option<v8::Global<v8::ObjectTemplate>>>,
+    pub overflows: Vec<Option<Vec<v8::Global<v8::ObjectTemplate>>>>,
     pub next: usize,
     pub diverged: bool,
     /// Set by [`Engine::use_snapshot_context`].
@@ -368,6 +372,7 @@ pub(super) fn spec_digest(spec: &InterfaceSpec) -> u64 {
     h.flag(spec.indexed_length.is_some());
     h.flag(spec.named_unenumerable);
     h.u32(MAX_TEMPLATE_PROPS as u32);
+    h.u32(OVERFLOW_CHUNK as u32);
     h.finish()
 }
 
@@ -454,20 +459,23 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
         r.diverged = true;
         return None;
     }
-    let (Some(template), overflow) = (r.templates[i].take(), r.overflows[i].take()) else {
+    let (Some(template), Some(overflow)) = (r.templates[i].take(), r.overflows[i].take()) else {
         r.diverged = true;
         return None;
     };
     let expect_after = r.meta.cb_after[i] as usize;
     r.next += 1;
-    let split = spec.instance.len().min(MAX_TEMPLATE_PROPS);
-    let overflow = overflow.map(|ot| {
-        let keys = spec.instance[split..]
-            .iter()
-            .map(|m| m.key.clone())
-            .collect();
-        (ot, keys)
-    });
+    let split = template_split(spec.instance.len());
+    let key_chunks = spec.instance[split..].chunks(OVERFLOW_CHUNK);
+    if key_chunks.len() != overflow.len() {
+        r.diverged = true;
+        return None;
+    }
+    let overflow = overflow
+        .into_iter()
+        .zip(key_chunks)
+        .map(|(ot, chunk)| (ot, chunk.iter().map(|m| m.key.clone()).collect()))
+        .collect();
     let parent = spec.parent;
     push_spec_callbacks(st, spec.clone());
     // The replay mirrors the builder; a count mismatch is a bug in this
@@ -691,17 +699,20 @@ fn fill_snapshot(
             return Err(JsError::host("unexpected snapshot data index"));
         }
     }
-    meta.overflow_index = st
-        .interfaces
-        .iter()
-        .map(|entry| match &entry.overflow {
-            Some((ot, _)) => {
-                let t = v8::Local::new(scope, ot);
-                scope.add_isolate_data(t) as u32
+    for entry in &st.interfaces {
+        let mut first = u32::MAX;
+        for (j, (ot, _)) in entry.overflow.iter().enumerate() {
+            let t = v8::Local::new(scope, ot);
+            let at = scope.add_isolate_data(t) as u32;
+            if j == 0 {
+                first = at;
+            } else if at != first + j as u32 {
+                return Err(JsError::host("unexpected snapshot data index"));
             }
-            None => u32::MAX,
-        })
-        .collect();
+        }
+        meta.overflow_index.push(first);
+        meta.overflow_count.push(entry.overflow.len() as u32);
+    }
     Ok(meta)
 }
 
@@ -723,15 +734,15 @@ pub(super) fn load_templates(
         templates.push(Some(v8::Global::new(scope, t)));
     }
     let mut overflows = Vec::with_capacity(n);
-    for &at in &meta.overflow_index {
-        if at == u32::MAX {
-            overflows.push(None);
-            continue;
+    for (&first, &count) in meta.overflow_index.iter().zip(&meta.overflow_count) {
+        let mut chunks = Vec::with_capacity(count as usize);
+        for at in (0..count).map(|j| first as usize + j as usize) {
+            let t = scope
+                .get_isolate_data_from_snapshot_once::<v8::ObjectTemplate>(at)
+                .map_err(|e| format!("snapshot overflow template {at}: {e}"))?;
+            chunks.push(v8::Global::new(scope, t));
         }
-        let t = scope
-            .get_isolate_data_from_snapshot_once::<v8::ObjectTemplate>(at as usize)
-            .map_err(|e| format!("snapshot overflow template {at}: {e}"))?;
-        overflows.push(Some(v8::Global::new(scope, t)));
+        overflows.push(Some(chunks));
     }
     Ok(Box::new(Restore {
         meta,
@@ -756,7 +767,9 @@ pub(super) fn check_blob(blob: &'static [u8]) -> Result<(Meta, &'static [u8]), S
     if meta.v8_flags != v8_flags() {
         return Err("snapshot was created with other V8 flags".into());
     }
-    if meta.overflow_index.len() != meta.digests.len() {
+    if meta.overflow_index.len() != meta.digests.len()
+        || meta.overflow_count.len() != meta.digests.len()
+    {
         return Err("snapshot header is inconsistent".into());
     }
     if !v8::StartupData::from(v8_part).is_valid() {
@@ -780,6 +793,7 @@ mod tests {
             cb_before: vec![0, 3],
             cb_after: vec![3, 9],
             overflow_index: vec![u32::MAX, 2],
+            overflow_count: vec![0, 3],
         };
         let mut out = Vec::new();
         m.encode(&mut out);

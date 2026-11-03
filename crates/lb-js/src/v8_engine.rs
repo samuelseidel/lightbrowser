@@ -646,17 +646,31 @@ enum Callback {
 struct IfaceEntry {
     template: v8::Global<v8::FunctionTemplate>,
     parent: Option<InterfaceId>,
-    /// Instance members past [`MAX_TEMPLATE_PROPS`], copied onto each
-    /// instance after it is created (see `apply_overflow`).
-    overflow: Option<(v8::Global<v8::ObjectTemplate>, Vec<PropKey>)>,
+    /// Instance members not on the instance template, in chunks of at
+    /// most [`OVERFLOW_CHUNK`], copied onto each instance after it is
+    /// created, in order (see `apply_overflow`).
+    overflow: Vec<(v8::Global<v8::ObjectTemplate>, Vec<PropKey>)>,
 }
 
-/// V8 152 crashes (`PushStackTraceAndDie` in the load IC) when an object
-/// template with accessors has more than ~1020 properties: the descriptor
-/// limit of a fast-mode map. A Chrome window global has ~1,200 own
-/// properties, so members past this count go through a second template and
-/// are defined on the instance after creation, in order.
-const MAX_TEMPLATE_PROPS: usize = 960;
+/// Interfaces with more instance members than this (the window global,
+/// ~1,200) get none on the instance template: all go through `overflow`.
+///
+/// V8 instantiates a template into a fresh fast-mode object and adds the
+/// members one by one, each copying the map's descriptor array, so one big
+/// template costs O(n²): for the window global about 280M instructions and
+/// 60 MB of garbage per realm built without the snapshot. V8 152 also
+/// crashes (`PushStackTraceAndDie` in the load IC) past ~1020 properties
+/// with accessors (the descriptor limit of a fast-mode map). The global
+/// object itself is a dictionary, so defining the members on it after
+/// creation is linear; small chunks keep each temporary object cheap.
+const MAX_TEMPLATE_PROPS: usize = 64;
+/// Members per overflow chunk template.
+const OVERFLOW_CHUNK: usize = 32;
+
+/// How many of `n` instance members go on the instance template itself.
+fn template_split(n: usize) -> usize {
+    if n > MAX_TEMPLATE_PROPS { 0 } else { n }
+}
 
 struct ModuleEntry {
     url: String,
@@ -1017,7 +1031,7 @@ impl Engine {
             );
         }
         methods.clear();
-        let split = spec.instance.len().min(MAX_TEMPLATE_PROPS);
+        let split = template_split(spec.instance.len());
         for m in &spec.instance[..split] {
             install_member(
                 scope,
@@ -1029,25 +1043,25 @@ impl Engine {
                 this_iface,
             );
         }
-        let overflow = (split < spec.instance.len()).then(|| {
-            let ot = v8::ObjectTemplate::new(scope);
-            for m in &spec.instance[split..] {
-                install_member(
-                    scope,
-                    &mut st,
-                    Target::Object(ot),
-                    Some(signature),
-                    m,
-                    &mut methods,
-                    this_iface,
-                );
-            }
-            let keys = spec.instance[split..]
-                .iter()
-                .map(|m| m.key.clone())
-                .collect();
-            (v8::Global::new(scope, ot), keys)
-        });
+        let overflow = spec.instance[split..]
+            .chunks(OVERFLOW_CHUNK)
+            .map(|chunk| {
+                let ot = v8::ObjectTemplate::new(scope);
+                for m in chunk {
+                    install_member(
+                        scope,
+                        &mut st,
+                        Target::Object(ot),
+                        Some(signature),
+                        m,
+                        &mut methods,
+                        this_iface,
+                    );
+                }
+                let keys = chunk.iter().map(|m| m.key.clone()).collect();
+                (v8::Global::new(scope, ot), keys)
+            })
+            .collect();
         if spec.immutable_proto {
             inst.set_immutable_proto();
         }
@@ -1674,10 +1688,20 @@ fn build_context<'s>(
     // interface object. V8 templates only link the prototype objects, so
     // this instantiates every interface object now (the startup snapshot
     // context has this done already).
+    //
+    // Every interface object is instantiated here, before the global's
+    // members are defined: V8 names a template function after the first
+    // property it is instantiated for, and `[LegacyWindowAlias]` members
+    // (`webkitURL`) come before their interface (`URL`) on the global. As
+    // in Chrome, `webkitURL.name` must be "URL".
     {
         let st = state.borrow();
         for entry in &st.interfaces {
-            let Some(parent) = entry.parent else { continue };
+            let Some(parent) = entry.parent else {
+                let ft = v8::Local::new(scope, &entry.template);
+                let _ = ft.get_function(scope);
+                continue;
+            };
             let ft = v8::Local::new(scope, &entry.template);
             let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
             if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
@@ -2888,63 +2912,72 @@ fn wrap_host<'s>(
     Ok(obj)
 }
 
-fn desc_field<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    d: v8::Local<'s, v8::Object>,
-    name: &str,
-) -> Option<v8::Local<'s, v8::Value>> {
-    let k = v8_str(scope, name);
-    d.get(scope, k.into())
-}
-
-/// Define an interface's overflow members (past [`MAX_TEMPLATE_PROPS`]) on
-/// a fresh instance, in member order, with their template descriptors.
+/// Define an interface's overflow members (those not on its instance
+/// template, see [`MAX_TEMPLATE_PROPS`]) on a fresh instance, in member
+/// order, with their template descriptors.
 fn apply_overflow<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &SharedState,
     iface: InterfaceId,
     obj: v8::Local<'_, v8::Object>,
 ) {
-    let (ot, keys) = {
+    let chunks: Vec<(v8::Local<'s, v8::ObjectTemplate>, Vec<PropKey>)> = {
         let st = state.borrow();
-        let Some((ot, keys)) = st
-            .interfaces
-            .get(iface.0 as usize)
-            .and_then(|e| e.overflow.as_ref())
-        else {
+        let Some(entry) = st.interfaces.get(iface.0 as usize) else {
             return;
         };
-        (v8::Local::new(scope, ot), keys.clone())
+        entry
+            .overflow
+            .iter()
+            .map(|(ot, keys)| (v8::Local::new(scope, ot), keys.clone()))
+            .collect()
     };
-    let Some(tmp) = ot.new_instance(scope) else {
+    if chunks.is_empty() {
         return;
+    }
+    let field = |scope: &mut v8::PinScope<'s, '_>, name: &str| -> v8::Local<'s, v8::Value> {
+        v8_str(scope, name).into()
     };
-    for key in &keys {
-        let k = v8_key(scope, key);
-        let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
+    let (k_enum, k_conf, k_get, k_set, k_value, k_writable) = (
+        field(scope, "enumerable"),
+        field(scope, "configurable"),
+        field(scope, "get"),
+        field(scope, "set"),
+        field(scope, "value"),
+        field(scope, "writable"),
+    );
+    for (ot, keys) in chunks {
+        let Some(tmp) = ot.new_instance(scope) else {
             continue;
         };
-        let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
-            continue;
-        };
-        let enumerable = desc_field(scope, d, "enumerable").is_some_and(|v| v.is_true());
-        let configurable = desc_field(scope, d, "configurable").is_some_and(|v| v.is_true());
-        let get = desc_field(scope, d, "get");
-        let set = desc_field(scope, d, "set");
-        let mut desc = match (get, set) {
-            (Some(g), Some(s)) if g.is_function() || s.is_function() => {
-                v8::PropertyDescriptor::new_from_get_set(g, s)
-            }
-            _ => {
-                let value =
-                    desc_field(scope, d, "value").unwrap_or_else(|| v8::undefined(scope).into());
-                let writable = desc_field(scope, d, "writable").is_some_and(|v| v.is_true());
-                v8::PropertyDescriptor::new_from_value_writable(value, writable)
-            }
-        };
-        desc.set_enumerable(enumerable);
-        desc.set_configurable(configurable);
-        obj.define_property(scope, k, &desc);
+        for key in &keys {
+            let k = v8_key(scope, key);
+            let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
+                continue;
+            };
+            let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
+                continue;
+            };
+            let enumerable = d.get(scope, k_enum).is_some_and(|v| v.is_true());
+            let configurable = d.get(scope, k_conf).is_some_and(|v| v.is_true());
+            let get = d.get(scope, k_get);
+            let set = d.get(scope, k_set);
+            let mut desc = match (get, set) {
+                (Some(g), Some(s)) if g.is_function() || s.is_function() => {
+                    v8::PropertyDescriptor::new_from_get_set(g, s)
+                }
+                _ => {
+                    let value = d
+                        .get(scope, k_value)
+                        .unwrap_or_else(|| v8::undefined(scope).into());
+                    let writable = d.get(scope, k_writable).is_some_and(|v| v.is_true());
+                    v8::PropertyDescriptor::new_from_value_writable(value, writable)
+                }
+            };
+            desc.set_enumerable(enumerable);
+            desc.set_configurable(configurable);
+            obj.define_property(scope, k, &desc);
+        }
     }
 }
 

@@ -19,6 +19,13 @@ fn rss() -> String {
 fn main() {
     let t0 = Instant::now();
     let lap = |what: &str| eprintln!("{:8.1} ms  {what:30} {}", t0.elapsed().as_secs_f64() * 1e3, rss());
+    if let Ok(out) = std::env::var("PROBE_DUMP") {
+        let t = Instant::now();
+        let blob = lb_webapi::snapshot::startup_snapshot(lb_persona::BrowserFamily::Chrome).unwrap();
+        eprintln!("snapshot {} bytes in {:.1} ms", blob.len(), t.elapsed().as_secs_f64() * 1e3);
+        std::fs::write(out, blob).unwrap();
+        return;
+    }
     let url = std::env::args().nth(1).expect("url");
     let snapshot = std::env::var("PROBE_SNAPSHOT").is_ok();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles");
