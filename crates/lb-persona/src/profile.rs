@@ -13,6 +13,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::consistency::{self, ValidationResult};
+use crate::os::WebGpuAdapter;
 use crate::{BrowserFamily, Persona};
 
 /// Schema version written by v2 files.
@@ -118,6 +119,64 @@ pub struct PersonaProfile {
     /// and the scrollbar width. Optional; defaults are a light desktop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferences: Option<Preferences>,
+    /// WebGPU adapter. Absent: derived from the GPU on Windows and macOS,
+    /// none on Linux ([`PersonaProfile::webgpu`]). `null`: no adapter.
+    #[serde(
+        default,
+        deserialize_with = "explicit_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub webgpu: Option<Option<WebGpuAdapter>>,
+    /// Hardware video decode answers ([`PersonaProfile::codecs`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<MediaInfo>,
+    /// OS-gated APIs ([`PersonaProfile::os_apis`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apis: Option<ApisInfo>,
+    /// Where the values come from (captured or reference). Documentation
+    /// only; no layer reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
+}
+
+/// Keeps an explicit JSON `null` apart from an absent field.
+fn explicit_option<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+/// `media`: codec answers. Absent fields take the OS default.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub struct MediaInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hevc: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub h264_power_efficient: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub av1_hw: Option<bool>,
+}
+
+/// `apis`: OS-gated APIs. Absent fields take the OS default.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub struct ApisInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bluetooth: Option<bool>,
+}
+
+/// `provenance`: whether the persona's OS values were captured from a real
+/// device or built from the surface reference.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub struct Provenance {
+    pub captured: bool,
+    /// What the values come from.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -130,6 +189,15 @@ pub struct OsInfo {
     pub platform: String,
     /// `x86_64`, `arm64` or `x86`.
     pub architecture: String,
+    /// Linux: kernel release (`uname -r`). Mesa renderer strings embed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel: Option<String>,
+    /// Linux: distro id and version, e.g. `ubuntu-24.04`, `fedora-42`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distro: Option<String>,
+    /// Linux: `x11` (default) or `wayland`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_server: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -199,6 +267,10 @@ pub struct ClientHints {
     pub mobile: bool,
     #[serde(default)]
     pub wow64: bool,
+    /// `formFactors` / `Sec-CH-UA-Form-Factors`. Absent: `["Desktop"]`
+    /// (`["Mobile"]` when `mobile`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_factors: Option<Vec<String>>,
     /// Deprecated `uaFullVersion`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_version: Option<String>,
@@ -279,6 +351,15 @@ pub struct ScreenInfo {
     pub avail_top: u32,
     #[serde(default)]
     pub avail_left: u32,
+    /// `screenX`. Absent: see [`PersonaProfile::window_position`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_x: Option<i32>,
+    /// `screenY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_y: Option<i32>,
+    /// The window is maximized (outer size equals the work area).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximized: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -358,6 +439,35 @@ pub struct ShaderPrecision {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct FontInfo {
     pub available: Vec<String>,
+    /// Overrides of the OS default fonts
+    /// ([`PersonaProfile::font_defaults`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<FontDefaultsInfo>,
+}
+
+/// `fonts.defaults`: every field optional; absent ones take the OS default.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+pub struct FontDefaultsInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serif: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sans_serif: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monospace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursive: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fantasy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_ui: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_font: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_font_px: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -377,7 +487,7 @@ pub struct TimingInfo {
     pub performance_now_resolution_us: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct BehaviorInfo {
     /// lb-behavior preset name: `casual_user`, `power_user`, `slow_reader`
     /// or `mobile_like`.
@@ -392,6 +502,20 @@ pub struct BehaviorInfo {
     /// momentum). Absent: `trackpad` on macOS, `mouse` elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pointing_device: Option<String>,
+    /// Wheel model ([`PersonaProfile::wheel`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wheel: Option<WheelInfo>,
+}
+
+/// `behavior.wheel`: absent fields take the OS default.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+pub struct WheelInfo {
+    /// CSS px scrolled per notch (`deltaY` of one notch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub px_per_notch: Option<f64>,
+    /// `-wheelDeltaY / deltaY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_ratio: Option<f64>,
 }
 
 impl Default for BehaviorInfo {
@@ -400,6 +524,7 @@ impl Default for BehaviorInfo {
             profile: default_behavior(),
             seed: None,
             pointing_device: None,
+            wheel: None,
         }
     }
 }
@@ -414,6 +539,10 @@ pub struct AudioInfo {
     pub sample_rate: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_latency: Option<f64>,
+    /// `AudioContext.outputLatency` in seconds. Absent: twice
+    /// `base_latency`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_latency: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_channel_count: Option<u32>,
 }
@@ -436,11 +565,11 @@ fn yes() -> bool {
 /// counts default to one device per kind that has a label field.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub struct MediaDevices {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webcam_label: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mic_label: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker_label: Option<String>,
     /// Number of microphones. Default: 1 if `mic_label` is set, else 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]

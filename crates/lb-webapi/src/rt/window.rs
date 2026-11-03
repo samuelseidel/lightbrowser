@@ -527,6 +527,9 @@ pub(crate) fn screen_dims(w: &Window) -> lb_persona::profile::ScreenInfo {
             outer_height: 1040,
             avail_top: 0,
             avail_left: 0,
+            window_x: None,
+            window_y: None,
+            maximized: None,
         })
 }
 

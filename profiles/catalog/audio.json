@@ -1,0 +1,96 @@
+{
+  "format": 1,
+  "note": "Realtime AudioContext values per OS (not captured: M7 surface reference (medium confidence); the Linux capture had no audio server). base_latency 0.01 is what Chrome reports for the default buffer.",
+  "windows": [
+    {
+      "sample_rate": 48000,
+      "base_latency": 0.01,
+      "max_channel_count": 2,
+      "weight": 1
+    }
+  ],
+  "macos_intel": [
+    {
+      "sample_rate": 44100,
+      "base_latency": 0.01,
+      "max_channel_count": 2,
+      "weight": 1
+    }
+  ],
+  "macos_arm": [
+    {
+      "sample_rate": 48000,
+      "base_latency": 0.01,
+      "max_channel_count": 2,
+      "weight": 2
+    },
+    {
+      "sample_rate": 44100,
+      "base_latency": 0.01,
+      "max_channel_count": 2,
+      "weight": 1
+    }
+  ],
+  "linux": [
+    {
+      "sample_rate": 48000,
+      "base_latency": 0.01,
+      "max_channel_count": 2,
+      "weight": 3
+    },
+    {
+      "sample_rate": 44100,
+      "base_latency": 0.01,
+      "max_channel_count": 2,
+      "weight": 1
+    }
+  ],
+  "media_devices": {
+    "windows_desktop": {
+      "webcam_label": "HD Pro Webcam C920 (046d:082d)",
+      "mic_label": "Microphone (HD Pro Webcam C920)",
+      "speaker_label": "Speakers (Realtek(R) Audio)",
+      "audioinput": 1,
+      "videoinput": 1,
+      "audiooutput": 1
+    },
+    "windows_laptop": {
+      "webcam_label": "Integrated Camera (04f2:b6d9)",
+      "mic_label": "Microphone Array (Intel® Smart Sound Technology for Digital Microphones)",
+      "speaker_label": "Speakers (Realtek(R) Audio)",
+      "audioinput": 1,
+      "videoinput": 1,
+      "audiooutput": 1
+    },
+    "macos_laptop": {
+      "webcam_label": "FaceTime HD Camera",
+      "mic_label": "MacBook Microphone (Built-in)",
+      "speaker_label": "MacBook Speakers (Built-in)",
+      "audioinput": 1,
+      "videoinput": 1,
+      "audiooutput": 1
+    },
+    "macos_desktop": {
+      "speaker_label": "Mac mini Speakers (Built-in)",
+      "audioinput": 0,
+      "videoinput": 0,
+      "audiooutput": 1
+    },
+    "linux_desktop": {
+      "webcam_label": "HD Pro Webcam C920 (046d:082d)",
+      "mic_label": "HD Pro Webcam C920 Analog Stereo",
+      "speaker_label": "Built-in Audio Analog Stereo",
+      "audioinput": 1,
+      "videoinput": 1,
+      "audiooutput": 1
+    },
+    "linux_laptop": {
+      "webcam_label": "Integrated Camera: Integrated C (04f2:b6d9)",
+      "mic_label": "Built-in Audio Analog Stereo",
+      "speaker_label": "Built-in Audio Analog Stereo",
+      "audioinput": 1,
+      "videoinput": 1,
+      "audiooutput": 1
+    }
+  }
+}

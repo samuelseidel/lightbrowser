@@ -1,0 +1,81 @@
+# ADR 0015: OS personas: one OS axis, read through accessors
+
+Status: Accepted (2026-11-03)
+
+## Context
+
+Until M7 the Chrome personas were Windows 10 and macOS 15, and the OS showed
+up in scattered places: `os.name` string checks in several crates, a
+Linux-flavoured interface set, fixed generic fonts, one wheel model. The
+bench's OS rules (WP-A, ADR 0007) fire on each of these. Real Chrome's
+answers depend on the OS, its release, the Linux distro and display server,
+and the hardware (Apple chip or Intel Mac, GPU backend).
+
+Ground truth is uneven: Linux was captured from the local Chrome for
+Testing 153 (`tests/fixtures/os/`); Windows and macOS values come from the
+M7 surface reference and are not captured. Some captured Linux facts
+contradicted the plan (`platformVersion` is `""`, `deviceMemory` is not
+capped at 8, one wheel notch is 120 px).
+
+## Decision
+
+- **One OS axis in `lb-persona`** (`os.rs`): `OsKind` (Windows, macOS,
+  Linux), `DisplayServer` (X11, Wayland), `Distro` (Ubuntu, Fedora), from
+  `os.name` and the new optional `os.kernel`, `os.distro`,
+  `os.display_server`.
+- **Accessors with OS defaults.** Layers read OS-dependent values through
+  `PersonaProfile` methods, never through `os.name` checks of their own.
+  Each returns the persona's value when the JSON has one, else the default
+  for its OS and distro: `os_kind`, `display_server`, `linux_distro`,
+  `windows_major`, `macos_version`, `apple_chip`, `font_defaults`
+  (standard, serif, sans-serif, monospace, cursive, fantasy, system-ui,
+  emoji, system font keyword family and size), `font_aliases` (fontconfig
+  metric aliases on Linux, Blink's alternate names everywhere),
+  `window_position`, `scrollbar_width`, `wheel` (px per notch,
+  `wheelDelta` ratio), `audio_defaults`, `webgpu`, `codecs`, `os_apis`
+  (`share`, `bluetooth`), `high_entropy_hints`.
+- **Schema v2 stays compatible.** New fields are optional: `os.kernel`,
+  `os.distro`, `os.display_server`, `screen.window_x/window_y/maximized`,
+  `fonts.defaults`, `audio.output_latency`, `behavior.wheel`, `webgpu`
+  (`null` = no adapter), `media`, `apis`, `client_hints.form_factors`,
+  `provenance`. Existing personas load unchanged.
+- **Rules R17-R26** (Chrome personas only): platform version per OS and
+  build (Linux `""`), architecture and GPU, GPU backend and limits and the
+  Mesa kernel, screen geometry per OS and display server, fonts per OS,
+  release and distro (and installed defaults), voices, audio (warning),
+  preferences, hardware (deviceMemory powers of two, Apple chip thread
+  counts), macOS versions per Mac. R08 accepts 11, 14, 18 and 22 threads;
+  R12's architecture check is now a violation.
+- **Catalog and generator.** `profiles/catalog/` holds the OS releases,
+  CPUs and Apple chips, GPUs with WebGL per ANGLE backend, screens, fonts,
+  voices and audio. `lb_persona::generate` samples consistent personas from
+  it with SFC32 and refuses any that break a rule.
+- **Provenance is recorded.** Personas and catalog files say which values
+  were captured and which come from the reference.
+- **No TCP/IP layer.** TTL and TCP options always come from the host OS;
+  personas have no field for them.
+
+## Alternatives considered
+
+- **Per-OS persona types or crates.** More code, and every layer would
+  still need the same defaults. One profile plus accessors keeps the data in
+  one place.
+- **Hard-coded defaults in each layer.** That is what M7 replaces: it let
+  layers disagree (Linux monospace was Liberation Mono in layout while
+  Chrome uses DejaVu Sans Mono).
+- **Required schema fields.** Would break the existing personas and v1
+  files for no gain; defaults cover the common case.
+
+## Consequences
+
+- WP-C (layout, fonts, scrollbars), WP-D (web APIs, input) and WP-E
+  (Accept-CH) read these accessors; until they land, the new reference
+  personas still fire the bench rules listed in `docs/ROADMAP.md` ("M7
+  status: WP-B").
+- Windows and macOS defaults are medium confidence until internal captures
+  exist. Changing one is a data change plus a test update.
+- `fonts.available` must have a metric table or a `derived.json` entry per
+  font (`lb-persona` and `lb-layout` tests check this); the Linux and
+  Windows 11 fonts got derived entries.
+- A passive TCP/IP fingerprint can still contradict a Windows or macOS
+  persona (Risks in `docs/ROADMAP.md`).

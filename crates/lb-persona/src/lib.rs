@@ -4,18 +4,27 @@
 //! - [`Persona`]: the small network-facing summary (headers, TLS profile id).
 //! - [`PersonaProfile`]: the full persona (`persona_v2.schema.json`; v1 files
 //!   load as Firefox). [`PersonaProfile::to_network`] derives a [`Persona`].
-//! - [`consistency`]: rules R01-R16, vendored from stealth-browser
-//!   (`consistency/`, R01-R10) plus the Chrome rules. [`validate_file`]
-//!   backs `lightbrowser validate`.
+//! - [`consistency`]: rules R01-R26, vendored from stealth-browser
+//!   (`consistency/`, R01-R10) plus the Chrome rules (R11-R16) and the OS
+//!   rules (R17-R26, M7). [`validate_file`] backs `lightbrowser validate`.
+//! - [`os`]: the OS axis ([`OsKind`], display server, distro) and the
+//!   per-OS defaults behind the accessors on [`PersonaProfile`] (ADR 0015).
+//! - [`generate`]: builds consistent personas from `profiles/catalog/`.
 //! - [`sfc32`]: deterministic noise.
 
 pub mod consistency;
+pub mod generate;
+pub mod os;
 pub mod profile;
 pub mod sfc32;
 pub mod uach;
 
 pub use consistency::{
     ValidateOutcome, ValidationResult, Violation, Warning, validate, validate_file,
+};
+pub use os::{
+    AudioDefaults, Codecs, DisplayServer, Distro, FontDefaults, HighEntropyHints, OsApis, OsKind,
+    WebGpuAdapter, WheelModel,
 };
 pub use profile::{
     BatteryInfo, BrandVersion, ClientHints, MediaDevices, PersonaError, PersonaProfile,

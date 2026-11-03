@@ -11,7 +11,7 @@ Each milestone ends with something we can run and measure.
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
-| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules) done; WP-B..E open. See "M7 status" |
+| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules) and WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015) done; WP-C..E open. See "M7 status" |
 | **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.63 MB, the < 40 MB budget is met (ADR 0013); `bench/` runner done; Lightpanda compared (user-approved nightly, loopback only): 4 of 6 checks pass, `fetch` CPU and CDP peak RSS still lose; service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
@@ -21,7 +21,7 @@ Each milestone ends with something we can run and measure.
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
-| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona` | WP-B..E; with the OS rules T-010 scores fp 88.0 (Windows) and 83.9 (macOS), see "M7 status" |
+| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones | WP-C..E; with the OS rules T-010 scores fp 83.9-88.0 for every reference persona, see "M7 status" |
 | M6 Performance | Snapshot, memory, binary size (39.63 MB, < 40 MB met), `bench/` runner, screenshots, Lightpanda comparison (wall time wins in both modes; 4 of 6 checks pass) done | `fetch` CPU and CDP peak RSS vs Lightpanda, service workers |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
@@ -1328,6 +1328,102 @@ both; `--input human` fp 88.0 / 83.9, beh 0 for both (the info rule
 `uach_arch_gpu`, `webgl_backend_os`, `fonts_os_markers`,
 `generic_fonts_os`, `voices_os`, `webgpu_os` (no WebGPU), `codecs_os`
 (codecs throw), `screen_os`.
+
+## M7 status: WP-B, OS persona model (2026-11-03)
+
+**Model (ADR 0015).** `lb-persona` `os.rs`: `OsKind`, `DisplayServer`,
+`Distro` and the accessors every layer reads instead of checking `os.name`:
+`font_defaults`, `font_aliases`, `window_position`, `scrollbar_width`,
+`wheel`, `audio_defaults`, `webgpu`, `codecs`, `os_apis`,
+`high_entropy_hints` (plus `windows_major`, `macos_version`, `apple_chip`,
+`linux_distro`). Each takes the persona's optional field, else the OS
+default (table in ARCHITECTURE.md, "OS axis"). New optional schema fields:
+`os.kernel/distro/display_server`, `screen.window_x/window_y/maximized`,
+`fonts.defaults`, `audio.output_latency`, `behavior.wheel`,
+`client_hints.form_factors`, `webgpu`, `media`, `apis`, `provenance`. No
+TCP/IP field (TTL and TCP options are the host's).
+
+Accessor names that differ from the plan: the font keyword size is
+`FontDefaults::system_font_px` (with its family in `system_font`, Arial on
+Linux as captured), not `system_ui_px`; the wheel ratio is
+`behavior.wheel.delta_ratio` in JSON and `WheelModel::wheel_delta_per_px`
+in Rust.
+
+**Rules.** R17 platform version (Windows build table: 19045 -> `10.0.0`,
+22631 -> `15.0.0`, 26100 -> `19.0.0`; macOS = `os.version`; Linux `""`,
+captured), R18 architecture/GPU/wow64, R19 ANGLE backend per OS (D3D11,
+Metal, GL or Vulkan), `Google Inc. (X)` wrapper, limits per backend and
+the kernel in radeonsi strings, R20 screen geometry (taskbar 40/48 px per
+DPR, menu bar 23-25 or 30-39, Wayland avail = screen and window 0,0, outer
+>= inner, width difference 0 or 16), R21 fonts (foreign markers, Windows
+11 fonts iff Windows 11, Ubuntu fonts on Ubuntu, defaults installed), R22
+voices, R23 audio (warning), R24 preferences (forced colors only on
+Windows, scrollbar width per OS, 30-bit means wide gamut), R25 hardware
+(`deviceMemory` a power of two up to 32, as captured: no cap at 8; Apple
+chip thread counts), R26 macOS versions (Intel Macs end at 26; Apple chips
+have a first version). R12's architecture check is now a violation, its
+platform-version check moved to R17; R08 also accepts 11, 14, 18 and 22
+threads. R17-R26 skip Firefox personas.
+
+**Personas.** Six new Chrome references (Windows 11 24H2 RTX 4060, Windows
+11 23H2 Iris Xe laptop at 1.25, macOS 14 Intel Iris Plus, macOS 26 Apple
+M4, Ubuntu 24.04 X11 Intel UHD 630, Fedora 42 Wayland AMD RX 6600; table
+in `profiles/README.md`). The macOS 15 persona now has the full default
+macOS voice list (176 Apple voices, including the Eloquence voices in 14
+locales, plus 19 Google), was 64 + 19. `profiles/catalog/` and
+`lb_persona::generate` (`examples/gen_personas.rs`) produce consistent
+personas; 5 per OS are committed in `profiles/generated/`. 11 adversarial
+personas each break exactly one of R17-R26. Derived font entries were added
+for Windows 11 and the Linux distro fonts (`profiles/fonts/README.md`).
+Windows/macOS values are the surface reference (not captured); Linux
+WebGL limits, distro font sets, panel sizes and audio are not captured
+either (no GPU, fonts or audio server in the capture container).
+
+**Checks.** `cargo test -p lb-persona`: 13 + 41 pass (5 new unit and 16
+new integration tests: every
+reference, generated and adversarial file, 50 generated personas per OS,
+determinism, schema coverage, font-table coverage, accessor defaults, each
+new rule). Every persona file except the three adversarial ones meant to
+break the schema validates against `persona_v2.schema.json` (Python
+`jsonschema`, 36 files). `lightbrowser validate`: all 8 Chrome references
+OK with 0 warnings. `fingerprint-report`: 0 mismatch, 0 unimplemented for
+all 8 (112-115 ok each); `cargo test -p lb-page --test pages` 19 pass
+(includes the report gate over all 8). `lb-layout` (font coverage), `lb-css`,
+`lb-cdp`, `lightbrowser` tests pass; clippy `-D warnings` workspace and
+firefox clean; firefox tests 15 pass, 2 ignored; `sdk/python` 93 pass, 4
+skipped; detect-bench unittest OK (unchanged). Release: stripped binary
+39,690,104 bytes (< 40,000,000; +61,440 since the M6 measurement, which
+also includes WP-A); `realm_bench` with the snapshot: first realm 3.39 ms,
+next 2.62 ms.
+
+**Bench** (debug build, fresh `serve` per run, T-010, loopback; Playwright
+input / `--input human`):
+
+| Persona | fp | beh (human) | OS rules still firing | WP |
+|---|---|---|---|---|
+| Windows 10 RTX 3060 | 88.0 / 88.0 | 0 | `ch_high_entropy`, `api_throws`, `os_api_surface`, `scrollbar_os`, `emoji_render`, `os_bluetooth` | C, D, E |
+| Windows 11 RTX 4060 | 83.9 / 83.9 | **35** (`beh_mouse_linear`, ratio 0.87, same on a rerun) | as Windows 10 without `scrollbar_os` (Windows 11 accepts 0 px) | C, D, E; beh: lb-behavior |
+| Windows 11 Iris Xe laptop | 83.9 / 83.9 | 0 | as Windows 11 | C, D, E |
+| macOS 14 Intel | 83.9 / 83.9 | 0 | `ch_high_entropy`, `api_throws`, `os_api_surface`, `emoji_render`, `os_bluetooth` | C, D, E |
+| macOS 15 M2 | 83.9 / 83.9 | 0 | as macOS 14 (unchanged by the voice fix) | C, D, E |
+| macOS 26 M4 | 83.9 / 83.9 | 0 | as macOS 14 | C, D, E |
+| Ubuntu 24.04 X11 | 85.8 / 85.8 | 0 | `ch_high_entropy`, `api_throws`, `generic_fonts_os` (no Arial: the alias layer is WP-C), `scrollbar_os` (0 px, want 15), `emoji_render` | C, D, E |
+| Fedora 42 Wayland | 85.8 / 85.8 | 0 | as Ubuntu | C, D, E |
+
+The Windows 10 and macOS 15 scores are the same as after WP-A. The Linux
+personas do not fire `os_api_surface`, `os_bluetooth`,
+`uach_platform_version`, `voices_os`, `fonts_os_markers` or
+`webgl_backend_os`. Adversarial personas through `serve
+--unchecked-persona` fire the bench rule listed in `profiles/README.md`
+for 7 of 11; the other 4 (kernel mismatch, Linux with Segoe fonts, Wayland
+work area, macOS 17 px scrollbars) have no bench rule that can see them
+yet.
+
+Dark color schemes: `run.js` opens its page with Playwright's default
+`colorScheme: 'light'`, which `Emulation.setEmulatedMedia` refuses for a
+dark persona (ADR 0009), so the reference personas are light; about a
+quarter of generated personas are dark and need `colorScheme: null` (or
+`dark`) in the client.
 
 ## Workspace check (2026-11-03)
 

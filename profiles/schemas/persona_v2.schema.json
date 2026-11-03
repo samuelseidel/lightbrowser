@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://lightbrowser/schemas/persona_v2.schema.json",
   "title": "LightBrowser Persona Profile (v2)",
-  "description": "Persona profile for LightBrowser. v2 = GeckoPhantom persona_v1 plus browser.family, client_hints, timing, behavior and optional device surfaces. v1 files (Firefox 128) still load: they are read as family=firefox with no client_hints. Rule-level consistency (R01-R16) is checked by lb-persona, not by this schema.",
+  "description": "Persona profile for LightBrowser. v2 = GeckoPhantom persona_v1 plus browser.family, client_hints, timing, behavior and optional device surfaces. v1 files (Firefox 128) still load: they are read as family=firefox with no client_hints. Rule-level consistency (R01-R26) is checked by lb-persona, not by this schema.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -112,6 +112,25 @@
             "arm64",
             "x86"
           ]
+        },
+        "kernel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Linux: kernel release (uname -r), e.g. '6.8.0-87-generic'. Mesa renderer strings that embed the kernel must match it (rule R19)."
+        },
+        "distro": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[0-9.]+)?$",
+          "description": "Linux: distro id and version, e.g. 'ubuntu-24.04', 'fedora-42'. Picks the default fonts (GTK system-ui font, monospace)."
+        },
+        "display_server": {
+          "type": "string",
+          "enum": [
+            "x11",
+            "wayland"
+          ],
+          "description": "Linux: display server. Default x11. On Wayland Chrome sees no work area (screen.avail* equals the screen) and screenX/Y are 0 (rule R20)."
         }
       }
     },
@@ -330,7 +349,7 @@
         },
         "device_memory": {
           "type": "number",
-          "description": "navigator.deviceMemory in GB (Chrome only; Chrome caps it at 8). Kept for Firefox v1 files, where it is not exposed.",
+          "description": "navigator.deviceMemory in GB (Chrome only): a power of two. Chrome 153 does not cap it at 8 (16 seen on a 15 GB machine; rule R25). Kept for Firefox v1 files, where it is not exposed.",
           "enum": [
             0.25,
             0.5,
@@ -338,7 +357,8 @@
             2,
             4,
             8,
-            16
+            16,
+            32
           ]
         },
         "max_touch_points": {
@@ -496,6 +516,18 @@
           "minimum": 0,
           "default": 0,
           "description": "screen.availLeft."
+        },
+        "window_x": {
+          "type": "integer",
+          "description": "screenX. Default: 0 on Wayland, else avail_left."
+        },
+        "window_y": {
+          "type": "integer",
+          "description": "screenY. Default: 0 on Wayland, else avail_top."
+        },
+        "maximized": {
+          "type": "boolean",
+          "description": "The window is maximized: outer size equals the work area (except on Wayland). Default: outer_width == avail_width."
         }
       }
     },
@@ -872,6 +904,73 @@
           "minItems": 0,
           "maxItems": 512,
           "uniqueItems": true
+        },
+        "defaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Overrides of the OS default fonts (Chrome's font settings, generic families, system font keywords). Absent fields take the OS/distro default; every family must be installed or an alias of an installed one (rule R21).",
+          "properties": {
+            "standard": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "Chrome's standard font (initial font-family). Windows/Linux Times New Roman, macOS Times."
+            },
+            "serif": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "serif. Windows/Linux Times New Roman, macOS Times."
+            },
+            "sans_serif": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "sans-serif. Windows/Linux Arial, macOS Helvetica."
+            },
+            "monospace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "monospace. Windows Consolas, macOS Courier, Ubuntu DejaVu Sans Mono, Fedora Noto Sans Mono."
+            },
+            "cursive": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "cursive. Windows Comic Sans MS, macOS Apple Chancery, Linux Times New Roman (captured)."
+            },
+            "fantasy": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "fantasy. Windows Impact, macOS Papyrus, Linux Times New Roman (captured)."
+            },
+            "system_ui": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "system-ui. Windows Segoe UI, macOS system-ui (SF), Linux the GTK font (Ubuntu Sans, Adwaita Sans, Cantarell)."
+            },
+            "emoji": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "emoji. Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji."
+            },
+            "system_font": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "Family of font: caption/menu/message-box/status-bar/icon/small-caption. Windows Segoe UI, macOS system-ui, Linux Arial (captured)."
+            },
+            "system_font_px": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 64,
+              "description": "Size of the system font keywords in px. Windows 12, macOS 13, Linux 16 (captured)."
+            }
+          }
         }
       }
     },
@@ -1020,6 +1119,22 @@
             "null"
           ],
           "description": "Deprecated uaFullVersion. Optional."
+        },
+        "form_factors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "Desktop",
+              "Automotive",
+              "Mobile",
+              "Tablet",
+              "XR",
+              "EInk",
+              "Watch"
+            ]
+          },
+          "description": "formFactors / Sec-CH-UA-Form-Factors. Default [\"Desktop\"] ([\"Mobile\"] when mobile)."
         }
       }
     },
@@ -1057,6 +1172,25 @@
           "type": "string",
           "enum": ["mouse", "trackpad"],
           "description": "mouse (notched wheel) or trackpad (pixel scrolling with momentum). Default: trackpad on macOS, mouse elsewhere."
+        },
+        "wheel": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Mouse-wheel model. Absent fields take the OS default: Windows 100 px and ratio 1.2, macOS 40 px and ratio 3, Linux 120 px and ratio 1 (captured).",
+          "properties": {
+            "px_per_notch": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000,
+              "description": "deltaY of one notch in CSS px."
+            },
+            "delta_ratio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 10,
+              "description": "-wheelDeltaY / deltaY."
+            }
+          }
         }
       }
     },
@@ -1085,6 +1219,11 @@
           "minimum": 1,
           "maximum": 32,
           "description": "AudioDestinationNode.maxChannelCount."
+        },
+        "output_latency": {
+          "type": "number",
+          "minimum": 0,
+          "description": "AudioContext.outputLatency in seconds. Default: twice base_latency."
         }
       }
     },
@@ -1254,6 +1393,113 @@
           "minimum": 0,
           "maximum": 40,
           "description": "Classic scrollbar width in CSS px. Default: 17 on Windows, 15 on Linux, 0 on macOS (overlay)."
+        }
+      }
+    },
+    "webgpu": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "vendor",
+            "architecture"
+          ],
+          "properties": {
+            "vendor": {
+              "type": "string",
+              "enum": [
+                "nvidia",
+                "intel",
+                "amd",
+                "apple",
+                "qualcomm"
+              ],
+              "description": "GPUAdapterInfo.vendor."
+            },
+            "architecture": {
+              "type": "string",
+              "maxLength": 32,
+              "description": "GPUAdapterInfo.architecture, e.g. ampere, lovelace, gen-12lp, rdna-2, metal-3."
+            },
+            "device": {
+              "type": "string",
+              "maxLength": 64,
+              "description": "GPUAdapterInfo.device (empty unless unmasked)."
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 128,
+              "description": "GPUAdapterInfo.description (empty unless unmasked)."
+            }
+          }
+        }
+      ],
+      "description": "navigator.gpu.requestAdapter(). null: no adapter. Absent: derived from the WebGL GPU on Windows and macOS, null on Linux (captured)."
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Hardware video decode behind canPlayType, MediaSource.isTypeSupported and mediaCapabilities.decodingInfo. Absent fields: true on Windows/macOS with a hardware GPU (AV1 by GPU generation), false on Linux (captured: HEVC '').",
+      "properties": {
+        "hevc": {
+          "type": "boolean",
+          "description": "HEVC (hvc1/hev1) playable."
+        },
+        "h264_power_efficient": {
+          "type": "boolean",
+          "description": "decodingInfo H.264 1080p powerEfficient."
+        },
+        "av1_hw": {
+          "type": "boolean",
+          "description": "AV1 decoded in hardware."
+        }
+      }
+    },
+    "apis": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OS-gated web APIs. Absent fields: present on Windows and macOS, absent on Linux (captured).",
+      "properties": {
+        "share": {
+          "type": "boolean",
+          "description": "navigator.share / canShare."
+        },
+        "bluetooth": {
+          "type": "boolean",
+          "description": "navigator.bluetooth and the Bluetooth* interfaces."
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured",
+        "source"
+      ],
+      "description": "Where the persona's OS values come from. Documentation only.",
+      "properties": {
+        "captured": {
+          "type": "boolean",
+          "description": "true if the values were captured from a real device running that OS."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "What the values come from."
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": "Caveats."
         }
       }
     }

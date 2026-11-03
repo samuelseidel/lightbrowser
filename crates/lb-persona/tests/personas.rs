@@ -177,6 +177,8 @@ fn adversarial_chrome_reports_expected_rules() {
             "R12_UACH_PLATFORM",
             "R13_TLS_FAMILY_VERSION",
             "R15_NAVIGATOR_CONSTANTS",
+            "R20_SCREEN_GEOMETRY",
+            "R21_FONTS_OS",
         ]
     );
     assert!(r.has_warning("R16_PERF_NOW_RESOLUTION"));
@@ -275,19 +277,15 @@ fn r12_platform_mismatch() {
 }
 
 #[test]
-fn r12_warns_on_arch_and_platform_version() {
+fn r12_arch_is_a_violation() {
     let mut p = chrome_mac();
     p.client_hints.as_mut().unwrap().architecture = "x86".into();
-    p.client_hints.as_mut().unwrap().platform_version = "13.0.0".into();
-    let r = consistency::validate(&p);
-    assert!(r.is_valid());
-    assert_eq!(
-        r.warnings
-            .iter()
-            .filter(|w| w.rule_id == "R12_UACH_PLATFORM")
-            .count(),
-        2
-    );
+    only(&p, "R12_UACH_PLATFORM");
+
+    // 32-bit Chrome on 64-bit Windows: bitness stays 64, wow64 true.
+    let mut p = chrome_win();
+    p.client_hints.as_mut().unwrap().wow64 = true;
+    assert!(consistency::validate(&p).is_valid());
 }
 
 #[test]
@@ -419,9 +417,9 @@ fn adversarial_flag_does_not_skip_rules() {
 #[test]
 fn rule_table_has_unique_sorted_ids() {
     let ids: Vec<_> = rules().iter().map(|r| r.id).collect();
-    assert_eq!(ids.len(), 16);
+    assert_eq!(ids.len(), 26);
     assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
-    assert!(ids[0].starts_with("R01") && ids[15].starts_with("R16"));
+    assert!(ids[0].starts_with("R01") && ids[25].starts_with("R26"));
 }
 
 #[test]
@@ -474,4 +472,484 @@ fn validate_file_reports() {
 
     let missing = validate_file(profiles_dir().join("nope.json"));
     assert!(!missing.ok && missing.report.contains("ERROR"));
+}
+
+// --- M7: OS personas (ADR 0015) ---
+
+fn reference(name: &str) -> PersonaProfile {
+    PersonaProfile::from_path(profiles_dir().join("reference/chrome").join(name)).unwrap()
+}
+
+fn ubuntu() -> PersonaProfile {
+    reference("chrome153_ubuntu24_intel_uhd630_x11_1080p.json")
+}
+
+fn fedora() -> PersonaProfile {
+    reference("chrome153_fedora42_amd_rx6600_wayland_1440p.json")
+}
+
+fn win11() -> PersonaProfile {
+    reference("chrome153_win11_rtx4060_1080p.json")
+}
+
+fn mac_m4() -> PersonaProfile {
+    reference("chrome153_macos26_apple_m4_1512x982.json")
+}
+
+#[test]
+fn reference_chrome_personas_cover_every_os() {
+    use lb_persona::{DisplayServer, OsKind};
+    let all: Vec<PersonaProfile> = json_files("reference/chrome")
+        .iter()
+        .map(|p| PersonaProfile::from_path(p).unwrap())
+        .collect();
+    assert_eq!(all.len(), 8);
+    let count = |k: OsKind| all.iter().filter(|p| p.os_kind() == k).count();
+    assert_eq!(count(OsKind::Windows), 3);
+    assert_eq!(count(OsKind::MacOs), 3);
+    assert_eq!(count(OsKind::Linux), 2);
+    assert!(
+        all.iter()
+            .any(|p| p.os.architecture == "x86_64" && p.os_kind() == OsKind::MacOs)
+    );
+    assert!(
+        all.iter()
+            .any(|p| p.display_server() == Some(DisplayServer::Wayland))
+    );
+    assert!(
+        all.iter()
+            .any(|p| p.display_server() == Some(DisplayServer::X11))
+    );
+}
+
+/// Each OS adversarial persona breaks exactly one rule.
+#[test]
+fn os_adversarial_personas_trip_exactly_their_rule() {
+    let cases = [
+        ("chrome153_linux_with_d3d11.json", "R19_GPU_BACKEND"),
+        ("chrome153_mac_arm_intel_gpu.json", "R18_ARCH_GPU"),
+        ("chrome153_win11_fonts_pv10.json", "R17_PLATFORM_VERSION"),
+        ("chrome153_linux_segoe_fonts.json", "R21_FONTS_OS"),
+        ("chrome153_wayland_avail_top.json", "R20_SCREEN_GEOMETRY"),
+        ("chrome153_mac_scrollbar17.json", "R24_PREFERENCES_OS"),
+        (
+            "chrome153_linux_mesa_kernel_mismatch.json",
+            "R19_GPU_BACKEND",
+        ),
+        ("chrome153_mac_microsoft_voices.json", "R22_VOICES_OS"),
+        ("chrome153_win_metal_renderer.json", "R19_GPU_BACKEND"),
+        ("chrome153_intel_mac_macos27.json", "R26_MACOS_VERSION"),
+        ("chrome153_devicememory12.json", "R25_HARDWARE"),
+    ];
+    for (file, rule) in cases {
+        let p = PersonaProfile::from_path(profiles_dir().join("generated/adversarial").join(file))
+            .unwrap();
+        assert!(p.adversarial, "{file}");
+        let r = consistency::validate(&p);
+        assert_eq!(r.violated_rule_ids(), [rule], "{file}: {:?}", r.violations);
+        assert!(r.warnings.is_empty(), "{file}: {:?}", r.warnings);
+    }
+}
+
+#[test]
+fn generated_personas_validate() {
+    for os in ["windows", "macos", "linux"] {
+        let files = json_files(&format!("generated/{os}"));
+        assert!(files.len() >= 5, "{os}: {files:?}");
+        for path in files {
+            let p = PersonaProfile::from_path_checked(&path)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            assert_eq!(p.os_kind().as_str(), os);
+            assert!(!p.adversarial);
+            assert_eq!(p.provenance.as_ref().map(|v| v.captured), Some(false));
+        }
+    }
+}
+
+#[test]
+fn generator_is_consistent_and_deterministic() {
+    use lb_persona::OsKind;
+    use lb_persona::generate::{Catalog, generate};
+    let cat = Catalog::load(&profiles_dir().join("catalog")).unwrap();
+    for os in [OsKind::Windows, OsKind::MacOs, OsKind::Linux] {
+        // generate() refuses any persona that breaks a rule.
+        let a = generate(&cat, os, 50, 42).unwrap();
+        assert_eq!(a.len(), 50);
+        for p in &a {
+            assert_eq!(p.os_kind(), os);
+            assert!(consistency::validate(p).is_valid());
+        }
+        let b = generate(&cat, os, 5, 42).unwrap();
+        assert_eq!(&a[..5], &b[..]);
+        let c = generate(&cat, os, 5, 43).unwrap();
+        assert_ne!(a[0].profile_id, c[0].profile_id);
+    }
+    // The committed files are what the example writes for seed 1.
+    let ours = generate(&cat, OsKind::Linux, 5, 1).unwrap();
+    let file = PersonaProfile::from_path(
+        profiles_dir().join("generated/linux/chrome153_linux_s1_000.json"),
+    )
+    .unwrap();
+    assert_eq!(ours[0], file);
+}
+
+/// Every installed font of every persona and catalog set has a metric table
+/// (`profiles/fonts/<os>/`) or a derived entry, so width probes detect it.
+#[test]
+fn every_persona_font_has_a_table() {
+    use std::collections::HashSet;
+    let fonts = profiles_dir().join("fonts");
+    let mut have: HashSet<(String, String)> = HashSet::new();
+    for os in ["windows", "macos", "linux"] {
+        for entry in std::fs::read_dir(fonts.join(os)).unwrap() {
+            let path = entry.unwrap().path();
+            let t: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            have.insert((
+                os.into(),
+                t["family"].as_str().unwrap().to_ascii_lowercase(),
+            ));
+        }
+    }
+    let derived: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fonts.join("derived.json")).unwrap())
+            .unwrap();
+    for e in derived["families"].as_array().unwrap() {
+        have.insert((
+            e["os"].as_str().unwrap().into(),
+            e["family"].as_str().unwrap().to_ascii_lowercase(),
+        ));
+    }
+    let mut files = json_files("reference/chrome");
+    for os in ["windows", "macos", "linux"] {
+        files.extend(json_files(&format!("generated/{os}")));
+    }
+    for path in files {
+        let p = PersonaProfile::from_path(&path).unwrap();
+        let os = p.os_kind().as_str();
+        for f in &p.fonts.available {
+            assert!(
+                have.contains(&(os.into(), f.to_ascii_lowercase())),
+                "{}: no {os} table for {f}",
+                path.display()
+            );
+        }
+    }
+    let cat: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(profiles_dir().join("catalog/fonts.json")).unwrap(),
+    )
+    .unwrap();
+    for (set, list) in cat["sets"].as_object().unwrap() {
+        let os = if set.starts_with("windows") {
+            "windows"
+        } else if set.starts_with("mac") {
+            "macos"
+        } else {
+            "linux"
+        };
+        for f in list.as_array().unwrap() {
+            let f = f.as_str().unwrap();
+            assert!(
+                have.contains(&(os.into(), f.to_ascii_lowercase())),
+                "{set}: {f}"
+            );
+        }
+    }
+}
+
+/// The schema declares every field the persona files use
+/// (`additionalProperties: false` everywhere).
+#[test]
+fn schema_declares_every_persona_field() {
+    fn walk(schema: &serde_json::Value, v: &serde_json::Value, at: &str, file: &str) {
+        let schema = schema
+            .get("oneOf")
+            .and_then(|o| o.as_array())
+            .and_then(|o| o.iter().find(|s| s["type"] == "object"))
+            .unwrap_or(schema);
+        match v {
+            serde_json::Value::Object(map) => {
+                let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+                    return;
+                };
+                for (k, child) in map {
+                    let sub = props
+                        .get(k)
+                        .unwrap_or_else(|| panic!("{file}: {at}.{k} is not in the schema"));
+                    walk(sub, child, &format!("{at}.{k}"), file);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                if let Some(item) = schema.get("items") {
+                    for (i, x) in items.iter().enumerate() {
+                        walk(item, x, &format!("{at}[{i}]"), file);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let schema: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(profiles_dir().join("schemas/persona_v2.schema.json")).unwrap(),
+    )
+    .unwrap();
+    let mut files = json_files("reference/chrome");
+    files.extend(json_files("generated"));
+    for path in files {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        walk(&schema, &v, "", &path.display().to_string());
+    }
+}
+
+#[test]
+fn os_accessors_have_os_defaults() {
+    use lb_persona::{DisplayServer, OsKind};
+    let w = chrome_win();
+    assert_eq!(w.os_kind(), OsKind::Windows);
+    assert_eq!(w.display_server(), None);
+    assert_eq!(w.windows_major(), Some(10));
+    let d = w.font_defaults();
+    assert_eq!(
+        (
+            d.sans_serif.as_str(),
+            d.monospace.as_str(),
+            d.system_ui.as_str()
+        ),
+        ("Arial", "Consolas", "Segoe UI")
+    );
+    assert_eq!(w.window_position(), (0, 0));
+    let wheel = w.wheel();
+    assert_eq!((wheel.px_per_notch, wheel.wheel_delta_per_px), (100.0, 1.2));
+    let a = w.audio_defaults();
+    assert_eq!(
+        (a.sample_rate, a.base_latency, a.output_latency, a.channels),
+        (48_000, 0.01, 0.02, 2)
+    );
+    let g = w.webgpu().unwrap();
+    assert_eq!(
+        (g.vendor.as_str(), g.architecture.as_str()),
+        ("nvidia", "ampere")
+    );
+    let c = w.codecs();
+    assert!(c.hevc && c.h264_power_efficient && c.av1_hw);
+    assert!(w.os_apis().share && w.os_apis().bluetooth);
+    let h = w.high_entropy_hints().unwrap();
+    assert_eq!(h.platform_version, "10.0.0");
+    assert_eq!(h.form_factors, ["Desktop"]);
+    // Blink's alternates: Helvetica falls back to Arial on Windows.
+    assert!(
+        w.font_aliases()
+            .contains(&("Helvetica".into(), "Arial".into()))
+    );
+
+    let m = chrome_mac();
+    assert_eq!(m.macos_version(), Some((15, 0, 0)));
+    assert_eq!(m.apple_chip().as_deref(), Some("M2"));
+    assert_eq!(m.font_defaults().system_ui, "system-ui");
+    assert_eq!(m.wheel().wheel_delta_per_px, 3.0);
+    assert!(!m.codecs().av1_hw);
+    assert_eq!(m.webgpu().unwrap().architecture, "metal-3");
+
+    let u = ubuntu();
+    assert_eq!(u.display_server(), Some(DisplayServer::X11));
+    assert_eq!(u.linux_distro().map(|d| d.1), Some("24.04".into()));
+    let d = u.font_defaults();
+    assert_eq!(
+        (
+            d.system_ui.as_str(),
+            d.monospace.as_str(),
+            d.cursive.as_str(),
+            d.system_font_px
+        ),
+        ("Ubuntu Sans", "DejaVu Sans Mono", "Times New Roman", 16.0)
+    );
+    let aliases = u.font_aliases();
+    assert!(aliases.contains(&("Arial".into(), "Liberation Sans".into())));
+    assert!(aliases.contains(&("Courier New".into(), "Liberation Mono".into())));
+    assert!(
+        !aliases.iter().any(|(a, _)| a == "Calibri"),
+        "no Carlito installed"
+    );
+    assert_eq!(u.window_position(), (64, 32));
+    assert_eq!(u.wheel().px_per_notch, 120.0);
+    assert_eq!(u.webgpu(), None);
+    assert!(!u.os_apis().share && !u.os_apis().bluetooth);
+    assert!(!u.codecs().hevc);
+    assert_eq!(u.high_entropy_hints().unwrap().platform_version, "");
+
+    let f = fedora();
+    assert_eq!(f.display_server(), Some(DisplayServer::Wayland));
+    assert_eq!(f.window_position(), (0, 0));
+    assert_eq!(f.font_defaults().system_ui, "Adwaita Sans");
+    assert_eq!(f.os.kernel.as_deref(), Some("6.14.5-300.fc42.x86_64"));
+
+    // Absent fields take the OS default; `webgpu: null` means no adapter.
+    let mut u2 = ubuntu();
+    u2.webgpu = None;
+    u2.media = None;
+    u2.apis = None;
+    u2.behavior.wheel = None;
+    assert_eq!(u2.webgpu(), None);
+    assert!(!u2.os_apis().share);
+    assert_eq!(u2.wheel().wheel_delta_per_px, 1.0);
+    let mut w2 = chrome_win();
+    w2.webgpu = Some(None);
+    assert_eq!(w2.webgpu(), None);
+}
+
+#[test]
+fn os_fields_round_trip() {
+    for p in [ubuntu(), fedora(), win11(), mac_m4()] {
+        let text = serde_json::to_string(&p).unwrap();
+        assert_eq!(PersonaProfile::from_json(&text).unwrap(), p);
+    }
+    // `webgpu: null` survives a round trip.
+    let text = serde_json::to_string(&ubuntu()).unwrap();
+    assert!(text.contains("\"webgpu\":null"), "{text}");
+}
+
+#[test]
+fn chrome_tls_profile_is_os_independent() {
+    // R06 is Firefox-only: every Chrome persona uses chrome_153_linux.
+    for path in json_files("reference/chrome") {
+        let p = PersonaProfile::from_path(&path).unwrap();
+        assert_eq!(p.tls.profile_id, "chrome_153_linux");
+        assert!(!consistency::validate(&p).has_violation("R06_TLS_PROFILE"));
+    }
+}
+
+#[test]
+fn r17_platform_version_per_os() {
+    let mut p = chrome_win();
+    p.client_hints.as_mut().unwrap().platform_version = "15.0.0".into();
+    only(&p, "R17_PLATFORM_VERSION");
+    let mut p = win11();
+    p.os.build = "10.0.22631".into(); // 23H2 reports 15.0.0
+    only(&p, "R17_PLATFORM_VERSION");
+    let mut p = win11();
+    p.os.build = "10.0.19045".into(); // a Windows 10 build
+    only(&p, "R17_PLATFORM_VERSION");
+    let mut p = mac_m4();
+    p.client_hints.as_mut().unwrap().platform_version = "26.1".into();
+    only(&p, "R17_PLATFORM_VERSION");
+    let mut p = mac_m4();
+    p.client_hints.as_mut().unwrap().platform_version = "26.0.0".into();
+    only(&p, "R17_PLATFORM_VERSION");
+    let mut p = ubuntu();
+    p.client_hints.as_mut().unwrap().platform_version = "6.8.0".into();
+    only(&p, "R17_PLATFORM_VERSION");
+}
+
+#[test]
+fn r18_wow64_and_apple_gpu() {
+    let mut p = chrome_mac();
+    p.client_hints.as_mut().unwrap().wow64 = true;
+    only(&p, "R18_ARCH_GPU");
+    let mut p = chrome_mac();
+    p.os.architecture = "x86_64".into();
+    p.client_hints.as_mut().unwrap().architecture = "x86".into();
+    only(&p, "R18_ARCH_GPU");
+}
+
+#[test]
+fn r19_wrapper_and_limits() {
+    let mut p = ubuntu();
+    p.hardware.gpu.vendor_unmasked = "Google Inc. (Intel Open Source Technology Center)".into();
+    only(&p, "R19_GPU_BACKEND");
+    let mut p = chrome_win();
+    p.webgl.parameters.insert(
+        "ALIASED_LINE_WIDTH_RANGE".into(),
+        serde_json::json!([1, 7.99]),
+    );
+    only(&p, "R19_GPU_BACKEND");
+    let mut p = chrome_mac();
+    p.hardware.gpu.renderer_unmasked = "ANGLE (Apple, Apple M2, OpenGL 4.1 Metal - 88.1)".into();
+    assert!(consistency::validate(&p).has_violation("R19_GPU_BACKEND"));
+}
+
+#[test]
+fn r20_screen_per_os() {
+    let mut p = chrome_win();
+    p.screen.avail_height = 1000; // an 80 px taskbar
+    p.screen.outer_height = 1000;
+    p.screen.inner_height = 897;
+    only(&p, "R20_SCREEN_GEOMETRY");
+    let mut p = chrome_mac();
+    p.screen.avail_top = 0;
+    only(&p, "R20_SCREEN_GEOMETRY");
+    let mut p = fedora();
+    p.screen.window_x = Some(10);
+    only(&p, "R20_SCREEN_GEOMETRY");
+    let mut p = chrome_win();
+    p.screen.outer_width = 1936; // dw 16 needs a restored window
+    p.screen.avail_width = 1920;
+    only(&p, "R20_SCREEN_GEOMETRY");
+}
+
+#[test]
+fn r21_fonts_per_release_and_defaults() {
+    let mut p = chrome_win();
+    p.fonts.available.push("Segoe UI Variable Text".into());
+    only(&p, "R21_FONTS_OS");
+    let mut p = win11();
+    p.fonts
+        .available
+        .retain(|f| !f.starts_with("Segoe UI Variable"));
+    only(&p, "R21_FONTS_OS");
+    let mut p = ubuntu();
+    p.fonts.available.retain(|f| !f.starts_with("Ubuntu"));
+    only(&p, "R21_FONTS_OS"); // Ubuntu fonts missing, and the system-ui default
+    let mut p = chrome_mac();
+    p.fonts.available.push("DejaVu Sans".into());
+    only(&p, "R21_FONTS_OS");
+    let mut p = chrome_win();
+    p.fonts.defaults = Some(lb_persona::profile::FontDefaultsInfo {
+        monospace: Some("Fira Code".into()),
+        ..Default::default()
+    });
+    only(&p, "R21_FONTS_OS");
+}
+
+#[test]
+fn r22_r24_r25_r26() {
+    let mut p = ubuntu();
+    p.speech_voices = chrome_mac().speech_voices;
+    only(&p, "R22_VOICES_OS");
+
+    let mut p = chrome_win();
+    p.speech_voices.retain(|v| !v.name.starts_with("Microsoft"));
+    only(&p, "R22_VOICES_OS");
+
+    let mut p = chrome_mac();
+    p.preferences.as_mut().unwrap().forced_colors = true;
+    only(&p, "R24_PREFERENCES_OS");
+    let mut p = chrome_mac();
+    p.preferences.as_mut().unwrap().color_gamut = "srgb".into();
+    only(&p, "R24_PREFERENCES_OS"); // a 30-bit screen is wide gamut
+
+    let mut p = mac_m4();
+    p.hardware.hardware_concurrency = 8;
+    only(&p, "R25_HARDWARE");
+    let mut p = chrome_win();
+    p.hardware.device_memory = 16.0;
+    assert!(consistency::validate(&p).is_valid());
+    p.hardware.hardware_concurrency = 14;
+    assert!(
+        consistency::validate(&p).is_valid(),
+        "14 threads is a real CPU"
+    );
+
+    let mut p = mac_m4();
+    p.os.version = "14.7.1".into();
+    p.client_hints.as_mut().unwrap().platform_version = "14.7.1".into();
+    only(&p, "R26_MACOS_VERSION");
+}
+
+#[test]
+fn r23_audio_is_a_warning() {
+    let mut p = chrome_win();
+    p.audio.as_mut().unwrap().sample_rate = Some(96_000);
+    let r = consistency::validate(&p);
+    assert!(r.is_valid() && r.has_warning("R23_AUDIO_OS"));
 }

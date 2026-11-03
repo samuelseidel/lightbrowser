@@ -113,10 +113,12 @@ python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (33)
 ```
 
 Since M7 the bench also has OS rules (`scoring.py`, "OS rules (M7)" in its
-README). With them both reference personas score fp 88.0 / 83.9 until
-WP-B..E land; see "M7 status" in `docs/ROADMAP.md`. To serve a persona that
-breaks the consistency rules (adversarial bench tests only), use the
-hidden `lightbrowser serve --unchecked-persona FILE`.
+README). With them the eight Chrome reference personas score fp 83.9 to
+88.0 until WP-C..E land; see "M7 status" in `docs/ROADMAP.md`. To serve a
+persona that breaks the consistency rules (adversarial bench tests only),
+use the hidden `lightbrowser serve --unchecked-persona FILE`; the M7
+adversarial personas and the bench rule each one fires are listed in
+`profiles/README.md`.
 
 Use a fresh `serve` per run. M5 target, the same flow through
 `LightBrowser.human*` (`--seed N` fixes the reading pauses):

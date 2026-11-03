@@ -47,7 +47,17 @@ em. The numbers are estimates (no proprietary font files were used); they
 make installed fonts measurably different from the fallbacks, so width
 probes detect exactly the persona's fonts. A real table in `<os>/` wins over
 a derived one. `lb-layout` checks that every font in the reference personas
-has a table or a derived entry.
+has a table or a derived entry; `lb-persona` checks the same for the
+generated personas and the catalog font sets (`profiles/catalog/fonts.json`).
+
+M7 added derived entries for Windows 11 (Segoe UI Variable Display, Small
+and Text; Segoe Fluent Icons) and for the Linux distro fonts (Ubuntu,
+Ubuntu Sans, Noto, Adwaita, Cantarell, URW base35, FreeFont, Carlito,
+Caladea, Noto Color Emoji). The FreeFont, Noto Color Emoji, Carlito,
+Caladea and Inter-based Adwaita Sans scales follow the widths the local
+Chrome for Testing 153 measured (`tests/fixtures/os/`); the rest are
+estimates from published metrics. Regenerate them from the OFL font files
+when those are available.
 
 ## Glyph outlines (`outlines/`)
 

@@ -52,6 +52,7 @@ RSS CDP 42.2 vs 31.4 MB (eager interface objects per realm). Details:
 | 0012 | Each frame is a realm in the page's engine, built synchronously through `lb_js::RealmOps`; origins via V8 security tokens |
 | 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary < 40 MB: ICU data compressed in chunks and paged in on first touch, no unwind tables, V8 code that only off-by-default flags reach not linked; the window global's members are defined after context creation (linear, not V8's O(n²) template instantiation) |
 | 0014 | Page screenshots painted on demand from a per-capture display list (no retained paint state, never noised) |
+| 0015 | OS personas: one OS axis (`OsKind`, display server, distro) in `lb-persona`; layers read OS-dependent values through `PersonaProfile` accessors with per-OS defaults; rules R17-R26; catalog and generator |
 
 ## Layers
 
@@ -138,6 +139,32 @@ any persona whose family doesn't match the engine compiled into it.
 
 The existing GeckoPhantom personas (`persona_v1`, Firefox 128) load as
 `family = firefox` without changes.
+
+## OS axis (M7, ADR 0015)
+
+A Chrome persona claims Windows 10/11, macOS (Intel or Apple Silicon) or
+Linux (Ubuntu or Fedora, X11 or Wayland). `lb-persona` (`os.rs`) parses
+that into `OsKind`, `DisplayServer` and `Distro`, and every OS-dependent
+value is read through a `PersonaProfile` accessor that returns the
+persona's own value or the OS default:
+
+| Accessor | Default (Windows / macOS / Linux) | Read by |
+|---|---|---|
+| `os_kind`, `display_server`, `linux_distro`, `windows_major`, `macos_version`, `apple_chip` | from `os.*` and the GPU | all |
+| `font_defaults` | Times New Roman, Arial, Consolas, Segoe UI / Times, Helvetica, Courier, SF / Times New Roman, Arial, DejaVu Sans Mono or Noto Sans Mono, the GTK font; emoji and system font keywords | lb-layout, lb-css (WP-C) |
+| `font_aliases` | Blink's alternates (Arial and Helvetica, Times and Times New Roman, Courier and Courier New); Linux adds fontconfig's metric aliases (Liberation, Carlito, Caladea) | lb-layout (WP-C) |
+| `scrollbar_width` | 17 / 0 / 15 px | lb-layout (WP-C) |
+| `window_position` | work-area origin; Wayland 0,0 | lb-webapi (WP-D) |
+| `wheel` | 100 px, ratio 1.2 / 40 px, ratio 3 / 120 px, ratio 1 | lb-webapi, lb-behavior (WP-D) |
+| `audio_defaults` | 48 kHz / 44.1 kHz / 48 kHz; base latency 0.01 s; output latency twice the base | lb-webapi (WP-D) |
+| `webgpu`, `codecs`, `os_apis` | from the GPU / same / no adapter, no HEVC, no `share` or `bluetooth` | lb-webapi (WP-D) |
+| `high_entropy_hints` | from `client_hints`, `formFactors` `["Desktop"]` | lb-net, lb-page (WP-E) |
+
+Linux defaults were captured from the local Chrome for Testing 153;
+Windows and macOS defaults are the M7 surface reference (not captured).
+Chrome's TLS and H2 fingerprints do not depend on the OS (one
+`chrome_153_linux` profile for every Chrome persona); TCP/IP-level values
+(TTL, TCP options) are the host's and are not modelled.
 
 ## Process and threading model
 
@@ -252,9 +279,9 @@ Steps are in `tests/README.md`. Both modes use our own local server only.
 
 | From | To | How |
 |---|---|---|
-| `consistency/` (`PersonaProfile`, rules R01–R10) | `lb-persona` | Vendored in M2 (ahead of M4). Chrome rules R11–R16 added: UA-CH brands and GREASE, UA-CH platform, TLS profile ↔ UA major, client-hints presence, navigator constants. |
+| `consistency/` (`PersonaProfile`, rules R01–R10) | `lb-persona` | Vendored in M2 (ahead of M4). Chrome rules R11–R16 added: UA-CH brands and GREASE, UA-CH platform, TLS profile ↔ UA major, client-hints presence, navigator constants. OS rules R17–R26 added in M7 (ADR 0015): platform version, architecture and GPU, GPU backend, screen geometry, fonts, voices, audio, preferences, hardware, macOS versions. |
 | `behavior/` (`human_click_events`, …) | `lb-behavior` | Vendored in M2 (ahead of M5), on rand 0.9. M5 rewrote the generators from first principles (Fitts' law, submovements, minimum jerk, frame-coalesced sampling, log-normal keystrokes with rollover and Shift, wheel flicks, trackpad momentum). `lb_behavior::cdp` turns events into `Input.dispatch*` params; lb-page replays them through the Input pipeline for `LightBrowser.human*`. |
-| `profiles/schemas/persona_v1.schema.json` | `profiles/schemas/persona_v2.schema.json` | Adds `browser.family` and `client_hints`. v1 is read as Firefox. |
+| `profiles/schemas/persona_v1.schema.json` | `profiles/schemas/persona_v2.schema.json` | Adds `browser.family` and `client_hints` (and, M7, optional OS fields: `os.kernel/distro/display_server`, `fonts.defaults`, `webgpu`, `media`, `apis`, `provenance`, ...). v1 is read as Firefox. |
 | `profiles/tls/firefox_128_*.json` | `profiles/tls/` | Same format. Chrome profiles are captured with `lb-fptest` and add optional fields (`grease`, `permute_extensions`, `alps_protocols`, `ech_grease`, `server_padding_request`, `trust_anchor_ids`, `http2_priority.headers`). |
 | SFC32 in `geckophantom_config.h` | `lb-persona::sfc32` | **Done.** Bit-identical, with a test against C output. |
 | SDK `human_*`, `verify_fingerprint` | `sdk/python/lightbrowser` | Thin layer over Playwright `connect_over_cdp`. |

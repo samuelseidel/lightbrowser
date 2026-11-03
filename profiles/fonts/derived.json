@@ -838,6 +838,276 @@
    "ascent": 1.9,
    "descent": 1.2,
    "line_gap": 0.0
+  },
+  {
+   "family": "Segoe Fluent Icons",
+   "os": "windows",
+   "base": "Arial",
+   "scale": 1.452,
+   "ascent": 1.0,
+   "descent": 0.0,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe UI Variable Display",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 0.975,
+   "ascent": 0.93,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe UI Variable Small",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 1.035,
+   "ascent": 0.93,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Segoe UI Variable Text",
+   "os": "windows",
+   "base": "Segoe UI",
+   "scale": 0.995,
+   "ascent": 0.93,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Adwaita Mono",
+   "os": "linux",
+   "base": "Liberation Mono",
+   "scale": 0.8333,
+   "ascent": 0.965,
+   "descent": 0.285,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Adwaita Sans",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 1.031,
+   "ascent": 0.969,
+   "descent": 0.242,
+   "line_gap": 0.0
+  },
+  {
+   "family": "C059",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 1.12,
+   "ascent": 0.98,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Caladea",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 1.0066,
+   "ascent": 0.9307,
+   "descent": 0.2222,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Cantarell",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 1.0,
+   "ascent": 0.95,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Carlito",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 0.942,
+   "ascent": 0.952,
+   "descent": 0.269,
+   "line_gap": 0.0
+  },
+  {
+   "family": "D050000L",
+   "os": "linux",
+   "base": "DejaVu Sans",
+   "scale": 0.98,
+   "ascent": 0.9,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "FreeMono",
+   "os": "linux",
+   "base": "Liberation Mono",
+   "scale": 1.0,
+   "ascent": 0.8,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "FreeSans",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 0.971,
+   "ascent": 0.9,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "FreeSerif",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 0.992,
+   "ascent": 0.9,
+   "descent": 0.2,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Nimbus Mono PS",
+   "os": "linux",
+   "base": "Liberation Mono",
+   "scale": 1.0,
+   "ascent": 0.83,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Nimbus Roman",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 1.0,
+   "ascent": 0.93,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Nimbus Sans",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 1.0,
+   "ascent": 0.95,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Noto Color Emoji",
+   "os": "linux",
+   "base": "DejaVu Sans",
+   "scale": 0.8246,
+   "ascent": 0.95,
+   "descent": 0.23,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Noto Mono",
+   "os": "linux",
+   "base": "Liberation Mono",
+   "scale": 1.0,
+   "ascent": 1.069,
+   "descent": 0.293,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Noto Sans",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 1.04,
+   "ascent": 1.069,
+   "descent": 0.293,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Noto Sans Mono",
+   "os": "linux",
+   "base": "Liberation Mono",
+   "scale": 1.0,
+   "ascent": 1.069,
+   "descent": 0.293,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Noto Serif",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 1.1,
+   "ascent": 1.069,
+   "descent": 0.293,
+   "line_gap": 0.0
+  },
+  {
+   "family": "P052",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 1.07,
+   "ascent": 0.98,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Ubuntu",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 0.985,
+   "ascent": 0.932,
+   "descent": 0.189,
+   "line_gap": 0.028
+  },
+  {
+   "family": "Ubuntu Mono",
+   "os": "linux",
+   "base": "Liberation Mono",
+   "scale": 0.8333,
+   "ascent": 0.83,
+   "descent": 0.17,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Ubuntu Sans",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 0.975,
+   "ascent": 0.932,
+   "descent": 0.189,
+   "line_gap": 0.028
+  },
+  {
+   "family": "Ubuntu Sans Mono",
+   "os": "linux",
+   "base": "Liberation Mono",
+   "scale": 1.0,
+   "ascent": 0.932,
+   "descent": 0.189,
+   "line_gap": 0.0
+  },
+  {
+   "family": "URW Bookman",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 1.17,
+   "ascent": 0.98,
+   "descent": 0.3,
+   "line_gap": 0.0
+  },
+  {
+   "family": "URW Gothic",
+   "os": "linux",
+   "base": "Liberation Sans",
+   "scale": 1.08,
+   "ascent": 0.98,
+   "descent": 0.25,
+   "line_gap": 0.0
+  },
+  {
+   "family": "Z003",
+   "os": "linux",
+   "base": "Liberation Serif",
+   "scale": 0.84,
+   "ascent": 0.92,
+   "descent": 0.3,
+   "line_gap": 0.0
   }
  ]
 }
