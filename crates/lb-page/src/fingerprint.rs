@@ -65,7 +65,27 @@ fn config(profile: &PersonaProfile) -> Value {
         "permissions": profile.permissions.keys().collect::<Vec<_>>(),
         "webglParams": profile.webgl.parameters.keys().collect::<Vec<_>>(),
         "shaderPrecision": profile.webgl.shader_precision.keys().collect::<Vec<_>>(),
+        "genericFonts": generic_fonts(profile),
     })
+}
+
+/// Generic keyword -> the persona's default family, for the collector.
+/// macOS `system-ui` (SF) has no family name a page can write, so it is
+/// left out.
+fn generic_fonts(profile: &PersonaProfile) -> Value {
+    let d = profile.font_defaults();
+    let mut m = serde_json::Map::new();
+    for (k, v) in [
+        ("serif", &d.serif),
+        ("sans-serif", &d.sans_serif),
+        ("monospace", &d.monospace),
+        ("system-ui", &d.system_ui),
+    ] {
+        if v != "system-ui" {
+            m.insert(k.to_owned(), json!(v));
+        }
+    }
+    Value::Object(m)
 }
 
 /// Collect the live surface of the page's current document (see the
@@ -458,6 +478,14 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
             "uaHigh.fullVersionList",
             brands(&ch.full_version_list),
         );
+        if let Some(he) = p.high_entropy_hints() {
+            c.eq(
+                s,
+                "highEntropy.formFactors",
+                "uaHigh.formFactors",
+                json!(he.form_factors),
+            );
+        }
         if let Some(v) = &ch.full_version {
             c.eq(
                 s,
@@ -573,6 +601,68 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
         json!(sc.outer_height),
     );
 
+    // OS axis (M7): window position, scrollbars, generic fonts, OS-gated
+    // APIs, codecs, WebGPU.
+    let (wx, wy) = p.window_position();
+    c.eq(s, "window.screenX", "window.screenX", json!(wx));
+    c.eq(s, "window.screenY", "window.screenY", json!(wy));
+    if chrome {
+        c.eq(
+            s,
+            "layout.scrollbarWidth",
+            "layout.scrollbarWidth",
+            json!(p.scrollbar_width()),
+        );
+        if let Some(g) = generic_fonts(p).as_object() {
+            for k in g.keys() {
+                c.eq(
+                    s,
+                    &format!("fonts.generic.{k}"),
+                    &format!("genericFonts.{k}"),
+                    json!(true),
+                );
+            }
+        }
+        let apis = p.os_apis();
+        c.eq(s, "navigator.share", "osApis.share", json!(apis.share));
+        c.eq(
+            s,
+            "navigator.canShare",
+            "osApis.canShare",
+            json!(apis.share),
+        );
+        c.eq(
+            s,
+            "navigator.bluetooth",
+            "osApis.bluetooth",
+            json!(apis.bluetooth),
+        );
+        c.eq(
+            s,
+            "window.Bluetooth",
+            "osApis.Bluetooth",
+            json!(apis.bluetooth),
+        );
+        let codecs = p.codecs();
+        c.eq(s, "media.hevc", "codecs.hevc", json!(codecs.hevc));
+        c.eq(
+            s,
+            "media.h264PowerEfficient",
+            "codecs.h264PowerEfficient",
+            json!(codecs.h264_power_efficient),
+        );
+        c.eq(
+            s,
+            "media.av1PowerEfficient",
+            "codecs.av1PowerEfficient",
+            json!(codecs.av1_hw),
+        );
+        let gpu = p
+            .webgpu()
+            .map(|a| json!({"vendor": a.vendor, "architecture": a.architecture}));
+        c.eq(s, "webgpu.adapter", "webgpu", gpu.unwrap_or(Value::Null));
+    }
+
     // Time zone and locale.
     c.eq(
         s,
@@ -636,22 +726,33 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
     c.info(s, "audio.sum", "audio.sum");
     c.info(s, "audio.hash", "audio.hash");
     c.info(s, "fonts.hash", "fonts.hash");
-    if let Some(a) = &p.audio {
-        if let Some(r) = a.sample_rate {
-            c.eq(s, "audio.sampleRate", "audio.live.sampleRate", json!(r));
-        }
-        if let Some(l) = a.base_latency {
-            c.eq(s, "audio.baseLatency", "audio.live.baseLatency", json!(l));
-        }
-        if let Some(m) = a.max_channel_count {
-            c.eq(
-                s,
-                "audio.maxChannelCount",
-                "audio.live.maxChannelCount",
-                json!(m),
-            );
-        }
-    }
+    // Realtime audio defaults (the persona's `audio`, else the OS's).
+    let ad = p.audio_defaults();
+    c.eq(
+        s,
+        "audio.sampleRate",
+        "audio.live.sampleRate",
+        json!(ad.sample_rate),
+    );
+    c.eq(
+        s,
+        "audio.baseLatency",
+        "audio.live.baseLatency",
+        json!(ad.base_latency),
+    );
+    c.eq(
+        s,
+        "audio.maxChannelCount",
+        "audio.live.maxChannelCount",
+        json!(ad.channels),
+    );
+    c.with(
+        s,
+        "audio.outputLatency",
+        "audio.live.outputLatency",
+        json!(ad.output_latency),
+        |a, e| a.is_null() || same(a, e),
+    );
 
     // Fonts: every persona font is detected, made-up ones are not.
     c.eq(s, "fonts.missing", "fonts.missing", json!([]));
@@ -702,6 +803,15 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
     if !p.speech_voices.is_empty() {
         let names: Vec<&str> = p.speech_voices.iter().map(|v| v.name.as_str()).collect();
         c.eq(s, "speechSynthesis.voices", "voices", json!(names));
+    }
+    if chrome {
+        c.with(
+            s,
+            "speechSynthesis.voiceCount",
+            "voices",
+            json!(p.speech_voices.len()),
+            |a, e| a.as_array().map(Vec::len) == e.as_u64().map(|n| n as usize),
+        );
     }
     if let Some(pr) = &p.preferences {
         c.eq(

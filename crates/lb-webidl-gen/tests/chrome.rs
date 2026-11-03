@@ -16,11 +16,19 @@ fn table() -> &'static Table {
     })
 }
 
+/// The secure-context fixture with the OS overlay merged in (what the
+/// generator arbitrates against).
 fn fixture() -> &'static Value {
     static F: OnceLock<Value> = OnceLock::new();
     F.get_or_init(|| {
         let i = ChromeInputs::default();
-        serde_json::from_str(&std::fs::read_to_string(i.fixture).unwrap()).unwrap()
+        let read = |p: &std::path::Path| -> Value {
+            serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+        };
+        let mut f = read(&i.fixture);
+        let o = read(i.overlay.as_deref().unwrap());
+        lb_webidl_gen::chrome::apply_overlay(&mut f, &o, true).unwrap();
+        f
     })
 }
 
@@ -124,6 +132,34 @@ fn window_own_props_in_chrome_order() {
         Some(GlobalProp::LegacyFactory { iface, .. }) if iface == "HTMLImageElement"
     ));
     assert_eq!(t.window_props[t.window_late_start].name(), "Temporal");
+}
+
+/// The OS overlay: every gated member reaches the table, Bluetooth* are
+/// secure-context only except `BluetoothUUID`, and without the overlay the
+/// table is the Linux capture.
+#[test]
+fn os_overlay_is_gated() {
+    let t = table();
+    let gated: Vec<(&str, &str, &str)> = t
+        .os_gated
+        .iter()
+        .map(|(g, o, n)| (g.as_str(), o.as_str(), n.as_str()))
+        .collect();
+    assert!(gated.contains(&("share", "Navigator", "share")));
+    assert!(gated.contains(&("share", "Navigator", "canShare")));
+    assert!(gated.contains(&("bluetooth", "Navigator", "bluetooth")));
+    assert!(gated.contains(&("bluetooth", "Window", "BluetoothUUID")));
+    assert_eq!(gated.len(), 11);
+    assert!(t.window_secure_only.iter().any(|n| n == "BluetoothDevice"));
+    assert!(!t.window_secure_only.iter().any(|n| n == "BluetoothUUID"));
+    let i = ChromeInputs {
+        overlay: None,
+        ..Default::default()
+    };
+    let plain = build_chrome(&i).expect("build without overlay");
+    assert!(plain.os_gated.is_empty());
+    assert!(plain.interface("Bluetooth").is_none());
+    assert_eq!(plain.window_props.len() + 8, t.window_props.len());
 }
 
 #[test]

@@ -25,3 +25,9 @@ There are two fixtures, both from the local Chromium, loopback only:
 - `chromium_153_surface.json`: `about:blank` (`node tools/dump_surface.js
   OUT`), which is not a secure context. The generator uses it to mark
   secure-context-only members, which insecure realms leave out.
+
+A third input, `tests/fixtures/chrome_153_os_overlay.json`, adds members
+Chrome has on Windows and macOS only (Web Share, Web Bluetooth), which the
+Linux captures lack. It is not captured (see its `_meta`); the generator
+merges it into both fixtures and lists its members in `OS_GATED`, and
+`lb-webapi` deletes them per realm for personas whose OS lacks them.

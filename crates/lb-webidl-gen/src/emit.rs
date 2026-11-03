@@ -297,7 +297,7 @@ pub fn emit(table: &Table, header: &str) -> String {
         "\n#![allow(clippy::all)]\n\nuse crate::desc::GlobalProp as G;\nuse crate::desc::Slot::{Attr as A, Const as C, Op as O};\n#[allow(unused_imports)]\nuse crate::desc::*;\n\n",
     );
     s.push_str(
-        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: INTERFACES,\n    namespaces: NAMESPACES,\n    window_props: WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n    window_secure_only: WINDOW_SECURE_ONLY,\n};\n\n",
+        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: INTERFACES,\n    namespaces: NAMESPACES,\n    window_props: WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n    window_secure_only: WINDOW_SECURE_ONLY,\n    os_gated: OS_GATED,\n};\n\n",
     );
     let _ = writeln!(
         s,
@@ -321,6 +321,16 @@ pub fn emit(table: &Table, header: &str) -> String {
     s.push_str("];\n\n/// Window props that exist only in secure contexts.\npub static WINDOW_SECURE_ONLY: &[&str] = &[\n");
     for n in &table.window_secure_only {
         let _ = writeln!(s, "    {},", q(n));
+    }
+    s.push_str("];\n\n/// Members only some OSes have (`gate`, owner interface or `Window`, name).\npub static OS_GATED: &[OsGated] = &[\n");
+    for (gate, owner, name) in &table.os_gated {
+        let _ = writeln!(
+            s,
+            "    OsGated {{ gate: {}, owner: {}, name: {} }},",
+            q(gate),
+            q(owner),
+            q(name)
+        );
     }
     s.push_str("];\n");
     s

@@ -87,6 +87,11 @@ pub struct WindowRealmOptions {
     /// non-loopback host, `about:blank` of such a page): `[SecureContext]`
     /// members and interfaces are removed. Default: secure.
     pub insecure: bool,
+    /// The persona's OS-gated APIs (`PersonaProfile::os_apis`): members of
+    /// each gate turned off (`Table::os_gated`) are deleted from the realm,
+    /// which keeps the order of the rest. `None` keeps every gated member
+    /// (the snapshot's surface).
+    pub os_apis: Option<lb_persona::OsApis>,
 }
 
 impl std::fmt::Debug for WindowRealmOptions {
@@ -96,6 +101,7 @@ impl std::fmt::Debug for WindowRealmOptions {
             .field("world", &self.world)
             .field("module_loader", &self.module_loader.is_some())
             .field("insecure", &self.insecure)
+            .field("os_apis", &self.os_apis)
             .finish()
     }
 }
@@ -308,6 +314,12 @@ impl Bindings {
         };
         if result.is_ok() && options.insecure {
             result = engine.evaluate(realm, &self.0.insecure_fixup, ScriptOrigin::new(""));
+        }
+        if result.is_ok()
+            && let Some(apis) = options.os_apis
+            && let Some(script) = os_gate_script(self.0.table, &self.0.ids, apis)
+        {
+            result = engine.evaluate(realm, &script, ScriptOrigin::new(""));
         }
         if let Err(e) = result {
             engine.drop_realm(realm);
@@ -921,6 +933,74 @@ fn insecure_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> S
     );
     s.push_str("})()");
     s
+}
+
+/// Whether an OS gate (`Table::os_gated`) is on for `apis`. Unknown gates
+/// stay on.
+pub fn os_gate_on(gate: &str, apis: lb_persona::OsApis) -> bool {
+    match gate {
+        "share" => apis.share,
+        "bluetooth" => apis.bluetooth,
+        _ => true,
+    }
+}
+
+/// The script that deletes the OS-gated members `apis` turns off, or
+/// `None` when every gate is on. Interface members first (the lookups need
+/// the interface objects), window properties last; deleting keeps the order
+/// of everything else.
+fn os_gate_script(
+    table: &Table,
+    ids: &HashMap<&'static str, InterfaceId>,
+    apis: lb_persona::OsApis,
+) -> Option<String> {
+    let off: Vec<_> = table
+        .os_gated
+        .iter()
+        .filter(|g| !os_gate_on(g.gate, apis) && (g.owner == "Window" || ids.contains_key(g.owner)))
+        .collect();
+    if off.is_empty() {
+        return None;
+    }
+    let mut s = String::from(
+        "(function(){'use strict';const g=globalThis,gd=Object.getOwnPropertyDescriptor;\
+         function I(n){const d=gd(g,n);return d&&d.value;}\
+         function D(o,ks){if(o)for(const k of ks)delete o[k];}",
+    );
+    let mut owners: Vec<&str> = Vec::new();
+    for g in &off {
+        if g.owner != "Window" && !owners.contains(&g.owner) {
+            owners.push(g.owner);
+        }
+    }
+    for owner in owners {
+        let d = table.interface(owner);
+        let is_static =
+            |n: &str| d.is_some_and(|d| d.static_order.iter().any(|s| d.slot_name(*s) == n));
+        let (statics, proto): (Vec<&str>, Vec<&str>) = off
+            .iter()
+            .filter(|g| g.owner == owner)
+            .map(|g| g.name)
+            .partition(|n| is_static(n));
+        let _ = write!(s, "{{const i=I({});", js_str(owner));
+        if !proto.is_empty() {
+            let _ = write!(s, "D(i&&i.prototype,{});", js_list(proto));
+        }
+        if !statics.is_empty() {
+            let _ = write!(s, "D(i,{});", js_list(statics));
+        }
+        s.push('}');
+    }
+    let window: Vec<&str> = off
+        .iter()
+        .filter(|g| g.owner == "Window")
+        .map(|g| g.name)
+        .collect();
+    if !window.is_empty() {
+        let _ = write!(s, "D(g,{});", js_list(window));
+    }
+    s.push_str("})()");
+    Some(s)
 }
 
 #[cfg(test)]

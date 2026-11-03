@@ -168,6 +168,10 @@ pub struct MouseData {
     pub pointer: Option<PointerData>,
     /// `deltaX`, `deltaY`, `deltaZ`, `deltaMode`.
     pub wheel: Option<[f64; 4]>,
+    /// Legacy `wheelDeltaX`, `wheelDeltaY`: `-delta x` the persona's wheel
+    /// ratio for trusted wheels (120 per notch), the init's values or
+    /// `-delta` for `new WheelEvent(...)` (Blink).
+    pub wheel_delta: [f64; 2],
 }
 
 /// State of a `KeyboardEvent`.
@@ -196,6 +200,8 @@ pub(crate) struct InputState {
     focus_value: Option<(NodeId, String)>,
     /// A contenteditable whose whole content is selected.
     select_all: Option<NodeId>,
+    /// Clock time of the last activation-triggering input.
+    activation: Option<f64>,
 }
 
 /// Selection of a text control, in UTF-16 code units.
@@ -365,12 +371,35 @@ fn splice(value: &str, start: usize, end: usize, text: &str) -> String {
 /// browser frame, from the persona).
 fn screen_point(w: &Window, x: f64, y: f64) -> (f64, f64) {
     let s = super::window::screen_dims(w);
+    let (wx, wy) = super::window::window_position(w);
     let border = f64::from(s.outer_width.saturating_sub(s.inner_width)) / 2.0;
     let top = f64::from(s.outer_height.saturating_sub(s.inner_height)) - border;
-    (
-        f64::from(s.avail_left) + border + x,
-        f64::from(s.avail_top) + top + y,
-    )
+    (f64::from(wx) + border + x, f64::from(wy) + top + y)
+}
+
+/// Transient user activation lasts 5 s in Chrome (`kActivationLifespan`).
+const ACTIVATION_MS: f64 = 5000.0;
+
+/// Note a trusted activation-triggering input (mousedown, keydown other
+/// than Escape and modifiers).
+fn activate_user(w: &Window) {
+    w.input.borrow_mut().activation = Some(w.clock.now());
+}
+
+/// The window has transient user activation.
+pub(crate) fn has_transient_activation(w: &Window) -> bool {
+    w.input
+        .borrow()
+        .activation
+        .is_some_and(|t| w.clock.now() - t <= ACTIVATION_MS)
+}
+
+/// Use up transient activation (`navigator.share()`, popups). True if
+/// there was some.
+pub(crate) fn consume_activation(w: &Window) -> bool {
+    let had = has_transient_activation(w);
+    w.input.borrow_mut().activation = None;
+    had
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -428,6 +457,7 @@ fn mouse_extra(
             primary: true,
         }),
         wheel: None,
+        wheel_delta: [0.0, 0.0],
     }))
 }
 
@@ -566,6 +596,7 @@ fn mouse_press(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
         .buttons
         .unwrap_or(w.input.borrow().buttons | ev.button.bit());
     w.input.borrow_mut().buttons = buttons;
+    activate_user(w);
     let t = node_ref(0, target);
     let b = ev.button.index();
     let detail = ev.click_count as i32;
@@ -670,6 +701,14 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     }
 }
 
+/// `wheelDelta` per CSS px of trusted wheels, from the persona's wheel
+/// model (1.2 without a persona: Chrome on Windows at 100%).
+pub(crate) fn wheel_ratio(w: &Window) -> f64 {
+    w.profile
+        .as_deref()
+        .map_or(1.2, |p| p.wheel().wheel_delta_per_px)
+}
+
 fn mouse_wheel(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     let Some(target) = hit(w, ev.x, ev.y) else {
         return;
@@ -679,6 +718,10 @@ fn mouse_wheel(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     let mut extra = mouse_extra(w, ev.x, ev.y, 0, buttons, ev.modifiers, 0, None, false);
     if let EventExtra::Mouse(m) = &mut extra {
         m.wheel = Some([ev.delta_x, ev.delta_y, 0.0, 0.0]);
+        // Chrome: wheelDelta = notches x 120 (`kTickMultiplier`), i.e.
+        // -delta x the OS's ratio (Windows 1.2, Linux 1, macOS 3).
+        let ratio = wheel_ratio(w);
+        m.wheel_delta = [(-ev.delta_x * ratio).round(), (-ev.delta_y * ratio).round()];
     }
     if fire(
         js,
@@ -1048,6 +1091,12 @@ pub fn dispatch_key(js: &mut dyn Js, w: &Rc<Window>, ev: &KeyInput) {
     };
     match ev.kind {
         KeyKind::Down | KeyKind::RawDown => {
+            if !matches!(
+                ev.key.as_str(),
+                "Escape" | "Shift" | "Control" | "Alt" | "Meta" | "CapsLock" | "AltGraph"
+            ) {
+                activate_user(w);
+            }
             let ok = fire(
                 js,
                 w,
@@ -1230,8 +1279,17 @@ fn implicit_submit(js: &mut dyn Js, w: &Rc<Window>, field: NodeId) {
 }
 
 /// Non-text keys: deletion, caret movement, Tab, select all.
+/// The shortcut modifier of the persona's OS: Meta (Cmd) on macOS, Ctrl
+/// elsewhere.
+pub(crate) fn primary_modifier(w: &Window) -> u32 {
+    let mac = w
+        .profile
+        .as_deref()
+        .is_some_and(|p| p.os_kind() == lb_persona::OsKind::MacOs);
+    if mac { MOD_META } else { MOD_CTRL }
+}
+
 fn key_default(js: &mut dyn Js, w: &Rc<Window>, ev: &KeyInput) {
-    let ctrl = ev.modifiers & (MOD_CTRL | MOD_META) != 0;
     let shift = ev.modifiers & MOD_SHIFT != 0;
     let f = w.focused.get().filter(|&f| connected(w, f));
     match ev.key.as_str() {
@@ -1257,7 +1315,8 @@ fn key_default(js: &mut dyn Js, w: &Rc<Window>, ev: &KeyInput) {
                 }
             }
         }
-        "a" | "A" if ctrl => run_command(js, w, "selectAll"),
+        // Select all: Cmd+A on macOS, Ctrl+A elsewhere.
+        "a" | "A" if ev.modifiers & primary_modifier(w) != 0 => run_command(js, w, "selectAll"),
         "Backspace" | "Delete" => {
             let Some(f) = f else { return };
             let back = ev.key == "Backspace";
@@ -1645,6 +1704,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                         detail,
                         pointer: None,
                         wheel: None,
+                        wheel_delta: [0.0, 0.0],
                     };
                     if iface == "PointerEvent" {
                         m.pointer = Some(PointerData {
@@ -1657,12 +1717,21 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                         });
                     }
                     if iface == "WheelEvent" {
+                        let dx = dict_num(cx, &d, "deltaX")?;
+                        let dy = dict_num(cx, &d, "deltaY")?;
                         m.wheel = Some([
-                            dict_num(cx, &d, "deltaX")?,
-                            dict_num(cx, &d, "deltaY")?,
+                            dx,
+                            dy,
                             dict_num(cx, &d, "deltaZ")?,
                             dict_num(cx, &d, "deltaMode")?,
                         ]);
+                        // Blink: the init's wheelDeltaX/Y, else -delta.
+                        let wx = dict_num(cx, &d, "wheelDeltaX")?.trunc();
+                        let wy = dict_num(cx, &d, "wheelDeltaY")?.trunc();
+                        m.wheel_delta = [
+                            if wx != 0.0 { wx } else { -dx },
+                            if wy != 0.0 { wy } else { -dy },
+                        ];
                     }
                     EventExtra::Mouse(Box::new(m))
                 }
@@ -1858,17 +1927,18 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             cx.ret(mouse_of(&e).wheel.map_or(0.0, |d| d[i]))
         });
     }
+    // `long` attributes: truncated toward zero like Blink's int cast.
     getter(reg, rt, "WheelEvent", "wheelDeltaX", |cx, w| {
         let e = this_event_data(cx, w)?;
-        cx.ret(mouse_of(&e).wheel.map_or(0.0, |d| -d[0] * 1.2).round())
+        cx.ret(mouse_of(&e).wheel_delta[0].trunc())
     });
     getter(reg, rt, "WheelEvent", "wheelDeltaY", |cx, w| {
         let e = this_event_data(cx, w)?;
-        cx.ret(mouse_of(&e).wheel.map_or(0.0, |d| -d[1] * 1.2).round())
+        cx.ret(mouse_of(&e).wheel_delta[1].trunc())
     });
     getter(reg, rt, "WheelEvent", "wheelDelta", |cx, w| {
         let e = this_event_data(cx, w)?;
-        cx.ret(mouse_of(&e).wheel.map_or(0.0, |d| -d[1] * 1.2).round())
+        cx.ret(mouse_of(&e).wheel_delta[1].trunc())
     });
 
     // KeyboardEvent

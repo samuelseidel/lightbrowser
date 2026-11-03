@@ -1320,8 +1320,121 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
         window_props,
         window_late_start,
         window_secure_only,
+        os_gated: Vec::new(),
         coverage: cov,
     })
+}
+
+/// Merge the OS overlay (`tests/fixtures/chrome_153_os_overlay.json`) into
+/// a fixture: members Chrome 153 has on Windows and macOS but the Linux
+/// capture lacks. `secure` is true for the secure-context fixture; the
+/// non-secure one only gets entries marked `"secure": false`. Each entry is
+/// inserted after the property its `after` names, in the order given.
+pub fn apply_overlay(fixture: &mut Value, overlay: &Value, secure: bool) -> Result<(), String> {
+    let wanted = |e: &Value| secure || e["secure"].as_bool() == Some(false);
+    let insert = |list: &mut Vec<Value>, e: &Value, what: &str| -> Result<(), String> {
+        let after = e["after"].as_str().ok_or("overlay: entry without after")?;
+        let at = list
+            .iter()
+            .position(|p| p.get(0).and_then(Value::as_str) == Some(after))
+            .ok_or_else(|| format!("overlay: {what} has no {after}"))?;
+        let props = e["props"]
+            .as_array()
+            .ok_or("overlay: entry without props")?;
+        for (k, p) in props.iter().enumerate() {
+            let name = p.get(0).and_then(Value::as_str).unwrap_or_default();
+            if list
+                .iter()
+                .any(|q| q.get(0).and_then(Value::as_str) == Some(name))
+            {
+                return Err(format!("overlay: {what} already has {name}"));
+            }
+            list.insert(at + 1 + k, p.clone());
+        }
+        Ok(())
+    };
+    for e in overlay["members"].as_array().into_iter().flatten() {
+        if !wanted(e) {
+            continue;
+        }
+        let iface = e["interface"]
+            .as_str()
+            .ok_or("overlay: member without interface")?;
+        let list = fixture["interfaces"][iface]["proto"]
+            .as_array_mut()
+            .ok_or_else(|| format!("overlay: fixture has no {iface}"))?;
+        insert(list, e, iface)?;
+    }
+    for e in overlay["windowProps"].as_array().into_iter().flatten() {
+        if !wanted(e) {
+            continue;
+        }
+        let list = fixture["windowProps"]
+            .as_array_mut()
+            .ok_or("overlay: fixture has no windowProps")?;
+        insert(list, e, "windowProps")?;
+    }
+    for (name, f) in overlay["interfaces"].as_object().into_iter().flatten() {
+        if !wanted(f) {
+            continue;
+        }
+        let map = fixture["interfaces"]
+            .as_object_mut()
+            .ok_or("overlay: fixture has no interfaces")?;
+        if map.contains_key(name) {
+            return Err(format!("overlay: fixture already has interface {name}"));
+        }
+        let mut f = f.clone();
+        if let Some(o) = f.as_object_mut() {
+            o.remove("secure");
+        }
+        map.insert(name.clone(), f);
+    }
+    Ok(())
+}
+
+/// The gated members of the overlay, `(gate, owner, name)`, checked
+/// against the built table: every interface the overlay adds (as a window
+/// property), its prototype members and statics, and each member entry.
+pub fn overlay_gates(
+    overlay: &Value,
+    table: &Table,
+) -> Result<Vec<(String, String, String)>, String> {
+    let mut out = Vec::new();
+    for e in overlay["members"].as_array().into_iter().flatten() {
+        let gate = e["gate"].as_str().ok_or("overlay: member without gate")?;
+        let iface = e["interface"].as_str().unwrap_or_default();
+        let i = table
+            .interface(iface)
+            .ok_or_else(|| format!("overlay: table has no {iface}"))?;
+        for p in e["props"].as_array().into_iter().flatten() {
+            let name = p.get(0).and_then(Value::as_str).unwrap_or_default();
+            let found = i
+                .proto_order
+                .iter()
+                .chain(&i.static_order)
+                .any(|s| i.slot_name(*s) == name);
+            if !found {
+                return Err(format!("overlay: {iface}.{name} did not reach the table"));
+            }
+            out.push((gate.to_owned(), iface.to_owned(), name.to_owned()));
+        }
+    }
+    for e in overlay["windowProps"].as_array().into_iter().flatten() {
+        let gate = e["gate"]
+            .as_str()
+            .ok_or("overlay: window prop without gate")?;
+        for p in e["props"].as_array().into_iter().flatten() {
+            let name = p.get(0).and_then(Value::as_str).unwrap_or_default();
+            if !table.window_props.iter().any(|g| g.name() == name) {
+                return Err(format!(
+                    "overlay: window prop {name} did not reach the table"
+                ));
+            }
+            out.push((gate.to_owned(), "Window".to_owned(), name.to_owned()));
+        }
+    }
+    Ok(out)
 }
 
 /// Flag what a non-secure capture lacks.

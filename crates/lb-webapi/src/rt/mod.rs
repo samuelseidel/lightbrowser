@@ -48,9 +48,11 @@ mod dom;
 mod events;
 mod fonts;
 pub mod frames;
+mod gpu;
 mod image;
 pub mod input;
 mod matrix;
+mod media;
 mod misc;
 mod navigator;
 mod net;
@@ -324,6 +326,8 @@ impl Runtime {
         audio::register(reg, &rt);
         fonts::register(reg, &rt);
         navigator::register(reg, &rt);
+        media::register(reg, &rt);
+        gpu::register(reg, &rt);
         frames::register(reg, &rt);
         table::register(reg, &rt);
         inherit_redeclared(reg);
@@ -778,6 +782,7 @@ impl Window {
                 world: None,
                 module_loader: Some(loader),
                 insecure,
+                os_apis: self.profile.as_deref().map(PersonaProfile::os_apis),
             },
         )?;
         self.realm.set(realm);
@@ -802,6 +807,7 @@ impl Window {
                 world: Some(lb_js::World::Isolated(name.to_owned())),
                 module_loader: None,
                 insecure: !is_secure_url(&frames::effective_url(self)),
+                os_apis: self.profile.as_deref().map(PersonaProfile::os_apis),
             },
         )?;
         self.rt.attach(realm, self.clone());

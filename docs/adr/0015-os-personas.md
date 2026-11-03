@@ -80,6 +80,23 @@ capped at 8, one wheel notch is 120 px).
     an inconsistent persona (Segoe UI on Linux) is detectable, as it would
     be on a real machine.
 
+- **Web APIs and input per OS (WP-D).**
+  - The interface set is the Linux capture plus an overlay
+    (`tests/fixtures/chrome_153_os_overlay.json`) of what Chrome has on
+    Windows and macOS only: `navigator.share`/`canShare` (Web Share),
+    `navigator.bluetooth` and the `Bluetooth*` interfaces (Web Bluetooth).
+    `lb-webidl-gen` puts them in Chrome's order and lists them as
+    `OS_GATED`; the snapshot keeps them (no persona data). Creating a realm
+    deletes the members of each gate the persona's `os_apis()` turns off.
+    Deleting keeps the order of everything else, so a Linux realm equals
+    the Linux capture.
+  - Media type answers come from Chrome's codec tables (the Linux capture
+    is the unit test) and `codecs()`; `navigator.gpu` from `webgpu()`;
+    `AudioContext` from `audio_defaults()`; `screenX/Y` from
+    `window_position()`; trusted `wheelDelta` from `wheel()`, which also
+    sets the detent `LightBrowser.human*` scrolls in. WebGL limits default
+    per ANGLE backend. Select-all uses the OS's shortcut modifier.
+
 ## Alternatives considered
 
 - **Per-OS persona types or crates.** More code, and every layer would
@@ -90,13 +107,21 @@ capped at 8, one wheel notch is 120 px).
   Chrome uses DejaVu Sans Mono).
 - **Required schema fields.** Would break the existing personas and v1
   files for no gain; defaults cover the common case.
+- **One generated table per OS, or adding gated members at realm setup.**
+  Three tables would triple the generated data and the snapshot; adding
+  members per realm cannot put them in Chrome's place in the prototype.
+  One table with every member and deletion per realm keeps one snapshot
+  and the order.
 
 ## Consequences
 
-- WP-C (layout, fonts, scrollbars) reads these accessors; WP-D (web APIs,
-  input) and WP-E (Accept-CH) still have to. Until they land, the
-  reference personas still fire the bench rules listed in
-  `docs/ROADMAP.md` ("M7 status: WP-C").
+- WP-C (layout, fonts, scrollbars) and WP-D (web APIs, input) read these
+  accessors; WP-E (Accept-CH) still has to. Until it lands every reference
+  persona fires `ch_high_entropy` (fp 40, `docs/ROADMAP.md`, "M7 status:
+  WP-D").
+- Realm setup runs one short deletion script for personas whose OS lacks a
+  gated API (Linux): realm creation stays at about 3.2 ms first, 2.5 ms
+  next.
 - Pages taller than the viewport (and overflowing `overflow: auto` boxes)
   cost a second taffy pass when scrollbars take space (Windows, Linux).
 - Windows and macOS defaults are medium confidence until internal captures

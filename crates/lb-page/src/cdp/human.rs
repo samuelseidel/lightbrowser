@@ -56,19 +56,20 @@ pub(crate) struct HumanState {
 pub fn behavior_for(persona: &PersonaProfile) -> (BehaviorProfile, u64) {
     let b = &persona.behavior;
     let profile = BehaviorProfile::preset(&b.profile).unwrap_or_else(BehaviorProfile::casual_user);
-    let device =
-        b.pointing_device
-            .as_deref()
-            .unwrap_or(if persona.os.name.eq_ignore_ascii_case("macos") {
-                "trackpad"
-            } else {
-                "mouse"
-            });
+    let mac = persona.os_kind() == lb_persona::OsKind::MacOs;
+    let device = b
+        .pointing_device
+        .as_deref()
+        .unwrap_or(if mac { "trackpad" } else { "mouse" });
     let mut profile = profile.with_scroll_type(if device == "trackpad" {
         ScrollType::Trackpad
     } else {
         ScrollType::Wheel
     });
+    // The OS's wheel detent (Windows 100 px, Linux 120, macOS 40 with
+    // acceleration); `wheelDelta` follows from it in lb-webapi.
+    profile.scroll.notch_px = persona.wheel().px_per_notch;
+    profile.scroll.accelerate = mac;
     let seed = b
         .seed
         .as_deref()

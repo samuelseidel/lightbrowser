@@ -86,7 +86,7 @@ from the command line:
     --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json   # exit 1 on mismatch
 ```
 
-Other new suites: `cargo test -p lb-behavior` (65: determinism per seed,
+Other new suites: `cargo test -p lb-behavior` (66: determinism per seed,
 Fitts scaling, bell-shaped speed, click scatter, keystroke statistics,
 wheel and trackpad totals, CDP conversion), `cargo test -p lb-js --test
 snapshot` and `cargo test -p lb-webapi --test snapshot` (snapshot and
@@ -113,12 +113,18 @@ python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (33)
 ```
 
 Since M7 the bench also has OS rules (`scoring.py`, "OS rules (M7)" in its
-README). With them the eight Chrome reference personas score fp 64 (Linux)
-and 78.6 (Windows, macOS) after WP-C, until WP-D and WP-E land; see "M7
-status" in `docs/ROADMAP.md`. Rendering per OS is checked without the
-bench by `cargo test -p lb-layout --test os` (scrollbars for every
-reference persona; Linux font widths, scrollbars and emoji against the
-capture in `tests/fixtures/os/`). To serve a
+README). With them the eight Chrome reference personas score fp 40 after
+WP-D (only `ch_high_entropy`, until WP-E lands); see "M7 status" in
+`docs/ROADMAP.md`. Rendering per OS is checked without the bench by `cargo
+test -p lb-layout --test os` (scrollbars for every reference persona; Linux
+font widths, scrollbars and emoji against the capture in
+`tests/fixtures/os/`); web APIs and input per OS by `cargo test -p lb-page
+--test os_apis` (Web Share and Web Bluetooth only on Windows/macOS, media
+answers, keyboard, WebGPU, `screenX/Y`, audio) and `--test human`
+(`wheel_and_shortcuts_follow_the_os`), and the media tables by `cargo test
+-p lb-webapi media` (every captured Linux answer). The OS overlay of
+Windows/macOS-only members is `tests/fixtures/chrome_153_os_overlay.json`
+(not captured; see its `_meta`). To serve a
 persona that breaks the consistency rules (adversarial bench tests only),
 use the hidden `lightbrowser serve --unchecked-persona FILE`; the M7
 adversarial personas and the bench rule each one fires are listed in

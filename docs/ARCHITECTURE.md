@@ -154,11 +154,18 @@ persona's own value or the OS default:
 | `font_defaults` | Times New Roman, Arial, Consolas, Segoe UI / Times, Helvetica, Courier, SF / Times New Roman, Arial, DejaVu Sans Mono or Noto Sans Mono, the GTK font; emoji and system font keywords | lb-css (`MediaEnv::fonts`: initial family, `font: caption` ...), lb-layout and lb-paint (generic keywords, emoji font) |
 | `font_aliases` | Blink's alternates (Arial and Helvetica, Times and Times New Roman, Courier and Courier New); Linux adds fontconfig's metric aliases (Liberation, Carlito, Caladea) | lb-layout, lb-paint (`FontAvailability::for_persona`) |
 | `scrollbar_width` | 17 / 0 / 15 px | lb-css (`MediaEnv::scrollbar_width`), lb-layout |
-| `window_position` | work-area origin; Wayland 0,0 | lb-webapi (WP-D) |
-| `wheel` | 100 px, ratio 1.2 / 40 px, ratio 3 / 120 px, ratio 1 | lb-webapi, lb-behavior (WP-D) |
-| `audio_defaults` | 48 kHz / 44.1 kHz / 48 kHz; base latency 0.01 s; output latency twice the base | lb-webapi (WP-D) |
-| `webgpu`, `codecs`, `os_apis` | from the GPU / same / no adapter, no HEVC, no `share` or `bluetooth` | lb-webapi (WP-D) |
+| `window_position` | work-area origin; Wayland 0,0 | lb-webapi (`screenX/Y`, screen coordinates of trusted input) |
+| `wheel` | 100 px, ratio 1.2 / 40 px, ratio 3 / 120 px, ratio 1 | lb-webapi (trusted `wheelDelta`), lb-page `cdp/human.rs` (detent size; macOS acceleration in lb-behavior) |
+| `audio_defaults` | 48 kHz / 44.1 kHz / 48 kHz; base latency 0.01 s; output latency twice the base | lb-webapi (`AudioContext`) |
+| `webgpu`, `codecs`, `os_apis` | from the GPU / same / no adapter, no HEVC, no `share` or `bluetooth` | lb-webapi (`navigator.gpu`, `rt/media.rs`, realm setup deletes the `Table::os_gated` members a gate turns off) |
 | `high_entropy_hints` | from `client_hints`, `formFactors` `["Desktop"]` | lb-net, lb-page (WP-E) |
+
+The interface set is the Linux capture plus an OS overlay
+(`tests/fixtures/chrome_153_os_overlay.json`: Web Share, Web Bluetooth),
+all in the persona-free snapshot; a realm deletes what its persona's OS
+lacks, so member order stays Chrome's. Select-all is Cmd+A on macOS and
+Ctrl+A elsewhere; WebGL limits default per ANGLE backend (D3D11, Metal,
+OpenGL on Mesa or NVIDIA, Vulkan).
 
 Linux defaults were captured from the local Chrome for Testing 153;
 Windows and macOS defaults are the M7 surface reference (not captured).
@@ -213,7 +220,8 @@ timing.
 | H2 SETTINGS, WINDOW_UPDATE, PRIORITY, pseudo-header order | lb-net (h2 fork) | TLS profile `http2_*` |
 | Header order and name case per destination, Accept, Accept-Language, Sec-CH-UA*, favicon request | lb-net (`header_profile`, `h1`), lb-page | `profiles/headers/<family>_*.json` plus persona `browser`, `locale`, `client_hints` |
 | `navigator.*`, `userAgentData`, plugins, mimeTypes | lb-webapi + generated bindings | persona `browser`, `hardware` |
-| Interface set, prototype/property order, `toString` | lb-webidl-gen | family IDL set |
+| Interface set, prototype/property order, `toString` | lb-webidl-gen | family IDL set, captured surface fixtures plus the OS overlay; OS-gated members removed per realm from persona `os_apis()` |
+| Media types (`canPlayType`, `isTypeSupported`, `mediaCapabilities`), `navigator.gpu`, `navigator.keyboard` | lb-webapi (`rt/media.rs`, `rt/gpu.rs`, `rt/navigator.rs`) | Chrome codec tables (Linux captured) + persona `codecs()`, `webgpu()`; US keyboard layout |
 | Engine quirks (errors, stacks, Math) | lb-js | real engine |
 | `screen`, `devicePixelRatio`, window sizes, media queries | lb-webapi, lb-css | persona `screen` |
 | Canvas 2D, image decode/encode | lb-paint, lb-webapi | real raster + `canvas_seed` |
@@ -228,7 +236,7 @@ timing.
 | Permissions, battery, media devices, speech voices | lb-webapi | persona |
 | `performance.now` resolution | lb-webapi (`coarse_time`) | Chrome 100 µs with Blink's jittered tick / Firefox 1 ms (RFP off: 20 µs) |
 | Automation tells (`webdriver`, CDP leaks) | lb-cdp, lb-page | never exposed to the page world |
-| Mouse/keyboard dynamics | lb-behavior, replayed by lb-page (`cdp/human.rs`) | persona `behavior` (preset, seed, pointing device) |
+| Mouse/keyboard dynamics | lb-behavior, replayed by lb-page (`cdp/human.rs`) | persona `behavior` (preset, seed, pointing device) and `wheel()` (detent, `wheelDelta` ratio) |
 
 ## Network fingerprint testing (`lb-fptest`)
 

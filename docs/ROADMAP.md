@@ -11,7 +11,7 @@ Each milestone ends with something we can run and measure.
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
-| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015) and WP-C (scrollbars, fonts, aliases, emoji per OS) done; WP-D and WP-E open. See "M7 status" |
+| **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015), WP-C (scrollbars, fonts, aliases, emoji per OS) and WP-D (OS-gated APIs, codecs, WebGPU, keyboard, WebGL backends, audio, window position, wheel and shortcuts per OS) done; WP-E open. See "M7 status" |
 | **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 39.63 MB, the < 40 MB budget is met (ADR 0013); `bench/` runner done; Lightpanda compared (user-approved nightly, loopback only): 4 of 6 checks pass, `fetch` CPU and CDP peak RSS still lose; service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
@@ -21,7 +21,7 @@ Each milestone ends with something we can run and measure.
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
-| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona | WP-D and WP-E; with the OS rules T-010 scores fp 64 (Linux) and 78.6 (Windows, macOS), see "M7 status: WP-C" |
+| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS | WP-E; with the OS rules T-010 scores fp 40 for every reference persona (`ch_high_entropy` only), see "M7 status: WP-D" |
 | M6 Performance | Snapshot, memory, binary size (39.63 MB, < 40 MB met), `bench/` runner, screenshots, Lightpanda comparison (wall time wins in both modes; 4 of 6 checks pass) done | `fetch` CPU and CDP peak RSS vs Lightpanda, service workers |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
@@ -29,8 +29,8 @@ Budgets (ARCHITECTURE.md), with the evidence for each:
 | Budget | Result | Evidence |
 |---|---|---|
 | Idle RSS < 15 MB | Met: 10.2 MB (9.9-10.3 MB in earlier runs) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 40 MB (< 56 MB in between) | Met: 39.63 MB (39,628,664 bytes), 0.37 MB under (39.17 MB before the lazily paged ICU data, +0.43 MB) | "M6 status: binary size, third pass", "M6 status: Lightpanda comparison" |
-| Realm creation < 5 ms | Met: 3.13 ms first, 2.47 ms next (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
+| Binary < 40 MB (< 56 MB in between) | Met: 39.80 MB (39,800,696 bytes) after M7 WP-D, 0.20 MB under; 39.63 MB at the end of M6 | "M6 status: binary size, third pass", "M6 status: Lightpanda comparison" |
+| Realm creation < 5 ms | Met: 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
 | Wall time, peak RSS and CPU <= Lightpanda | Partly met (Lightpanda 1.1.0-nightly.11582): wall time `fetch` 2.63 vs 3.50 s and CDP 1.32 vs 5.15 s, peak RSS `fetch` 43.8 vs 44.9 MB, CPU CDP 0.99 vs 1.06 s pass; **CPU `fetch` 2.51 vs 1.37 s and peak RSS CDP 42.2 vs 31.4 MB fail** | "M6 status: Lightpanda comparison" |
 
@@ -1512,6 +1512,113 @@ fonts (no local files; derived entries stay); content that overflows only
 because the viewport scrollbar narrowed it gets no second scrollbar pass;
 horizontal viewport scrollbars are not modelled; screenshots do not draw
 scrollbars.
+
+## M7 status: WP-D, web APIs and input per OS (2026-11-03)
+
+**What changed (ADR 0015).**
+
+- **OS-gated members.** `tests/fixtures/chrome_153_os_overlay.json` adds
+  what Chrome 153 has on Windows and macOS only: `navigator.share`,
+  `canShare`, `bluetooth` and the 8 `Bluetooth*` interfaces
+  (`BluetoothUUID` is not `[SecureContext]`). `lb-webidl-gen` merges it into
+  both fixtures, in Chrome's order (not captured: attributes in IDL order,
+  operations alphabetical, the secure-only group alphabetical, the main
+  group reverse alphabetical, as in the captured Linux fixture), and emits
+  the members as `OS_GATED`. The V8 snapshot keeps them all (persona-free);
+  `WindowRealmOptions::os_apis` deletes the gates the persona's `os_apis()`
+  turns off when a realm (main or isolated world) is created, which keeps
+  the order of the rest. A Linux realm equals the Linux capture exactly.
+  `share()` rejects `TypeError` for empty data, `NotAllowedError` without
+  transient user activation (5 s after a trusted mousedown or keydown, now
+  tracked) and `AbortError` (share sheet dismissed) with it; `canShare()`
+  checks the data. `bluetooth.getAvailability()` resolves `true`;
+  `requestDevice()` rejects `SecurityError` without activation, else
+  `TypeError` or `NotFoundError` (chooser cancelled).
+- **Media** (`rt/media.rs`). `canPlayType`, `MediaSource.isTypeSupported`
+  and `MediaRecorder.isTypeSupported` from Chrome's container and codec
+  tables: all 35 + 35 + 16 answers of the Linux capture match (a unit test
+  reads the capture). HEVC needs `codecs().hevc` (Windows/macOS with a
+  hardware GPU). `navigator.mediaCapabilities.decodingInfo/encodingInfo`
+  validate like Blink and resolve `{powerEfficient, smooth, supported,
+  configuration, keySystemAccess}`, `powerEfficient` from hardware decode
+  (Linux all false, as captured).
+- **`navigator.keyboard`**: `getLayoutMap()` resolves a US map of 48 keys
+  (captured size); `lock()` resolves.
+- **`navigator.gpu`** (`rt/gpu.rs`): `requestAdapter()` resolves `null`
+  without a persona adapter (Linux, captured) or a `GPUAdapter` whose
+  `info` has the persona's vendor and architecture; `features`, `limits`
+  and `wgslLanguageFeatures` are the surface reference (not captured);
+  `getPreferredCanvasFormat()` is `rgba8unorm` on Linux (captured),
+  `bgra8unorm` elsewhere. `requestDevice()` rejects `OperationError`.
+- **WebGL backends.** D3D11 / Metal / OpenGL on Mesa / OpenGL on NVIDIA /
+  Vulkan, each with its own default `MAX_VIEWPORT_DIMS`, line width, point
+  size and `MAX_VERTEX_UNIFORM_VECTORS` (persona values still win).
+- **Audio.** `AudioContext` rate, `baseLatency`, `outputLatency` and
+  channel count come from `audio_defaults()` (Linux now 48 kHz).
+- **Window position.** `screenX/Y`, `screenLeft/Top` and the screen
+  coordinates of trusted input come from `window_position()` (Ubuntu
+  64,32; Wayland 0,0; macOS below the menu bar).
+- **Wheel.** Trusted `wheelDelta` is `-delta x wheel().wheel_delta_per_px`
+  (Windows 1.2, Linux 1, macOS 3); script-made `WheelEvent`s use the init's
+  `wheelDeltaX/Y` or `-delta` (Blink). `LightBrowser.human*` scrolls in the
+  OS's detent (Windows 100 px, Linux 120, macOS 40) and lb-behavior has a
+  macOS acceleration model for mouse wheels (`ScrollProfile::accelerate`;
+  macOS personas default to a trackpad).
+- **Shortcuts.** Select-all is Cmd+A on macOS personas, Ctrl+A elsewhere.
+- **Smaller.** Windows lists a "communications" audio device after
+  "default" once microphone permission is granted. `getHighEntropyValues`
+  `formFactors` and `Emulation.setUserAgentOverride` (`formFactors`,
+  `wow64`) follow `high_entropy_hints()`.
+- **fingerprint-report** adds `window.screenX/Y`, `layout.scrollbarWidth`,
+  `fonts.generic.*` (keyword width equals the default family's),
+  `navigator.share/canShare/bluetooth`, `window.Bluetooth`, `media.hevc`,
+  `media.h264PowerEfficient`, `media.av1PowerEfficient`, `webgpu.adapter`,
+  `highEntropy.formFactors`, `speechSynthesis.voiceCount` and the audio
+  defaults including `outputLatency`.
+
+**Checks.** New tests: `lb-webapi` `install::os_gated_members_follow_os_apis`,
+`media::linux_capture_matches`, `media::hevc_follows_hardware_decode`,
+`gpu::limits_cover_the_interface`; `lb-webidl-gen` `os_overlay_is_gated`
+(the generator tests now compare against the overlaid fixture);
+`lb-behavior` `accelerated_wheel_grows_within_a_flick`; `lb-page`
+`os_apis` (Windows 10, Ubuntu, Fedora and macOS 15 on a loopback page) and
+`human::wheel_and_shortcuts_follow_the_os` (wheel detents and ratios on
+Windows, Ubuntu and macOS; select-all modifier); `lb-cdp`
+`formFactors`/`wow64` overrides. Results: `lb-webapi` 26 + 11 + 4,
+`lb-webidl-gen` 1 + 7, `lb-behavior` 66 + 1 + 1, `lb-cdp` 13 + 10,
+`lb-page` (lib 9, `canvas` 3, `cdp_host` 2, `connections` 1,
+`fingerprint_surfaces` 2, `human` 3, `navigator` 1, `os_apis` 1, `pages`
+19, `tables` 3, `wpt`), `lightbrowser` 6, all pass; WPT subset 2552/2788
+(unchanged); Playwright 20/20; detect-bench unittest 33 OK; `sdk/python` 93
+pass, 4 skipped. `lb-webidl-gen --check` clean. Clippy `-D warnings`
+(workspace and firefox) and `fmt` clean; firefox tests 15 pass, 2 ignored.
+`fingerprint-report`: 0 mismatch, 0 unimplemented for all 8 references
+(130-133 ok). Release: stripped binary 39,800,696 bytes (< 40,000,000;
++77,824 since WP-C: media, GPU, keyboard and Bluetooth code and 8 more
+interfaces; 199,304 bytes left); `realm_bench` with Linux realms (the gate
+deletion runs): first realm 3.17 ms, next 2.45 ms with the snapshot (976 of
+976 templates restored).
+
+**Bench** (debug build, fresh `serve` per run, T-010, loopback, own seeds):
+
+| Persona | fp (Playwright input) | beh (`--input human`) | OS rules firing |
+|---|---|---|---|
+| Windows 10, Windows 11 (both) | 40 | 0 | `ch_high_entropy` (WP-E) |
+| macOS 14, 15, 26 | 40 | 0 | `ch_high_entropy` |
+| Ubuntu 24.04, Fedora 42 | 40 | 0 | `ch_high_entropy` |
+
+`api_throws`, `os_api_surface` and `os_bluetooth` no longer fire;
+`codecs_os`, `screen_os` and `wheel_os` stay quiet at their target weights
+(15, 15, 20) for every run, Playwright and human input. All 8 references
+pass `beh<=30` with human input (beh 0). The adversarial personas fire the
+same rules as after WP-C (9 of 11).
+
+**Not done in WP-D.** Windows and macOS answers (overlay order, codecs,
+WebGPU limits and features, wheel ratios, select-all, communications
+device) are the surface reference, not captures. `GPUAdapter.requestDevice`
+cannot create a device. `AudioContext.resume()` without a user gesture
+still starts the context (the Linux capture stays `suspended`). Files in
+`canShare`/`share` are counted, not type-checked.
 
 ## Workspace check (2026-11-03)
 

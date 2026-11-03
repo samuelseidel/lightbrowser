@@ -25,6 +25,20 @@ fn fixture() -> Value {
     fixture_of(true)
 }
 
+/// The fixtures were captured on Linux: no Web Share, no Web Bluetooth.
+const LINUX_APIS: lb_persona::OsApis = lb_persona::OsApis {
+    share: false,
+    bluetooth: false,
+};
+
+/// An OS-gated window property (`Table::os_gated`).
+fn gated_global(b: &Bindings, name: &str) -> bool {
+    b.table()
+        .os_gated
+        .iter()
+        .any(|g| g.owner == "Window" && g.name == name)
+}
+
 fn setup_with(reg: &Registry, insecure: bool) -> (Engine, Bindings, RealmId) {
     let mut e = engine();
     let b = Bindings::define(&mut e, reg).unwrap();
@@ -33,6 +47,7 @@ fn setup_with(reg: &Registry, insecure: bool) -> (Engine, Bindings, RealmId) {
             &mut e,
             WindowRealmOptions {
                 insecure,
+                os_apis: Some(LINUX_APIS),
                 ..Default::default()
             },
         )
@@ -285,7 +300,11 @@ fn descriptors_match_fixture_sample() {
     let (mut e, b, r) = setup(&Registry::new());
     let mut all = Vec::new();
     for d in b.table().interfaces.iter().filter(|d| d.from_fixture) {
-        for p in fx["interfaces"][d.name]["proto"].as_array().unwrap() {
+        for p in fx["interfaces"][d.name]["proto"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
             all.push((
                 d.name,
                 p[0].as_str().unwrap().to_owned(),
@@ -394,6 +413,7 @@ fn window_props_match(secure: bool) {
         })
         .map(|p| p.name())
         .filter(|n| secure || !b.table().window_secure_only.contains(n))
+        .filter(|n| !gated_global(&b, n))
         .collect();
     let got = eval_str(&mut e, r, "Object.getOwnPropertyNames(globalThis).join()");
     let got: Vec<&str> = got.split(',').filter(|n| ours.contains(n)).collect();
@@ -441,6 +461,81 @@ fn window_props_match(secure: bool) {
         );
         assert_eq!(got, code, "{name}");
     }
+}
+
+/// The OS overlay: Windows/macOS members sit where Chrome puts them and
+/// realm setup deletes the gates `os_apis` turns off, keeping the order of
+/// the rest.
+#[test]
+fn os_gated_members_follow_os_apis() {
+    let reg = Registry::new();
+    let mut e = engine();
+    let b = Bindings::define(&mut e, &reg).unwrap();
+    let realm = |e: &mut Engine, insecure, apis| {
+        b.new_window_realm(
+            e,
+            WindowRealmOptions {
+                insecure,
+                os_apis: apis,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+    let nav = "Object.getOwnPropertyNames(Navigator.prototype).join()";
+    let win = "Object.getOwnPropertyNames(globalThis).join()";
+    let fx = fixture();
+    let linux_nav = names(&fx["interfaces"]["Navigator"]["proto"]).join(",");
+    let all = lb_persona::OsApis {
+        share: true,
+        bluetooth: true,
+    };
+
+    let r = realm(&mut e, false, Some(all));
+    let got = eval_str(&mut e, r, nav);
+    let want = linux_nav
+        .replace("protectedAudience,", "protectedAudience,bluetooth,")
+        .replace(
+            "canLoadAdAuctionFencedFrame,",
+            "canLoadAdAuctionFencedFrame,canShare,share,",
+        );
+    assert_eq!(got, want);
+    let g = eval_str(&mut e, r, win);
+    assert!(
+        g.contains("BatteryManager,Bluetooth,BluetoothCharacteristicProperties,BluetoothDevice,")
+    );
+    assert!(g.contains("BroadcastChannel,BluetoothUUID,BlobEvent"));
+
+    // Linux: exactly the captured surface.
+    let r = realm(&mut e, false, Some(LINUX_APIS));
+    assert_eq!(eval_str(&mut e, r, nav), linux_nav);
+    let g = eval_str(&mut e, r, win);
+    assert!(!g.contains("Bluetooth"));
+
+    // Share only (an explicit persona `apis`).
+    let r = realm(
+        &mut e,
+        false,
+        Some(lb_persona::OsApis {
+            share: true,
+            bluetooth: false,
+        }),
+    );
+    let got = eval_str(&mut e, r, nav);
+    assert!(got.contains("canShare,share") && !got.contains("bluetooth"));
+
+    // Non-secure Windows realm: only BluetoothUUID (not [SecureContext]).
+    let r = realm(&mut e, true, Some(all));
+    let g = eval_str(&mut e, r, win);
+    assert!(g.contains("BluetoothUUID") && !g.contains("BluetoothDevice"));
+    assert_eq!(
+        eval_str(
+            &mut e,
+            r,
+            "String('share' in Navigator.prototype) + ('bluetooth' in Navigator.prototype)"
+        ),
+        "falsefalse"
+    );
 }
 
 #[test]

@@ -107,6 +107,7 @@ impl BehaviorProfile {
                 speed_std: 0.3,
                 momentum_deceleration: 0.95,
                 direction_change_probability: 0.1,
+                accelerate: false,
             },
             timing: TimingProfile {
                 first_interaction_ms: (800, 3000),
@@ -163,6 +164,7 @@ impl BehaviorProfile {
                 speed_std: 0.3,
                 momentum_deceleration: 0.955,
                 direction_change_probability: 0.05,
+                accelerate: false,
             },
             timing: TimingProfile {
                 first_interaction_ms: (300, 1000),
@@ -219,6 +221,7 @@ impl BehaviorProfile {
                 speed_std: 0.3,
                 momentum_deceleration: 0.94,
                 direction_change_probability: 0.15,
+                accelerate: false,
             },
             timing: TimingProfile {
                 first_interaction_ms: (1500, 6000),
@@ -278,6 +281,7 @@ impl BehaviorProfile {
                 speed_std: 0.35,
                 momentum_deceleration: 0.95,
                 direction_change_probability: 0.08,
+                accelerate: false,
             },
             timing: TimingProfile {
                 first_interaction_ms: (500, 2000),

@@ -24,6 +24,11 @@
 //   exact.
 // - With `direction_change_probability` the user scrolls back a little at
 //   the end (overshot what they were looking for).
+// - The detent size is the persona OS's (`notch_px`: Windows 100, Linux
+//   120, macOS 40, set by the replay layer). macOS accelerates a notched
+//   wheel (`accelerate`): the first detent of a flick moves a tenth of
+//   `notch_px`, and each quick detent after it doubles that, up to three
+//   times `notch_px` (M7 surface reference, not captured).
 
 use rand::rngs::SmallRng;
 use serde::{Deserialize, Serialize};
@@ -99,6 +104,9 @@ pub struct ScrollProfile {
     pub momentum_deceleration: f64,
     /// Probability that the user scrolls back a little at the end.
     pub direction_change_probability: f64,
+    /// Wheel: macOS-style acceleration (small deltas for slow detents,
+    /// growing with the detent rate).
+    pub accelerate: bool,
 }
 
 impl Default for ScrollProfile {
@@ -140,6 +148,9 @@ pub fn generate_scroll(
         return Vec::new();
     }
     match profile.scroll_type {
+        ScrollType::Wheel if profile.accelerate => {
+            wheel_accelerated(direction, total_px, profile, rng)
+        }
         ScrollType::Wheel => wheel(direction, total_px, profile, rng),
         ScrollType::Trackpad => trackpad(direction, total_px, profile, rng),
     }
@@ -203,6 +214,57 @@ fn wheel(
     if events.len() >= 3 && chance(rng, p.direction_change_probability) {
         t += clamp(log_normal(rng, 450.0, 0.4), 150.0, 2000.0);
         events.push(event(reverse(dir), notch, 0.0, t, ScrollType::Wheel));
+    }
+    events
+}
+
+/// A notched wheel with macOS acceleration: flicks as in [`wheel`], but each
+/// detent's delta grows with the detent rate. Scrolls at least `total_px`.
+fn wheel_accelerated(
+    dir: ScrollDirection,
+    total_px: f64,
+    p: &ScrollProfile,
+    rng: &mut SmallRng,
+) -> Vec<ScrollEvent> {
+    const SLOW: f64 = 0.1;
+    const MAX: f64 = 3.0;
+    let notch = p.notch_px.max(1.0);
+    let mut covered = 0.0;
+    let mut events = Vec::new();
+    let mut t = uniform(rng, 0.0, 20.0);
+    while covered < total_px && events.len() < 400 {
+        let k = clamp(
+            normal_sample(rng, p.notches_per_flick, 1.2).round(),
+            1.0,
+            8.0,
+        ) as i64;
+        let mut f = SLOW;
+        for j in 0..k {
+            let d = (notch * f).round().max(1.0);
+            events.push(event(dir, d, 0.0, t, ScrollType::Wheel));
+            covered += d;
+            if covered >= total_px {
+                break;
+            }
+            if j + 1 < k {
+                let edge = if j == 0 || j + 2 == k { 1.3 } else { 1.0 };
+                let gap = clamp(log_normal(rng, p.notch_interval_ms * edge, 0.3), 8.0, 250.0);
+                t += gap;
+                f = if gap < 100.0 {
+                    (f * 2.0).min(MAX)
+                } else {
+                    SLOW
+                };
+            }
+        }
+        if covered < total_px {
+            t += clamp(log_normal(rng, p.regrip_ms, 0.35), 60.0, 1500.0);
+        }
+    }
+    if events.len() >= 3 && chance(rng, p.direction_change_probability) {
+        t += clamp(log_normal(rng, 450.0, 0.4), 150.0, 2000.0);
+        let d = (notch * SLOW).round().max(1.0);
+        events.push(event(reverse(dir), d, 0.0, t, ScrollType::Wheel));
     }
     events
 }
@@ -356,6 +418,31 @@ mod tests {
         let min = *gaps.iter().min().unwrap();
         let max = *gaps.iter().max().unwrap();
         assert!(min < 100 && max > 2 * min, "{gaps:?}");
+    }
+
+    #[test]
+    fn accelerated_wheel_grows_within_a_flick() {
+        let mut p = wheel_profile();
+        p.notch_px = 40.0;
+        p.accelerate = true;
+        let mut rng = seeded_rng(7);
+        let ev = generate_scroll(ScrollDirection::Down, 600.0, &p, &mut rng);
+        let total: f64 = ev.iter().map(|e| e.delta_y).sum();
+        assert!(total >= 600.0, "{total}");
+        assert_eq!(ev[0].delta_y, 4.0);
+        assert!(ev.iter().any(|e| e.delta_y > 8.0));
+        assert!(ev.iter().all(|e| e.delta_y >= 1.0 && e.delta_y <= 120.0));
+        // Same seed, same events.
+        let again = generate_scroll(ScrollDirection::Down, 600.0, &p, &mut seeded_rng(7));
+        assert_eq!(
+            ev.iter()
+                .map(|e| (e.delta_y, e.timestamp_ms))
+                .collect::<Vec<_>>(),
+            again
+                .iter()
+                .map(|e| (e.delta_y, e.timestamp_ms))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

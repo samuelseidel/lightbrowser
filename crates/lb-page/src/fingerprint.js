@@ -60,6 +60,7 @@
     if (!d) return null;
     const v = await d.getHighEntropyValues([
       'architecture', 'bitness', 'model', 'platformVersion', 'uaFullVersion', 'fullVersionList', 'wow64',
+      'formFactors',
     ]);
     return {
       architecture: v.architecture,
@@ -68,6 +69,7 @@
       platformVersion: v.platformVersion,
       uaFullVersion: v.uaFullVersion,
       wow64: v.wow64,
+      formFactors: v.formFactors,
       fullVersionList: (v.fullVersionList || []).map((b) => ({ brand: b.brand, version: b.version })),
     };
   });
@@ -87,7 +89,58 @@
     pixelDepth: screen.pixelDepth,
     devicePixelRatio: devicePixelRatio,
   }));
-  await probe('window', () => ({ innerWidth, innerHeight, outerWidth, outerHeight }));
+  await probe('window', () => ({ innerWidth, innerHeight, outerWidth, outerHeight, screenX, screenY }));
+  // Scrollbar width of an overflow:scroll box.
+  await probe('layout', () => {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:absolute;left:-9999px;top:0;width:100px;height:100px;overflow:scroll';
+    (document.body || document.documentElement).appendChild(d);
+    const w = d.offsetWidth - d.clientWidth;
+    d.remove();
+    return { scrollbarWidth: w };
+  });
+  // Generic families: the width of each keyword equals that of the
+  // persona's default family.
+  await probe('genericFonts', () => {
+    const x = document.createElement('canvas').getContext('2d');
+    const text = 'mmmmmmmmmmlli1|WwQq@#';
+    const width = (f) => {
+      x.font = `72px ${f}`;
+      return x.measureText(text).width;
+    };
+    const r = {};
+    for (const [g, fam] of Object.entries(CFG.genericFonts)) {
+      r[g] = width(g) === width(`"${fam}"`);
+    }
+    return r;
+  });
+  // OS-gated APIs, codecs and WebGPU.
+  await probe('osApis', () => ({
+    share: 'share' in n,
+    canShare: 'canShare' in n,
+    bluetooth: 'bluetooth' in n,
+    Bluetooth: typeof Bluetooth !== 'undefined',
+  }));
+  await probe('codecs', async () => {
+    const v = document.createElement('video');
+    const h264 = 'video/mp4; codecs="avc1.640028"';
+    const hevc = 'video/mp4; codecs="hvc1.1.6.L93.B0"';
+    const av1 = 'video/mp4; codecs="av01.0.05M.08"';
+    const r = { hevc: v.canPlayType(hevc) === 'probably' };
+    if (n.mediaCapabilities) {
+      const info = (contentType) => n.mediaCapabilities.decodingInfo({
+        type: 'file', video: { contentType, width: 1920, height: 1080, bitrate: 5000000, framerate: 30 },
+      });
+      r.h264PowerEfficient = (await info(h264)).powerEfficient;
+      r.av1PowerEfficient = (await info(av1)).powerEfficient;
+    }
+    return r;
+  });
+  await probe('webgpu', async () => {
+    if (!n.gpu) return null;
+    const a = await n.gpu.requestAdapter();
+    return a ? { vendor: a.info.vendor, architecture: a.info.architecture } : null;
+  });
   await probe('locale', () => {
     const o = Intl.DateTimeFormat().resolvedOptions();
     return { timeZone: o.timeZone, locale: o.locale, offset: new Date().getTimezoneOffset() };
@@ -209,6 +262,9 @@
     if (typeof AudioContext !== 'undefined') {
       const a = new AudioContext();
       live = { sampleRate: a.sampleRate, baseLatency: a.baseLatency, maxChannelCount: a.destination.maxChannelCount };
+      // outputLatency is 0 until the context runs.
+      if (a.resume) await a.resume();
+      live.outputLatency = a.state === 'running' ? a.outputLatency : null;
       if (a.close) a.close();
     }
     return { sum: Math.round(sum * 1e6) / 1e6, hash, live };

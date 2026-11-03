@@ -2,7 +2,9 @@
 //! `plugins` / `mimeTypes` (Chrome's fixed PDF set), `userAgentData`,
 //! `connection`, `permissions`, `Notification`, `getBattery`,
 //! `mediaDevices`, `speechSynthesis`, `screen.orientation`,
-//! `performance.memory` and `getGamepads`.
+//! `performance.memory`, `getGamepads`, `keyboard` (US layout map) and the
+//! OS-gated Web Share (`share`, `canShare`) and Web Bluetooth members,
+//! which realm setup removes for personas whose OS lacks them (M7).
 //!
 //! Shapes, identities and error texts were compared with the local
 //! Chromium 153 on loopback (see `docs/ROADMAP.md`, M4 status):
@@ -60,6 +62,15 @@ pub(crate) enum NavObj {
     Timing,
     /// `performance.navigation`.
     Navigation,
+    /// `navigator.mediaCapabilities`.
+    MediaCapabilities,
+    /// `navigator.keyboard` and its layout maps.
+    Keyboard,
+    KeyboardLayoutMap,
+    /// `navigator.bluetooth` (Windows and macOS personas).
+    Bluetooth,
+    /// WebGPU objects (`gpu`).
+    Gpu(Box<super::gpu::GpuObj>),
 }
 
 impl NavObj {
@@ -89,6 +100,11 @@ impl NavObj {
             NavObj::Rtc(r) => r.iface_name(),
             NavObj::Timing => "PerformanceTiming",
             NavObj::Navigation => "PerformanceNavigation",
+            NavObj::MediaCapabilities => "MediaCapabilities",
+            NavObj::Keyboard => "Keyboard",
+            NavObj::KeyboardLayoutMap => "KeyboardLayoutMap",
+            NavObj::Bluetooth => "Bluetooth",
+            NavObj::Gpu(g) => g.iface_name(),
         }
     }
 }
@@ -132,6 +148,35 @@ fn new_nav(w: &Window, o: NavObj) -> Arg {
 fn single(w: &Window, key: &'static str, idx: u32, make: impl FnOnce() -> NavObj) -> Arg {
     let id = w.cached_obj((idx, 0, key, String::new()), || Obj::Nav(Box::new(make())));
     w.obj_arg(id)
+}
+
+/// A per-window singleton with no index (`navigator.gpu`, ...).
+pub(crate) fn single_nav(w: &Window, key: &'static str, o: NavObj) -> Arg {
+    single(w, key, 0, || o)
+}
+
+/// A new navigator-surface object.
+pub(crate) fn new_nav_obj(w: &Window, o: NavObj) -> Arg {
+    new_nav(w, o)
+}
+
+/// `this` must be a `NavObj` that `f` accepts, else `Illegal invocation`.
+pub(crate) fn this_is(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    f: impl FnOnce(&NavObj) -> bool,
+) -> Result<u32, HostError> {
+    let id = this_obj(cx)?;
+    nav(w, id, |o| f(o).then_some(id)).ok_or_else(illegal)
+}
+
+/// Run `f` on navigator object `id`.
+pub(crate) fn with_nav<R>(
+    w: &Window,
+    id: u32,
+    f: impl FnOnce(&mut NavObj) -> Option<R>,
+) -> Option<R> {
+    nav(w, id, f)
 }
 
 /// `this` as a `NavObj` matched by `f`, or `Illegal invocation`.
@@ -591,8 +636,15 @@ fn register_ua_data(reg: &mut Registry, rt: &Runtime) {
             }
             fields.push(format!("\"brands\":{}", brands_json(&h.brands)));
             if has("formFactors") {
-                let ff = if h.mobile { "Mobile" } else { "Desktop" };
-                fields.push(format!("\"formFactors\":[\"{ff}\"]"));
+                // The persona's `client_hints.form_factors`, else by `mobile`.
+                let ff: Vec<String> = profile(w)
+                    .and_then(PersonaProfile::high_entropy_hints)
+                    .map(|he| he.form_factors)
+                    .unwrap_or_else(|| {
+                        vec![if h.mobile { "Mobile" } else { "Desktop" }.to_owned()]
+                    });
+                let list: Vec<String> = ff.iter().map(|f| json_str(f)).collect();
+                fields.push(format!("\"formFactors\":[{}]", list.join(",")));
             }
             if has("fullVersionList") {
                 fields.push(format!("\"fullVersionList\":{}", brands_json(&h.full)));
@@ -1100,6 +1152,7 @@ fn devices(w: &Window) -> Vec<DeviceInfo> {
     let (mics, cams, speakers) = md.counts();
     let granted = |k: &str| persona_state(w, k, "prompt") == "granted";
     let (mic_ok, cam_ok) = (granted("microphone"), granted("camera"));
+    let windows = profile(w).is_some_and(|p| p.os_kind() == lb_persona::OsKind::Windows);
     let mut out = Vec::new();
     let mut add = |kind: &'static str, n: u32, label: &Option<String>, ok: bool| {
         if n == 0 {
@@ -1128,6 +1181,14 @@ fn devices(w: &Window) -> Vec<DeviceInfo> {
         };
         if audio {
             push("default".into(), format!("Default - {base}"), 0);
+            // Windows also lists the default communications device.
+            if windows {
+                push(
+                    "communications".into(),
+                    format!("Communications - {base}"),
+                    0,
+                );
+            }
         }
         for i in 0..n {
             let label = if i == 0 {
@@ -1720,7 +1781,275 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_speech(reg, rt);
     register_screen_extras(reg, rt);
     register_timing(reg, rt);
+    register_keyboard(reg, rt);
+    register_os_apis(reg, rt);
     super::rtc::register(reg, rt);
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard
+// ---------------------------------------------------------------------------
+
+/// `getLayoutMap()` of a US keyboard: the 48 writing-system keys
+/// (captured size 48 with the US layout on Linux; Windows and macOS give
+/// the same keys for US English), in DOM code order.
+const US_LAYOUT: [(&str, &str); 48] = [
+    ("Backquote", "`"),
+    ("Backslash", "\\"),
+    ("BracketLeft", "["),
+    ("BracketRight", "]"),
+    ("Comma", ","),
+    ("Digit0", "0"),
+    ("Digit1", "1"),
+    ("Digit2", "2"),
+    ("Digit3", "3"),
+    ("Digit4", "4"),
+    ("Digit5", "5"),
+    ("Digit6", "6"),
+    ("Digit7", "7"),
+    ("Digit8", "8"),
+    ("Digit9", "9"),
+    ("Equal", "="),
+    ("IntlBackslash", "\\"),
+    ("KeyA", "a"),
+    ("KeyB", "b"),
+    ("KeyC", "c"),
+    ("KeyD", "d"),
+    ("KeyE", "e"),
+    ("KeyF", "f"),
+    ("KeyG", "g"),
+    ("KeyH", "h"),
+    ("KeyI", "i"),
+    ("KeyJ", "j"),
+    ("KeyK", "k"),
+    ("KeyL", "l"),
+    ("KeyM", "m"),
+    ("KeyN", "n"),
+    ("KeyO", "o"),
+    ("KeyP", "p"),
+    ("KeyQ", "q"),
+    ("KeyR", "r"),
+    ("KeyS", "s"),
+    ("KeyT", "t"),
+    ("KeyU", "u"),
+    ("KeyV", "v"),
+    ("KeyW", "w"),
+    ("KeyX", "x"),
+    ("KeyY", "y"),
+    ("KeyZ", "z"),
+    ("Minus", "-"),
+    ("Period", "."),
+    ("Quote", "'"),
+    ("Semicolon", ";"),
+    ("Slash", "/"),
+];
+
+fn register_keyboard(reg: &mut Registry, rt: &Runtime) {
+    getter(reg, rt, "Navigator", "keyboard", |cx, w| {
+        this_obj(cx)?;
+        cx.ret(single(w, "nav:keyboard", 0, || NavObj::Keyboard))
+    });
+    // A new map per call, resolved at once.
+    method(reg, rt, "Keyboard", "getLayoutMap", |cx, w| {
+        this_is(cx, w, |o| matches!(o, NavObj::Keyboard))?;
+        let r = cx.ret_new_promise()?;
+        let map = new_nav(w, NavObj::KeyboardLayoutMap);
+        cx.resolve_promise(r, map)
+    });
+    // `lock()` resolves (it takes effect in fullscreen); `unlock()` is a
+    // no-op.
+    method(reg, rt, "Keyboard", "lock", |cx, w| {
+        this_is(cx, w, |o| matches!(o, NavObj::Keyboard))?;
+        let r = cx.ret_new_promise()?;
+        cx.resolve_promise(r, Arg::Undefined)
+    });
+    method(reg, rt, "Keyboard", "unlock", |cx, w| {
+        this_is(cx, w, |o| matches!(o, NavObj::Keyboard))?;
+        Ok(())
+    });
+    const M: &str = "KeyboardLayoutMap";
+    let is_map = |o: &NavObj| matches!(o, NavObj::KeyboardLayoutMap);
+    getter(reg, rt, M, "size", move |cx, w| {
+        this_is(cx, w, is_map)?;
+        cx.ret(US_LAYOUT.len() as f64)
+    });
+    method(reg, rt, M, "get", move |cx, w| {
+        this_is(cx, w, is_map)?;
+        need_args(cx, 1, "get", M)?;
+        let k = cx.arg_string(0)?;
+        match US_LAYOUT.iter().find(|(c, _)| *c == k) {
+            Some((_, v)) => cx.ret(*v),
+            None => Ok(()),
+        }
+    });
+    method(reg, rt, M, "has", move |cx, w| {
+        this_is(cx, w, is_map)?;
+        need_args(cx, 1, "has", M)?;
+        let k = cx.arg_string(0)?;
+        cx.ret(US_LAYOUT.iter().any(|(c, _)| *c == k))
+    });
+    for (op, part) in [("entries", 0u8), ("keys", 1), ("values", 2)] {
+        method(reg, rt, M, op, move |cx, w| {
+            this_is(cx, w, is_map)?;
+            let items = US_LAYOUT
+                .iter()
+                .map(|(k, v)| match part {
+                    0 => Arg::Array(vec![Arg::from(*k), Arg::from(*v)]),
+                    1 => Arg::from(*k),
+                    _ => Arg::from(*v),
+                })
+                .collect();
+            super::misc::ret_iterator(cx, w, items)
+        });
+    }
+    method(reg, rt, M, "forEach", move |cx, w| {
+        let id = this_is(cx, w, is_map)?;
+        need_args(cx, 1, "forEach", M)?;
+        if cx.arg_kind(0) != ValueKind::Function {
+            return Err(HostError::type_error(
+                "Failed to execute 'forEach' on 'KeyboardLayoutMap': The callback provided as parameter 1 is not a function.",
+            ));
+        }
+        let f = cx.arg_handle(0);
+        let this = if cx.len() > 1 {
+            Arg::Handle(cx.arg_handle(1))
+        } else {
+            Arg::Undefined
+        };
+        for (k, v) in US_LAYOUT {
+            cx.call(
+                f,
+                this.clone(),
+                &[Arg::from(v), Arg::from(k), w.obj_arg(id)],
+            )?;
+        }
+        Ok(())
+    });
+}
+
+// ---------------------------------------------------------------------------
+// OS-gated APIs: Web Share and Web Bluetooth
+// ---------------------------------------------------------------------------
+//
+// The members exist only for Windows and macOS personas: realm setup
+// deletes them for the rest (`Table::os_gated`, `PersonaProfile::os_apis`).
+
+/// Web Share's `ShareData` check: at least one known member, a parsable
+/// `url`. `Err` is the TypeError `share()` rejects with.
+fn share_data_ok(cx: &mut CallCtx<'_, '_, '_>, w: &Window, op: &str) -> Result<bool, HostError> {
+    let d = Dict::arg(cx, 0);
+    if d.handle().is_none() {
+        return Ok(false);
+    }
+    let files = d.get(cx, "files")?;
+    let text = d.string(cx, "text")?;
+    let title = d.string(cx, "title")?;
+    let url = d.string(cx, "url")?;
+    let nfiles = match files {
+        Some(h) => {
+            let len = cx.get_property(h, "length")?;
+            let n = match cx.handle_value(len) {
+                JsValue::Number(n) => n,
+                _ => 0.0,
+            };
+            cx.release(len);
+            cx.release(h);
+            n
+        }
+        None => 0.0,
+    };
+    d.release(cx);
+    if let Some(u) = &url
+        && w.url().join(u).is_err()
+    {
+        return Err(HostError::type_error(format!(
+            "Failed to execute '{op}' on 'Navigator': Invalid URL"
+        )));
+    }
+    Ok(text.is_some() || title.is_some() || url.is_some() || nfiles > 0.0)
+}
+
+fn register_os_apis(reg: &mut Registry, rt: &Runtime) {
+    method(reg, rt, "Navigator", "canShare", |cx, w| {
+        this_obj(cx)?;
+        let ok = share_data_ok(cx, w, "canShare").unwrap_or(false);
+        cx.ret(ok)
+    });
+    // Rejects without a user gesture; with one the share sheet is
+    // dismissed (no share target behind a persona).
+    method(reg, rt, "Navigator", "share", |cx, w| {
+        this_obj(cx)?;
+        let r = cx.ret_new_promise()?;
+        match share_data_ok(cx, w, "share") {
+            Err(e) => return cx.reject_promise(r, e),
+            Ok(false) => {
+                return cx.reject_promise(
+                    r,
+                    HostError::type_error(
+                        "Failed to execute 'share' on 'Navigator': No known share data fields supplied. If using only new fields (other than title, text and url), you must feature-detect them first.",
+                    ),
+                );
+            }
+            Ok(true) => {}
+        }
+        if !super::input::consume_activation(w) {
+            return cx.reject_promise(
+                r,
+                w.rt.err(
+                    "NotAllowedError",
+                    "Failed to execute 'share' on 'Navigator': Must be handling a user gesture to perform a share request.",
+                ),
+            );
+        }
+        cx.reject_promise(r, w.rt.err("AbortError", "Share canceled"))
+    });
+    getter(reg, rt, "Navigator", "bluetooth", |cx, w| {
+        this_obj(cx)?;
+        cx.ret(single(w, "nav:bluetooth", 0, || NavObj::Bluetooth))
+    });
+    let is_bt = |o: &NavObj| matches!(o, NavObj::Bluetooth);
+    // Desktop personas have an adapter.
+    method(reg, rt, "Bluetooth", "getAvailability", move |cx, w| {
+        this_is(cx, w, is_bt)?;
+        let r = cx.ret_new_promise()?;
+        cx.resolve_promise(r, Arg::Bool(true))
+    });
+    method(reg, rt, "Bluetooth", "requestDevice", move |cx, w| {
+        this_is(cx, w, is_bt)?;
+        let r = cx.ret_new_promise()?;
+        if !super::input::has_transient_activation(w) {
+            return cx.reject_promise(
+                r,
+                w.rt.err(
+                    "SecurityError",
+                    "Failed to execute 'requestDevice' on 'Bluetooth': Must be handling a user gesture to show a permission request.",
+                ),
+            );
+        }
+        let d = Dict::arg(cx, 0);
+        let filters = d.get(cx, "filters")?;
+        let all = d.bool(cx, "acceptAllDevices")?;
+        d.release(cx);
+        let has_filters = filters.is_some();
+        if let Some(h) = filters {
+            cx.release(h);
+        }
+        if has_filters == all {
+            return cx.reject_promise(
+                r,
+                HostError::type_error(
+                    "Failed to execute 'requestDevice' on 'Bluetooth': Either 'filters' should be present or 'acceptAllDevices' should be true, but not both.",
+                ),
+            );
+        }
+        cx.reject_promise(
+            r,
+            w.rt.err(
+                "NotFoundError",
+                "User cancelled the requestDevice() chooser.",
+            ),
+        )
+    });
 }
 
 #[cfg(test)]

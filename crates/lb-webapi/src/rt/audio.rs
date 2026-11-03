@@ -70,6 +70,8 @@ pub(crate) struct Ctx {
     /// it had rendered then.
     run_start: Option<(f64, u64)>,
     base_latency: f64,
+    /// `outputLatency` while running.
+    output_latency: f64,
     max_channels: u32,
 }
 
@@ -477,7 +479,7 @@ fn new_context(
     channels: usize,
     length: usize,
 ) -> (Rc<RefCell<Ctx>>, u32) {
-    let audio = w.profile.as_ref().and_then(|p| p.audio.clone());
+    let defaults = audio_defaults(w);
     let ctx = Rc::new(RefCell::new(Ctx {
         offline,
         graph: Graph::new(sample_rate, channels),
@@ -491,14 +493,12 @@ fn new_context(
         buffers: HashMap::new(),
         props: HashMap::new(),
         run_start: None,
-        base_latency: audio.as_ref().and_then(|a| a.base_latency).unwrap_or(0.01),
+        base_latency: defaults.base_latency,
+        output_latency: defaults.output_latency,
         max_channels: if offline {
             channels as u32
         } else {
-            audio
-                .as_ref()
-                .and_then(|a| a.max_channel_count)
-                .unwrap_or(2)
+            defaults.channels
         },
     }));
     let id = new_a(
@@ -524,21 +524,23 @@ fn new_context(
     (ctx, id)
 }
 
-/// Default realtime sample rate: persona, else by OS.
+/// Realtime defaults from the persona's `audio_defaults()` (its `audio`,
+/// else the OS default); without a persona 44.1 kHz, 10 ms base latency.
+fn audio_defaults(w: &Window) -> lb_persona::AudioDefaults {
+    w.profile.as_deref().map_or(
+        lb_persona::AudioDefaults {
+            sample_rate: 44_100,
+            base_latency: 0.01,
+            output_latency: 0.02,
+            channels: 2,
+        },
+        lb_persona::PersonaProfile::audio_defaults,
+    )
+}
+
+/// Default realtime sample rate.
 fn default_rate(w: &Window) -> f32 {
-    if let Some(r) = w
-        .profile
-        .as_ref()
-        .and_then(|p| p.audio.as_ref())
-        .and_then(|a| a.sample_rate)
-    {
-        return r as f32;
-    }
-    let windows = w
-        .profile
-        .as_ref()
-        .is_some_and(|p| p.os.name.to_ascii_lowercase().starts_with("win"));
-    if windows { 48000.0 } else { 44100.0 }
+    audio_defaults(w).sample_rate as f32
 }
 
 /// Advance a running realtime context's graph to the page clock.
@@ -762,7 +764,7 @@ fn register_contexts(reg: &mut Registry, rt: &Runtime) {
         let c = this_ctx(cx, w)?;
         let c = c.borrow();
         cx.ret(if c.state == "running" {
-            c.base_latency * 2.0
+            c.output_latency
         } else {
             0.0
         })

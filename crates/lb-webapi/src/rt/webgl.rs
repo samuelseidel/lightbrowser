@@ -344,12 +344,16 @@ fn constant_values() -> HashMap<&'static str, u32> {
     m
 }
 
-/// The GPU backend the persona's unmasked renderer names.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// The ANGLE backend the persona's unmasked renderer names: Direct3D 11
+/// (Windows), Metal (macOS), OpenGL on Mesa or on the NVIDIA driver, or
+/// Vulkan (Linux).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Backend {
     D3d11,
     Metal,
-    Gl,
+    GlMesa,
+    GlNvidia,
+    Vulkan,
 }
 
 fn backend(p: &PersonaProfile) -> Backend {
@@ -358,8 +362,45 @@ fn backend(p: &PersonaProfile) -> Backend {
         Backend::D3d11
     } else if r.contains("Metal") {
         Backend::Metal
+    } else if r.contains("Vulkan") {
+        Backend::Vulkan
+    } else if r.contains("NVIDIA") && !r.contains("Mesa") && !r.contains("nouveau") {
+        Backend::GlNvidia
     } else {
-        Backend::Gl
+        Backend::GlMesa
+    }
+}
+
+/// Limits that differ per backend, used when the persona has none:
+/// `MAX_VIEWPORT_DIMS`, `ALIASED_LINE_WIDTH_RANGE`,
+/// `ALIASED_POINT_SIZE_RANGE`, `MAX_VERTEX_UNIFORM_VECTORS` (M7 surface
+/// reference, not captured: no GPU here).
+struct BackendLimits {
+    viewport: i32,
+    line: [f64; 2],
+    point: [f64; 2],
+    vertex_uniform_vectors: f64,
+}
+
+impl Backend {
+    fn limits(self) -> BackendLimits {
+        let l = |viewport, line, point, vertex_uniform_vectors| BackendLimits {
+            viewport,
+            line,
+            point,
+            vertex_uniform_vectors,
+        };
+        match self {
+            Backend::D3d11 => l(32767, [1.0, 1.0], [1.0, 1024.0], 4096.0),
+            Backend::Metal => l(16384, [1.0, 1.0], [1.0, 511.0], 1024.0),
+            Backend::GlMesa | Backend::Vulkan => l(16384, [1.0, 7.375], [1.0, 255.875], 4096.0),
+            Backend::GlNvidia => l(32768, [1.0, 10.0], [1.0, 2047.0], 4096.0),
+        }
+    }
+
+    /// OpenGL backends cap `MAX_ELEMENT_INDEX` at 2^30 - 1.
+    fn is_gl(self) -> bool {
+        matches!(self, Backend::GlMesa | Backend::GlNvidia)
     }
 }
 
@@ -573,6 +614,7 @@ impl Gl {
     /// A limit: persona first, then the backend default.
     fn limit(&self, pname: u32) -> Option<Arg> {
         let be = backend(&self.profile);
+        let bl = be.limits();
         let d3d = be == Backend::D3d11;
         let num = |v: f64| Some(Arg::Number(v));
         const WEBGL1_LIMITS: [u32; 13] = [
@@ -603,19 +645,19 @@ impl Gl {
         let blocks = if d3d { 12.0 } else { 14.0 };
         let v1 = match pname {
             0x0D33 | 0x851C | 0x84E8 => num(16384.0),
-            0x0D3A => {
-                let s = if d3d { 32767 } else { 16384 };
-                Some(Arg::Int32Array(vec![s, s]))
-            }
+            0x0D3A => Some(Arg::Int32Array(vec![bl.viewport, bl.viewport])),
             0x8869 => num(16.0),
-            0x8DFB => num(if d3d { 4096.0 } else { 1024.0 }),
+            0x8DFB => num(bl.vertex_uniform_vectors),
             0x8DFD => num(1024.0),
             0x8DFC => num(varying),
             0x8B4D => num(32.0),
             0x8B4C | 0x8872 => num(16.0),
-            0x846E => Some(Arg::Float32Array(vec![1.0, 1.0])),
+            0x846E => {
+                let r = self.pair("ALIASED_LINE_WIDTH_RANGE", bl.line);
+                Some(Arg::Float32Array(vec![r[0] as f32, r[1] as f32]))
+            }
             0x846D => {
-                let r = self.pair("ALIASED_POINT_SIZE_RANGE", [1.0, 1024.0]);
+                let r = self.pair("ALIASED_POINT_SIZE_RANGE", bl.point);
                 Some(Arg::Float32Array(vec![r[0] as f32, r[1] as f32]))
             }
             _ => None,
@@ -635,7 +677,7 @@ impl Gl {
             0x8A33 => num(fuc + fub * block / 4.0),
             0x8A31 => num(vuv * 4.0 + vub * block / 4.0),
             0x8A2E => num(vub + fub),
-            0x8D6B => num(if be == Backend::Gl {
+            0x8D6B => num(if be.is_gl() {
                 1_073_741_823.0
             } else {
                 4_294_967_295.0

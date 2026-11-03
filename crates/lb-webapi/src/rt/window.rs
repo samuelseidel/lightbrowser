@@ -509,6 +509,14 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
     w.request_navigation(NavRequest { url, replace });
 }
 
+/// `(screenX, screenY)`: the persona's `window_position()` (Wayland 0,0;
+/// else `screen.window_x/y` or the work-area origin).
+pub(crate) fn window_position(w: &Window) -> (i32, i32) {
+    w.profile
+        .as_deref()
+        .map_or((0, 0), lb_persona::PersonaProfile::window_position)
+}
+
 pub(crate) fn screen_dims(w: &Window) -> lb_persona::profile::ScreenInfo {
     w.profile
         .as_ref()
@@ -678,10 +686,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     win_num!("outerWidth", |w| f64::from(screen_dims(w).outer_width));
     win_num!("outerHeight", |w| f64::from(screen_dims(w).outer_height));
     win_num!("devicePixelRatio", |w| screen_dims(w).device_pixel_ratio);
-    win_num!("screenX", |w| f64::from(screen_dims(w).avail_left));
-    win_num!("screenLeft", |w| f64::from(screen_dims(w).avail_left));
-    win_num!("screenY", |w| f64::from(screen_dims(w).avail_top));
-    win_num!("screenTop", |w| f64::from(screen_dims(w).avail_top));
+    win_num!("screenX", |w| f64::from(window_position(w).0));
+    win_num!("screenLeft", |w| f64::from(window_position(w).0));
+    win_num!("screenY", |w| f64::from(window_position(w).1));
+    win_num!("screenTop", |w| f64::from(window_position(w).1));
     win_num!("scrollX", |w| w.with_layout(0, |l, d| l.window_scroll(d).0)
         as f64);
     win_num!(

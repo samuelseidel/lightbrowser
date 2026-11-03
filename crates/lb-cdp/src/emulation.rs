@@ -241,6 +241,29 @@ fn check_ua_metadata(p: &PersonaProfile, meta: &Value) -> Result<(), CdpError> {
             ));
         }
     }
+    if let Some(v) = meta.get("wow64").and_then(Value::as_bool)
+        && v != h.wow64
+    {
+        return Err(reject(
+            M,
+            format!("userAgentMetadata.wow64 {v} differs from the persona"),
+        ));
+    }
+    if let (Some(ff), Some(he)) = (
+        meta.get("formFactors").and_then(Value::as_array),
+        p.high_entropy_hints(),
+    ) {
+        let given: Vec<&str> = ff.iter().filter_map(Value::as_str).collect();
+        if given != he.form_factors {
+            return Err(reject(
+                M,
+                format!(
+                    "userAgentMetadata.formFactors {given:?} differs from the persona's {:?}",
+                    he.form_factors
+                ),
+            ));
+        }
+    }
     if let Some(m) = meta.get("mobile").and_then(Value::as_bool)
         && m != h.mobile
     {
@@ -479,6 +502,21 @@ mod tests {
             .is_err()
         );
         check_user_agent(&p, &ua(json!({"userAgent": "", "userAgentMetadata": {"platform": "Windows", "mobile": false}}))).unwrap();
+        check_user_agent(&p, &ua(json!({"userAgent": "", "userAgentMetadata": {"formFactors": ["Desktop"], "wow64": false}}))).unwrap();
+        assert!(
+            check_user_agent(
+                &p,
+                &ua(json!({"userAgent": "", "userAgentMetadata": {"formFactors": ["Mobile"]}}))
+            )
+            .is_err()
+        );
+        assert!(
+            check_user_agent(
+                &p,
+                &ua(json!({"userAgent": "", "userAgentMetadata": {"wow64": true}}))
+            )
+            .is_err()
+        );
 
         check_locale(&p, Some("en-US")).unwrap();
         check_locale(&p, Some("")).unwrap();

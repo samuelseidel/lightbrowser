@@ -354,6 +354,19 @@ pub struct Table {
     pub window_late_start: usize,
     /// Names in `window_props` that exist only in secure contexts.
     pub window_secure_only: &'static [&'static str],
+    /// Members Chrome has on some OSes only (`navigator.share`, Web
+    /// Bluetooth). Realm setup deletes the gates the persona turns off.
+    pub os_gated: &'static [OsGated],
+}
+
+/// One OS-gated member: `owner` is an interface (prototype or static
+/// member) or `Window` (a global property).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OsGated {
+    /// `share` or `bluetooth` (see `lb_persona::OsApis`).
+    pub gate: &'static str,
+    pub owner: &'static str,
+    pub name: &'static str,
 }
 
 impl Table {

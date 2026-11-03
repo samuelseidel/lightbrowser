@@ -2,7 +2,8 @@
 //!
 //! Defaults: `--fixture tests/fixtures/chromium_153_surface_secure.json`
 //! (arbiter), `--insecure-fixture tests/fixtures/chromium_153_surface.json`
-//! (secure-context marks), output `crates/lb-webapi/src/generated/chromium.rs`.
+//! (secure-context marks), `--overlay tests/fixtures/chrome_153_os_overlay.json`
+//! (Windows/macOS-only members), output `crates/lb-webapi/src/generated/chromium.rs`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,12 +22,14 @@ fn main() -> ExitCode {
             "--fixture" => inputs.fixture = value().unwrap_or(inputs.fixture),
             "--insecure-fixture" => inputs.insecure_fixture = value(),
             "--no-insecure-fixture" => inputs.insecure_fixture = None,
+            "--overlay" => inputs.overlay = value(),
+            "--no-overlay" => inputs.overlay = None,
             "--idl" => inputs.idl_root = value().unwrap_or(inputs.idl_root),
             "--out" => inputs.out = value().unwrap_or(inputs.out),
             "--check" => check = true,
             "-h" | "--help" => {
                 println!(
-                    "usage: lb-webidl-gen --family chrome [--fixture FILE] [--insecure-fixture FILE | --no-insecure-fixture] [--idl DIR] [--out FILE] [--check]"
+                    "usage: lb-webidl-gen --family chrome [--fixture FILE] [--insecure-fixture FILE | --no-insecure-fixture] [--overlay FILE | --no-overlay] [--idl DIR] [--out FILE] [--check]"
                 );
                 return ExitCode::SUCCESS;
             }

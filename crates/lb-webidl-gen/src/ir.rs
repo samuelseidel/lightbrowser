@@ -229,6 +229,9 @@ pub struct Table {
     pub window_late_start: usize,
     /// Window props that exist only in secure contexts.
     pub window_secure_only: Vec<String>,
+    /// OS-gated members from the overlay: `(gate, owner, name)`; owner
+    /// `Window` means a window global property.
+    pub os_gated: Vec<(String, String, String)>,
     pub coverage: Coverage,
 }
 

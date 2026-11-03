@@ -41,8 +41,19 @@ fn run(label: &str, persona: &Arc<Persona>, snapshot: Option<&'static [u8]>) {
         let b = Bindings::define(&mut e, &reg).unwrap();
         rt.set_bindings(b.clone());
         let t2 = Instant::now();
+        // A Linux persona's realm: the OS gate deletion runs (M7).
+        let linux = Some(lb_persona::OsApis {
+            share: false,
+            bluetooth: false,
+        });
         let r = b
-            .new_window_realm(&mut e, WindowRealmOptions::default())
+            .new_window_realm(
+                &mut e,
+                WindowRealmOptions {
+                    os_apis: linux,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         let t3 = Instant::now();
         e.drop_realm(r);
@@ -54,6 +65,7 @@ fn run(label: &str, persona: &Arc<Persona>, snapshot: Option<&'static [u8]>) {
                     &mut e,
                     WindowRealmOptions {
                         insecure: i % 2 == 1,
+                        os_apis: linux,
                         ..Default::default()
                     },
                 )

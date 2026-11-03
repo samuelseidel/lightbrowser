@@ -314,3 +314,79 @@ fn same_persona_same_stream_virtual_time() {
     })
     .unwrap();
 }
+
+/// Wheel detents and `wheelDelta` follow the persona's OS (Windows 100 px
+/// and ratio 1.2, Linux 120 px and ratio 1, macOS trackpad ratio 3), and
+/// select-all is Ctrl+A off macOS, Cmd+A on macOS.
+#[test]
+fn wheel_and_shortcuts_follow_the_os() {
+    lb_cdp::block_on_local(async {
+        let s = serve(vec![("/", Resource::html(PAGE))]).await;
+        for (persona, notch, ratio, select_mod) in [
+            (WIN, Some(100.0), 1.2, 2),
+            ("chrome153_ubuntu24_intel_uhd630_x11_1080p.json", Some(120.0), 1.0, 2),
+            (MAC, None, 3.0, 4),
+        ] {
+            let h = host(persona, true);
+            open(&h, &s.url("/")).await;
+            eval(
+                &h,
+                "T",
+                "window.wd = []; addEventListener('wheel', (e) => wd.push([e.deltaY, e.wheelDeltaY, e.wheelDelta, e.isTrusted]), true); 1",
+            )
+            .await;
+            h.human_input(
+                "T",
+                HumanCommand::Scroll(HumanScroll {
+                    delta_y: 600.0,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+            let wd = eval(&h, "T", "wd").await;
+            let wd = wd.as_array().unwrap();
+            assert!(wd.len() >= 3, "{persona}: {wd:?}");
+            for e in wd {
+                let dy = e[0].as_f64().unwrap();
+                assert_eq!(e[3], json!(true));
+                assert_eq!(e[1].as_f64().unwrap(), (-dy * ratio).round(), "{persona}: {e}");
+                assert_eq!(e[1], e[2]);
+                if let Some(n) = notch {
+                    assert_eq!(dy.abs(), n, "{persona}: {e}");
+                }
+            }
+            // A script-made WheelEvent: wheelDelta is -delta (Blink).
+            assert_eq!(
+                eval(&h, "T", "new WheelEvent('wheel', {deltaY: 100}).wheelDeltaY").await,
+                json!(-100)
+            );
+
+            // Select all with the OS's shortcut modifier only.
+            eval(&h, "T", "const i = document.getElementById('i'); i.value = 'abc'; i.focus(); i.setSelectionRange(3, 3); 1").await;
+            let other = if select_mod == 2 { 4 } else { 2 };
+            for (m, want) in [(other, 3), (select_mod, 0)] {
+                for kind in ["keyDown", "keyUp"] {
+                    h.dispatch_key_event(
+                        "T",
+                        lb_cdp::types::KeyEvent {
+                            kind: kind.into(),
+                            key: Some("a".into()),
+                            code: Some("KeyA".into()),
+                            modifiers: m,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+                }
+                assert_eq!(
+                    eval(&h, "T", "document.getElementById('i').selectionStart").await,
+                    json!(want),
+                    "{persona}: modifiers {m}"
+                );
+            }
+        }
+    })
+    .unwrap();
+}

@@ -1,0 +1,159 @@
+{
+  "_meta": {
+    "source": "M7 surface reference for Chrome 153 on Windows and macOS (not captured: no Windows or macOS machine here). Member and property order follows the captured Linux fixture's conventions: attributes in IDL order, then operations in alphabetical order, then constructor; secure-context interfaces sorted alphabetically in their window group; the main interface group in reverse alphabetical order.",
+    "captured": false,
+    "note": "lb-webidl-gen merges this into chromium_153_surface_secure.json (and the non-secure entries into chromium_153_surface.json). Every member here belongs to a gate; at realm setup lb-webapi deletes the members of each gate the persona's os_apis() turns off (Linux: all), so the V8 snapshot stays persona-free. Runtime flags: WebShare and WebBluetooth are stable on Windows and macOS and off on Linux; WebBluetoothGetDevices, WebBluetoothWatchAdvertisements and WebBluetoothScanning stay off (experimental)."
+  },
+  "gates": {
+    "share": "navigator.share and navigator.canShare (Web Share)",
+    "bluetooth": "navigator.bluetooth and the Bluetooth* interfaces (Web Bluetooth)"
+  },
+  "members": [
+    {
+      "gate": "bluetooth",
+      "interface": "Navigator",
+      "after": "protectedAudience",
+      "secure": true,
+      "props": [["bluetooth", "gec", null]]
+    },
+    {
+      "gate": "share",
+      "interface": "Navigator",
+      "after": "canLoadAdAuctionFencedFrame",
+      "secure": true,
+      "props": [["canShare", "fwec", 0], ["share", "fwec", 0]]
+    }
+  ],
+  "windowProps": [
+    {
+      "gate": "bluetooth",
+      "after": "BroadcastChannel",
+      "secure": false,
+      "props": [["BluetoothUUID", "fwc", 0]]
+    },
+    {
+      "gate": "bluetooth",
+      "after": "BatteryManager",
+      "secure": true,
+      "props": [
+        ["Bluetooth", "fwc", 0],
+        ["BluetoothCharacteristicProperties", "fwc", 0],
+        ["BluetoothDevice", "fwc", 0],
+        ["BluetoothRemoteGATTCharacteristic", "fwc", 0],
+        ["BluetoothRemoteGATTDescriptor", "fwc", 0],
+        ["BluetoothRemoteGATTServer", "fwc", 0],
+        ["BluetoothRemoteGATTService", "fwc", 0]
+      ]
+    }
+  ],
+  "interfaces": {
+    "Bluetooth": {
+      "secure": true,
+      "length": 0,
+      "static": [],
+      "proto": [["getAvailability", "fwec", 0], ["requestDevice", "fwec", 0], ["constructor", "fwc", 0]],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "EventTarget",
+      "toStringTag": "Bluetooth",
+      "ctorToString": "function Bluetooth() { [native code] }"
+    },
+    "BluetoothCharacteristicProperties": {
+      "secure": true,
+      "length": 0,
+      "static": [],
+      "proto": [
+        ["broadcast", "gec", null], ["read", "gec", null], ["writeWithoutResponse", "gec", null],
+        ["write", "gec", null], ["notify", "gec", null], ["indicate", "gec", null],
+        ["authenticatedSignedWrites", "gec", null], ["reliableWrite", "gec", null],
+        ["writableAuxiliaries", "gec", null], ["constructor", "fwc", 0]
+      ],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "Object",
+      "toStringTag": "BluetoothCharacteristicProperties",
+      "ctorToString": "function BluetoothCharacteristicProperties() { [native code] }"
+    },
+    "BluetoothDevice": {
+      "secure": true,
+      "length": 0,
+      "static": [],
+      "proto": [
+        ["id", "gec", null], ["name", "gec", null], ["gatt", "gec", null],
+        ["ongattserverdisconnected", "gsec", null], ["constructor", "fwc", 0]
+      ],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "EventTarget",
+      "toStringTag": "BluetoothDevice",
+      "ctorToString": "function BluetoothDevice() { [native code] }"
+    },
+    "BluetoothRemoteGATTCharacteristic": {
+      "secure": true,
+      "length": 0,
+      "static": [],
+      "proto": [
+        ["service", "gec", null], ["uuid", "gec", null], ["properties", "gec", null], ["value", "gec", null],
+        ["oncharacteristicvaluechanged", "gsec", null],
+        ["getDescriptor", "fwec", 1], ["getDescriptors", "fwec", 0], ["readValue", "fwec", 0],
+        ["startNotifications", "fwec", 0], ["stopNotifications", "fwec", 0], ["writeValue", "fwec", 1],
+        ["writeValueWithResponse", "fwec", 1], ["writeValueWithoutResponse", "fwec", 1],
+        ["constructor", "fwc", 0]
+      ],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "EventTarget",
+      "toStringTag": "BluetoothRemoteGATTCharacteristic",
+      "ctorToString": "function BluetoothRemoteGATTCharacteristic() { [native code] }"
+    },
+    "BluetoothRemoteGATTDescriptor": {
+      "secure": true,
+      "length": 0,
+      "static": [],
+      "proto": [
+        ["characteristic", "gec", null], ["uuid", "gec", null], ["value", "gec", null],
+        ["readValue", "fwec", 0], ["writeValue", "fwec", 1], ["constructor", "fwc", 0]
+      ],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "Object",
+      "toStringTag": "BluetoothRemoteGATTDescriptor",
+      "ctorToString": "function BluetoothRemoteGATTDescriptor() { [native code] }"
+    },
+    "BluetoothRemoteGATTServer": {
+      "secure": true,
+      "length": 0,
+      "static": [],
+      "proto": [
+        ["device", "gec", null], ["connected", "gec", null],
+        ["connect", "fwec", 0], ["disconnect", "fwec", 0], ["getPrimaryService", "fwec", 1],
+        ["getPrimaryServices", "fwec", 0], ["constructor", "fwc", 0]
+      ],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "Object",
+      "toStringTag": "BluetoothRemoteGATTServer",
+      "ctorToString": "function BluetoothRemoteGATTServer() { [native code] }"
+    },
+    "BluetoothRemoteGATTService": {
+      "secure": true,
+      "length": 0,
+      "static": [],
+      "proto": [
+        ["device", "gec", null], ["uuid", "gec", null], ["isPrimary", "gec", null],
+        ["getCharacteristic", "fwec", 1], ["getCharacteristics", "fwec", 0], ["constructor", "fwc", 0]
+      ],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "Object",
+      "toStringTag": "BluetoothRemoteGATTService",
+      "ctorToString": "function BluetoothRemoteGATTService() { [native code] }"
+    },
+    "BluetoothUUID": {
+      "secure": false,
+      "length": 0,
+      "static": [
+        ["canonicalUUID", "fwec", 1], ["getCharacteristic", "fwec", 1], ["getDescriptor", "fwec", 1],
+        ["getService", "fwec", 1]
+      ],
+      "proto": [["constructor", "fwc", 0]],
+      "protoSymbols": ["Symbol(Symbol.toStringTag)"],
+      "parent": "Object",
+      "toStringTag": "BluetoothUUID",
+      "ctorToString": "function BluetoothUUID() { [native code] }"
+    }
+  }
+}
