@@ -267,15 +267,15 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
         }
         if let Some(nav) = w.take_nav_request() {
             let (ws2, p2) = (ws.clone(), page.clone());
-            let initiator = w.url();
+            let target = crate::nav::Target::from_script(nav, w.url());
             tokio::task::spawn_local(async move {
-                let _ = crate::nav::navigate(ws2, p2, nav.url, Some(initiator), nav.replace).await;
+                let _ = crate::nav::navigate(ws2, p2, target).await;
             });
             did = true;
         }
         for x in wins.iter().skip(1) {
             if let Some(nav) = x.take_nav_request() {
-                crate::frames::navigate_from_script(&ws, &page, x, nav.url);
+                crate::frames::navigate_from_script(&ws, &page, x, nav);
                 did = true;
             }
         }
@@ -558,7 +558,8 @@ impl Page {
         let (tx, rx) = oneshot::channel();
         self.call(move |ws, page| async move {
             tokio::task::spawn_local(async move {
-                let r = crate::nav::navigate_committed(ws, page, url, None, false, tx).await;
+                let target = crate::nav::Target::typed(url);
+                let r = crate::nav::navigate_committed(ws, page, target, tx).await;
                 let _ = r;
             });
             Ok(())
@@ -575,7 +576,8 @@ impl Page {
             let url = page.window().map(|w| w.url()).ok_or(PageError::Closed)?;
             page.reloading.set(true);
             tokio::task::spawn_local(async move {
-                let r = crate::nav::navigate_committed(ws, page, url, None, false, tx).await;
+                let target = crate::nav::Target::typed(url);
+                let r = crate::nav::navigate_committed(ws, page, target, tx).await;
                 let _ = r;
             });
             Ok(())

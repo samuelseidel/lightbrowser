@@ -7,7 +7,9 @@ use lb_dom::{Document, NodeFlags, NodeId, ParseStep, local_name};
 use lb_js::{JsErrorKind, ScriptOrigin};
 use lb_webapi::host::{Destination, NetRequest, NetResponse, decode_text};
 use lb_webapi::rt::script::{self, ScriptKind};
-use lb_webapi::rt::{EngineJs, ReadyState, TaskSource, WINDOW_REF, Window, WindowInit, fire_event};
+use lb_webapi::rt::{
+    EngineJs, FormBody, ReadyState, TaskSource, WINDOW_REF, Window, WindowInit, fire_event,
+};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -96,16 +98,72 @@ async fn sw_or_network_loader(
     crate::cdp::net::page_fetch(page, req, loader).await
 }
 
+/// What to load in a top-level navigation.
+pub(crate) struct Target {
+    pub url: Url,
+    /// The document that started it (`None`: typed or `Page.navigate`).
+    pub initiator: Option<Url>,
+    /// Replace the current history entry.
+    pub replace: bool,
+    /// Form POST body; `None` is a GET.
+    pub post: Option<FormBody>,
+    /// Started by trusted user input (`Sec-Fetch-User`).
+    pub user_activated: bool,
+}
+
+impl Target {
+    /// A browser-initiated GET (typed URL, `Page.navigate`).
+    pub(crate) fn typed(url: Url) -> Target {
+        Target {
+            url,
+            initiator: None,
+            replace: false,
+            post: None,
+            user_activated: false,
+        }
+    }
+
+    /// A navigation a document asked for (`location`, form submission).
+    pub(crate) fn from_script(nav: lb_webapi::rt::NavRequest, initiator: Url) -> Target {
+        Target {
+            url: nav.url,
+            initiator: Some(initiator),
+            replace: nav.replace,
+            post: nav.post,
+            user_activated: nav.user_activated,
+        }
+    }
+}
+
+/// The document request for a navigation to `url` (a frame's with
+/// `Destination::Iframe`): GET, or POST with the form's body and
+/// `Content-Type`.
+pub(crate) fn document_request(
+    url: Url,
+    dest: Destination,
+    initiator: Option<Url>,
+    post: Option<FormBody>,
+    user_activated: bool,
+) -> NetRequest {
+    let mut req = NetRequest::get(url, dest, initiator);
+    req.mode = "navigate";
+    req.user_activated = user_activated;
+    if let Some(p) = post {
+        req.method = "POST".into();
+        req.headers.push(("Content-Type".into(), p.content_type));
+        req.body = p.data;
+    }
+    req
+}
+
 /// Navigate (script-initiated or from [`crate::Page::navigate`]).
 pub(crate) async fn navigate(
     ws: Rc<WorkerState>,
     page: Rc<PageState>,
-    url: Url,
-    initiator: Option<Url>,
-    replace: bool,
+    target: Target,
 ) -> Result<NavResult, PageError> {
     let (tx, _rx) = oneshot::channel();
-    navigate_committed(ws, page, url, initiator, replace, tx).await
+    navigate_committed(ws, page, target, tx).await
 }
 
 /// Navigate; `committed` gets the result at commit (or the failure). The
@@ -113,11 +171,16 @@ pub(crate) async fn navigate(
 pub(crate) async fn navigate_committed(
     ws: Rc<WorkerState>,
     page: Rc<PageState>,
-    url: Url,
-    initiator: Option<Url>,
-    replace: bool,
+    target: Target,
     committed: oneshot::Sender<Result<NavResult, PageError>>,
 ) -> Result<NavResult, PageError> {
+    let Target {
+        url,
+        initiator,
+        replace,
+        post,
+        user_activated,
+    } = target;
     let seq = page.nav_seq.get() + 1;
     page.nav_seq.set(seq);
     page.loading.set(true);
@@ -140,8 +203,13 @@ pub(crate) async fn navigate_committed(
             redirected: false,
         })
     } else {
-        let mut req = NetRequest::get(url.clone(), Destination::Document, initiator.clone());
-        req.mode = "navigate";
+        let req = document_request(
+            url.clone(),
+            Destination::Document,
+            initiator.clone(),
+            post,
+            user_activated,
+        );
         // The document being replaced, as the request's client (Chrome
         // reports it for same-origin navigations such as reloads).
         let replaced = page

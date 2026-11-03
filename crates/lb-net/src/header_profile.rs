@@ -154,6 +154,11 @@ pub struct RequestMeta {
     /// `None`: the initiator is the top-level document (a top-level
     /// navigation uses its own target).
     pub top_frame: Option<Url>,
+    /// A form POST navigation ([`RequestKind::Document`] or
+    /// [`RequestKind::Iframe`]): the `<kind>_post` list, and
+    /// `<kind>_post_redirect` for its redirect hops (also after a 303 turned
+    /// it into a GET; Chrome keeps `Cache-Control: max-age=0` there).
+    pub form_post: bool,
 }
 
 impl RequestMeta {
@@ -166,6 +171,7 @@ impl RequestMeta {
             priority: None,
             preflight: None,
             top_frame: None,
+            form_post: false,
         }
     }
 
@@ -257,6 +263,8 @@ fn origin_for(meta: &RequestMeta, target: &Url, method: &Method) -> Option<Strin
     let safe = matches!(*method, Method::GET | Method::HEAD);
     let send = match meta.kind {
         RequestKind::ModuleScript | RequestKind::Font | RequestKind::Preflight => true,
+        // Form POST navigations; not the GET after a 303.
+        RequestKind::Document | RequestKind::Iframe => !safe,
         RequestKind::Fetch => match meta.mode.as_str() {
             "no-cors" => !safe,
             "same-origin" => !safe,
@@ -449,10 +457,19 @@ impl HeaderProfile {
                 )));
             }
         }
-        if !p.kinds.contains_key("document_redirect") {
-            return Err(NetError::Profile(
-                "header profile has no document_redirect list".into(),
-            ));
+        for k in [
+            "document_redirect",
+            "document_post",
+            "document_post_redirect",
+            "iframe_post",
+            "iframe_post_redirect",
+        ] {
+            if !p.kinds.contains_key(k) {
+                return Err(NetError::Profile(format!(
+                    "header profile {} has no {k:?} list",
+                    p.profile_id
+                )));
+            }
         }
         Ok(p)
     }
@@ -481,17 +498,18 @@ impl HeaderProfile {
     /// page used (page headers).
     pub fn build(&self, input: &BuildInput<'_>) -> OrderedHeaders {
         let meta = input.meta;
+        // A `Critical-CH` retry of a GET navigation has its own list; form
+        // POSTs and redirect hops pick theirs in `list_key`.
         let key = if meta.kind == RequestKind::Document
+            && !meta.form_post
             && input.restart
             && self.kinds.contains_key("document_restart")
         {
-            "document_restart"
-        } else if meta.kind == RequestKind::Document && input.hop > 0 {
-            "document_redirect"
+            "document_restart".to_owned()
         } else {
-            meta.kind.key()
+            list_key(meta, input.hop)
         };
-        let slots = &self.kinds[key];
+        let slots = &self.kinds[key.as_str()];
         let has_group = slots.iter().any(|s| matches!(s, Slot::Group { .. }));
         let h1 = input.version == HttpVersion::Http1;
 
@@ -748,6 +766,17 @@ impl HeaderProfile {
     }
 }
 
+/// Which list of the profile a hop uses.
+fn list_key(meta: &RequestMeta, hop: usize) -> String {
+    let post = meta.form_post && matches!(meta.kind, RequestKind::Document | RequestKind::Iframe);
+    match (post, hop) {
+        (true, 0) => format!("{}_post", meta.kind.key()),
+        (true, _) => format!("{}_post_redirect", meta.kind.key()),
+        (false, h) if h > 0 && meta.kind == RequestKind::Document => "document_redirect".into(),
+        (false, _) => meta.kind.key().into(),
+    }
+}
+
 fn extras_has(extras: &[(String, String)], lower: &str) -> bool {
     extras.iter().any(|(n, _)| n.eq_ignore_ascii_case(lower))
 }
@@ -926,6 +955,100 @@ mod tests {
         assert_eq!(&n[n.len() - 2..], ["cookie", "priority"]);
         assert_eq!(n[0], "sec-ch-ua");
         assert!(!n.contains(&"host"));
+    }
+
+    #[test]
+    fn form_post_lists_per_hop() {
+        let mut meta = RequestMeta::new(RequestKind::Document, Some(url("https://a.test/")));
+        assert_eq!(list_key(&meta, 0), "document");
+        assert_eq!(list_key(&meta, 1), "document_redirect");
+        meta.form_post = true;
+        assert_eq!(list_key(&meta, 0), "document_post");
+        assert_eq!(list_key(&meta, 2), "document_post_redirect");
+        meta.kind = RequestKind::Iframe;
+        assert_eq!(list_key(&meta, 0), "iframe_post");
+        assert_eq!(list_key(&meta, 1), "iframe_post_redirect");
+        // Only navigations have post lists.
+        meta.kind = RequestKind::Fetch;
+        assert_eq!(list_key(&meta, 0), "fetch");
+    }
+
+    #[test]
+    fn form_post_h1_order_origin_and_cache_control() {
+        let persona = Persona::default_chrome();
+        let init = url("http://127.0.0.1:1/login");
+        let target = url("http://127.0.0.1:1/login");
+        let mut meta = RequestMeta::new(RequestKind::Document, Some(init.clone()));
+        meta.form_post = true;
+        meta.user_activated = true;
+        let caller = vec![(
+            "Content-Type".to_owned(),
+            "application/x-www-form-urlencoded".to_owned(),
+        )];
+        let h = profile().build(&BuildInput {
+            persona: &persona,
+            version: HttpVersion::Http1,
+            meta: &meta,
+            url: &target,
+            method: &Method::POST,
+            body_len: 9,
+            cookie: None,
+            caller: &caller,
+            hop: 0,
+            site: Site::between(Some(&init), &target),
+        });
+        assert_eq!(
+            names(&h),
+            [
+                "Host",
+                "Connection",
+                "Content-Length",
+                "Cache-Control",
+                "sec-ch-ua",
+                "sec-ch-ua-mobile",
+                "sec-ch-ua-platform",
+                "Accept-Language",
+                "Upgrade-Insecure-Requests",
+                "Content-Type",
+                "User-Agent",
+                "Origin",
+                "Accept",
+                "Sec-Fetch-Site",
+                "Sec-Fetch-Mode",
+                "Sec-Fetch-User",
+                "Sec-Fetch-Dest",
+                "Referer",
+                "Accept-Encoding",
+            ]
+        );
+        let get = |n: &str| h.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+        assert_eq!(get("Origin"), Some("http://127.0.0.1:1"));
+        assert_eq!(get("Cache-Control"), Some("max-age=0"));
+        assert_eq!(get("Content-Length"), Some("9"));
+        assert_eq!(
+            get("Content-Type"),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert_eq!(get("Sec-Fetch-Site"), Some("same-origin"));
+
+        // The GET after a 303: no body headers, no Origin.
+        let h = profile().build(&BuildInput {
+            persona: &persona,
+            version: HttpVersion::Http2,
+            meta: &meta,
+            url: &target,
+            method: &Method::GET,
+            body_len: 0,
+            cookie: Some("a=1"),
+            caller: &Vec::new(),
+            hop: 1,
+            site: Site::SameOrigin,
+        });
+        let n = names(&h);
+        assert_eq!(n[0], "cache-control");
+        assert!(!n.contains(&"origin") && !n.contains(&"content-type"));
+        assert!(!n.contains(&"content-length"));
+        assert_eq!(&n[n.len() - 2..], ["cookie", "priority"]);
     }
 
     #[test]

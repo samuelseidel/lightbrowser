@@ -19,7 +19,8 @@ than names and case:
   preflight. `Accept`, `Sec-Fetch-Mode/Dest`, `Priority` (`u=0, i`, `u=0`,
   `u=1`, `u=2, i`, `u=1, i`) and `Referer` differ.
 - Chrome 153 puts `accept-language` early (after `sec-ch-ua-platform`), not
-  next to `accept-encoding` as Chrome 131 did, and `cookie` after `priority`.
+  next to `accept-encoding` as Chrome 131 did. (This capture also showed
+  `cookie` after `priority` on h2; that was the decoder, see the amendment.)
 - Subresource requests send `sec-ch-ua-platform, accept-language, sec-ch-ua,
   user-agent, sec-ch-ua-mobile` in that order, with the page's own headers
   mixed in (`Content-Type`, custom headers, `Accept` when the page sets it).
@@ -85,10 +86,10 @@ than names and case:
 - The detection bench's `EXPECTED["chrome"]["doc_header_order"]` had Chrome
   131's slot for `Accept-Language`; it was corrected to Chrome 153's (see
   `ROADMAP.md`, "M4 status: detect-bench target and determinism").
-- Open: form-post navigations (`Origin`, `Content-Type` positions), `Range`
-  requests, `Cache-Control` revalidation headers and h3 are not captured.
-- Open: `Sec-Fetch-User` for link clicks needs the page layer to say the
-  navigation was user-activated.
+- Open: `Range` requests, `Cache-Control` revalidation headers and h3 are not
+  captured. (Form POST navigations are, see the amendment.)
+- Open: `Sec-Fetch-User` for link clicks. `NetRequest` has a user-activation
+  flag now, but only trusted form submissions set it.
 - The profile is Linux-captured; ordering is OS independent, but the values
   (UA, platform) come from each persona.
 
@@ -123,3 +124,47 @@ two points:
   test. Not covered: the `priority: i` of CSS background images (not
   fetched yet) and `Sec-Fetch-Storage-Access` on cross-site frames of an
   https page, which LightBrowser does not send.
+
+## Amendment (2026-11-03): form POST navigations, h2 cookie position
+
+Another loopback capture (`profiles/headers/captures/chrome_153_linux_forms.jsonl`,
+52 requests, same Chrome for Testing 153.0.8010.12) recorded `<form
+method="post">` navigations: urlencoded, multipart and `text/plain`, clicked
+(trusted) and script-submitted, top-level and in an iframe, with 303 and 307
+redirects, h1 and h2. The scripts are in `tests/header-capture/` (a Node
+server, so h2 headers keep wire order, and a raw-CDP driver, because
+Playwright's context sets an `Accept-Language` override that moves that
+header to the end).
+
+Findings:
+
+- A form POST has its own list: `content-length` and `cache-control:
+  max-age=0` first, `content-type` after `upgrade-insecure-requests`,
+  `origin` after `user-agent`. `Sec-Fetch-User: ?1` only when the submit
+  came from user input. An iframe POST is the same with `sec-fetch-dest:
+  iframe`.
+- Its redirect hops keep `Cache-Control: max-age=0` and use the redirect
+  order (`sec-ch-ua*` after `sec-fetch-dest`). After a 303 the GET has no
+  `Content-Length`, `Content-Type` or `Origin`; after a 307 it keeps them.
+- On h2, `cookie` comes before `priority` for every request kind. The first
+  capture's Python `h2` decoder joins cookie crumbs and appends the result,
+  which put `cookie` last. Node's `http2` keeps wire order (checked with
+  curl sending both orders). The client-hints capture above found the same, independently.
+
+Decision:
+
+- `chrome_153.json` gets `document_post`, `document_post_redirect`,
+  `iframe_post` and `iframe_post_redirect` (all required), and `cookie`
+  moves before `priority` in every list. A `content-type` slot takes the
+  request's `Content-Type`.
+- `RequestMeta::form_post` picks the post lists for document and iframe
+  requests (all hops). `Origin` is sent for non-GET navigations. lb-page
+  sets it for POST navigations; `NetRequest::user_activated` carries user
+  activation to `Sec-Fetch-User`.
+- `lb-webapi` `rt/form.rs` builds the entry list and encodes it as Chrome
+  does (urlencoded with CRLF newlines, multipart with a
+  `----WebKitFormBoundary` + 16 character boundary from Blink's table,
+  `text/plain`); `NavRequest` and `FrameNavigation` carry the body.
+- `crates/lb-net/tests/form_post_headers.rs` replays the whole new capture
+  through `HeaderProfile::build` (names, case, order and every non-persona
+  value).

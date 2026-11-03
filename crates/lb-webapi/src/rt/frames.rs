@@ -99,6 +99,10 @@ pub struct FrameNavigation {
     pub srcdoc: Option<String>,
     /// URL of the document that started it (referrer, `Sec-Fetch-Site`).
     pub initiator: Option<Url>,
+    /// Form POST body (`None`: GET).
+    pub post: Option<super::FormBody>,
+    /// Started by trusted user input (`Sec-Fetch-User`).
+    pub user_activated: bool,
 }
 
 /// What the page layer provides for frames. Calls may come from inside a
@@ -426,6 +430,8 @@ fn navigation_for(w: &Window, el: NodeId) -> Option<FrameNavigation> {
             url: Url::parse("about:srcdoc").ok()?,
             srcdoc: Some(doc),
             initiator,
+            post: None,
+            user_activated: false,
         });
     }
     let src = src.filter(|s| !s.trim().is_empty())?;
@@ -437,6 +443,8 @@ fn navigation_for(w: &Window, el: NodeId) -> Option<FrameNavigation> {
         url,
         srcdoc: None,
         initiator,
+        post: None,
+        user_activated: false,
     })
 }
 

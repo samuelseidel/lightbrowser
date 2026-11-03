@@ -20,7 +20,7 @@
 use std::rc::{Rc, Weak};
 
 use lb_js::RealmOps;
-use lb_webapi::host::{Destination, NetRequest, NetResponse, decode_text};
+use lb_webapi::host::{Destination, NetResponse, decode_text};
 use lb_webapi::rt::frames::{self as wf, FrameHooks, FrameNavigation};
 use lb_webapi::rt::{TaskSource, Window, fire_event};
 
@@ -142,9 +142,13 @@ async fn navigate_frame(
             Some(parent_url.clone()),
         ),
         None => {
-            let mut req =
-                NetRequest::get(nav.url.clone(), Destination::Iframe, nav.initiator.clone());
-            req.mode = "navigate";
+            let req = crate::nav::document_request(
+                nav.url.clone(),
+                Destination::Iframe,
+                nav.initiator.clone(),
+                nav.post.clone(),
+                nav.user_activated,
+            );
             parent.in_flight.set(parent.in_flight.get() + 1);
             let r =
                 crate::nav::sw_or_network(&page, req, sw.as_ref(), String::new(), &reserved, false)
@@ -273,17 +277,19 @@ pub(crate) fn lifecycle(page: &PageState, id: u64, name: &str) {
     }
 }
 
-/// `location` changed inside frame window `w` (script navigation).
+/// Frame window `w` asked for a navigation (`location`, form submission).
 pub(crate) fn navigate_from_script(
     ws: &Rc<WorkerState>,
     page: &Rc<PageState>,
     w: &Rc<Window>,
-    url: url::Url,
+    req: lb_webapi::rt::NavRequest,
 ) {
     let nav = FrameNavigation {
-        url,
+        url: req.url,
         srcdoc: None,
         initiator: Some(w.url()),
+        post: req.post,
+        user_activated: req.user_activated,
     };
     start(ws, page, w, nav);
 }

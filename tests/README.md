@@ -271,7 +271,7 @@ realm_bench` prints the realm-creation timings the runner reads.
 
 ## Planned suites
 
-- **Header golden test for the first capture** (M4): replay `profiles/headers/captures/chrome_153_linux.jsonl` the same way as the client-hints capture (its h2 `cookie` position is a decoder artifact, ADR 0011).
+- **Header golden test for the first capture** (M4): replay `profiles/headers/captures/chrome_153_linux.jsonl` the same way as the client-hints and form POST captures (`cargo test -p lb-net --test accept_ch`, `--test form_post_headers`). The old file's h2 `cookie` position is a decoder artifact (ADR 0011 amendment), so a replay must skip it there.
 - **Fingerprint tests for Firefox** (M4b): same checks as the Chrome personas, against OUR detection engine only.
 - **Firefox network fingerprint** (M4b): close the ADR 0003 gaps and re-capture Firefox 128 with `lb-fptest`.
 
@@ -288,6 +288,26 @@ the `h2` package, which moves `cookie` last on h2, and an `openssl` cert);
 client hints. A full re-capture for a new Chrome major is still partly
 manual: record the same request kinds from a local Chromium, compare
 with the existing JSONL, and update the slot lists (ADR 0011).
+
+Form POST navigations (`chrome_153_linux_forms.jsonl`, 52 requests) were
+captured with the scripts in `tests/header-capture/`, which are in the repo.
+They bind 127.0.0.1 only and drive the local Chromium over raw CDP (not
+Playwright: its contexts set an `Accept-Language` override that moves the
+header):
+
+```bash
+d=$(mktemp -d)
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$d/key.pem" -out "$d/cert.pem" \
+    -days 2 -subj "/CN=localhost"
+node tests/header-capture/server.js "$d/forms.jsonl" 18490 18491 "$d" &
+node tests/header-capture/drive.js 18490 18491
+kill %1
+```
+
+Each request is labelled with its scenario in `page` (the `?s=` of the page
+that started it); `/favicon.ico` is not logged. Copy the output to
+`profiles/headers/captures/` and run `cargo test -p lb-net --test
+form_post_headers`.
 
 ## Re-capturing a Chrome TLS/H2 profile (`lb-fptest`)
 

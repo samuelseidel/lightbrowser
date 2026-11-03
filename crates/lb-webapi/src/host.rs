@@ -51,6 +51,8 @@ pub struct NetRequest {
     pub initiator: Option<Url>,
     /// `fetch` / XHR mode: `cors`, `no-cors`, `same-origin`, `navigate`.
     pub mode: &'static str,
+    /// A navigation started by trusted user input (`Sec-Fetch-User: ?1`).
+    pub user_activated: bool,
 }
 
 impl NetRequest {
@@ -67,6 +69,7 @@ impl NetRequest {
                 Destination::Empty => "cors",
                 _ => "no-cors",
             },
+            user_activated: false,
         }
     }
 }

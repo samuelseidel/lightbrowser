@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use lb_dom::{Document, NodeFlags, NodeId, local_name};
+use lb_dom::{Document, NodeFlags, NodeId};
 use lb_js::{Arg, CallCtx, HostError, HostRef, JsError, JsValue, RealmId, ScriptOrigin, ValueKind};
 use url::Url;
 
@@ -385,8 +385,6 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
     }
 }
 
-/// Submit a form as a GET navigation (POST bodies are not sent yet; the
-/// navigation becomes a GET with a console warning).
 /// The form data set of `form` (submittable controls in tree order, with
 /// form-associated custom elements' values), as name/value pairs.
 pub(crate) fn form_entries(
@@ -461,40 +459,6 @@ pub(crate) fn form_entries(
     pairs
 }
 
-pub(crate) fn submit_form(w: &Window, form: NodeId) {
-    let (action, method, pairs) = w.with_doc(|d| {
-        let action = d
-            .get_attribute(form, "action")
-            .filter(|a| !a.is_empty())
-            .map(str::to_owned);
-        let method = d
-            .get_attribute(form, "method")
-            .unwrap_or("get")
-            .to_ascii_lowercase();
-        let pairs = form_entries(w, d, form);
-        (action, method, pairs)
-    });
-    let base = match action {
-        Some(a) => w.resolve_url(&a),
-        None => Some(w.url()),
-    };
-    let Some(mut url) = base else { return };
-    if method == "post" {
-        w.warn("form POST is submitted as GET (POST navigation bodies are not supported yet)");
-    }
-    {
-        let mut q = url.query_pairs_mut();
-        q.clear();
-        for (k, v) in &pairs {
-            q.append_pair(k, v);
-        }
-    }
-    w.request_navigation(NavRequest {
-        url,
-        replace: false,
-    });
-}
-
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
 pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
@@ -546,7 +510,7 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
         let _ = js;
         return;
     }
-    w.request_navigation(NavRequest { url, replace });
+    w.request_navigation(NavRequest::get(url, replace));
 }
 
 /// `(screenX, screenY)`: the persona's `window_position()` (Wayland 0,0;
@@ -1006,10 +970,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Location", "reload", |_cx, w| {
-        w.request_navigation(NavRequest {
-            url: w.url(),
-            replace: true,
-        });
+        w.request_navigation(NavRequest::get(w.url(), true));
         Ok(())
     });
     method(reg, rt, "Location", "toString", |cx, w| {
@@ -1096,10 +1057,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             };
             if delta == 0 {
                 if name == "go" {
-                    w.request_navigation(NavRequest {
-                        url: w.url(),
-                        replace: true,
-                    });
+                    w.request_navigation(NavRequest::get(w.url(), true));
                 }
                 return Ok(());
             }

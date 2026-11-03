@@ -113,7 +113,7 @@ fn peer<R>(
 }
 
 /// A deterministic random stream for this persona, origin and purpose.
-fn rng(w: &Window, what: &str) -> lb_persona::sfc32::Sfc32 {
+pub(crate) fn rng(w: &Window, what: &str) -> lb_persona::sfc32::Sfc32 {
     let mut key = w
         .profile
         .as_deref()
