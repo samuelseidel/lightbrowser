@@ -47,6 +47,7 @@ mod coll;
 mod dom;
 mod events;
 mod fonts;
+mod form;
 pub mod frames;
 mod image;
 pub mod input;
@@ -517,6 +518,31 @@ impl Clock {
 pub struct NavRequest {
     pub url: Url,
     pub replace: bool,
+    /// Form POST body (`None`: GET).
+    pub post: Option<FormBody>,
+    /// Started by trusted user input (a click or Enter on a submit button):
+    /// `Sec-Fetch-User: ?1`.
+    pub user_activated: bool,
+}
+
+impl NavRequest {
+    /// A GET navigation from script.
+    pub fn get(url: Url, replace: bool) -> NavRequest {
+        NavRequest {
+            url,
+            replace,
+            post: None,
+            user_activated: false,
+        }
+    }
+}
+
+/// The encoded entry list of a `method="post"` form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormBody {
+    /// `Content-Type` header value (with the multipart boundary).
+    pub content_type: String,
+    pub data: Vec<u8>,
 }
 
 pub(crate) struct Timer {

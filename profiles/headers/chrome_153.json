@@ -2,7 +2,7 @@
   "schema": 1,
   "profile_id": "chrome_153",
   "family": "chrome",
-  "description": "Request header names, case and order that Chrome for Testing 153.0.8010.12 (Linux, --headless=new) sends, per request kind. Captured on loopback against a local logging server (HTTP/1.1 raw bytes, HTTPS h2 decoded). See docs/adr/0011-per-destination-headers.md and captures/chrome_153_linux.jsonl.",
+  "description": "Request header names, case and order that Chrome for Testing 153.0.8010.12 (Linux, --headless=new) sends, per request kind. Captured on loopback against a local logging server (HTTP/1.1 raw bytes, HTTPS h2 decoded). See docs/adr/0011-per-destination-headers.md, captures/chrome_153_linux.jsonl and captures/chrome_153_linux_forms.jsonl (form POST navigations, h2 cookie position).",
   "browser_version": "153.0.8010.12",
   "captured": "2026-11-03",
 
@@ -10,6 +10,9 @@
     "Each request kind is a list of header slots in h2 wire order (names lowercase).",
     "\"name\" = value computed from the persona or the request (user-agent, sec-ch-ua*, accept-language, host, referer, origin, cookie, content-length, sec-fetch-site, sec-fetch-mode, sec-fetch-user, access-control-request-*). A slot with no value is skipped.",
     "\"name: value\" = fixed value.",
+    "\"content-type\" = the Content-Type the request carries (form enctype); skipped when there is none.",
+    "*_post lists: form POST navigations; *_post_redirect: their redirect hops (303 turns them into GET, so content-length, content-type and origin drop out; 307/308 keep them).",
+    "h2 `cookie` comes before `priority` (re-checked with a Node http2 server in captures/chrome_153_linux_forms.jsonl; the first capture's Python h2 decoder moved cookie to the end).",
     "\"@group\" = the renderer header group: user-agent, sec-ch-ua*, accept-language and the page's own headers, in Blink's hash-table order (see renderer_group).",
     "HTTP/1.1 = the same list with `host` and `connection: keep-alive` in front and `priority` removed, names re-cased by h1."
   ],
@@ -31,8 +34,8 @@
       "sec-fetch-site", "sec-fetch-mode: navigate", "sec-fetch-user", "sec-fetch-dest: document",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=0, i",
-      "cookie"
+      "cookie",
+      "priority: u=0, i"
     ],
     "document_redirect": [
       "accept-language",
@@ -43,8 +46,40 @@
       "referer",
       "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=0, i",
-      "cookie"
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "document_post": [
+      "content-length",
+      "cache-control: max-age=0",
+      "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "content-type",
+      "user-agent",
+      "origin",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-fetch-site", "sec-fetch-mode: navigate", "sec-fetch-user", "sec-fetch-dest: document",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "document_post_redirect": [
+      "content-length",
+      "cache-control: max-age=0",
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "content-type",
+      "user-agent",
+      "origin",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-fetch-site", "sec-fetch-mode: navigate", "sec-fetch-user", "sec-fetch-dest: document",
+      "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
     ],
     "iframe": [
       "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
@@ -55,8 +90,40 @@
       "sec-fetch-site", "sec-fetch-mode: navigate", "sec-fetch-dest: iframe",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=0, i",
-      "cookie"
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "iframe_post": [
+      "content-length",
+      "cache-control: max-age=0",
+      "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "content-type",
+      "user-agent",
+      "origin",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-fetch-site", "sec-fetch-mode: navigate", "sec-fetch-user", "sec-fetch-dest: iframe",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "iframe_post_redirect": [
+      "content-length",
+      "cache-control: max-age=0",
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "content-type",
+      "user-agent",
+      "origin",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-fetch-site", "sec-fetch-mode: navigate", "sec-fetch-user", "sec-fetch-dest: iframe",
+      "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
     ],
     "style": [
       "@group",
@@ -64,8 +131,8 @@
       "sec-fetch-site", "sec-fetch-mode: no-cors", "sec-fetch-dest: style",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=0",
-      "cookie"
+      "cookie",
+      "priority: u=0"
     ],
     "script": [
       "@group",
@@ -73,8 +140,8 @@
       "sec-fetch-site", "sec-fetch-mode: no-cors", "sec-fetch-dest: script",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=1",
-      "cookie"
+      "cookie",
+      "priority: u=1"
     ],
     "module_script": [
       "@group+origin",
@@ -82,8 +149,8 @@
       "sec-fetch-site", "sec-fetch-mode: cors", "sec-fetch-dest: script",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=1",
-      "cookie"
+      "cookie",
+      "priority: u=1"
     ],
     "image": [
       "@group",
@@ -91,8 +158,8 @@
       "sec-fetch-site", "sec-fetch-mode: no-cors", "sec-fetch-dest: image",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=2, i",
-      "cookie"
+      "cookie",
+      "priority: u=2, i"
     ],
     "favicon": [
       "@group",
@@ -100,8 +167,8 @@
       "sec-fetch-site", "sec-fetch-mode: no-cors", "sec-fetch-dest: image",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=1, i",
-      "cookie"
+      "cookie",
+      "priority: u=1, i"
     ],
     "font": [
       "@group+origin",
@@ -109,8 +176,8 @@
       "sec-fetch-site", "sec-fetch-mode: cors", "sec-fetch-dest: font",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=0",
-      "cookie"
+      "cookie",
+      "priority: u=0"
     ],
     "fetch": [
       "content-length",
@@ -120,8 +187,8 @@
       "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest: empty",
       "referer",
       "accept-encoding: gzip, deflate, br, zstd",
-      "priority: u=1, i",
-      "cookie"
+      "cookie",
+      "priority: u=1, i"
     ],
     "preflight": [
       "accept: */*",

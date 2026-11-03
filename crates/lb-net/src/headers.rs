@@ -40,8 +40,8 @@ fn push(h: &mut OrderedHeaders, name: &str, value: &str) {
 /// Order, Chrome 153 (from `profiles/headers/chrome_153.json`):
 /// sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, accept-language,
 /// upgrade-insecure-requests, user-agent, accept, sec-fetch-site,
-/// sec-fetch-mode, sec-fetch-user, sec-fetch-dest, accept-encoding, priority,
-/// [cookie].
+/// sec-fetch-mode, sec-fetch-user, sec-fetch-dest, accept-encoding, [cookie],
+/// priority.
 ///
 /// Observed order, Firefox 128 (h2):
 /// user-agent, accept, accept-language, accept-encoding,
@@ -88,7 +88,8 @@ pub fn navigation_headers(persona: &Persona, _host: &str) -> OrderedHeaders {
 /// Insert the `cookie` header where the browser puts it, for headers built by
 /// [`navigation_headers`]. Any existing `cookie` header is replaced.
 ///
-/// - Chrome (153): last, after `priority`.
+/// - Chrome (153): right before `priority` (last on HTTP/1.1, which has no
+///   `priority`).
 /// - Firefox: right after `accept-encoding`, i.e. before
 ///   `upgrade-insecure-requests`.
 ///
@@ -103,7 +104,10 @@ pub fn with_cookie(mut headers: OrderedHeaders, value: &str) -> OrderedHeaders {
             .position(|(n, _)| n == "upgrade-insecure-requests")
             .unwrap_or(headers.len())
     } else {
-        headers.len()
+        headers
+            .iter()
+            .position(|(n, _)| n == "priority")
+            .unwrap_or(headers.len())
     };
     headers.insert(pos, ("cookie".to_owned(), value.to_owned()));
     headers
@@ -211,7 +215,8 @@ pub fn generic_request_headers(input: &BuildInput<'_>) -> OrderedHeaders {
             set(&mut base, "sec-fetch-dest", dest);
         }
     }
-    if !(meta.kind == RequestKind::Document && meta.user_activated) {
+    let navigation = matches!(meta.kind, RequestKind::Document | RequestKind::Iframe);
+    if !(navigation && meta.user_activated) {
         base.retain(|(n, _)| n != "sec-fetch-user");
     }
     let mut out = merge_headers(base, input.caller);
@@ -221,7 +226,9 @@ pub fn generic_request_headers(input: &BuildInput<'_>) -> OrderedHeaders {
     if let Some(i) = &meta.initiator {
         let safe = matches!(*input.method, Method::GET | Method::HEAD);
         let cross = i.origin() != input.url.origin();
-        if meta.kind == RequestKind::Fetch && (!safe || cross) {
+        // Form POST navigations send Origin too (not checked against
+        // Firefox yet, M4b).
+        if (meta.kind == RequestKind::Fetch && (!safe || cross)) || (navigation && !safe) {
             out.push(("origin".into(), i.origin().ascii_serialization()));
         }
     }
@@ -340,12 +347,13 @@ mod tests {
     }
 
     #[test]
-    fn chrome_cookie_goes_last() {
+    fn chrome_cookie_goes_before_priority() {
         let h = with_cookie(navigation_headers(&Persona::default_chrome(), "h"), "a=1");
         let n = names(&h);
         let i = n.iter().position(|x| *x == "cookie").unwrap();
-        assert_eq!(n[i - 1], "priority");
-        assert_eq!(i, n.len() - 1);
+        assert_eq!(n[i - 1], "accept-encoding");
+        assert_eq!(n[i + 1], "priority");
+        assert_eq!(i, n.len() - 2);
         assert_eq!(n.len(), 14);
     }
 

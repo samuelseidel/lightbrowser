@@ -934,9 +934,8 @@ fn submit(js: &mut dyn Js, w: &Rc<Window>, form: NodeId, submitter: Option<NodeI
             e.trusted = trusted;
         }
     });
-    let _ = submitter;
     if dispatch(js, w, node_ref(0, form), ev) {
-        super::window::submit_form(w, form);
+        super::form::submit_form(w, form, submitter, trusted);
     }
 }
 
@@ -2254,8 +2253,5 @@ fn register_controls(reg: &mut Registry, rt: &Runtime) {
 /// Request a navigation (used by the page layer for keyboard/link tests).
 #[allow(dead_code)]
 pub(crate) fn request(w: &Window, url: url::Url) {
-    w.request_navigation(NavRequest {
-        url,
-        replace: false,
-    });
+    w.request_navigation(NavRequest::get(url, false));
 }

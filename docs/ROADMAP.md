@@ -19,7 +19,7 @@ Each milestone ends with something we can run and measure.
 |---|---|---|
 | M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
-| M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
+| M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word (see "M5 status"); form POSTs now send a POST (see "M4 status: form POST navigations") |
 | M6 Performance | Snapshot, memory, binary size, `bench/` runner and screenshots done | Lightpanda comparison (no binary here), service workers, the original < 40 MB binary budget (44.4 MB now, 4.4 MB over; further cuts mean dropping Rust features or building V8 from source, ADR 0013) |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
@@ -147,8 +147,9 @@ Still open from M2:
   wrappers (host objects live until the window drops); no `DOMException`
   `stack`; namespace and worker-only member order is from the IDL, not a
   fixture.
-- Pages: no workers, no cross-document history, form POST sent as GET.
-  (Nested browsing contexts landed in M4, see "M4 status: frames".)
+- Pages: no workers, no cross-document history. (Nested browsing contexts
+  landed in M4, see "M4 status: frames"; form POST navigations in "M4
+  status: form POST navigations".)
 - Scripts: no dynamic `import()` or `import.meta`; script-inserted module
   scripts are skipped; dynamic `async = false` scripts are not ordered;
   scripts written by `document.write` run after the writer returns; no
@@ -250,8 +251,8 @@ Open (CDP and page host):
   `prefers-reduced-data` with fixed values instead of the persona's
   `preferences`.
 - Input: contenteditable editing appends at the end (no caret, Range or
-  Selection); number inputs are not sanitized; form POST still navigates as
-  GET.
+  Selection); number inputs are not sanitized. (Form POST navigations
+  landed, see "M4 status: form POST navigations".)
 - Layout has no real line boxes, shaping, bidi or table layout, and
   `clientWidth` ignores scrollbars (the persona's
   `preferences.scrollbar_width` is not used by `lb-layout` yet).
@@ -340,17 +341,78 @@ header set.
   fingerprint`, 2 tests: TLS/H2 unchanged), and T-010 no longer fires
   `header_order`.
 
-Open: no test replays the capture file through `HeaderProfile::build` yet;
-the capture server script is not in the repo (it lived in an agent's
-scratch directory, so re-capturing is manual, see `tests/README.md`);
-header sets the page adds beyond the captured ones are placed right after
-`user-agent`; the referer slot after a redirect hop is a guess; form-POST
-navigations, `Range` and revalidation headers are not captured; the layer
-that builds fetch/XHR requests does not add the default `Content-Type` for
-a body; `Destination` has no `Font`/beacon variants and `NetRequest` has no
-user-activation flag (so `Sec-Fetch-User` for link clicks, and font/beacon
-priorities, are only reachable through `lb-net`); nothing issues CORS
-preflights.
+Open: no test replays the first capture file through `HeaderProfile::build`
+yet (the form POST capture has one, see "M4 status: form POST
+navigations"); the first capture's server script is not in the repo
+(`tests/header-capture/` now has a Node server and driver for new
+captures); header sets the page adds beyond the captured ones are placed
+right after `user-agent`; the referer slot after a redirect hop is a guess;
+`Range` and revalidation headers are not captured; the layer that builds
+fetch/XHR requests does not add the default `Content-Type` for a body;
+`Destination` has no `Font`/beacon variants, so font/beacon priorities are
+only reachable through `lb-net`; `NetRequest::user_activated` is set only
+by trusted form submissions, so link clicks send no `Sec-Fetch-User`;
+nothing issues CORS preflights. (The h2 `cookie`/`priority` order in this
+section's capture was a decoder artifact, fixed with the form POST work.)
+
+## M4 status: form POST navigations (2026-11-03)
+
+`<form method="post">` sends a POST navigation, as Chrome does. Before, the
+form became a GET with the entries in the URL (detect-bench T-010 sent the
+email and password as `/login?email=...&password=...`).
+
+- Capture: Chrome for Testing 153.0.8010.12 on loopback with the scripts in
+  `tests/header-capture/` (Node `http`/`http2` logging server, raw-CDP
+  driver), 52 requests in
+  `profiles/headers/captures/chrome_153_linux_forms.jsonl`: urlencoded,
+  multipart and `text/plain`; clicked and script-submitted; top-level and
+  in an iframe; no redirect, 303 and 307; h1 and h2; one cross-site POST.
+- Chrome's form POST: `Content-Length` and `Cache-Control: max-age=0`
+  first, `Content-Type` after `Upgrade-Insecure-Requests`, `Origin` after
+  `User-Agent`, `Sec-Fetch-User: ?1` only for a user-activated submit. The
+  redirect hops keep `Cache-Control` and use the redirect order; after a
+  303 the GET drops `Content-Length`, `Content-Type` and `Origin`, after a
+  307 it keeps them. Iframes differ only in `Sec-Fetch-Dest`.
+- Correction: on h2 `cookie` comes before `priority` for every request
+  kind. The first capture's Python `h2` decoder had moved it to the end.
+  Every list in `chrome_153.json` changed (ADR 0011 amendment).
+- `lb-net`: `RequestMeta::form_post` picks `document_post` /
+  `iframe_post` and their `*_post_redirect` lists; `Origin` for non-GET
+  navigations; the Firefox overlay sends `Origin` and keeps
+  `Sec-Fetch-User` for activated iframes too (not checked against Firefox,
+  M4b).
+- `lb-webapi`: `rt/form.rs` builds the entry list (submitter only, checked
+  boxes with `on`, disabled controls and fieldsets skipped, `select
+  multiple`, `_charset_`, empty files) and encodes it: urlencoded with CRLF
+  newlines, multipart with Blink's `----WebKitFormBoundary` + 16 character
+  boundary (persona-seeded sfc32 plus the window clock), `text/plain`. The
+  submitter's `formaction`/`formmethod`/`formenctype` win.
+  `NetRequest::user_activated`, `NavRequest::post`/`user_activated` and
+  `FrameNavigation::post`/`user_activated` carry it to the page layer.
+- `lb-page`: `nav::Target` (URL, initiator, replace, body, activation)
+  for top-level navigations; `nav::document_request` builds the GET or
+  POST for documents and frames. The URL stays the action URL, query
+  included. CDP `requestWillBeSent` reports the method and `postData`.
+
+Verified: `cargo test --workspace` (463 passed, 0 failed), including
+`lb-net --test form_post_headers` (all 52 captured requests replayed:
+names, case, order and every non-persona value), `--test fingerprint`
+(TLS/H2 unchanged) and `lb-page --test forms` (5: urlencoded POST with a
+303 and Chrome's exact h1 order, multipart and `text/plain` bodies, GET
+forms, an iframe POST, `Sec-Fetch-User` from a trusted CDP click); clippy
+`--workspace --all-targets -D warnings`; fmt; the firefox tests and clippy
+for `lightbrowser` and `lb-js`. detect-bench T-010 (`--input playwright`,
+debug build): the server now records the `form` request on `/login` with
+the captured header order; no request carries the credentials; fp 0.
+
+Open: values are always UTF-8 (no `accept-charset` or legacy encodings);
+`target` is ignored (the form's own window navigates); image buttons send
+no `x`/`y`; file inputs send an empty file; controls associated with
+`form="id"` outside the form are not collected; `Sec-Fetch-User` comes
+only from a trusted click or Enter on the form, not from a script submit
+inside a click handler (Chrome uses transient activation); reload and
+history after a POST re-GET the URL; a 307 to another origin keeps the
+original `Origin` (the Fetch spec says `null`; not captured).
 
 ## M4 status: canvas and images (2026-11-03)
 
@@ -795,9 +857,10 @@ the new build: T-010 `--input playwright` scores beh 92.3 for both personas
 (`beh_typing_no_keys`, `beh_click_center`, `beh_click_no_path`,
 `beh_click_hold`, `beh_ttfi`, `beh_wheel_pattern`, `page_dwell_short`);
 stock Chromium T-001 and T-003 score 100. No persona seed was picked, and
-neither model was tuned to a threshold. LightBrowser still submits the
-`method="post"` login form as a GET (`lb-webapi` `submit_form`; the
-credentials end up in the URL). The bench does not score this.
+neither model was tuned to a threshold. At the time LightBrowser
+submitted the `method="post"` login form as a GET (the credentials ended
+up in the URL); fixed since, see "M4 status: form POST navigations". The
+bench does not score this.
 
 Verified: `cargo test -p lb-behavior` (65), `-p lb-cdp`, `-p lb-persona`,
 `-p lb-page` (new `tests/human.rs`: trusted events, Chrome order,
@@ -821,8 +884,7 @@ almost straight, and a page with only such moves can fire
 `beh_mouse_linear` (macOS seed 10). Human data on the distribution of path
 curvature would settle whether that is too often. The SDK's T-004
 (`sdk/python/lightbrowser/scenarios.py`) still types one six-letter word,
-so its key rules fire by chance as described above. Form POSTs are sent as
-GETs (lb-webapi).
+so its key rules fire by chance as described above.
 
 ## M6 status: snapshot, memory and binary size (2026-11-03)
 

@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use lb_dom::{Document, NodeFlags, NodeId, local_name};
+use lb_dom::{Document, NodeFlags, NodeId};
 use lb_js::{Arg, CallCtx, HostError, HostRef, JsError, JsValue, RealmId, ScriptOrigin, ValueKind};
 use url::Url;
 
@@ -358,103 +358,6 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
     }
 }
 
-/// Submit a form as a GET navigation (POST bodies are not sent yet; the
-/// navigation becomes a GET with a console warning).
-pub(crate) fn submit_form(w: &Window, form: NodeId) {
-    let (action, method, pairs) = w.with_doc(|d| {
-        let action = d
-            .get_attribute(form, "action")
-            .filter(|a| !a.is_empty())
-            .map(str::to_owned);
-        let method = d
-            .get_attribute(form, "method")
-            .unwrap_or("get")
-            .to_ascii_lowercase();
-        let mut pairs = Vec::new();
-        for c in d.descendants(form) {
-            let Some(name) = d.get_attribute(c, "name").filter(|n| !n.is_empty()) else {
-                continue;
-            };
-            if d.has_attribute(c, "disabled") {
-                continue;
-            }
-            let local = d.local_name(c).map(|l| l.to_string()).unwrap_or_default();
-            let value = match local.as_str() {
-                "input" => {
-                    let t = super::dom::input_type(d, c);
-                    if matches!(t.as_str(), "checkbox" | "radio")
-                        && !super::dom::checked(d, c, "checked")
-                    {
-                        continue;
-                    }
-                    if matches!(t.as_str(), "submit" | "button" | "reset" | "image" | "file") {
-                        continue;
-                    }
-                    w.values.borrow().get(&(0, c)).cloned().unwrap_or_else(|| {
-                        d.get_attribute(c, "value")
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| {
-                                if matches!(t.as_str(), "checkbox" | "radio") {
-                                    "on".into()
-                                } else {
-                                    String::new()
-                                }
-                            })
-                    })
-                }
-                "textarea" => w
-                    .values
-                    .borrow()
-                    .get(&(0, c))
-                    .cloned()
-                    .unwrap_or_else(|| d.text_content(c).unwrap_or_default()),
-                "select" => {
-                    let opts: Vec<NodeId> = d
-                        .descendants(c)
-                        .filter(|&o| d.is_html_element_named(o, &local_name!("option")))
-                        .collect();
-                    let sel = opts
-                        .iter()
-                        .copied()
-                        .find(|&o| super::dom::checked(d, o, "selected"))
-                        .or(opts.first().copied());
-                    match sel {
-                        Some(o) => d
-                            .get_attribute(o, "value")
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| {
-                                d.text_content(o).unwrap_or_default().trim().to_owned()
-                            }),
-                        None => continue,
-                    }
-                }
-                _ => continue,
-            };
-            pairs.push((name.to_owned(), value));
-        }
-        (action, method, pairs)
-    });
-    let base = match action {
-        Some(a) => w.resolve_url(&a),
-        None => Some(w.url()),
-    };
-    let Some(mut url) = base else { return };
-    if method == "post" {
-        w.warn("form POST is submitted as GET (POST navigation bodies are not supported yet)");
-    }
-    {
-        let mut q = url.query_pairs_mut();
-        q.clear();
-        for (k, v) in &pairs {
-            q.append_pair(k, v);
-        }
-    }
-    w.request_navigation(NavRequest {
-        url,
-        replace: false,
-    });
-}
-
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
 pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
@@ -506,7 +409,7 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
         let _ = js;
         return;
     }
-    w.request_navigation(NavRequest { url, replace });
+    w.request_navigation(NavRequest::get(url, replace));
 }
 
 pub(crate) fn screen_dims(w: &Window) -> lb_persona::profile::ScreenInfo {
@@ -931,10 +834,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Location", "reload", |_cx, w| {
-        w.request_navigation(NavRequest {
-            url: w.url(),
-            replace: true,
-        });
+        w.request_navigation(NavRequest::get(w.url(), true));
         Ok(())
     });
     method(reg, rt, "Location", "toString", |cx, w| {
@@ -1018,10 +918,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             };
             if delta == 0 {
                 if name == "go" {
-                    w.request_navigation(NavRequest {
-                        url: w.url(),
-                        replace: true,
-                    });
+                    w.request_navigation(NavRequest::get(w.url(), true));
                 }
                 return Ok(());
             }

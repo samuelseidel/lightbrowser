@@ -1649,10 +1649,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         if slot == 0
             && let Some(u) = w.resolve_url(&v)
         {
-            w.request_navigation(super::NavRequest {
-                url: u,
-                replace: false,
-            });
+            w.request_navigation(super::NavRequest::get(u, false));
         }
         Ok(())
     });
@@ -2306,7 +2303,7 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "HTMLFormElement", "submit", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;
         if slot == 0 {
-            super::window::submit_form(w, n);
+            super::form::submit_form(w, n, None, false);
         }
         Ok(())
     });
