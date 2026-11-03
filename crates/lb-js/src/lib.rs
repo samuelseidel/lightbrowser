@@ -66,6 +66,17 @@
 //! let v = engine.evaluate(realm, "typeof Node", ScriptOrigin::new("https://a.test/"))?;
 //! ```
 //!
+//! # Startup snapshot (chrome, ADR 0013)
+//!
+//! [`Engine::snapshot_creator`] records interface definitions;
+//! [`Engine::create_snapshot`] serializes their templates plus one context
+//! of a global interface with an init script run. [`Engine::with_snapshot`]
+//! restores: the host defines the same interfaces again (checked against a
+//! digest each, only the callbacks are registered), then
+//! [`Engine::use_snapshot_context`] lets realms of that global be
+//! deserialized ([`RealmOps::is_snapshot_realm`]). Mismatches fall back to
+//! building; [`Engine::snapshot_status`] tells which happened.
+//!
 //! # Script execution
 //!
 //! [`Engine::evaluate`] compiles and runs a classic script with a
@@ -186,6 +197,12 @@ pub enum EngineError {
         persona: BrowserFamily,
         compiled: Option<BrowserFamily>,
     },
+    /// A process can make one startup snapshot: V8 shares one read-only
+    /// heap between all isolates, and a second snapshot creator would
+    /// change it under engines restored from the first blob.
+    SnapshotCreatorUsed,
+    /// A snapshot creator must be the only engine of the process.
+    SnapshotNotAlone,
 }
 
 impl std::fmt::Display for EngineError {
@@ -197,6 +214,12 @@ impl std::fmt::Display for EngineError {
                 persona.as_str(),
                 compiled.map_or("none", |c| c.as_str())
             ),
+            EngineError::SnapshotCreatorUsed => {
+                f.write_str("this process already made a startup snapshot")
+            }
+            EngineError::SnapshotNotAlone => {
+                f.write_str("a startup snapshot can only be made while no other engine exists")
+            }
         }
     }
 }

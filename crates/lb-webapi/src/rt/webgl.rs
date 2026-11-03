@@ -1174,6 +1174,24 @@ impl Gl {
 
     /// Unpremultiplied, noised RGBA rows top-down (what leaves the canvas).
     fn readback(&self) -> lb_paint::Bitmap {
+        let mut bmp = self.readback_clean();
+        let Some(fb) = &self.fb else { return bmp };
+        if let Some(seed) = self.seed {
+            lb_paint::CanvasNoise::new(seed).apply(
+                fb,
+                self.width,
+                self.height,
+                0,
+                0,
+                self.width,
+                &mut bmp.data,
+            );
+        }
+        bmp
+    }
+
+    /// Readback without noise (page screenshots only).
+    fn readback_clean(&self) -> lb_paint::Bitmap {
         let mut bmp = lb_paint::Bitmap::new(self.width, self.height);
         let Some(fb) = &self.fb else { return bmp };
         bmp.data.copy_from_slice(fb);
@@ -1191,17 +1209,6 @@ impl Gl {
             for px in bmp.data.chunks_exact_mut(4) {
                 px[3] = 255;
             }
-        }
-        if let Some(seed) = self.seed {
-            lb_paint::CanvasNoise::new(seed).apply(
-                fb,
-                self.width,
-                self.height,
-                0,
-                0,
-                self.width,
-                &mut bmp.data,
-            );
         }
         bmp
     }
@@ -1300,11 +1307,13 @@ fn make_context(
     gl.borrow_mut().obj = id;
     let value = cx.make_handle(w.obj_arg(id))?;
     let g1 = gl.clone();
-    let g2 = gl;
+    let g2 = gl.clone();
+    let g3 = gl;
     Ok(Some(ExternalContext {
         value,
         snapshot: Some(Rc::new(move || Some(g1.borrow().readback()))),
         resize: Some(Rc::new(move |ww, hh| g2.borrow_mut().resize(ww, hh))),
+        raw: Some(Rc::new(move || Some(g3.borrow().readback_clean()))),
     }))
 }
 

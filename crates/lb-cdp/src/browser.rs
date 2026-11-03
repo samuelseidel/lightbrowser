@@ -1214,14 +1214,20 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
                 (v.width, v.height)
             });
             let dpr = p.screen.device_pixel_ratio;
-            let layout = json!({ "pageX": 0, "pageY": 0, "clientWidth": w, "clientHeight": h });
-            let visual = json!({ "offsetX": 0, "offsetY": 0, "pageX": 0, "pageY": 0, "clientWidth": w, "clientHeight": h, "scale": 1, "zoom": 1 });
-            let content = json!({ "x": 0, "y": 0, "width": w, "height": h });
+            let m = host.page_metrics(&t).map_err(host_err)?;
+            let (sx, sy) = m.map_or((0.0, 0.0), |m| (m.scroll_x, m.scroll_y));
+            let (cw, ch) = m.map_or((f64::from(w), f64::from(h)), |m| {
+                (m.content_width, m.content_height)
+            });
+            let layout = json!({ "pageX": sx, "pageY": sy, "clientWidth": w, "clientHeight": h });
+            let visual = json!({ "offsetX": 0, "offsetY": 0, "pageX": sx, "pageY": sy, "clientWidth": w, "clientHeight": h, "scale": 1, "zoom": 1 });
+            let content = json!({ "x": 0, "y": 0, "width": cw, "height": ch });
             let device = |v: u32| f64::from(v) * dpr;
+            // Chrome reports device-pixel sizes but CSS-px page offsets here.
             Ok(json!({
-                "layoutViewport": { "pageX": 0, "pageY": 0, "clientWidth": device(w), "clientHeight": device(h) },
-                "visualViewport": { "offsetX": 0, "offsetY": 0, "pageX": 0, "pageY": 0, "clientWidth": device(w), "clientHeight": device(h), "scale": 1, "zoom": 1 },
-                "contentSize": { "x": 0, "y": 0, "width": device(w), "height": device(h) },
+                "layoutViewport": { "pageX": sx, "pageY": sy, "clientWidth": device(w), "clientHeight": device(h) },
+                "visualViewport": { "offsetX": 0, "offsetY": 0, "pageX": sx, "pageY": sy, "clientWidth": device(w), "clientHeight": device(h), "scale": 1, "zoom": 1 },
+                "contentSize": { "x": 0, "y": 0, "width": cw * dpr, "height": ch * dpr },
                 "cssLayoutViewport": layout,
                 "cssVisualViewport": visual,
                 "cssContentSize": content,
@@ -1714,6 +1720,25 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
                 )));
             }
         }
+        "Emulation.setDefaultBackgroundColorOverride" => {
+            let color = match c.p.get("color") {
+                Some(v) if v.is_object() => {
+                    let ch = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0).min(255) as u8;
+                    Some(crate::host::Rgba {
+                        r: ch("r"),
+                        g: ch("g"),
+                        b: ch("b"),
+                        a: v.get("a")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(1.0)
+                            .clamp(0.0, 1.0),
+                    })
+                }
+                _ => None,
+            };
+            host.set_default_background_color(&t, color)
+                .map_err(host_err)?;
+        }
         "Emulation.setGeolocationOverride" => {
             if c.p.get("latitude").is_some() || c.p.get("longitude").is_some() {
                 return Err(CdpError::server(
@@ -1861,9 +1886,33 @@ async fn lightbrowser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<V
                 .await
                 .map_err(host_err)
         }
-        "LightBrowser.humanClick" | "LightBrowser.humanType" | "LightBrowser.humanScroll" => Err(
-            CdpError::server(format!("{} is not implemented yet (M5)", c.method)),
-        ),
+        "LightBrowser.humanMove"
+        | "LightBrowser.humanClick"
+        | "LightBrowser.humanType"
+        | "LightBrowser.humanScroll" => {
+            // Page sessions only: the input goes to the session's page.
+            let t = c.page()?;
+            let cmd = match c.method {
+                "LightBrowser.humanMove" => HumanCommand::Move(params(c.p)?),
+                "LightBrowser.humanClick" => {
+                    let p: HumanClick = params(c.p)?;
+                    if p.selector.is_none() && (p.x.is_none() || p.y.is_none()) {
+                        return Err(CdpError::invalid_params(
+                            "selector or both x and y are required",
+                        ));
+                    }
+                    if let Some(b) = &p.button
+                        && !matches!(b.as_str(), "left" | "middle" | "right")
+                    {
+                        return Err(CdpError::invalid_params(format!("unknown button {b:?}")));
+                    }
+                    HumanCommand::Click(p)
+                }
+                "LightBrowser.humanType" => HumanCommand::Type(params(c.p)?),
+                _ => HumanCommand::Scroll(params(c.p)?),
+            };
+            c.sh.host.human_input(&t, cmd).await.map_err(host_err)
+        }
         _ => Err(CdpError::method_not_found(c.method)),
     }
 }

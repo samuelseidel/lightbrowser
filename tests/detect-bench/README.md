@@ -118,7 +118,7 @@ password characters become `x`), `dx,dy,dm` (wheel), `sy` (scrollY), `it`
 |---|---|---|
 | `T-001 stock-chromium-headless` | `chromium.launch()`, instant `click`/`fill`, one big wheel. | `>=90` |
 | `T-003 scripted-slow` | Same browser; `mouse.move` with steps, wheel ticks, `pressSequentially` with delay. | `>=70&fp>=70`: still caught by fingerprint rules |
-| `T-010 cdp-endpoint` | `chromium.connectOverCDP(--cdp ws://...)`, context with `viewport: null` (ADR 0009), T-001 flow. For LightBrowser. | set with `--expect` |
+| `T-010 cdp-endpoint` | `chromium.connectOverCDP(--cdp ws://...)`, context with `viewport: null` (ADR 0009), T-001 flow. For LightBrowser. `--input human` runs the same flow (scroll 900 px, click `#add-3`, type `jacket` into `#q`, click `#search-btn`) through `LightBrowser.humanScroll/humanClick/humanType` on the page's CDP session, with a reading pause per page (skimming at 600-700 words per minute, a third to two thirds of the page's words, 1.2-6 s; `--seed N` fixes the pauses). Default `--input playwright`. | set with `--expect` |
 | `T-020 human-replay` | Replays a trace file (`--trace`) with its timing. Placeholder. | set with `--expect`, e.g. `beh<=30` |
 
 Every scenario opens `/shop`, scrolls, adds a product to the cart, types
@@ -128,6 +128,7 @@ score.
 ```bash
 node run.js --scenario T-001 --save-fixtures fixtures
 node run.js --scenario T-010 --cdp ws://127.0.0.1:9222/devtools/browser/<id> --expect 'fp<=30'   # M4 target (ADR 0007)
+node run.js --scenario T-010 --cdp ws://127.0.0.1:9222/devtools/browser/<id> --input human --expect 'beh<=30'   # M5 target
 node run.js --scenario T-020 --trace fixtures/synthetic-human-trace.json --expect 'beh<=30'
 node run.js --base https://localhost:8766      # against server.py --tls
 ```
@@ -286,4 +287,6 @@ Notes:
   with a Chrome persona: no automation, consistency or fingerprint rule
   should fire, and the same seed should give the same `canvas`, `audio`,
   `webgl_params` and `fonts` hashes on every run.
-- M5: with `human_*` input, `beh<=30`.
+- M5: with `human_*` input (`--input human`), `beh<=30`. With the
+  default Playwright input the behaviour rules must keep firing: the bench
+  still has to catch naive automation driving LightBrowser.

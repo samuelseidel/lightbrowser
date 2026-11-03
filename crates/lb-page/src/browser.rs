@@ -24,6 +24,11 @@ pub struct BrowserOptions {
     pub workers: usize,
     /// JS heap cap per engine (worker).
     pub max_heap_bytes: Option<usize>,
+    /// Restore engines from the process-wide V8 startup snapshot
+    /// (`lb_webapi::snapshot`, ADR 0013): window realms then take about
+    /// 2 ms instead of ~30. The snapshot is made in memory when the first
+    /// engine starts (about 110 ms once).
+    pub startup_snapshot: bool,
 }
 
 impl Default for BrowserOptions {
@@ -31,6 +36,7 @@ impl Default for BrowserOptions {
         BrowserOptions {
             workers: std::thread::available_parallelism().map_or(1, |n| n.get()),
             max_heap_bytes: Some(512 << 20),
+            startup_snapshot: true,
         }
     }
 }
@@ -56,9 +62,12 @@ pub(crate) struct WorkerState {
     runtime: RefCell<Option<(Runtime, Bindings)>>,
     pub(crate) pages: RefCell<HashMap<u64, Rc<PageState>>>,
     max_heap: Option<usize>,
+    startup_snapshot: bool,
     /// Page count of this worker (load balancing).
     pub(crate) page_count: Arc<AtomicUsize>,
     stop: std::cell::Cell<bool>,
+    /// A page closed: collect garbage once the job queue is empty.
+    gc_pending: std::cell::Cell<bool>,
 }
 
 impl WorkerState {
@@ -67,18 +76,29 @@ impl WorkerState {
         if self.engine.borrow().is_some() {
             return Ok(());
         }
-        let mut engine = Engine::new(
-            persona.clone(),
-            EngineOptions {
-                max_heap_bytes: self.max_heap,
-            },
-        )
+        let options = EngineOptions {
+            max_heap_bytes: self.max_heap,
+        };
+        let snapshot = if self.startup_snapshot {
+            lb_webapi::snapshot::startup_snapshot(persona.family)
+                .inspect_err(|e| tracing::warn!("no startup snapshot: {e}"))
+                .ok()
+        } else {
+            None
+        };
+        let mut engine = match snapshot {
+            Some(blob) => Engine::with_snapshot(persona.clone(), options, blob),
+            None => Engine::new(persona.clone(), options),
+        }
         .map_err(|e| PageError::Setup(e.to_string()))?;
         let mut reg = Registry::new();
         let rt = Runtime::new(&mut reg);
         let bindings =
             Bindings::define(&mut engine, &reg).map_err(|e| PageError::Setup(e.to_string()))?;
         rt.set_bindings(bindings.clone());
+        if snapshot.is_some() {
+            tracing::debug!("engine snapshot: {:?}", engine.snapshot_status());
+        }
         *self.engine.borrow_mut() = Some(engine);
         *self.runtime.borrow_mut() = Some((rt, bindings));
         Ok(())
@@ -93,6 +113,13 @@ impl WorkerState {
 
     pub(crate) fn runtime(&self) -> Option<(Runtime, Bindings)> {
         self.runtime.borrow().clone()
+    }
+
+    /// Ask for one full GC (V8 low-memory notification) when this worker
+    /// next has nothing queued, e.g. after a page closed: dropped realms
+    /// are otherwise kept until the next allocation pressure.
+    pub(crate) fn request_gc(&self) {
+        self.gc_pending.set(true);
     }
 }
 
@@ -125,9 +152,10 @@ impl Browser {
             };
             let count = handle.pages.clone();
             let max_heap = opts.max_heap_bytes;
+            let snapshot = opts.startup_snapshot;
             let t = std::thread::Builder::new()
                 .name(format!("lb-worker-{i}"))
-                .spawn(move || worker_main(rx, count, max_heap))
+                .spawn(move || worker_main(rx, count, max_heap, snapshot))
                 .map_err(|e| PageError::Setup(e.to_string()))?;
             workers.push(handle);
             threads.push(t);
@@ -187,6 +215,7 @@ fn worker_main(
     mut rx: mpsc::UnboundedReceiver<Job>,
     page_count: Arc<AtomicUsize>,
     max_heap: Option<usize>,
+    startup_snapshot: bool,
 ) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -205,13 +234,21 @@ fn worker_main(
             runtime: RefCell::new(None),
             pages: RefCell::new(HashMap::new()),
             max_heap,
+            startup_snapshot,
             page_count,
             stop: std::cell::Cell::new(false),
+            gc_pending: std::cell::Cell::new(false),
         });
         while let Some(job) = rx.recv().await {
             job(&state);
             if state.stop.get() {
                 break;
+            }
+            if state.gc_pending.get() && rx.is_empty() {
+                // Let the closed pages' tasks finish unwinding first.
+                tokio::task::yield_now().await;
+                state.gc_pending.set(false);
+                state.with_engine(|e| e.low_memory_notification());
             }
         }
         // Close every page before the engine goes.

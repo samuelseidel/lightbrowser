@@ -1047,6 +1047,16 @@
           "maxLength": 64,
           "default": "casual_user",
           "description": "Name of the lb-behavior preset: casual_user, power_user, slow_reader or mobile_like. Default casual_user."
+        },
+        "seed": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{1,16}$",
+          "description": "Seed of generated input (LightBrowser.human*), up to 16 hex digits. Default: derived from profile_id and fingerprint_seeds."
+        },
+        "pointing_device": {
+          "type": "string",
+          "enum": ["mouse", "trackpad"],
+          "description": "mouse (notched wheel) or trackpad (pixel scrolling with momentum). Default: trackpad on macOS, mouse elsewhere."
         }
       }
     },

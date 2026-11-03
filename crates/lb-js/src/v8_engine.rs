@@ -22,8 +22,11 @@ pub use v8;
 
 mod inspect;
 mod realm_ops;
+mod snapshot;
 pub use inspect::{Caught, Inspected, InspectedObject, PromiseOutcome, PropertyEntry};
 pub use realm_ops::RealmOps;
+pub use snapshot::SnapshotStatus;
+use snapshot::{Meta, SnapState};
 
 use crate::{
     EngineError, HeapStats, HostRef, InterfaceId, JsEngine, JsError, JsErrorKind, JsValue,
@@ -35,6 +38,8 @@ use crate::{
 // ---------------------------------------------------------------------------
 
 static V8_INIT: Once = Once::new();
+/// The flags V8 was initialised with (a startup snapshot must match them).
+static V8_FLAGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Initialise the V8 platform once per process. `flags` (e.g. `--jitless`)
 /// only apply if this is the first call; [`Engine::new`] calls it with no
@@ -42,6 +47,7 @@ static V8_INIT: Once = Once::new();
 pub fn init_v8(flags: &str) -> bool {
     let mut did = false;
     V8_INIT.call_once(|| {
+        let _ = V8_FLAGS.set(flags.to_owned());
         if !flags.is_empty() {
             v8::V8::set_flags_from_string(flags);
         }
@@ -51,6 +57,55 @@ pub fn init_v8(flags: &str) -> bool {
         did = true;
     });
     did
+}
+
+/// Which snapshot the isolates of the process are made from.
+///
+/// V8 keeps one read-only heap per process, shared by every isolate. So
+/// isolates alive at the same time must all come from the same snapshot
+/// (V8's built-in one, or one blob of ours), and
+/// `SnapshotCreator::CreateBlob` (which writes into that heap) needs to be
+/// alone. Once the process has a blob, every isolate is made from it.
+/// Held while an isolate is created, and for a snapshot creator's life.
+struct IsolateSetup {
+    /// Isolates alive (decremented after disposal).
+    live: usize,
+    /// The process's snapshot blob, once made or first restored.
+    blob: Option<&'static [u8]>,
+}
+
+static ISOLATE_SETUP: std::sync::Mutex<IsolateSetup> = std::sync::Mutex::new(IsolateSetup {
+    live: 0,
+    blob: None,
+});
+
+/// Lock [`ISOLATE_SETUP`]; a panic while it was held does not matter (the
+/// counts are updated in single steps).
+fn isolate_setup_lock() -> std::sync::MutexGuard<'static, IsolateSetup> {
+    ISOLATE_SETUP
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Counts one isolate in [`IsolateSetup::live`] while it exists.
+struct LiveIsolate;
+
+impl LiveIsolate {
+    fn new(setup: &mut IsolateSetup) -> Self {
+        setup.live += 1;
+        LiveIsolate
+    }
+}
+
+impl Drop for LiveIsolate {
+    fn drop(&mut self) {
+        isolate_setup_lock().live -= 1;
+    }
+}
+
+/// Flags passed to [`init_v8`] (empty before initialisation).
+fn v8_flags() -> String {
+    V8_FLAGS.get().cloned().unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -597,13 +652,12 @@ struct ModuleEntry {
 
 struct RealmEntry {
     context: v8::Global<v8::Context>,
+    /// Deserialized from the startup snapshot context.
+    from_snapshot: bool,
     world: World,
     loader: Option<ModuleLoader>,
     modules: Vec<ModuleEntry>,
 }
-
-/// Stored in each context's slot so callbacks know their realm.
-struct RealmTag(RealmId);
 
 /// Shared with the near-heap-limit callback through a raw pointer.
 struct HeapGuard {
@@ -620,11 +674,18 @@ struct State {
     callbacks: Vec<Callback>,
     interfaces: Vec<IfaceEntry>,
     realms: HashMap<RealmId, RealmEntry>,
+    /// Realms by the identity hash of their global proxy, so callbacks
+    /// find the realm of a context. Kept here rather than in a context
+    /// slot: rusty_v8's per-context slot storage (a weak handle per
+    /// context) double-frees at isolate teardown for contexts deserialized
+    /// from a snapshot.
+    realm_by_global: HashMap<i32, Vec<RealmId>>,
     next_realm: u32,
     handles: Slab<(RealmId, v8::Global<v8::Value>)>,
     resolvers: Slab<(RealmId, v8::Global<v8::PromiseResolver>)>,
     wrappers: HashMap<(RealmId, HostRef), v8::Global<v8::Object>>,
     heap: Option<Rc<HeapGuard>>,
+    snap: SnapState,
 }
 
 type SharedState = Rc<RefCell<State>>;
@@ -647,11 +708,24 @@ const HOST_FIELDS: usize = 2;
 // Engine
 // ---------------------------------------------------------------------------
 
+/// How [`Engine::build`] creates the isolate.
+enum Build {
+    Plain,
+    Creator,
+    Restore(&'static [u8]),
+}
+
 /// One V8 isolate with its realms. `!Send`: stays on its thread.
 pub struct Engine {
-    isolate: v8::OwnedIsolate,
+    /// Disposed by hand in `Drop` (a snapshot creator's isolate is consumed
+    /// by `create_blob` instead).
+    isolate: std::mem::ManuallyDrop<v8::OwnedIsolate>,
     state: SharedState,
     persona: Arc<Persona>,
+    /// A snapshot creator holds [`ISOLATE_SETUP`] for its whole life.
+    setup: Option<std::sync::MutexGuard<'static, IsolateSetup>>,
+    /// Dropped after the isolate (field order).
+    live: LiveIsolate,
 }
 
 /// Enters the isolate for one operation, so several engines can share a
@@ -705,6 +779,14 @@ impl Engine {
     /// Create an engine (isolate) for `persona`. Refuses personas of another
     /// browser family.
     pub fn new(persona: Arc<Persona>, options: EngineOptions) -> Result<Engine, EngineError> {
+        Engine::build(persona, options, Build::Plain)
+    }
+
+    fn build(
+        persona: Arc<Persona>,
+        options: EngineOptions,
+        build: Build,
+    ) -> Result<Engine, EngineError> {
         if persona.family != BrowserFamily::Chrome {
             return Err(EngineError::FamilyMismatch {
                 persona: persona.family,
@@ -716,11 +798,72 @@ impl Engine {
         if let Some(max) = options.max_heap_bytes {
             params = params.heap_limits(0, max);
         }
-        let mut isolate = v8::Isolate::new(params);
+        let mut snap = SnapState::Off;
+        let mut restore_meta = None;
+        let mut setup = isolate_setup_lock();
+        let build = match build {
+            Build::Creator if setup.live > 0 => {
+                return Err(EngineError::SnapshotNotAlone);
+            }
+            // The process already uses another snapshot (or V8's own, with
+            // engines alive): this engine must too.
+            Build::Restore(blob)
+                if setup.blob.is_some_and(|b| !std::ptr::eq(b, blob))
+                    || (setup.blob.is_none() && setup.live > 0) =>
+            {
+                snap = SnapState::Rejected("the process uses another snapshot".into());
+                Build::Plain
+            }
+            b => b,
+        };
+        // Built engines come from the process's blob too, without replay.
+        let plain_blob = match build {
+            Build::Plain => setup.blob,
+            _ => None,
+        };
+        let from_blob = |params: v8::CreateParams, blob: &'static [u8]| {
+            let (_, v8_part) = Meta::decode(blob).unwrap_or((Meta::default(), blob));
+            params
+                .external_references(snapshot::external_refs())
+                .snapshot_blob(v8::StartupData::from(v8_part))
+        };
+        let mut isolate = match build {
+            Build::Plain => match plain_blob {
+                Some(blob) => v8::Isolate::new(from_blob(params, blob)),
+                None => v8::Isolate::new(params),
+            },
+            Build::Creator => {
+                snap = SnapState::Creating(Default::default());
+                v8::Isolate::snapshot_creator(Some(snapshot::external_refs()), Some(params))
+            }
+            Build::Restore(blob) => match snapshot::check_blob(blob) {
+                Ok((meta, _)) => {
+                    restore_meta = Some(meta);
+                    setup.blob = Some(blob);
+                    v8::Isolate::new(from_blob(params, blob))
+                }
+                Err(reason) => {
+                    snap = SnapState::Rejected(reason);
+                    match setup.blob {
+                        Some(blob) => v8::Isolate::new(from_blob(params, blob)),
+                        None => v8::Isolate::new(params),
+                    }
+                }
+            },
+        };
         // `Isolate::new` enters the isolate; undo that so engines can be
         // created and dropped in any order. Every operation enters again.
         // SAFETY: pairs the enter done by `Isolate::new` on this thread.
         unsafe { isolate.exit() };
+        let live = LiveIsolate::new(&mut setup);
+        let setup = matches!(snap, SnapState::Creating(_)).then_some(setup);
+        if let Some(meta) = restore_meta {
+            let mut iso = Entered::new(&mut isolate);
+            snap = match snapshot::load_templates(&mut iso, meta) {
+                Ok(r) => SnapState::Restoring(r),
+                Err(reason) => SnapState::Rejected(reason),
+            };
+        }
 
         let heap = options.max_heap_bytes.map(|max| {
             Rc::new(HeapGuard {
@@ -735,11 +878,13 @@ impl Engine {
             callbacks: Vec::new(),
             interfaces: Vec::new(),
             realms: HashMap::new(),
+            realm_by_global: HashMap::new(),
             next_realm: 1,
             handles: Slab::new(),
             resolvers: Slab::new(),
             wrappers: HashMap::new(),
             heap: heap.clone(),
+            snap,
         }));
         {
             let mut iso = Entered::new(&mut isolate);
@@ -750,9 +895,11 @@ impl Engine {
             }
         }
         Ok(Engine {
-            isolate,
+            isolate: std::mem::ManuallyDrop::new(isolate),
             state,
             persona,
+            setup,
+            live,
         })
     }
 
@@ -778,6 +925,23 @@ impl Engine {
     /// that use them. Panics if `spec.parent` is not an interface of this
     /// engine.
     pub fn define_interface(&mut self, spec: InterfaceSpec) -> InterfaceId {
+        let record = {
+            let mut st = self.state.borrow_mut();
+            if let Some(id) = snapshot::restore_interface(&mut st, &spec) {
+                return id;
+            }
+            matches!(st.snap, SnapState::Creating(_))
+                .then(|| (snapshot::spec_digest(&spec), st.callbacks.len() as u32))
+        };
+        let id = self.build_interface(spec);
+        if let Some((digest, cb_before)) = record {
+            snapshot::record_interface(&mut self.state.borrow_mut(), digest, cb_before);
+        }
+        id
+    }
+
+    /// Build the V8 templates of an interface.
+    fn build_interface(&mut self, spec: InterfaceSpec) -> InterfaceId {
         let mut iso = Entered::new(&mut self.isolate);
         v8::scope!(let scope, &mut **iso);
         let mut st = self.state.borrow_mut();
@@ -1398,6 +1562,22 @@ impl Drop for Engine {
                 .remove_near_heap_limit_callback(near_heap_limit, heap.max);
         }
         self.isolate.remove_slot::<SharedState>();
+        // SAFETY: taken once, here; the field is never used again.
+        let isolate = unsafe { std::mem::ManuallyDrop::take(&mut self.isolate) };
+        if self.setup.is_some() {
+            // A snapshot creator that never made its blob: V8 only lets it
+            // go through `CreateBlob`, which is not safe here. Leak it.
+            // SAFETY: balances the enter above; the isolate is never used.
+            unsafe { isolate.exit() };
+            std::mem::forget(isolate);
+            // It still exists: keep counting it.
+            if let Some(setup) = self.setup.as_mut() {
+                let extra = LiveIsolate::new(setup);
+                std::mem::forget(extra);
+            }
+        } else {
+            drop(isolate);
+        }
     }
 }
 
@@ -1407,55 +1587,32 @@ fn new_realm_in(
     state: &SharedState,
     options: RealmOptions,
 ) -> Result<RealmId, JsError> {
-    let global_template = match options.global {
-        Some(id) => {
-            let st = state.borrow();
-            let entry = st
-                .interfaces
-                .get(id.0 as usize)
-                .ok_or_else(|| JsError::host(format!("unknown interface {id:?}")))?;
-            let ft = v8::Local::new(scope, &entry.template);
-            Some(ft.instance_template(scope))
-        }
-        None => None,
+    if let Some(id) = options.global
+        && state.borrow().interfaces.get(id.0 as usize).is_none()
+    {
+        return Err(JsError::host(format!("unknown interface {id:?}")));
+    }
+    let snapshot_global = state.borrow().snap.context_global();
+    let from_snapshot = options.global.is_some() && options.global == snapshot_global;
+    let context = if from_snapshot {
+        v8::Context::from_snapshot(scope, 0, Default::default())
+            .ok_or_else(|| JsError::host("snapshot context could not be created"))?
+    } else {
+        build_context(scope, state, options.global)
     };
-    let context = v8::Context::new(
-        scope,
-        v8::ContextOptions {
-            global_template,
-            ..Default::default()
-        },
-    );
     let id = {
         let mut st = state.borrow_mut();
         let id = RealmId(st.next_realm);
         st.next_realm += 1;
         id
     };
-    context.set_slot(Rc::new(RealmTag(id)));
     let scope = &mut v8::ContextScope::new(scope, context);
-
-    // WebIDL: an interface object's [[Prototype]] is its parent's
-    // interface object. V8 templates only link the prototype objects, so
-    // this instantiates every interface object now. The M6 startup
-    // snapshot removes that cost.
-    {
-        let st = state.borrow();
-        for entry in &st.interfaces {
-            let Some(parent) = entry.parent else { continue };
-            let ft = v8::Local::new(scope, &entry.template);
-            let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
-            if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
-                f.set_prototype(scope, pf.into());
-            }
-        }
-    }
-
     let global = context.global(scope);
-    if let Some(id) = options.global {
-        apply_overflow(scope, state, id, global);
-    }
     let mut st = state.borrow_mut();
+    st.realm_by_global
+        .entry(global.get_identity_hash().get())
+        .or_default()
+        .push(id);
     if let Some(host) = options.global_host {
         if global.internal_field_count() >= HOST_FIELDS {
             set_host(scope, global, host);
@@ -1467,6 +1624,7 @@ fn new_realm_in(
         id,
         RealmEntry {
             context: v8::Global::new(scope, context),
+            from_snapshot,
             world: options.world,
             loader: options.module_loader,
             modules: Vec::new(),
@@ -1475,9 +1633,67 @@ fn new_realm_in(
     Ok(id)
 }
 
+/// A context whose global is built from `global`, with every interface
+/// object instantiated and linked and the overflow members defined. No
+/// realm slot: this is also the snapshot context.
+fn build_context<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    state: &SharedState,
+    global: Option<InterfaceId>,
+) -> v8::Local<'s, v8::Context> {
+    let global_template = global.and_then(|id| {
+        let st = state.borrow();
+        let entry = st.interfaces.get(id.0 as usize)?;
+        let ft = v8::Local::new(scope, &entry.template);
+        Some(ft.instance_template(scope))
+    });
+    let context = v8::Context::new(
+        scope,
+        v8::ContextOptions {
+            global_template,
+            ..Default::default()
+        },
+    );
+    let scope = &mut v8::ContextScope::new(scope, context);
+
+    // WebIDL: an interface object's [[Prototype]] is its parent's
+    // interface object. V8 templates only link the prototype objects, so
+    // this instantiates every interface object now (the startup snapshot
+    // context has this done already).
+    {
+        let st = state.borrow();
+        for entry in &st.interfaces {
+            let Some(parent) = entry.parent else { continue };
+            let ft = v8::Local::new(scope, &entry.template);
+            let pft = v8::Local::new(scope, &st.interfaces[parent.0 as usize].template);
+            if let (Some(f), Some(pf)) = (ft.get_function(scope), pft.get_function(scope)) {
+                f.set_prototype(scope, pf.into());
+            }
+        }
+    }
+    if let Some(id) = global {
+        let g = context.global(scope);
+        apply_overflow(scope, state, id, g);
+    }
+    context
+}
+
+/// Whether `realm` was deserialized from the snapshot context.
+fn is_snapshot_realm(state: &SharedState, realm: RealmId) -> bool {
+    state
+        .borrow()
+        .realms
+        .get(&realm)
+        .is_some_and(|r| r.from_snapshot)
+}
+
 fn drop_realm_state(state: &SharedState, realm: RealmId) {
     let mut st = state.borrow_mut();
     st.realms.remove(&realm);
+    st.realm_by_global.retain(|_, ids| {
+        ids.retain(|r| *r != realm);
+        !ids.is_empty()
+    });
     st.wrappers.retain(|(r, _), _| *r != realm);
     st.handles.retain(|(r, _)| *r != realm);
     st.resolvers.retain(|(r, _)| *r != realm);
@@ -1972,7 +2188,7 @@ impl<'s, 'i> PropCtx<'_, 's, 'i> {
         let holder = self.args.holder();
         holder
             .get_creation_context(self.scope)
-            .and_then(|c| c.get_slot::<RealmTag>().map(|t| t.0))
+            .and_then(|c| realm_of_context(self.scope, c))
             .unwrap_or(self.realm)
     }
 }
@@ -1993,10 +2209,26 @@ fn shared_state(scope: &v8::PinScope<'_, '_>) -> SharedState {
 }
 
 fn current_realm(scope: &v8::PinScope<'_, '_>) -> RealmId {
-    scope
-        .get_current_context()
-        .get_slot::<RealmTag>()
-        .map_or(RealmId(0), |t| t.0)
+    let ctx = scope.get_current_context();
+    realm_of_context(scope, ctx).unwrap_or(RealmId(0))
+}
+
+/// The realm of a context of this engine, if it is one.
+fn realm_of_context(
+    scope: &v8::PinScope<'_, '_>,
+    ctx: v8::Local<'_, v8::Context>,
+) -> Option<RealmId> {
+    let state = scope.get_slot::<SharedState>()?;
+    let hash = ctx.global(scope).get_identity_hash().get();
+    let st = state.try_borrow().ok()?;
+    match st.realm_by_global.get(&hash)?.as_slice() {
+        [id] => Some(*id),
+        ids => ids.iter().copied().find(|id| {
+            st.realms
+                .get(id)
+                .is_some_and(|r| v8::Local::new(scope, &r.context) == ctx)
+        }),
+    }
 }
 
 fn host_trampoline<'s>(

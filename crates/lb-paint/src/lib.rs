@@ -13,6 +13,10 @@
 //! - Codecs: [`encode`] (PNG, JPEG, lossless WebP; data URLs) and
 //!   [`decode`] (PNG, JPEG, GIF, WebP, ICO/BMP; SVG sized only).
 //!
+//! - Page screenshots ([`page`]): an lb-layout display list painted with
+//!   backgrounds, borders, text, replaced content, opacity and clips;
+//!   never noised.
+//!
 //! Everything here is engine-neutral and single-threaded per window
 //! ([`PaintEnv`] is shared through `Rc`).
 
@@ -22,6 +26,7 @@ pub mod decode;
 pub mod encode;
 pub mod font;
 pub mod noise;
+pub mod page;
 pub mod path;
 
 pub use canvas::{Canvas2d, CanvasPattern, Gradient, PaintEnv, Repetition, Style};
@@ -29,6 +34,9 @@ pub use color::{parse_color, serialize_color};
 pub use encode::Bitmap;
 pub use font::{CanvasFont, FontSet, TextAlign, TextBaseline, TextMetrics, TextStyle};
 pub use noise::CanvasNoise;
+pub use page::{
+    Capture, ImageFormat, ReplacedContent, ReplacedSource, encode_screenshot, paint_page,
+};
 pub use path::{PathData, parse_svg_path};
 pub use tiny_skia;
 pub use tiny_skia::{FillRule, Pixmap};

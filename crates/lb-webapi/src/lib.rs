@@ -20,6 +20,10 @@
 //!   functions.
 //! - `rt` (chrome): the implementations and the per-frame `rt::Window`
 //!   state the page layer drives (tasks, timers, parser, documents).
+//! - [`snapshot`] (chrome): the process-wide V8 startup snapshot of the
+//!   bindings (templates plus a window context), made in memory on first
+//!   use; engines restored from it create window realms in about a
+//!   millisecond.
 //! - [`host`]: engine-neutral types the page layer provides (network,
 //!   storage areas, console messages, encoding sniffing).
 //! - [`text`]: `innerText`-like text without layout.
@@ -95,4 +99,6 @@ pub use registry::{ImplKind, Registry, host_fn};
 pub mod host;
 #[cfg(feature = "chrome")]
 pub mod rt;
+#[cfg(feature = "chrome")]
+pub mod snapshot;
 pub mod text;

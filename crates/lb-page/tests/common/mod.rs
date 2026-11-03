@@ -189,6 +189,7 @@ pub fn browser() -> Browser {
     Browser::new(BrowserOptions {
         workers: 1,
         max_heap_bytes: Some(256 << 20),
+        ..Default::default()
     })
     .unwrap()
 }

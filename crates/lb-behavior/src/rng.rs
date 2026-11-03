@@ -67,6 +67,42 @@ pub fn uniform(rng: &mut SmallRng, min: f64, max: f64) -> f64 {
     min + rng.random::<f64>() * (max - min)
 }
 
+/// Sample a log-normal value with the given median and log-space standard
+/// deviation `sigma`: `median · exp(N(0, sigma))`.
+///
+/// Human response and movement times are positive and right-skewed; the
+/// log-normal is the usual model for them (e.g. reaction times, key hold
+/// times, inter-key intervals).
+pub fn log_normal(rng: &mut SmallRng, median: f64, sigma: f64) -> f64 {
+    median * normal_sample(rng, 0.0, sigma).exp()
+}
+
+/// `true` with probability `p`.
+pub fn chance(rng: &mut SmallRng, p: f64) -> bool {
+    rng.random::<f64>() < p
+}
+
+/// SplitMix64 finaliser: derives an independent per-action seed from a
+/// session seed and an action index, so one root seed reproduces a whole
+/// session while no two actions share an event stream.
+pub fn mix_seed(seed: u64, index: u64) -> u64 {
+    let mut z = seed.wrapping_add(index.wrapping_add(1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// FNV-1a over `bytes`: a stable 64-bit seed from a string (for example a
+/// persona id), the same on every platform and run.
+pub fn seed_from_bytes(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
 /// Clamp `val` into the closed interval [min, max].
 ///
 /// Keeps sampled values from producing degenerate geometry (e.g. negative
@@ -116,6 +152,26 @@ mod tests {
             let v = uniform(&mut rng, 10.0, 20.0);
             assert!((10.0..20.0).contains(&v));
         }
+    }
+
+    #[test]
+    fn log_normal_median() {
+        let mut rng = seeded_rng(5);
+        let mut v: Vec<f64> = (0..10_001)
+            .map(|_| log_normal(&mut rng, 100.0, 0.3))
+            .collect();
+        v.sort_by(f64::total_cmp);
+        assert!((v[5000] - 100.0).abs() < 3.0, "median {}", v[5000]);
+        assert!(v[0] > 0.0);
+    }
+
+    #[test]
+    fn mix_seed_spreads() {
+        assert_ne!(mix_seed(1, 0), mix_seed(1, 1));
+        assert_ne!(mix_seed(1, 0), mix_seed(2, 0));
+        assert_eq!(mix_seed(7, 3), mix_seed(7, 3));
+        assert_eq!(seed_from_bytes(b"a"), seed_from_bytes(b"a"));
+        assert_ne!(seed_from_bytes(b"a"), seed_from_bytes(b"b"));
     }
 
     #[test]

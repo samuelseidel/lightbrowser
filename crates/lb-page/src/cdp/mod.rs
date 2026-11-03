@@ -23,7 +23,11 @@
 //! read and written through the context's jar.
 
 pub(crate) mod agent;
+mod human;
 pub(crate) mod net;
+mod screenshot;
+
+pub use human::behavior_for;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -810,6 +814,15 @@ impl PageHost for CdpHost {
         .await
     }
 
+    async fn human_input(
+        &self,
+        target_id: &str,
+        cmd: HumanCommand,
+    ) -> HostResult<serde_json::Value> {
+        self.on_worker(target_id, move |ws, p| human::run(ws, p, cmd))
+            .await
+    }
+
     async fn insert_text(&self, target_id: &str, text: &str) -> HostResult<()> {
         let text = text.to_string();
         self.on_worker(target_id, move |ws, p| async move {
@@ -1007,6 +1020,37 @@ impl PageHost for CdpHost {
             if let Some(w) = p.window() {
                 w.with_layout_engine(|l, _| l.set_viewport(vw as f32, vh as f32));
             }
+        })
+    }
+
+    // ---- Screenshots ----
+
+    fn capture_screenshot(
+        &self,
+        target_id: &str,
+        params: &serde_json::Value,
+    ) -> HostResult<String> {
+        let req = screenshot::Request::parse(params)?;
+        let bytes = self.blocking(target_id, move |_, a, w| {
+            let bg = a.st.borrow().screenshot_bg;
+            screenshot::capture(w, &req, bg)
+        })?;
+        let mut out = String::with_capacity(bytes.len() * 4 / 3 + 4);
+        lb_paint::encode::base64_into(&bytes, &mut out);
+        Ok(out)
+    }
+
+    fn page_metrics(&self, target_id: &str) -> HostResult<Option<lb_cdp::PageMetrics>> {
+        self.blocking(target_id, |_, _, w| Ok(Some(screenshot::metrics(w))))
+    }
+
+    fn set_default_background_color(
+        &self,
+        target_id: &str,
+        color: Option<lb_cdp::Rgba>,
+    ) -> HostResult<()> {
+        self.post(target_id, move |_, _, a| {
+            a.st.borrow_mut().screenshot_bg = color;
         })
     }
 

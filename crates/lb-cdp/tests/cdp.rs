@@ -1119,18 +1119,34 @@ fn targets_sessions_and_personas() {
             .await
             .unwrap_err();
         assert!(e["message"].as_str().unwrap().contains("not supported"));
-        for m in ["humanClick", "humanType", "humanScroll"] {
-            let e = c
-                .call(&format!("LightBrowser.{m}"), json!({}), None)
-                .await
-                .unwrap_err();
+        // human*: page sessions only; params are checked before the host
+        // (the mock host does not implement them).
+        for (m, p) in [
+            ("humanMove", json!({"x": 1, "y": 2})),
+            ("humanClick", json!({"selector": "#a"})),
+            ("humanType", json!({"text": "hi"})),
+            ("humanScroll", json!({"deltaY": 100})),
+        ] {
+            let method = format!("LightBrowser.{m}");
+            let e = c.call(&method, p.clone(), None).await.unwrap_err();
+            assert_eq!(e["code"], -32601, "{e}");
+            let e = c.call(&method, p, Some(&s3)).await.unwrap_err();
+            assert_eq!(e["code"], -32000, "{e}");
             assert!(
-                e["message"]
-                    .as_str()
-                    .unwrap()
-                    .contains("not implemented yet")
+                e["message"].as_str().unwrap().contains("not supported"),
+                "{e}"
             );
         }
+        let e = c
+            .call("LightBrowser.humanClick", json!({"x": 5}), Some(&s3))
+            .await
+            .unwrap_err();
+        assert_eq!(e["code"], -32602, "{e}");
+        let e = c
+            .call("LightBrowser.humanType", json!({}), Some(&s3))
+            .await
+            .unwrap_err();
+        assert_eq!(e["code"], -32602, "{e}");
 
         // Closing and disposing.
         c.ok("Target.closeTarget", json!({"targetId": t}), None)

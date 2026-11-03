@@ -19,11 +19,14 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | ≤ Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 40 MB (most of it is the JS engine) |
+| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8, whose floor is 42 MB (ADR 0013; was < 40 MB) |
 | Disk writes during a session | none by default |
-| Isolate/realm creation | < 5 ms (startup snapshot) |
+| Isolate/realm creation | < 5 ms (startup snapshot, ADR 0013) |
 
-`bench/` measures these against Lightpanda and headless Chrome.
+`bench/run.py` measures these (see the "Bench runner" row in the Stack table). Measured on
+2026-11-03: idle RSS 9.9 MB, binary 54.96 MB, first/next realm 2.4/2.1 ms, no
+disk writes. The Lightpanda comparison is not measured yet (no binary on the
+bench machine). Details: `docs/ROADMAP.md`, "M6 status".
 
 ## Decisions (see `docs/adr/`)
 
@@ -41,6 +44,8 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 | 0010 | Own box tree over taffy; font metric tables compiled in from `profiles/fonts` |
 | 0011 | Request headers per destination from `profiles/headers`, captured from local Chromium; own HTTP/1.1 writer |
 | 0012 | Each frame is a realm in the page's engine, built synchronously through `lb_js::RealmOps`; origins via V8 security tokens |
+| 0013 | V8 startup snapshot (templates plus a window context, no persona data) made in memory once per process; binary budget follows the V8 floor |
+| 0014 | Page screenshots painted on demand from a per-capture display list (no retained paint state, never noised) |
 
 ## Layers
 
@@ -53,7 +58,7 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 ├───────────────────────────────────────────────────────────────┤
 │ Page         lb-page: event loop, navigation, frames, CDP host,│
 │              virtual time (workers: not yet)                   │
-│              lb-behavior: human input (replay: M5)             │
+│              lb-behavior: human input (LightBrowser.human*)    │
 ├───────────────────────────────────────────────────────────────┤
 │ Web APIs     lb-webapi: DOM, events, fetch, XHR, timers, URL,  │
 │              storage, canvas 2D, images, WebGL (no shaders),  │
@@ -63,7 +68,8 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 ├───────────────────────────────────────────────────────────────┤
 │ Document     lb-dom (arena DOM, html5ever, selectors)          │
 │              lb-css (lazy cascade)  lb-layout (taffy, on demand)│
-│              lb-paint (tiny-skia canvas 2D, codecs, noise)     │
+│              lb-paint (tiny-skia canvas 2D, codecs, noise,     │
+│              page screenshots)                                 │
 ├───────────────────────────────────────────────────────────────┤
 │ Network      lb-net: BoringSSL, own h1 writer, forked h2,      │
 │              cookies, per-destination headers                  │
@@ -82,7 +88,7 @@ browser context. Nothing reads a global.
 | Area | Choice | Why |
 |---|---|---|
 | Language | Rust, edition 2024 | Memory safety without GC. Reuses the stealth-browser crates. |
-| JS (Chrome) | `v8` crate (rusty_v8): startup snapshot of all bindings, pointer compression, per-isolate heap cap, optional `--jitless` | Same engine as Chrome, so engine quirks match (error text, stack format, `Function.prototype.toString`, Math precision, timing). |
+| JS (Chrome) | `v8` crate (rusty_v8): startup snapshot of all bindings and one window context, made in memory when the first engine starts (ADR 0013); pointer compression, per-isolate heap cap, optional `--jitless` | Same engine as Chrome, so engine quirks match (error text, stack format, `Function.prototype.toString`, Math precision, timing). |
 | JS (Firefox) | Servo's `mozjs` (SpiderMonkey), per-realm heap cap | Same engine as Firefox, with a maintained Rust embedding. |
 | Bindings | Own WebIDL → Rust codegen with its own tolerant IDL parser (Blink's extended attributes parse as-is), using the Chromium IDL set for Chrome and the Gecko IDL set for Firefox. Members are filtered and ordered by a surface fixture captured from the local Chromium. | Interface list, prototype chains, property order and descriptors all match the claimed browser. This is a large fingerprint surface. |
 | TLS | BoringSSL (`boring`, `tokio-boring`, `boring-sys` FFI for unwrapped knobs) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ML-KEM, ML-DSA, trust_anchors, server_padding. Firefox's ciphers, sigalgs, groups and ALPN match by configuration. delegated_credentials, record_size_limit, ffdhe and Firefox's extension order need small BoringSSL patches (M4b, ADR 0003). rustls can do neither. |
@@ -96,12 +102,16 @@ browser context. Nothing reads a global.
 | Layout | `taffy` (block/flex/grid/float) over our own box tree that implements taffy's traits, so `calc()` resolves. Inline content is approximated as wrapping flex rows. Text is measured with per-font metric tables (`profiles/fonts/`, generated offline with `skrifa`, compiled in) for the persona's fonts. | Only runs when geometry is requested. |
 | Canvas 2D | `tiny-skia` raster (`lb-paint`), bitmap allocated on first draw. Text: widths and vertical metrics from the persona's `lb-layout` font tables (so `measureText` matches DOM text), shapes from glyph outline packs extracted offline with `skrifa` (`profiles/fonts/outlines/`, Liberation Sans/Serif/Mono Regular+Bold, SIL OFL, 205 KB). Encoders: PNG, JPEG, WebP (always lossless). Readback noise (`toDataURL`, `toBlob`, `convertToBlob`, `getImageData`; never the bitmap): only pixels with alpha > 0 that differ from a 4-neighbour when the lowest bit of each channel is ignored (edges, text, anti-aliasing; solid fills read back exactly); for row `y` an SFC32 seeded with `canvas_seed` XOR (width, `y`) in bytes 8..16 gives one `u32` per pixel from `x = 0`, and bit `c` replaces the lowest bit of channel `c` (R, G, B; alpha untouched). Changes are ±1, keyed by position, and idempotent (a `putImageData` round trip of opaque pixels reads back the same). | Real pixels, deterministic per persona. |
 | WebGL | Stub WebGL 1/2 contexts behind the canvas `getContext` factory hook (`lb-webapi` `rt/webgl.rs`). Strings, limits, extensions and shader precision come from the persona (`hardware.gpu`, `webgl.*`); missing limits use ANGLE defaults for the persona's backend (D3D11, Metal or GL) and ANGLE's formulas for derived ones. The persona's extension list is the WebGL 2 list; WebGL 1 gets it with WebGL 2-only entries dropped and the WebGL 1-only ones (core in WebGL 2) added, in Chrome's order. Extension objects are instances of hidden interfaces with the IDL constants. No shaders run: `clear` fills, draws rasterize the first float attribute as clip-space x/y with a uniform/constant/hashed color. `readPixels`, `toDataURL` and `drawImage` read the same pixels with the Canvas 2D noise rule keyed by `webgl_noise_seed`. | No GPU, consistent answers. |
+| Screenshots | `Page.captureScreenshot` (lb-page `cdp/screenshot.rs`): `lb_layout::LayoutEngine::display_list` gives boxes in paint order (stacking contexts, opacity groups, overflow clips, text lines in page coordinates); `lb_paint::page` paints them with tiny-skia at CSS px × clip scale × persona DPR: backgrounds (root/body propagate to the canvas), borders, text with the bundled glyph outlines, image and canvas pixels without readback noise, basic form controls, iframes. No background images, radius, shadows or transforms. | Playwright screenshots work; nothing is retained and nothing runs in any world (ADR 0014). |
 | Fonts | `document.fonts`, `FontFace` (`local()` loads only for persona fonts; `url()` sources are not fetched), `queryLocalFonts` rejects without user activation. Detection by width measurement works because `lb-layout` has a table for every persona font: bundled real tables where we have them, `profiles/fonts/derived.json` estimates for the rest. | Persona fonts are exactly the detectable ones. |
 | Frames | Each iframe is its own `Window` and realm in the page's engine, built synchronously when the element is connected (`lb_js::RealmOps`, `lb-webapi` `rt/frames.rs`, `lb-page` `frames.rs`). Origins are V8 security tokens; a cross-origin `contentWindow` is a proxy that throws Chrome's `SecurityError`; `postMessage` clones through JSON. The page event loop runs every window of the tree (ADR 0012). | `contentWindow` is never null, and frame realms expose the same surface as the top window. |
 | Fingerprint report | `lb_page::fingerprint` (`fingerprint.js` + native checks): a collector in a throwaway isolated world, never announced to CDP clients, reads the live navigator, UA-CH, screen, time zone, WebGL, canvas, audio, fonts, permissions, media queries and automation tells, and compares each value with the persona (`ok`, `mismatch`, `unimplemented`, `info`). CLI `lightbrowser fingerprint-report`, CDP `LightBrowser.fingerprintReport`, CI gate `cargo test -p lb-page --test pages report`. | One answer to "does the live surface match the persona" without running a detection engine. |
 | Audio | Web Audio graph rendered in 128-frame quanta (`rt/audio_dsp.rs`): Blink's band-limited oscillator tables and `DynamicsCompressorKernel`, gain, biquad, IIR, analyser (Blackman window, FFT), buffer/constant sources, delay, stereo panner, wave shaper, merger/splitter. The classic fingerprint scores 124.04346 (Chrome 153: 124.04348). Rendered and analyser float output get ±0.0001 seeded noise from `audio_seed` on non-zero samples only. Realtime contexts start `suspended`, rate and latency from persona `audio`. | Covers the standard audio fingerprint scripts. |
+| Human input | `lb-behavior` generates event streams from first principles (Fitts' law with corrective submovements, minimum-jerk speed, curved paths with lateral noise, endpoint scatter by target size, 125 Hz reports coalesced to 60 Hz frames; log-normal key intervals and holds with per-key habits, rollover, Shift, typos fixed with Backspace; wheel flicks or trackpad momentum). Profile, seed and pointing device come from the persona's `behavior` block. `lb-page` `cdp/human.rs` replays a stream through the trusted Input pipeline for `LightBrowser.humanMove/humanClick/humanType/humanScroll`, on the real clock or the virtual clock; selectors are resolved from Rust, so no script runs in any world. | The bench's behaviour rules (T-010 `--input human`) see pointer paths, press holds, key rhythm and wheel patterns that look like a person. |
+| Python SDK | `sdk/python/lightbrowser`: launches `lightbrowser serve --port 0` with a persona, connects stock Playwright over CDP and returns stock `Page` objects with `human_move/click/type/scroll` and `verify_fingerprint()` bound on; sync and async APIs; scenarios T-001 to T-007 against the bench. Loopback only. Needs Python Playwright >= 1.63: older versions put `__pwInitScripts` in the page's main world, which the browser cannot hide. | Replaces the GeckoPhantom SDK; control stays CDP only. |
+| Bench runner | `bench/run.py`: 50-page generated corpus served on loopback; `fetch` and CDP crawls of LightBrowser and headless Chromium (and Lightpanda if on PATH); wall time, p50/p90 page time, peak RSS/PSS, CPU, idle RSS, startup, binary size, realm creation and disk writes, checked against the budgets above. Results in `bench/results/`. | Makes the budgets measurable and repeatable. |
 | Runtime | Thread per core. Each thread runs a tokio `current_thread` runtime and owns its JS engine instances. | JS engines are single-threaded, so there's no locking. |
-| Allocator | mimalloc. Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped | Speed and size. |
+| Allocator | glibc malloc (mimalloc measured worse for idle and multi-page RSS, ADR 0013). Release build: fat LTO, `codegen-units=1`, `panic=abort`, stripped, `opt-level = "s"` for non-hot crates, linked with `--icf=safe` and packed relative relocations | Speed and size. |
 | Control | Own CDP server (`tokio-tungstenite`) | Playwright `connectOverCDP` works unchanged for both families. |
 
 ## Browser families
@@ -140,8 +150,8 @@ The existing GeckoPhantom personas (`persona_v1`, Firefox 128) load as
   `about:blank` window is built while the inserting script runs (ADR 0012).
   CDP utility code (Playwright's injected script) runs in an isolated world, so
   nothing is ever installed in the page's main world.
-- **Workers.** Dedicated workers get their own engine instance on the same
-  thread pool. Service workers are out of scope until M6.
+- **Workers.** Not built yet. Dedicated workers will get their own engine
+  instance on the same thread pool. Service workers are still open (M6).
 - **Crash isolation.** `--process-per-context` is an option for later. The
   default is single-process for the RAM budget.
 
@@ -182,7 +192,7 @@ timing.
 | Permissions, battery, media devices, speech voices | lb-webapi | persona |
 | `performance.now` resolution | lb-webapi (`coarse_time`) | Chrome 100 µs with Blink's jittered tick / Firefox 1 ms (RFP off: 20 µs) |
 | Automation tells (`webdriver`, CDP leaks) | lb-cdp, lb-page | never exposed to the page world |
-| Mouse/keyboard dynamics | lb-behavior | persona behavior profile |
+| Mouse/keyboard dynamics | lb-behavior, replayed by lb-page (`cdp/human.rs`) | persona `behavior` (preset, seed, pointing device) |
 
 ## Network fingerprint testing (`lb-fptest`)
 
@@ -220,21 +230,21 @@ Steps are in `tests/README.md`. Both modes use our own local server only.
 
 - **Browser:** getVersion, close, setDownloadBehavior
 - **Target:** setAutoAttach (flatten), createBrowserContext, disposeBrowserContext, createTarget, attachToTarget, closeTarget, getTargets, setDiscoverTargets
-- **Page:** enable, navigate, reload, getFrameTree, createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, captureScreenshot (after M6)
+- **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014)
 - **Runtime:** enable, evaluate, callFunctionOn, getProperties, releaseObject, executionContextCreated / Destroyed, consoleAPICalled
 - **DOM:** getDocument, describeNode, resolveNode, getBoxModel, getContentQuads, scrollIntoViewIfNeeded, setFileInputFiles
 - **Input:** dispatchMouseEvent, dispatchKeyEvent, insertText
 - **Network / Fetch:** enable, setExtraHTTPHeaders, getCookies, setCookies, requestPaused, continueRequest, fulfillRequest
-- **Emulation:** setDeviceMetricsOverride, setUserAgentOverride, setTimezoneOverride, setLocaleOverride. These are checked against the persona, and conflicts are rejected.
+- **Emulation:** setDeviceMetricsOverride, setUserAgentOverride, setTimezoneOverride, setLocaleOverride. These are checked against the persona, and conflicts are rejected. setDefaultBackgroundColorOverride only affects screenshots.
 - **Accessibility:** getFullAXTree, queryAXTree (for `getByRole`)
-- **Custom `LightBrowser.*`:** setPersona, humanClick, humanType, humanScroll, fingerprintReport (live surface vs persona, collected in a throwaway isolated world; also `lightbrowser fingerprint-report`)
+- **Custom `LightBrowser.*`:** setPersona, humanMove, humanClick, humanType, humanScroll (page sessions; generated by lb-behavior, replayed as trusted input on the real or virtual clock, selectors resolved from Rust), fingerprintReport (live surface vs persona, collected in a throwaway isolated world; also `lightbrowser fingerprint-report`)
 
 ## Reuse from stealth-browser
 
 | From | To | How |
 |---|---|---|
 | `consistency/` (`PersonaProfile`, rules R01–R10) | `lb-persona` | Vendored in M2 (ahead of M4). Chrome rules R11–R16 added: UA-CH brands and GREASE, UA-CH platform, TLS profile ↔ UA major, client-hints presence, navigator constants. |
-| `behavior/` (`human_click_events`, …) | `lb-behavior` | Vendored in M2 (ahead of M5), on rand 0.9. `lb_behavior::cdp` turns events into `Input.dispatch*` params; replay through the Input pipeline is M5. |
+| `behavior/` (`human_click_events`, …) | `lb-behavior` | Vendored in M2 (ahead of M5), on rand 0.9. M5 rewrote the generators from first principles (Fitts' law, submovements, minimum jerk, frame-coalesced sampling, log-normal keystrokes with rollover and Shift, wheel flicks, trackpad momentum). `lb_behavior::cdp` turns events into `Input.dispatch*` params; lb-page replays them through the Input pipeline for `LightBrowser.human*`. |
 | `profiles/schemas/persona_v1.schema.json` | `profiles/schemas/persona_v2.schema.json` | Adds `browser.family` and `client_hints`. v1 is read as Firefox. |
 | `profiles/tls/firefox_128_*.json` | `profiles/tls/` | Same format. Chrome profiles are captured with `lb-fptest` and add optional fields (`grease`, `permute_extensions`, `alps_protocols`, `ech_grease`, `server_padding_request`, `trust_anchor_ids`, `http2_priority.headers`). |
 | SFC32 in `geckophantom_config.h` | `lb-persona::sfc32` | **Done.** Bit-identical, with a test against C output. |
@@ -246,9 +256,10 @@ process and is controlled over CDP.
 ## Memory strategy
 
 - One arena per document. Node structs are kept small (≤ 64 bytes). Attribute and text storage use interned atoms.
-- No layout or style data until something asks for it, and dropped again under memory pressure.
-- No paint layers, display lists or compositor.
-- JS heap caps per page. The engine gets a low-memory notification when the event loop goes idle.
+- No layout or style data until something asks for it. `lb_layout::LayoutEngine::drop_layout` frees it; dropping it under memory pressure is not wired up yet.
+- No paint layers or compositor. A screenshot builds a display list from the current layout, paints it and drops it (ADR 0014).
+- JS heap cap per engine (512 MB). The engine gets a low-memory notification when a page's event loop goes idle and when a worker's queue drains after a page closed.
+- Window realms come from the startup snapshot: about 1.4 MB of V8 heap each, with far less garbage than building them (one local page in `serve`: 67 MB RSS instead of 152 MB).
 - HTTP cache in memory, bounded LRU, partitioned per context. Nothing goes to disk unless `--cache-dir` is given.
 - Fonts: metric tables only (advance widths, ascent/descent) for persona fonts. Glyph outline packs (205 KB, compiled in) are parsed only when a canvas draws or measures text.
 - Images: `<img>` loads keep the encoded bytes and their size; pixels are decoded on first `drawImage`.

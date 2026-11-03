@@ -383,12 +383,23 @@ pub struct BehaviorInfo {
     /// or `mobile_like`.
     #[serde(default = "default_behavior")]
     pub profile: String,
+    /// Seed of the generated input (`LightBrowser.human*`): up to 16 hex
+    /// digits. Absent: derived from `profile_id` and the fingerprint seeds,
+    /// so a persona always produces the same input streams.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
+    /// `mouse` (notched wheel) or `trackpad` (pixel scrolling with
+    /// momentum). Absent: `trackpad` on macOS, `mouse` elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pointing_device: Option<String>,
 }
 
 impl Default for BehaviorInfo {
     fn default() -> Self {
         Self {
             profile: default_behavior(),
+            seed: None,
+            pointing_device: None,
         }
     }
 }

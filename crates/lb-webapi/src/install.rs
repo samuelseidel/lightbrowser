@@ -104,6 +104,8 @@ struct Inner {
     ids: HashMap<&'static str, InterfaceId>,
     window: InterfaceId,
     fixup: String,
+    /// The global-object part of `fixup`, for snapshot realms.
+    globals_fixup: String,
     /// Appended to `fixup` for non-secure realms.
     insecure_fixup: String,
     dom_exceptions: DomExceptions,
@@ -203,16 +205,47 @@ impl Bindings {
         let window = engine.define_interface(spec);
         debug_assert_eq!(ids.get(window_desc.name), Some(&window));
 
-        let fixup = fixup_script(table, &ids);
+        let (fixup, globals_fixup) = fixup_script(table, &ids);
         let insecure_fixup = insecure_script(table, &ids);
+        // With a startup snapshot whose interfaces all matched, window
+        // realms are deserialized with the fixup already run.
+        engine.use_snapshot_context(window, &fixup);
         Ok(Bindings(Rc::new(Inner {
             table,
             ids,
             window,
             fixup,
+            globals_fixup,
             insecure_fixup,
             dom_exceptions: dom,
         })))
+    }
+
+    /// A V8 startup snapshot of these bindings for `registry` (which must
+    /// register the same implementations, in the same order, as the
+    /// registries later used with [`Engine::with_snapshot`]): every
+    /// interface template plus one window context with the fixup run. No
+    /// persona data goes in: the engine uses the default persona of the
+    /// family, and the specs only carry persona-independent values (a
+    /// differing spec makes the restoring engine build normally).
+    ///
+    /// The blob lives for the rest of the process and becomes its V8
+    /// snapshot (see `lb_js::Engine::create_snapshot`); a process makes at
+    /// most one, before any other engine exists.
+    pub fn create_snapshot(
+        family: BrowserFamily,
+        registry: &Registry,
+    ) -> Result<&'static [u8], InstallError> {
+        let persona = match family {
+            BrowserFamily::Chrome => lb_persona::Persona::default_chrome(),
+            BrowserFamily::Firefox => return Err(InstallError::NoTable(family)),
+        };
+        let mut engine = Engine::snapshot_creator(std::sync::Arc::new(persona))
+            .map_err(|e| InstallError::Js(JsError::new(lb_js::JsErrorKind::Host, e.to_string())))?;
+        let bindings = Bindings::define(&mut engine, registry)?;
+        let window = bindings.window_interface();
+        let fixup = bindings.0.fixup.clone();
+        Ok(engine.create_snapshot(window, &fixup)?)
     }
 
     /// Interface id by name (`"HTMLDivElement"`), for `Engine::wrap` and
@@ -257,7 +290,11 @@ impl Bindings {
             world: options.world.unwrap_or(World::Main),
             module_loader: options.module_loader,
         })?;
-        let mut result = engine.evaluate(realm, &self.0.fixup, ScriptOrigin::new(""));
+        let mut result = if engine.is_snapshot_realm(realm) {
+            engine.evaluate(realm, &self.0.globals_fixup, ScriptOrigin::new(""))
+        } else {
+            engine.evaluate(realm, &self.0.fixup, ScriptOrigin::new(""))
+        };
         if result.is_ok() && options.insecure {
             result = engine.evaluate(realm, &self.0.insecure_fixup, ScriptOrigin::new(""));
         }
@@ -705,12 +742,17 @@ fn js_list<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
 
 /// The per-realm fixup (see the module docs). Interfaces are reached
 /// through captured global values before anything else runs.
-fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> String {
-    let mut s = String::from(
-        "(function(){'use strict';const g=globalThis,O=Object,gd=O.getOwnPropertyDescriptor,dp=O.defineProperty;\
+///
+/// Returns the script and its global-object part alone. A realm
+/// deserialized from the startup snapshot already ran the full script at
+/// snapshot time, but V8 re-installs its flag-gated globals (`Temporal`,
+/// `DisposableStack`, `Float16Array`, `SharedArrayBuffer`, `WebAssembly`,
+/// ...) at the end of every new context, so the global part runs again.
+fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> (String, String) {
+    const PRELUDE: &str = "(function(){'use strict';const g=globalThis,O=Object,gd=O.getOwnPropertyDescriptor,dp=O.defineProperty;\
          function L(o,ks){for(const k of ks){const d=gd(o,k);if(d){delete o[k];dp(o,k,d);}}}\
-         function P(n){const d=gd(g,n);return d&&d.value&&d.value.prototype;}",
-    );
+         function P(n){const d=gd(g,n);return d&&d.value&&d.value.prototype;}";
+    let mut s = String::from(PRELUDE);
     let on_window = |name: &str| {
         table
             .window_props
@@ -753,6 +795,7 @@ fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> Stri
     }
     // Legacy factories inherit from Function.prototype, not from the
     // element interface (nothing to do: they have no parent).
+    let globals_at = s.len();
     let late_globals = table.window_props[table.window_late_start.min(table.window_props.len())..]
         .iter()
         .map(GlobalProp::name);
@@ -765,7 +808,8 @@ fn fixup_script(table: &Table, ids: &HashMap<&'static str, InterfaceId>) -> Stri
         js_list(table.window_props.iter().map(GlobalProp::name))
     );
     s.push_str("})()");
-    s
+    let globals = format!("{PRELUDE}{}", &s[globals_at..]);
+    (s, globals)
 }
 
 /// Removes what only secure contexts have.
@@ -831,7 +875,9 @@ mod tests {
         for (i, d) in crate::generated::chromium::INTERFACES.iter().enumerate() {
             ids.insert(d.name, InterfaceId(i as u32));
         }
-        let s = fixup_script(&crate::generated::chromium::TABLE, &ids);
+        let (s, globals) = fixup_script(&crate::generated::chromium::TABLE, &ids);
+        assert!(globals.starts_with("(function(){") && globals.ends_with("})()"));
+        assert!(globals.contains("L(g,[") && !globals.contains("XMLHttpRequest\"),["));
         assert!(
             s.contains(r#"L(P("XMLHttpRequest"),["responseXML","#),
             "{s}"

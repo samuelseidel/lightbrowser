@@ -17,8 +17,10 @@
 //!   matching values are accepted, contradicting ones are rejected.
 //! - `LightBrowser.*`: `setPersona` works; `fingerprintReport` asks the
 //!   host for the page's report ([`PageHost::fingerprint_report`]; on a
-//!   browser session it takes `targetId`); `human*` answer "not
-//!   implemented yet".
+//!   browser session it takes `targetId`); `humanMove`, `humanClick`,
+//!   `humanType` and `humanScroll` (page sessions) go to
+//!   [`PageHost::human_input`] ([`types::HumanCommand`]); `MockHost` does
+//!   not implement them.
 //! - [`remote`]: V8-style `RemoteObject`s and limited previews from a
 //!   [`remote::JsValue`] snapshot. [`convert`]: `lb-dom` / `lb-layout` data
 //!   as CDP types.
@@ -59,7 +61,7 @@ pub use browser::query_ax;
 pub use host::{
     BindingScope, CallFunctionRequest, CallTarget, ContextOptions, EvaluateRequest, EventSink,
     GetPropertiesRequest, HostError, HostEvent, HostResult, NavigateRequest, PageEvent, PageHost,
-    ViewportOverride,
+    PageMetrics, Rgba, ViewportOverride,
 };
 pub use protocol::CdpError;
 pub use server::{Server, ServerConfig, block_on_local};

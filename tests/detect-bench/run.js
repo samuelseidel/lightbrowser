@@ -5,7 +5,14 @@
 //   node run.js                                  # T-001 and T-003, headless Chromium
 //   node run.js --scenario T-001 --save-fixtures fixtures
 //   node run.js --scenario T-010 --cdp ws://127.0.0.1:9222/devtools/browser/... --expect '<=30'
+//   node run.js --scenario T-010 --cdp ws://... --input human --expect 'beh<=30'
 //   node run.js --scenario T-020 --trace trace.json --expect '<=40'
+//
+// --input playwright (default) drives T-010 with Playwright's own input
+// (mouse.wheel, click, fill). --input human drives the same flow through
+// LightBrowser.humanScroll/humanClick/humanType on a CDP session, with a
+// reading pause per page from its text length (--seed N makes the pauses
+// reproducible); it needs LightBrowser behind --cdp.
 //
 // Loopback only: any base URL, CDP URL or trace URL whose host is not
 // 127.0.0.1, ::1 or localhost is refused.
@@ -30,7 +37,7 @@ function assertLoopback(u, what) {
 
 function parseArgs(argv) {
   const a = { base: 'http://127.0.0.1:8765', scenarios: null, cdp: null, expect: null, trace: null,
-    saveFixtures: null, json: false, wait: 3500 };
+    saveFixtures: null, json: false, wait: 3500, input: 'playwright', seed: 1 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const next = () => {
@@ -44,9 +51,13 @@ function parseArgs(argv) {
     else if (k === '--trace') a.trace = next();
     else if (k === '--save-fixtures') a.saveFixtures = next();
     else if (k === '--wait') a.wait = Number(next());
+    else if (k === '--input') {
+      a.input = next();
+      if (!['playwright', 'human'].includes(a.input)) { console.error(`--input must be playwright or human, not ${JSON.stringify(a.input)}`); process.exit(2); }
+    } else if (k === '--seed') a.seed = Number(next()) >>> 0;
     else if (k === '--json') a.json = true;
     else if (k === '-h' || k === '--help') {
-      console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 12).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+      console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 18).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
       process.exit(0);
     } else { console.error(`unknown argument ${k}`); process.exit(2); }
   }
@@ -140,6 +151,48 @@ async function flowScriptedSlow(page, base) {
   await Promise.all([page.waitForURL(/\/search/), page.keyboard.press('Enter')]);
 }
 
+// Small seeded PRNG (mulberry32) for reproducible pauses.
+function prng(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = (t + 0x6d2b79f5) >>> 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Time spent looking at a page before acting on it. People skim a page at
+// about 600-700 words per minute (Rayner et al. 2016) and look at part of
+// it before acting: a third to two thirds of the words here, with a floor
+// for orienting on a short page and a cap for a long one.
+async function readingPause(page, rnd) {
+  // innerText runs in Playwright's utility world, not the page's.
+  const text = await page.locator('body').innerText().catch(() => '');
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const wpm = 600 + 100 * rnd();
+  const share = 0.33 + 0.33 * rnd();
+  const ms = Math.min(6000, Math.max(1200, (words * share / wpm) * 60000));
+  await pause(page, Math.round(ms));
+}
+
+// The common flow through LightBrowser's human input (M5). The CDP session
+// is the page's own; selectors are resolved by LightBrowser, not by script.
+async function flowHuman(page, base, a) {
+  const rnd = prng(a.seed);
+  await page.goto(`${base}/shop`);
+  const cdp = await page.context().newCDPSession(page);
+  const human = (m, p) => cdp.send(`LightBrowser.${m}`, p);
+  await readingPause(page, rnd);
+  await human('humanScroll', { deltaY: 900 });
+  await human('humanClick', { selector: '#add-3' });
+  await human('humanType', { selector: '#q', text: 'jacket' });
+  await Promise.all([page.waitForURL(/\/search/), human('humanClick', { selector: '#search-btn' })]);
+  await page.waitForLoadState('load');
+  await readingPause(page, rnd);
+  await cdp.detach().catch(() => {});
+}
+
 // Replays a trace from GET /api/trace/<sid> with its original timing.
 async function flowReplay(page, base, tracePath) {
   const tr = JSON.parse(fs.readFileSync(tracePath, 'utf8'));
@@ -171,7 +224,8 @@ async function flowReplay(page, base, tracePath) {
 const SCENARIOS = {
   'T-001': { name: 'stock-chromium-headless', expect: '>=90', run: (page, a) => flowInstant(page, a.base) },
   'T-003': { name: 'scripted-slow', expect: '>=70&fp>=70', run: (page, a) => flowScriptedSlow(page, a.base) },
-  'T-010': { name: 'cdp-endpoint', expect: null, cdp: true, run: (page, a) => flowInstant(page, a.base) },
+  'T-010': { name: 'cdp-endpoint', expect: null, cdp: true,
+    run: (page, a) => (a.input === 'human' ? flowHuman(page, a.base, a) : flowInstant(page, a.base)) },
   'T-020': { name: 'human-replay', expect: null, run: (page, a) => flowReplay(page, a.base, a.trace) },
 };
 
@@ -230,7 +284,7 @@ async function runScenario(id, a) {
   // --expect applies to T-010/T-020, or to the only scenario selected.
   const useArg = a.expect && (id === 'T-010' || id === 'T-020' || (a.scenarios && a.scenarios.length === 1));
   const exp = parseExpect(useArg ? a.expect : sc.expect);
-  return { id, name: sc.name, sid, ms: Date.now() - t0, result: r, expect: exp, pass: check(exp, r),
+  return { id, name: sc.name, sid, ms: Date.now() - t0, input: sc.cdp ? a.input : 'playwright', result: r, expect: exp, pass: check(exp, r),
     fp: partScore(r, false), beh: partScore(r, true) };
 }
 
@@ -252,6 +306,10 @@ async function main() {
   assertLoopback(a.base, 'base URL');
   if (a.cdp) assertLoopback(a.cdp, 'CDP URL');
   parseExpect(a.expect); // validate early
+  if (a.input === 'human' && !a.cdp) {
+    console.error('--input human needs --cdp (LightBrowser.human* exists only in LightBrowser)');
+    process.exit(2);
+  }
   let ids = a.scenarios || ['T-001', 'T-003'];
   if (!a.scenarios && a.cdp) ids.push('T-010');
   if (!a.scenarios && a.trace) ids.push('T-020');

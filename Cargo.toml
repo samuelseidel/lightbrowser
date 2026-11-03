@@ -17,6 +17,80 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Binary size (M6, ADR 0013): code that is not on a hot path (CDP and
+# JSON, network and DNS, cookies, CLI, image codecs, decompressors) is
+# optimised for size. DOM, JS bindings, style, layout and raster stay at 3.
+[profile.release.package.lb-cdp]
+opt-level = "s"
+[profile.release.package.lb-net]
+opt-level = "s"
+[profile.release.package.lb-persona]
+opt-level = "s"
+[profile.release.package.lb-behavior]
+opt-level = "s"
+[profile.release.package.hickory-proto]
+opt-level = "s"
+[profile.release.package.hickory-resolver]
+opt-level = "s"
+[profile.release.package.moka]
+opt-level = "s"
+[profile.release.package.h2]
+opt-level = "s"
+[profile.release.package.http]
+opt-level = "s"
+[profile.release.package.tokio-tungstenite]
+opt-level = "s"
+[profile.release.package.tungstenite]
+opt-level = "s"
+[profile.release.package.cookie_store]
+opt-level = "s"
+[profile.release.package.publicsuffix]
+opt-level = "s"
+[profile.release.package.tracing]
+opt-level = "s"
+[profile.release.package.tracing-core]
+opt-level = "s"
+[profile.release.package.time]
+opt-level = "s"
+[profile.release.package.uuid]
+opt-level = "s"
+[profile.release.package.idna]
+opt-level = "s"
+[profile.release.package.resolv-conf]
+opt-level = "s"
+[profile.release.package.futures-util]
+opt-level = "s"
+[profile.release.package.crossbeam-channel]
+opt-level = "s"
+[profile.release.package.crossbeam-epoch]
+opt-level = "s"
+[profile.release.package.image]
+opt-level = "s"
+[profile.release.package.png]
+opt-level = "s"
+[profile.release.package.gif]
+opt-level = "s"
+[profile.release.package.zune-jpeg]
+opt-level = "s"
+[profile.release.package.image-webp]
+opt-level = "s"
+[profile.release.package.moxcms]
+opt-level = "s"
+[profile.release.package.brotli]
+opt-level = "s"
+[profile.release.package.brotli-decompressor]
+opt-level = "s"
+[profile.release.package.flate2]
+opt-level = "s"
+[profile.release.package.miniz_oxide]
+opt-level = "s"
+[profile.release.package.zstd]
+opt-level = "s"
+[profile.release.package.zstd-safe]
+opt-level = "s"
+[profile.release.package.serde_json]
+opt-level = "s"
+
 # Size-tuned build for measuring disk footprint.
 [profile.release-small]
 inherits = "release"

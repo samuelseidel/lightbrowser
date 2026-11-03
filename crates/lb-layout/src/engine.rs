@@ -110,13 +110,13 @@ pub struct LayoutStats {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-struct Geo {
+pub(crate) struct Geo {
     /// Border box in client coordinates (scroll applied).
-    rect: Rect,
+    pub(crate) rect: Rect,
     /// Border box in document coordinates (no scroll applied).
     doc: Rect,
     /// Clip from overflow ancestors, client coordinates.
-    clip: Option<Rect>,
+    pub(crate) clip: Option<Rect>,
 }
 
 struct LayoutState {
@@ -730,6 +730,24 @@ impl LayoutEngine {
         crate::ax::AxTree::build(doc, &mut self.styles)
     }
 
+    /// Every painted box in paint order, in page coordinates, for
+    /// screenshots (see [`crate::DisplayList`]). Lays out if needed.
+    pub fn display_list(&mut self, doc: &Document) -> crate::display::DisplayList {
+        let document_size = self.document_size(doc);
+        self.ensure(doc);
+        let st = self.state.as_ref().expect("layout state");
+        let font_for = |s: &ComputedStyle| resolve_font(&self.fonts, &self.available, s);
+        crate::display::build(
+            doc,
+            &font_for,
+            &st.built,
+            &st.geo,
+            self.viewport,
+            self.viewport_scroll,
+            document_size,
+        )
+    }
+
     /// Number of boxes in the current layout (0 if none computed).
     pub fn box_count(&self) -> usize {
         self.state.as_ref().map_or(0, |s| s.built.tree.boxes.len())
@@ -879,7 +897,7 @@ struct Frame {
     fixed: bool,
 }
 
-fn creates_stacking_context(css: &ComputedStyle, parent_flex_or_grid: bool) -> bool {
+pub(crate) fn creates_stacking_context(css: &ComputedStyle, parent_flex_or_grid: bool) -> bool {
     (css.position != Position::Static && css.z_index.is_some())
         || matches!(css.position, Position::Fixed | Position::Sticky)
         || css.opacity < 1.0

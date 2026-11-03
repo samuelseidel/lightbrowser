@@ -18,6 +18,8 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0010](0010-own-box-tree-and-font-tables.md) | Our own box tree over taffy, and font metric tables compiled in | Accepted (2026-11-03) |
 | [0011](0011-per-destination-headers.md) | Request headers per destination, captured from local Chromium | Accepted (2026-11-03) |
 | [0012](0012-frames-as-realms.md) | Frames are realms in the page's engine, built on the spot (`RealmOps`) | Accepted (2026-11-03) |
+| [0013](0013-startup-snapshot-and-size-budget.md) | V8 startup snapshot made in memory; binary budget follows the V8 floor | Accepted (2026-11-03) |
+| [0014](0014-on-demand-page-screenshots.md) | Page screenshots painted on demand from the layout | Accepted (2026-11-03) |
 
 ## Adding an ADR
 

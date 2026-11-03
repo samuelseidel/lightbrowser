@@ -50,6 +50,9 @@ pub struct ExternalContext {
     pub snapshot: Option<Rc<dyn Fn() -> Option<Bitmap>>>,
     /// The canvas was resized (bitmap must be cleared).
     pub resize: Option<Rc<dyn Fn(u32, u32)>>,
+    /// Current pixels without readback noise (unpremultiplied RGBA), for
+    /// page screenshots, which the page cannot read.
+    pub raw: Option<Rc<dyn Fn() -> Option<Bitmap>>>,
 }
 
 /// Makes the context for `getContext(kind, attributes)`. `Ok(None)` makes
@@ -397,11 +400,11 @@ fn tiny_size(w: u32, h: u32) -> Option<lb_paint::tiny_skia::IntSize> {
     lb_paint::tiny_skia::IntSize::from_wh(w, h)
 }
 
-fn element_ctx(w: &Window, slot: u32, n: NodeId) -> Option<CanvasCtx> {
+pub(crate) fn element_ctx(w: &Window, slot: u32, n: NodeId) -> Option<CanvasCtx> {
     w.paint.canvases.borrow().get(&(slot, n)).cloned()
 }
 
-fn sync_element(w: &Window, slot: u32, n: NodeId) {
+pub(crate) fn sync_element(w: &Window, slot: u32, n: NodeId) {
     if let Some(CanvasCtx::TwoD { ctx, .. }) = element_ctx(w, slot, n) {
         let (cw, ch) = canvas_size(w, CanvasTarget::Element { slot, node: n });
         let stale = {

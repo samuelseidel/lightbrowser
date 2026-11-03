@@ -28,13 +28,13 @@
 //   bound (> 0) and a long tail (some users take minutes).  Log-normal is
 //   the standard model for positive-valued human RT data.
 //
-// • **Uniform** for think time: the range is short (< 2 s) and there is no
-//   strong empirical evidence for a specific shape within this range.
+// • **Log-normal** for think time too (LightBrowser M5; upstream used a
+//   uniform), clamped to the profile range.
 
 use rand::rngs::SmallRng;
 use serde::{Deserialize, Serialize};
 
-use crate::rng::{clamp, normal_sample, uniform};
+use crate::rng::{clamp, normal_sample};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -42,6 +42,7 @@ use crate::rng::{clamp, normal_sample, uniform};
 
 /// Per-session navigation timing parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TimingProfile {
     /// (min_ms, max_ms) for the initial delay after page load before any
     /// interaction.  The actual sample uses a log-normal distribution fitted
@@ -53,6 +54,12 @@ pub struct TimingProfile {
     pub reading_speed_wpm: f64,
     /// (min_ms, max_ms) for the think pause before each individual action.
     pub action_think_ms: (u64, u64),
+}
+
+impl Default for TimingProfile {
+    fn default() -> Self {
+        crate::BehaviorProfile::casual_user().timing
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -124,19 +131,11 @@ pub fn sample_dwell(profile: &TimingProfile, rng: &mut SmallRng) -> u64 {
 ///
 /// This models the cognitive preparation time: the user decides where to
 /// click, moves their eyes to the target, and initiates the motor action.
-/// In reaction-time literature this is sometimes called the "decision latency"
-/// component of Fitts' Law.
-///
-/// We use a uniform distribution here because the range is narrow (< 2 s in
-/// most profiles) and the empirical distribution within this range is roughly
-/// flat for generic web interactions.
-///
-/// For more specific interactions (e.g. filling a known form field vs.
-/// discovering where a button is), the caller should apply a multiplier to
-/// the sampled value.
+/// Log-normal over the profile range (5th to 95th percentile), like other
+/// human response times; clamped to the range.
 pub fn sample_think_time(profile: &TimingProfile, rng: &mut SmallRng) -> u64 {
     let (min, max) = profile.action_think_ms;
-    uniform(rng, min as f64, max as f64) as u64
+    sample_log_normal(rng, min, max).clamp(min, max)
 }
 
 /// Estimate the time (in ms) a user of the given profile would spend reading

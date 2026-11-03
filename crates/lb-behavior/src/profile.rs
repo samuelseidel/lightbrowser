@@ -34,41 +34,79 @@ pub struct BehaviorProfile {
 }
 
 impl BehaviorProfile {
+    /// Names accepted by [`BehaviorProfile::preset`].
+    pub const PRESETS: [&'static str; 4] =
+        ["casual_user", "power_user", "slow_reader", "mobile_like"];
+
+    /// A preset by name (`persona.behavior.profile`).
+    pub fn preset(name: &str) -> Option<Self> {
+        match name {
+            "casual_user" => Some(Self::casual_user()),
+            "power_user" => Some(Self::power_user()),
+            "slow_reader" => Some(Self::slow_reader()),
+            "mobile_like" => Some(Self::mobile_like()),
+            _ => None,
+        }
+    }
+
+    /// The same profile with another scroll device (a persona's pointing
+    /// device: a notched wheel on most desktops, a trackpad on laptops).
+    pub fn with_scroll_type(mut self, t: ScrollType) -> Self {
+        self.scroll.scroll_type = t;
+        self
+    }
+
     // ------------------------------------------------------------------
     // Preset constructors
     // ------------------------------------------------------------------
 
     /// A relaxed, average desktop user.
     ///
-    /// Rationale: This is the most common profile on the web.  WPM ~60
-    /// matches the widely-cited average adult typing speed.  Mouse speed is
-    /// moderate with occasional overshoots (humans frequently overshoot and
-    /// correct, especially when targeting small elements).  Long dwell times
-    /// represent reading and considering content before acting.
+    /// Rationale: This is the most common profile on the web.  WPM ~55 is
+    /// close to the 52 WPM average of Dhakal et al. 2018.  Fitts slope
+    /// 210 ms/bit is a mouse throughput of about 4.8 bit/s (ISO 9241-9
+    /// studies: 3.5-5).  A notched wheel; holds and IKIs at the dataset
+    /// means.  Long dwell times represent reading before acting.
     pub fn casual_user() -> Self {
         Self {
             name: "casual_user".into(),
             mouse: MouseProfile {
-                speed_mean_px_per_s: 800.0,
-                speed_std: 200.0,
-                overshoot_rate: 0.25,
+                fitts_a_ms: 100.0,
+                fitts_b_ms: 210.0,
+                curvature: 0.08,
+                path_noise: 0.012,
+                overshoot_rate: 0.2,
                 overshoot_distance_px: 18.0,
+                device_hz: 125.0,
+                display_hz: 60.0,
+                press_hold_ms: 95.0,
+                endpoint_spread: 1.0,
                 micro_movement_enabled: true,
                 micro_movement_std_px: 1.2,
             },
             keyboard: KeyboardProfile {
-                wpm_mean: 60.0,
-                wpm_std: 10.0,
-                error_rate: 0.04,
-                correction_delay_ms: (200, 600),
+                wpm_mean: 55.0,
+                wpm_std: 8.0,
+                error_rate: 0.03,
+                correction_delay_ms: (250, 700),
                 bigram_variation: true,
+                iki_sigma: 0.4,
+                hold_ms: 105.0,
+                hold_sigma: 0.25,
+                hesitation_rate: 0.06,
+                hold_key_spread: 0.15,
+                key_seed: 0,
             },
             scroll: ScrollProfile {
                 scroll_type: ScrollType::Wheel,
-                speed_mean_px_per_s: 1200.0,
-                speed_std: 300.0,
-                momentum_deceleration: 0.85,
-                direction_change_probability: 0.05,
+                notch_px: 100.0,
+                notches_per_flick: 3.5,
+                notch_interval_ms: 45.0,
+                regrip_ms: 280.0,
+                speed_mean_px_per_s: 1400.0,
+                speed_std: 0.3,
+                momentum_deceleration: 0.95,
+                direction_change_probability: 0.1,
             },
             timing: TimingProfile {
                 first_interaction_ms: (800, 3000),
@@ -89,26 +127,42 @@ impl BehaviorProfile {
         Self {
             name: "power_user".into(),
             mouse: MouseProfile {
-                speed_mean_px_per_s: 1600.0,
-                speed_std: 300.0,
-                overshoot_rate: 0.10,
-                overshoot_distance_px: 8.0,
-                micro_movement_enabled: false, // stays still while reading
+                fitts_a_ms: 60.0,
+                fitts_b_ms: 160.0,
+                curvature: 0.06,
+                path_noise: 0.01,
+                overshoot_rate: 0.15,
+                overshoot_distance_px: 14.0,
+                device_hz: 125.0,
+                display_hz: 60.0,
+                press_hold_ms: 80.0,
+                endpoint_spread: 0.9,
+                micro_movement_enabled: false,
                 micro_movement_std_px: 0.5,
             },
             keyboard: KeyboardProfile {
-                wpm_mean: 100.0,
-                wpm_std: 12.0,
+                wpm_mean: 95.0,
+                wpm_std: 10.0,
                 error_rate: 0.02,
-                correction_delay_ms: (80, 250),
+                correction_delay_ms: (120, 350),
                 bigram_variation: true,
+                iki_sigma: 0.35,
+                hold_ms: 90.0,
+                hold_sigma: 0.22,
+                hesitation_rate: 0.03,
+                hold_key_spread: 0.12,
+                key_seed: 0,
             },
             scroll: ScrollProfile {
                 scroll_type: ScrollType::Trackpad,
-                speed_mean_px_per_s: 2000.0,
-                speed_std: 400.0,
-                momentum_deceleration: 0.78,
-                direction_change_probability: 0.02,
+                notch_px: 100.0,
+                notches_per_flick: 4.5,
+                notch_interval_ms: 35.0,
+                regrip_ms: 180.0,
+                speed_mean_px_per_s: 2200.0,
+                speed_std: 0.3,
+                momentum_deceleration: 0.955,
+                direction_change_probability: 0.05,
             },
             timing: TimingProfile {
                 first_interaction_ms: (300, 1000),
@@ -129,26 +183,42 @@ impl BehaviorProfile {
         Self {
             name: "slow_reader".into(),
             mouse: MouseProfile {
-                speed_mean_px_per_s: 400.0,
-                speed_std: 150.0,
-                overshoot_rate: 0.40,
-                overshoot_distance_px: 30.0,
+                fitts_a_ms: 200.0,
+                fitts_b_ms: 280.0,
+                curvature: 0.1,
+                path_noise: 0.015,
+                overshoot_rate: 0.3,
+                overshoot_distance_px: 25.0,
+                device_hz: 125.0,
+                display_hz: 60.0,
+                press_hold_ms: 120.0,
+                endpoint_spread: 1.2,
                 micro_movement_enabled: true,
-                micro_movement_std_px: 2.5, // more drift while hovering/reading
+                micro_movement_std_px: 2.5,
             },
             keyboard: KeyboardProfile {
-                wpm_mean: 35.0,
-                wpm_std: 8.0,
-                error_rate: 0.08,
+                wpm_mean: 32.0,
+                wpm_std: 6.0,
+                error_rate: 0.06,
                 correction_delay_ms: (500, 1500),
-                bigram_variation: false, // more uniform; no well-practiced bigrams
+                bigram_variation: false,
+                iki_sigma: 0.5,
+                hold_ms: 130.0,
+                hold_sigma: 0.3,
+                hesitation_rate: 0.12,
+                hold_key_spread: 0.18,
+                key_seed: 0,
             },
             scroll: ScrollProfile {
                 scroll_type: ScrollType::Wheel,
-                speed_mean_px_per_s: 600.0,
-                speed_std: 200.0,
-                momentum_deceleration: 0.90,
-                direction_change_probability: 0.12, // re-reads sections
+                notch_px: 100.0,
+                notches_per_flick: 2.5,
+                notch_interval_ms: 60.0,
+                regrip_ms: 400.0,
+                speed_mean_px_per_s: 900.0,
+                speed_std: 0.3,
+                momentum_deceleration: 0.94,
+                direction_change_probability: 0.15,
             },
             timing: TimingProfile {
                 first_interaction_ms: (1500, 6000),
@@ -172,29 +242,41 @@ impl BehaviorProfile {
         Self {
             name: "mobile_like".into(),
             mouse: MouseProfile {
-                // Short, slow "swipe" movements rather than cross-screen arcs.
-                speed_mean_px_per_s: 350.0,
-                speed_std: 120.0,
-                overshoot_rate: 0.15,
-                overshoot_distance_px: 10.0,
-                micro_movement_enabled: false, // no hover jitter on touch
+                fitts_a_ms: 150.0,
+                fitts_b_ms: 220.0,
+                curvature: 0.05,
+                path_noise: 0.01,
+                overshoot_rate: 0.1,
+                overshoot_distance_px: 8.0,
+                device_hz: 125.0,
+                display_hz: 60.0,
+                press_hold_ms: 90.0,
+                endpoint_spread: 1.1,
+                micro_movement_enabled: false,
                 micro_movement_std_px: 0.0,
             },
             keyboard: KeyboardProfile {
-                wpm_mean: 45.0,
-                wpm_std: 12.0,
-                // Auto-correct intercepts many typos; apparent error rate is low
-                // but correction delays are short (auto-correct is instant).
+                wpm_mean: 40.0,
+                wpm_std: 10.0,
                 error_rate: 0.02,
                 correction_delay_ms: (50, 150),
                 bigram_variation: false,
+                iki_sigma: 0.45,
+                hold_ms: 95.0,
+                hold_sigma: 0.25,
+                hesitation_rate: 0.08,
+                hold_key_spread: 0.15,
+                key_seed: 0,
             },
             scroll: ScrollProfile {
-                // Touch always produces smooth momentum scroll.
                 scroll_type: ScrollType::Trackpad,
+                notch_px: 100.0,
+                notches_per_flick: 3.0,
+                notch_interval_ms: 45.0,
+                regrip_ms: 250.0,
                 speed_mean_px_per_s: 1800.0,
-                speed_std: 600.0,
-                momentum_deceleration: 0.82,
+                speed_std: 0.35,
+                momentum_deceleration: 0.95,
                 direction_change_probability: 0.08,
             },
             timing: TimingProfile {
@@ -223,5 +305,22 @@ mod tests {
             let back: BehaviorProfile = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(back.name, profile.name);
         }
+    }
+
+    #[test]
+    fn presets_by_name() {
+        for name in BehaviorProfile::PRESETS {
+            assert_eq!(BehaviorProfile::preset(name).unwrap().name, name);
+        }
+        assert!(BehaviorProfile::preset("nobody").is_none());
+        let p = BehaviorProfile::casual_user().with_scroll_type(ScrollType::Trackpad);
+        assert_eq!(p.scroll.scroll_type, ScrollType::Trackpad);
+    }
+
+    #[test]
+    fn partial_json_fills_defaults() {
+        let p: MouseProfile = serde_json::from_str(r#"{"fitts_b_ms": 300.0}"#).unwrap();
+        assert_eq!(p.fitts_b_ms, 300.0);
+        assert_eq!(p.display_hz, 60.0);
     }
 }

@@ -44,8 +44,8 @@ cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
 
 `tests/playwright/` runs stock Playwright `connectOverCDP` against
 `lightbrowser serve` (the real V8 page host) with `viewport: null` in every
-context (ADR 0009). 16 tests, all passing; `harness.mjs` starts `serve` and a
-local site.
+context (ADR 0009). 20 tests, all passing (debug and release binaries);
+`harness.mjs` starts `serve` and a local site.
 
 | Spec | Covers |
 |---|---|
@@ -55,6 +55,7 @@ local site.
 | `stealth.spec.mjs` | no added or suspicious main-world globals, `navigator.webdriver` false, trusted events |
 | `cdp.spec.mjs` | raw CDP: DOM, Accessibility, Emulation, console, page errors |
 | `frames.spec.mjs` | `frameLocator`, `page.frame`, frame attach/detach events, `LightBrowser.fingerprintReport` leaves no trace in the main world |
+| `screenshot.spec.mjs` | `page.screenshot()`: viewport, element (also scrolled into view), full page, jpeg quality and clip, `omitBackground`, raw CDP clip scale and `captureBeyondViewport`, un-noised canvas pixels, the 0-width error (ADR 0014) |
 
 ```bash
 cargo build -p lightbrowser && node --test tests/playwright/   # LIGHTBROWSER_BIN overrides
@@ -73,6 +74,7 @@ build only). Run one with `cargo test -p lb-page --test <name>`.
 | `navigator` | plugins, UA-CH, permissions, battery, devices, voices, time zone, `window.chrome`, screen, media queries, RTC, for both reference personas |
 | `fingerprint_surfaces` | WebGL strings and pixels, fonts, Web Audio sum (about 124.043), determinism per seed |
 | `wpt` | the WPT subset above |
+| `human` | `LightBrowser.human*` replay: trusted events in Chrome's order, monotonic timestamps, holds, the click point inside the target, scrolling into view, typed value, Shift, error texts; under virtual time the same persona gives the same stream and the clock advances |
 
 Fingerprint report gate: `cargo test -p lb-page --test pages report` checks
 every `profiles/reference/chrome` persona (on `about:blank` and on a loopback
@@ -84,8 +86,13 @@ from the command line:
     --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json   # exit 1 on mismatch
 ```
 
-Other new suites: `cargo test -p lb-paint` (paths, compositing, gradients,
-codecs, noise), `cargo test -p lb-webapi` (`tests/install.rs`: interface
+Other new suites: `cargo test -p lb-behavior` (65: determinism per seed,
+Fitts scaling, bell-shaped speed, click scatter, keystroke statistics,
+wheel and trackpad totals, CDP conversion), `cargo test -p lb-js --test
+snapshot` and `cargo test -p lb-webapi --test snapshot` (snapshot and
+built realms expose the identical surface, secure and insecure; V8 allows
+one snapshot per process, so these are separate test binaries), `cargo test -p lb-layout -p lb-paint` (paths, compositing,
+gradients, codecs, noise, display list and page painting), `cargo test -p lb-webapi` (`tests/install.rs`: interface
 surface vs Chrome 153), `cargo test -p lb-net` (74 unit tests, including the
 header profile in `header_profile.rs`, and `--test fingerprint`).
 
@@ -105,7 +112,45 @@ node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
 python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (18)
 ```
 
-Use a fresh `serve` per run. M5 target: `--expect 'beh<=30'`.
+Use a fresh `serve` per run. M5 target, the same flow through
+`LightBrowser.human*` (`--seed N` fixes the reading pauses):
+
+```bash
+node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
+    --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
+```
+
+Results (2026-11-03): the Windows reference persona scores 0 (pass); the
+macOS one scores 35 (`beh_key_dwell` on the six keys of `jacket`, fail),
+see "M5 status" in `docs/ROADMAP.md`. With the default `--input playwright`
+both score 85 to 92 on behaviour rules, and stock Chromium (T-001, T-003)
+scores 100, so the bench still catches naive automation.
+
+## Python SDK suite (M5)
+
+`sdk/python/tests` (pytest). Run it from `sdk/python`, because the package is
+not installed:
+
+```bash
+cd sdk/python
+python3 -m pytest tests -m "not integration"   # unit tests, no binary, about a second
+python3 -m pytest tests                        # also launches target/debug/lightbrowser
+python3 -m lightbrowser.scenarios --bench http://127.0.0.1:PORT   # scenarios T-001..T-007
+```
+
+93 pass and 4 skip with the installed Python Playwright 1.52: the bench
+scenarios T-002, T-004, T-006 and T-007 skip, because Playwright older than
+1.63 defines `__pwInitScripts` in the page's main world. With 1.63, 96 pass
+and 1 is skipped, and all seven scenarios pass (T-004 0 with fp 0 and beh 0).
+
+## Crawl benchmark (M6)
+
+`bench/` (see its README): `python3 bench/run.py` crawls a generated 50-page
+corpus on loopback with LightBrowser (`fetch` and CDP), headless Chromium and,
+if installed, Lightpanda, then checks the budgets and writes
+`bench/results/`. `python3 -m unittest discover -s bench` runs its tooling
+tests (10, no browser). `cargo run --release -p lb-webapi --example
+realm_bench` prints the realm-creation timings the runner reads.
 
 ## Planned suites
 

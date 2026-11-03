@@ -8,15 +8,20 @@ fingerprint (TLS, HTTP/2, header order), JavaScript surface, and device
 fingerprints (canvas, WebGL, audio, fonts, screen). It aims to use less CPU,
 RAM and disk than Lightpanda.
 
-**Status:** M1 (network), M2 (DOM + V8), M3 (layout + CDP) and M4 (Chrome
-fingerprints) are done for the Chrome build. `lightbrowser serve` runs real
-V8 pages, and stock Playwright `connectOverCDP` drives them (click, fill,
-getByRole, frames, network routing). On our own detection bench, fingerprint
-rules score 0 for both reference Chrome personas; only behaviour rules fire
-(M5). Not done: Firefox (M4b, no SpiderMonkey backend yet), workers,
-behaviour replay and the Python SDK (M5), size and startup budgets (M6; the
-release binary is 62.1 MB against < 40 MB). See
-[docs/ROADMAP.md](docs/ROADMAP.md).
+**Status:** M1 (network), M2 (DOM + V8), M3 (layout + CDP), M4 (Chrome
+fingerprints) and M5 (human input, Python SDK) are done for the Chrome build,
+and most of M6 (snapshot, memory, binary size, `bench/` runner, screenshots).
+`lightbrowser serve` runs real V8 pages, and stock Playwright
+`connectOverCDP` drives them (click, fill, getByRole, frames, network
+routing, screenshots). On our own detection bench, fingerprint rules score 0
+for both reference Chrome personas. With `LightBrowser.human*` input the
+Windows persona scores 0 on behaviour rules; the macOS persona scores 35
+(`beh_key_dwell`, a short-sample keystroke rule) and still needs a decision.
+Idle RSS is 9.9 MB, realm creation 2.1 ms, and the release binary 54.96 MB
+(the prebuilt V8 alone is 42 MB, so the budget is now < 56 MB, ADR 0013).
+Not done: Firefox (M4b, no SpiderMonkey backend yet), workers and service
+workers, and the comparison with Lightpanda (no binary on the bench machine).
+See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only
 
@@ -32,7 +37,7 @@ distribute binaries or push them to public repos or registries.
 |---|---|
 | Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | <= Lightpanda on the same machine |
 | Idle process RSS | < 15 MB |
-| Binary size (per family, stripped) | < 40 MB |
+| Binary size (per family, stripped) | < 56 MB for Chrome with the prebuilt V8 (floor 42 MB; was < 40 MB, ADR 0013) |
 | Disk writes during a session | none by default |
 | Isolate/realm creation | < 5 ms (startup snapshot) |
 
@@ -82,11 +87,36 @@ cargo clippy -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-featu
 Subcommands: `fetch <url> --dump html|text` (runs scripts), `validate
 <persona.json>`, `serve --port 9222` (CDP for Playwright `connectOverCDP`;
 use `viewport: null`, because viewports that contradict the persona are
-rejected), and `fingerprint-report [--persona FILE] [--url URL]` (compares the
+rejected; `--workers N`, `--insecure`, `--profiles-dir`), and `fingerprint-report [--persona FILE] [--url URL]` (compares the
 live JS surface with the persona; JSON on stdout, exit 1 on a mismatch).
 `fetch`, `serve` and `fingerprint-report` take `--persona FILE` and default to
 the Windows Chrome 153 reference persona. Point them only at loopback test
 servers.
+
+## Python SDK
+
+`sdk/python` starts `lightbrowser serve` with a persona and returns stock
+Playwright objects with human-like input and a fingerprint check bound on.
+Needs Python Playwright >= 1.63 (older versions leak `__pwInitScripts` into
+the page). Point it only at loopback servers. See
+[sdk/python/README.md](sdk/python/README.md).
+
+```python
+from lightbrowser import Browser, Persona
+
+persona = Persona.load("profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json")
+with Browser(persona=persona) as browser:        # runs `lightbrowser serve --port 0`
+    page = browser.new_page()                    # stock Playwright Page
+    page.goto("http://127.0.0.1:8765/shop")      # your own local server
+    page.human_scroll(900)
+    x, y = page.human_click("#add-3")            # the point actually clicked
+    page.human_type("#q", "jacket")
+    assert page.verify_fingerprint().ok
+```
+
+Detection bench check (a bench server on 127.0.0.1 and a fresh `serve` per run):
+`node tests/detect-bench/run.js --scenario T-010 --cdp <ws> --input human
+--expect 'beh<=30'`. Crawl benchmark: `python3 bench/run.py`.
 
 ## Layout
 
@@ -95,10 +125,10 @@ bin/lightbrowser/   CLI binary; selects the family feature
 crates/             lb-persona, lb-js, lb-net, lb-dom, lb-css, lb-layout,
                     lb-paint, lb-webapi, lb-webidl-gen, lb-page, lb-cdp,
                     lb-behavior (see CLAUDE.md for the crate map)
-sdk/python/         Python launcher + persona + human_* helpers (planned)
+sdk/python/         Python launcher + persona + human_* helpers
 profiles/           personas and TLS profiles (profiles/tls/)
-bench/              benchmarks vs Lightpanda and headless Chrome
-tests/              integration tests
+bench/              crawl benchmark vs headless Chromium (and Lightpanda if installed)
+tests/              Playwright, WPT and detection-bench suites
 docs/               architecture, roadmap, ADRs
 ```
 

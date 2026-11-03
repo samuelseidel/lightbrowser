@@ -10,8 +10,27 @@ Each milestone ends with something we can run and measure.
 | **M3 Layout + CDP core** | Lazy cascade, taffy layout, hit-testing, AX tree, CDP server with the domains in ARCHITECTURE.md | Playwright `connectOverCDP`: goto, evaluate, click, fill, getByRole, content all pass ✅ (Chrome; real V8 page host, 16 Playwright tests, see "M3 status") |
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
-| **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`) |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. |
+| **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done; Windows reference persona beh 0 (pass), macOS beh 35 (`beh_key_dwell` on six keys, fail; see "M5 status") |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot (realm 2 ms), memory tuning, binary size and screenshots (ADR 0014) done for Chrome; the size budget is now < 56 MB (ADR 0013); `bench/` runner done (`bench/results/`, Lightpanda not yet compared); service workers open. See "M6 status". |
+
+**Where we stand (Chrome build, 2026-11-03).**
+
+| Milestone | Chrome | Open |
+|---|---|---|
+| M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
+| M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
+| M5 Behavior + SDK | Done, with one failing check: T-010 `--input human` passes for the Windows reference persona (beh 0) and fails for the macOS one (beh 35, `beh_key_dwell`) | A decision on the short-sample keystroke rules (see "M5 status") |
+| M6 Performance | Snapshot, memory, binary size, `bench/` runner and screenshots done | Lightpanda comparison (no binary here), service workers, the original < 40 MB binary budget (now < 56 MB, ADR 0013), slow layout on image grids |
+
+Budgets (ARCHITECTURE.md), with the evidence for each:
+
+| Budget | Result | Evidence |
+|---|---|---|
+| Idle RSS < 15 MB | Met: 9.9 MB | `bench/run.py`, "M6 status: bench runner" |
+| Binary < 56 MB (was < 40 MB) | Met: 54.96 MB. The original < 40 MB is missed: the V8 floor alone is 42.0 MB | "M6 status: snapshot, memory and binary size"; "Workspace check" |
+| Realm creation < 5 ms | Met: 2.4 ms first, 2.1 ms next | `realm_bench`; `bench/run.py` |
+| No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
+| Wall time, peak RSS and CPU <= Lightpanda | Not measured: no `lightpanda` binary on this machine. The runner skips these checks | "M6 status: bench runner" |
 
 ## M1 status (2026-11-02)
 
@@ -213,7 +232,7 @@ the frames spec).
 
 Open (CDP and page host):
 
-- No workers or popups; no screenshots (M6).
+- No workers or popups. Screenshots landed in M6 (see "M6 status: screenshots").
 - `DOM.*` and `Input.*` on nodes inside child frames are refused (see
   "M4 status: frames and fingerprint report").
 - Same-document navigations are not reported (`navigatedWithinDocument`).
@@ -280,11 +299,12 @@ Known gaps after M4 (details in the sections below):
   approximately; no preflight is issued; Firefox uses a generic overlay.
 - Clicks into iframes, `window.frameName`, `sandbox` and structured clone
   for `postMessage` are missing.
-- Behaviour (M5): the T-010 behaviour rules still fire (`beh` 85.4, target
-  `<=30`).
-- Budgets: the release binary is 62.1 MB (budget < 40 MB) and realm
-  creation was about 30 ms when measured at M2 (budget < 5 ms with the M6
-  snapshot).
+- Behaviour (M5): the T-010 behaviour rules still fire with Playwright
+  input (`beh` 85.4, target `<=30`); with `LightBrowser.human*` input see
+  "M5 status: human input".
+- Budgets: the release binary was 62.1 MB (budget then < 40 MB) and realm
+  creation about 30 ms. Both are addressed in "M6 status: snapshot, memory
+  and binary size".
 
 ## M4 status: request headers (2026-11-03)
 
@@ -664,6 +684,300 @@ Release build (chrome): stripped binary 62.1 MB (was 58.9 MB at M2; budget
 Release also fires `beh_click_hold` (30) on top of the five debug-build
 behaviour rules (not investigated; likely the shorter press-to-release time
 of the faster build).
+
+## M5 status: human input (2026-11-03)
+
+PLAN M5 items 1-2 are done for the Chrome build: `LightBrowser.humanMove`,
+`humanClick`, `humanType` and `humanScroll` generate input with
+`lb-behavior` and replay it through the trusted input pipeline. The Python
+SDK (item 3) is done in `sdk/python` (launcher, `Persona`, sync and async
+APIs, `human_*`, `verify_fingerprint`, scenarios T-001..T-007). Its bench
+scenarios need Python Playwright >= 1.63: older versions define
+`__pwInitScripts` in the page's main world through
+`Page.addScriptToEvaluateOnNewDocument`, which LightBrowser cannot hide.
+
+- CDP contract (page sessions): `humanMove {x, y}`; `humanClick {selector?
+  | x?, y?, button?, clickCount?} -> {x, y}` (the clicked point);
+  `humanType {text, selector?}`; `humanScroll {deltaY?, deltaX?, x?, y?,
+  selector?}`. Each resolves after its last event. Errors are `-32000` with
+  Chrome-like text (`No node found for selector: #x`, `Node is not
+  visible`). lb-cdp checks params and calls `PageHost::human_input`
+  (`types::HumanCommand`); `MockHost` answers "not supported".
+- `lb-page` `cdp/human.rs`: selectors are resolved in the main document
+  from Rust (no script in any world); a target outside the viewport is
+  first brought into view with wheel input; the click point is chosen
+  inside the element's box by the profile. Events are dispatched at their
+  offsets with `tokio::time::sleep_until` on the page's worker, which keeps
+  serving other pages; with virtual time the clock is advanced to each
+  event instead. The pointer position persists per page (also after
+  `Input.dispatchMouseEvent`), starting at a seeded point in the upper
+  middle of the viewport. Calls on one page run one at a time.
+- Profile and seed come from the persona (`lb_page::cdp::behavior_for`):
+  `behavior.profile` preset; new optional `behavior.seed` (hex, default: a
+  hash of `profile_id` and the fingerprint seeds) and
+  `behavior.pointing_device` (`mouse` or `trackpad`; default trackpad on
+  macOS, a notched wheel elsewhere), in `lb-persona` and the v2 schema.
+  Call `n` on a page uses `mix_seed(seed, n)`: same persona and calls, same
+  stream (tested under virtual time).
+- `lb-behavior` generators rewritten from first principles (sources in each
+  module's header): Fitts' law durations; a primary submovement plus
+  corrective ones (Meyer et al. 1988), overshoot or undershoot; minimum-jerk
+  speed with a longer deceleration phase; curved paths with lateral motor
+  noise (Harris & Wolpert 1998; MacKenzie et al. 2001); endpoint scatter
+  sigma = W/4.133 of the target (ISO 9241-9); 125 Hz device reports
+  coalesced to 60 Hz frames, whole pixels; button holds around 95 ms.
+  Keys: log-normal down-to-down intervals and holds (Dhakal et al. 2018),
+  per-key hold habits (Killourhy & Maxion 2009), bigrams, word-start
+  pauses, rollover, Shift around shifted characters, typos noticed 0-2
+  keys later and fixed with Backspace. Wheel: fixed 100 px detents in
+  flicks with re-grip pauses; trackpad: swipes with momentum and axis
+  rails. Think times are log-normal.
+- `tests/detect-bench/run.js --input human`: the T-010 flow through
+  `LightBrowser.human*` on the page's CDP session, plus a reading pause per
+  page from its text length. Default stays `--input playwright`. No rule,
+  weight or probe changed.
+
+T-010 (debug build, fresh `serve --persona <file>` per run, bench on
+127.0.0.1):
+
+| Persona | Before (`--input playwright`) | After (`--input human`, persona's own seed) |
+|---|---|---|
+| `chrome153_win10_rtx3060_1080p` | 85.4 / fp 0 / beh 85.4: `beh_typing_no_keys`, `beh_click_center`, `beh_click_no_path`, `beh_wheel_pattern`, `page_dwell_short` | 0 / fp 0 / **beh 0**, pass |
+| `chrome153_macos15_apple_m2_retina` | 82.8 / fp 0 / beh 82.8: the same without `page_dwell_short` | 35 / fp 0 / beh 35: `beh_key_dwell` only, fail |
+
+With `--input playwright` on the new build both personas still score beh
+85.4 (the same five rules), so the bench still catches naive automation
+through LightBrowser. T-001 and T-003 stay at 100 (bot).
+
+Seed sweep (`behavior.seed` 1-8 plus the persona's own seed): Windows 8/9
+pass, macOS 6/9. Every failure is `beh_key_rhythm` and/or
+`beh_key_dwell` on the six keystrokes of `jacket`; no mouse, wheel or
+timing rule fired in any run. These two rules test the spread of 5-6
+samples (MAD/median < 0.1 and < 0.08). For log-normal intervals with a CV
+of about 0.4 and holds as above, a simulation gives chance rates of about
+18 % and 13 % (29 % for either) on six keys, so a human typing a short
+word trips them too. The model was not narrowed or widened to dodge them,
+and no persona seed was picked to pass. Options: the bench could require
+more keys before judging spread (a `scoring.py` change, with evidence from
+human traces), or the flow could type more text.
+
+Verified: `cargo test -p lb-behavior` (65), `-p lb-cdp`, `-p lb-persona`,
+`-p lb-page` (new `tests/human.rs`: trusted events, Chrome order,
+monotonic timestamps, real-clock duration, typed value, Shift, scrolling
+into view, errors; determinism and clock advance under virtual time),
+clippy `-D warnings` (`--no-deps`) and fmt for the touched crates,
+firefox clippy and tests for `lb-page` and `lightbrowser`, bench
+`run.js` T-001/T-003 (100/100).
+
+Open: no drag, hover dwell or idle micro-movements between calls; clicks
+into child frames; touch input; the pointer path ignores scroll
+containers other than the window; the trackpad's mouse movement uses the
+mouse model.
+
+## M6 status: snapshot, memory and binary size (2026-11-03)
+
+PLAN M6 items 1 and 3 (ADR 0013). Release build, chrome, 4 cores.
+
+Startup snapshot (`lb_js::Engine::with_snapshot`, `lb_webapi::snapshot`):
+- Every interface template plus one window context with the fixup run,
+  made in memory when the first engine starts (110 ms, 2.57 MB), no disk
+  writes, no persona data. Restoring replays the binding definitions
+  against per-interface digests; any difference falls back to building.
+- `cargo run --release -p lb-webapi --example realm_bench` (full `rt`
+  registry, medians of 7 engines x 20 realms):
+
+| | engine | registry + define | first realm | next realm |
+|---|---|---|---|---|
+| before | 0.8 ms | 9.1 ms | 28.3 ms | 34.7 ms |
+| snapshot | 2.7 ms | 5.2 ms | 2.4 ms | 2.0 ms |
+
+  V8 heap per window realm is 1.4 MB either way. Realm creation meets the
+  < 5 ms budget.
+- `lb-webapi` test `snapshot`: full surface (keys, descriptors, functions,
+  prototype links) of snapshot and built realms is identical, secure and
+  insecure. All lb-js, lb-webapi and lb-page tests run on snapshot engines;
+  WPT 2552/2788, Playwright 16/16, T-010 fp 0 for both reference personas.
+- One snapshot per process, made before any other engine; afterwards every
+  isolate comes from it, because V8 shares one read-only heap between
+  isolates (mixing snapshots or making one next to live isolates crashed in
+  V8; lb-js now refuses both and falls back to building). Realm ids moved
+  from rusty_v8 context slots into engine state: the slots' per-context
+  weak handle double-freed at teardown for deserialized contexts.
+
+Memory (`lightbrowser serve`, idle RSS, local `/shop` page of the bench):
+
+| | no page | 1 blank page | 1 local page | 10 local pages | 9 of them closed |
+|---|---|---|---|---|---|
+| no snapshot, 4 workers | 10.1 MB | 36.3 MB | 152.4 MB | 458.3 MB | 98.6 MB |
+| snapshot, 4 workers | 10.3 MB | 45.3 MB | 66.9 MB | 196.1 MB | 95.9 MB |
+| snapshot, 1 worker | 10.3 MB | 44.4 MB | 65.8 MB | 129.2 MB | 76.0 MB |
+
+- Idle RSS with no page is 10.1 MB (budget < 15 MB). An engine with one
+  blank page is ~44 MB: ~22 MB anonymous (V8 isolate, two window realms per
+  page with Playwright's utility world), the rest mapped binary pages (ICU
+  data, code).
+- A worker now runs one V8 low-memory GC when its queue drains after a page
+  closed; before, closing 9 of 10 pages freed nothing (195 MB stayed).
+- The one-time peak while the snapshot is made is 95 MB, below the
+  non-snapshot first-page peak (102 MB).
+- mimalloc was measured and rejected: 20.5 MB idle, 244 MB for 10 pages.
+- Open: dropping layout under memory pressure (lb-layout has
+  `drop_layout`, `rt::Window` does not expose it); per-page caps below the
+  512 MB per-engine heap cap.
+
+Binary size (stripped):
+
+| build | size |
+|---|---|
+| before (M4) | 62.1 MB |
+| + `--icf=safe` (rust-lld) | 57.3 MB |
+| + `opt-level = "s"` for non-hot crates | 56.8 MB |
+| + `-z pack-relative-relocs` (DT_RELR, glibc >= 2.36) | 54.9 MB |
+| V8 floor (`lb-js` example `v8_floor`, same flags) | 42.0 MB |
+
+- The floor is one isolate, one context, one script: V8 code ~26 MB,
+  builtins 2.2 MB, ICU code 1.7 MB and ICU data 10.9 MB. < 40 MB is not
+  reachable with the prebuilt `v8` crate; ADR 0013 sets < 56 MB for the
+  Chrome binary. Further steps: a from-source V8 with filtered ICU data,
+  dropping Rust unwind tables (~1-2 MB, full rebuild), `-no-pie` (~1 MB,
+  loses ASLR).
+- What we add over the floor (12.9 MB): lb-webapi 1.9 MB of code plus the
+  generated table, BoringSSL 1 MB, tokio/hyper/h2/hickory, taffy, image
+  codecs, font tables and glyph outlines.
+
+## M6 status: screenshots (2026-11-03)
+
+PLAN M6 item 4, first half (ADR 0014). Chrome build.
+
+- `Page.captureScreenshot` paints the main document from its layout:
+  `lb_layout::LayoutEngine::display_list` (paint order per stacking
+  context, `opacity` groups, `overflow` clips, text lines with their
+  resolved fonts, page coordinates) and `lb_paint::page::paint_page`
+  (tiny-skia). Formats png, jpeg (`quality`, default 80) and lossless
+  webp; `clip` with `scale` in page coordinates; output is CSS px × scale ×
+  persona DPR (2× for the macOS reference persona);
+  `captureBeyondViewport: false` paints only the visible viewport;
+  `fromSurface` and `optimizeForSpeed` are accepted and ignored.
+- Painted: background colors (root, else body, fills the canvas),
+  borders (solid, double, dashed, dotted; 3D styles shaded), text with
+  the bundled outlines, `<img>` and `<canvas>` pixels (2D and WebGL,
+  never noised), text inputs (value, placeholder, password bullets),
+  textarea first line, select, button-like inputs, check boxes and radio
+  buttons, iframes (from their own layout), `visibility`.
+- `Page.getLayoutMetrics` reports the real scroll offset and document
+  size (`PageHost::page_metrics`); `Emulation.setDefaultBackgroundColorOverride`
+  is accepted and only changes the screenshot base color (`omitBackground`).
+- Tests: `tests/playwright/screenshot.spec.mjs` (viewport, element,
+  scrolled element, full page, jpeg quality and clip, omitBackground, raw
+  CDP clip scale, captureBeyondViewport, un-noised canvas pixels, 0-width
+  error), lb-paint `page` and lb-layout `display` unit tests. Playwright
+  20/20, WPT 2552/2788 unchanged.
+- Open: CSS background images and gradients (no `background-image`
+  longhand; loading them changes network traffic), border radius,
+  shadows, outlines, text decoration, transforms, filters, scrollbars,
+  `object-fit`, video frames, native control theming. Pixels follow our
+  approximate inline layout, so they do not match Chrome exactly.
+
+## M6 status: bench runner (2026-11-03)
+
+PLAN M6 item 2. `bench/` (see `bench/README.md`) crawls a generated corpus of
+50 pages (6 kinds, 1.7 MB, scripts, stylesheets and images; each page sets
+`data-bench-rendered` after its scripts run and the runner checks it) from a
+loopback-only server. `python3 bench/run.py` runs 5 repetitions of
+`fetch:lightbrowser`, `cdp:lightbrowser` and `cdp:chromium` (Playwright
+`connect_over_cdp`), writes `bench/results/<date>-<sha>.json` and a summary
+table, and exits 1 if a budget fails or a browser did not render every page.
+`fetch:lightpanda` and `cdp:lightpanda` run only if a `lightpanda` binary is
+on PATH; they are untested. `python3 -m unittest discover -s bench` runs the
+tooling tests (10, no browser).
+
+First committed run: `bench/results/2026-11-03-a060281.json`, release binary
+sha256 `e801e8cd2f8ea13d` (54.88 MB, built before the screenshot work; the
+tree was dirty), 5 runs x 50 pages, 4-core Xeon, 16 GB, Chromium 153.0.8010.12.
+Median (min-max):
+
+| | fetch:lightbrowser | cdp:lightbrowser | cdp:chromium |
+|---|---|---|---|
+| crawl total | 18.4 s (17.7-19.0) | 14.2 s (13.8-15.0) | 10.3 s (9.8-10.9) |
+| page median | 165.5 ms | 100.0 ms | 205.0 ms |
+| page p90 | 1196 ms | 1084 ms | 221 ms |
+| peak RSS | 95.8 MB | 95.3 MB | 2876 MB (PSS 690 MB) |
+| CPU | 10.0 s | 1.41 s | 23.7 s |
+| idle RSS | n/a | 9.95 MB | 1084 MB (PSS 377 MB) |
+| start to listening | n/a | 4.1 ms | 103 ms |
+| first new page / later pages | n/a | 151 ms / 5.7 ms | 89 ms / 71 ms |
+| pages verified | 50/50 | 50/50 | 50/50 |
+
+- Fetch times include process start. CDP peak RSS is the sum of per-process
+  high-water marks, so it counts Chromium's shared pages once per process and
+  overstates it; PSS is the fairer figure. LightBrowser's peak includes the
+  one-time snapshot peak at the first page; after the crawl its RSS was 39.6 MB.
+- Binary: 54.88 MB against 293 MB for Chromium's `chrome` executable.
+  Realm creation: engine 2.83 ms, define 5.31 ms, first realm 2.41 ms, next
+  realm 2.08 ms. Disk: no files created, `write_bytes` 0.
+- Budgets met: idle RSS, binary size, realm creation, disk writes. The six
+  checks against Lightpanda are skipped.
+- Weak spot: LightBrowser wins on median page time, CPU and memory but loses
+  on total time and p90 because 8 of the 50 pages (the product grids) take
+  about 1 s instead of about 100 ms.
+
+Findings from the run, none fixed yet:
+1. **Slow layout on image grids (lb-layout, lb-css).** On the 8 grid pages,
+   DOMContentLoaded takes about 1 s. Cause: a deferred script calls
+   `document.body.getBoundingClientRect()` on a CSS grid of 18 loaded
+   `<img>` cards under `site.css`; removing the call, the images or the
+   stylesheet brings the page back to about 160 ms. Reproduce with
+   `lightbrowser fetch http://127.0.0.1:P/pages/p01.html --wait-until
+   domcontentloaded` against `python3 bench/serve_corpus.py --port P`.
+2. **`HTMLTableElement.rows` and `HTMLTableSectionElement.rows` are
+   undefined** (and `tBodies`). The corpus uses `children.length` instead.
+3. **`fetch` pays for the snapshot.** Each `fetch` process creates the V8
+   snapshot (about 110 ms, 95 MB peak), which is probably why fetch CPU is
+   10 s for 50 pages against 1.4 s over CDP. `startup_snapshot: false` for
+   the one-shot `fetch` subcommand is the likely fix.
+4. **The first CDP page takes 151 ms** (the snapshot is made at the first
+   engine); later pages take 5.7 ms.
+
+Not covered: the crawl is sequential, with no HTTPS, iframes or workers.
+Re-run `python3 bench/run.py` after a rebuild to refresh the numbers; the
+result file is named after HEAD, so identify a run by its binary hash.
+
+## Workspace check (2026-11-03)
+
+Chrome build unless noted, 4 cores.
+
+- `cargo fmt --all --check`, `cargo build --workspace`, `cargo clippy
+  --workspace --all-targets -- -D warnings`: clean. `cargo test
+  --workspace`: 440 pass (including doc tests), 0 fail.
+- Firefox: clippy `-D warnings` for `lightbrowser`, `lb-js`, `lb-webapi`,
+  `lb-page`, `lb-cdp`: clean; tests for `lightbrowser`, `lb-js`,
+  `lb-webapi`, `lb-page`: 14 pass, 2 ignored.
+- `lb-net` fingerprint test 2/2; WPT 2552/2788; Playwright 20/20;
+  detect-bench unittest 18 OK; `sdk/python` pytest 93 pass, 4 skipped
+  (bench scenarios, Python Playwright 1.52 is installed).
+- Release: stripped binary 54,964,168 bytes (54.96 MB, budget < 56 MB);
+  `realm_bench`: first realm 2.38 ms, next realm 2.07 ms with the
+  snapshot (28.3 / 35.5 ms without).
+- `lightbrowser fingerprint-report` (release): 113 ok, 0 mismatch for both
+  Chrome reference personas.
+- detect-bench on the release build (`serve --persona`, bench on
+  127.0.0.1):
+
+| Run | Windows persona | macOS persona |
+|---|---|---|
+| T-010, Playwright input, `fp<=30` | 89.8, fp 0, pass | 92.3, fp 0, pass |
+| T-010, `--input human`, `beh<=30` | 0, beh 0, pass | 35, beh 35 (`beh_key_dwell`), fail, same on rerun |
+| T-001 stock Chromium, `>=90` | 100, pass | |
+
+With Playwright input on the release build, the Windows run fires
+`page_dwell_short` (15) and the macOS run fires `beh_ttfi` (25) instead.
+The snapshot work attributed the `beh_ttfi` change to faster realm creation
+(the first interaction comes sooner); this was not isolated. fp is
+unaffected.
+
+The macOS failure is the short-sample keystroke issue in "M5 status";
+it still needs a decision (more keys before `scoring.py` judges spread,
+backed by human traces, or a longer typed text in the flow).
 
 ## Risks
 

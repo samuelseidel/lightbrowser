@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lightbrowser"
+version = "0.1.0"
+description = "Python SDK for the internal LightBrowser headless browser: launcher, Playwright over CDP, human input helpers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary, internal use only" }
+dependencies = ["playwright>=1.40"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["lightbrowser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: launches the lightbrowser binary (debug or release) and talks to it over CDP",
+    "slow: takes more than about 20 seconds",
+]

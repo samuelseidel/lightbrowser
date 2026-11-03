@@ -13,8 +13,19 @@
 //! - rustfmt and clippy `-D warnings` clean.
 //! - New [`cdp`] module: turns an [`InputEvent`] stream into CDP
 //!   `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` /
-//!   `Input.insertText` parameters with absolute time offsets, so lb-cdp can
-//!   replay a stream on the real clock.
+//!   `Input.insertText` parameters with absolute time offsets, so lb-page
+//!   can replay a stream on the real clock (`LightBrowser.human*`).
+//! - M5: the generators were rewritten from first principles; each module's
+//!   header names the model and its sources. [`mouse`]: Fitts' law
+//!   durations, primary + corrective submovements (Meyer et al. 1988),
+//!   minimum-jerk speed (Flash & Hogan 1985), curved paths, endpoint
+//!   scatter from the target size (ISO 9241-9 effective width), 125 Hz
+//!   device reports coalesced to 60 Hz frames, whole pixels, button holds.
+//!   [`keyboard`]: log-normal down-to-down intervals and holds (Dhakal et
+//!   al. 2018), rollover, Shift around shifted characters, typos noticed a
+//!   few keys later. [`scroll`]: notched wheels in flicks, trackpad swipes
+//!   with momentum. Think times are log-normal. Profiles carry the new
+//!   parameters ([`BehaviorProfile::preset`] by persona name).
 //!
 //! ## Architecture
 //!
@@ -50,10 +61,12 @@ pub mod timing;
 // Re-exports — public API surface
 // ---------------------------------------------------------------------------
 
-pub use keyboard::{KeyEventType, KeyboardProfile, KeystrokeEvent, generate_typing_events};
+pub use keyboard::{
+    KeyEventType, KeyboardProfile, KeystrokeEvent, generate_typing_events, needs_shift,
+};
 pub use mouse::{
-    MouseEvent, MouseEventType, MouseProfile, Point, generate_click, generate_micro_movements,
-    generate_mouse_path,
+    Button, ClickOptions, MouseEvent, MouseEventType, MouseProfile, Point, TargetBox,
+    generate_click, generate_click_in, generate_micro_movements, generate_mouse_path,
 };
 pub use profile::BehaviorProfile;
 pub use scroll::{ScrollDirection, ScrollEvent, ScrollProfile, ScrollType, generate_scroll};
@@ -101,18 +114,53 @@ pub enum InputEvent {
 // High-level API
 // ---------------------------------------------------------------------------
 
+/// Pointer movement from `from` to `to` with no think time (hovering,
+/// repositioning). Ends exactly at `to` (whole pixels).
+pub fn human_move_events(
+    from: Point,
+    to: Point,
+    profile: &BehaviorProfile,
+    seed: u64,
+) -> Vec<InputEvent> {
+    let mut rng = rng::seeded_rng(seed);
+    mouse::generate_mouse_path(from, to, &profile.mouse, &mut rng)
+        .into_iter()
+        .map(InputEvent::Mouse)
+        .collect()
+}
+
+/// A think-time pause, then a movement into `target` and a click at a
+/// point inside it chosen by the profile (not its exact centre). Returns
+/// the events and the clicked point.
+pub fn human_click_box_events(
+    from: Point,
+    target: &TargetBox,
+    opts: ClickOptions,
+    profile: &BehaviorProfile,
+    seed: u64,
+) -> (Vec<InputEvent>, Point) {
+    let mut rng = rng::seeded_rng(seed);
+    let think_ms = timing::sample_think_time(&profile.timing, &mut rng);
+    let mut events = vec![InputEvent::Wait(WaitEvent {
+        duration_ms: think_ms,
+    })];
+    let (mouse_events, at) = mouse::generate_click_in(from, target, opts, &profile.mouse, &mut rng);
+    events.extend(mouse_events.into_iter().map(InputEvent::Mouse));
+    (events, at)
+}
+
 /// Generate all events required to perform a human-like click on a target.
 ///
 /// The sequence is:
 ///   1. A `Wait` event representing the think-time before initiating movement.
-///   2. A series of `Mouse(Move)` events following a Bézier path from `from`
-///      to the vicinity of `target`.
-///   3. `Mouse(Down)`, `Mouse(Up)`, `Mouse(Click)` events at the (slightly
-///      scattered) click position.
+///   2. `Mouse(Move)` events along a curved, Fitts-timed path from `from`
+///      to a point near `target`.
+///   3. `Mouse(Down)`, `Mouse(Up)`, `Mouse(Click)` events at that point.
 ///
 /// # Arguments
 /// * `from`    — current cursor position
-/// * `target`  — centre of the element to click
+/// * `target`  — centre of the element to click (treated as a 24 px box;
+///   use [`human_click_box_events`] when the element's box is known)
 /// * `profile` — session behaviour profile
 /// * `seed`    — RNG seed for this specific action
 pub fn human_click_events(
@@ -143,9 +191,10 @@ pub fn human_click_events(
 ///
 /// The sequence is:
 ///   1. A `Wait` event for think-time (the user reads the field label, etc.).
-///   2. A flat sequence of `Keyboard` events (Down → Press → Up per key),
-///      with realistic inter-key intervals, bigram effects, and occasional
-///      error–correction sequences.
+///   2. A time-ordered sequence of `Keyboard` events (Down → Press → Up per
+///      key, Shift around shifted characters, keys may overlap), with
+///      log-normal intervals, bigram effects and occasional typos fixed
+///      with Backspace.
 ///
 /// # Arguments
 /// * `text`    — the text to type (may contain \n for Enter, \t for Tab)
@@ -172,8 +221,8 @@ pub fn human_type_events(text: &str, profile: &BehaviorProfile, seed: u64) -> Ve
 ///
 /// The sequence is:
 ///   1. A `Wait` event for think-time (the user decides to scroll).
-///   2. A series of `Scroll` events following either the discrete wheel model
-///      or the momentum trackpad model, as determined by `profile.scroll`.
+///   2. `Scroll` events from the notched-wheel model or the trackpad model,
+///      as set by `profile.scroll.scroll_type`.
 ///
 /// # Arguments
 /// * `direction` — scroll direction
@@ -418,6 +467,43 @@ mod tests {
                 profile.name
             );
         }
+    }
+
+    #[test]
+    fn click_box_lands_inside() {
+        let profile = BehaviorProfile::casual_user();
+        let target = TargetBox::new(200.0, 300.0, 80.0, 30.0);
+        let (events, at) = human_click_box_events(
+            Point::new(5.0, 5.0),
+            &target,
+            ClickOptions::default(),
+            &profile,
+            9,
+        );
+        assert!(target.contains(at));
+        assert!(matches!(events[0], InputEvent::Wait(_)));
+        let (again, at2) = human_click_box_events(
+            Point::new(5.0, 5.0),
+            &target,
+            ClickOptions::default(),
+            &profile,
+            9,
+        );
+        assert_eq!(at, at2);
+        assert_eq!(
+            events_to_json(&events).unwrap(),
+            events_to_json(&again).unwrap()
+        );
+    }
+
+    #[test]
+    fn move_events_end_at_target() {
+        let profile = BehaviorProfile::power_user();
+        let ev = human_move_events(Point::new(0.0, 0.0), Point::new(321.0, 123.0), &profile, 4);
+        let Some(InputEvent::Mouse(last)) = ev.last() else {
+            panic!("no moves")
+        };
+        assert_eq!((last.x, last.y), (321.0, 123.0));
     }
 
     #[test]

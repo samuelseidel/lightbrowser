@@ -134,6 +134,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "setEmulatedMedia",
             "setTouchEmulationEnabled",
             "setGeolocationOverride",
+            "setDefaultBackgroundColorOverride",
         ],
     ),
     (
@@ -151,6 +152,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
         &[
             "setPersona",
             "fingerprintReport",
+            "humanMove",
             "humanClick",
             "humanType",
             "humanScroll",

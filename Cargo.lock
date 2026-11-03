@@ -1347,11 +1347,14 @@ version = "0.0.1"
 dependencies = [
  "bytes",
  "http",
+ "lb-behavior",
  "lb-cdp",
+ "lb-css",
  "lb-dom",
  "lb-js",
  "lb-layout",
  "lb-net",
+ "lb-paint",
  "lb-persona",
  "lb-webapi",
  "serde_json",
@@ -1366,6 +1369,7 @@ version = "0.0.1"
 dependencies = [
  "image",
  "lb-css",
+ "lb-dom",
  "lb-layout",
  "lb-persona",
  "skrifa",

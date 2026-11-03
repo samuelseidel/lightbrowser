@@ -158,6 +158,25 @@ pub struct ViewportOverride {
     pub height: u32,
 }
 
+/// Scroll offset and scrollable size of a page's main document, in CSS
+/// px (`Page.getLayoutMetrics`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PageMetrics {
+    pub scroll_x: f64,
+    pub scroll_y: f64,
+    pub content_width: f64,
+    pub content_height: f64,
+}
+
+/// A CDP `DOM.RGBA` color (`a` in 0..=1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: f64,
+}
+
 /// Something that happened in a page.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PageEvent {
@@ -329,6 +348,23 @@ pub trait PageHost {
         Err(HostError::unsupported("LightBrowser.fingerprintReport"))
     }
 
+    /// `LightBrowser.humanMove` / `humanClick` / `humanType` /
+    /// `humanScroll` on the page's main frame: generated human input
+    /// (lb-behavior, seeded from the persona) replayed as trusted input on
+    /// the real clock (or the virtual clock when it is on). Resolves after
+    /// the last event was dispatched with the method's result (`{}`, or
+    /// `{x, y}` for `humanClick`). Errors use Chrome-like text ("No node
+    /// found for selector: #x", "Node is not visible").
+    async fn human_input(&self, _target_id: &str, cmd: HumanCommand) -> HostResult<Value> {
+        let name = match cmd {
+            HumanCommand::Move(_) => "LightBrowser.humanMove",
+            HumanCommand::Click(_) => "LightBrowser.humanClick",
+            HumanCommand::Type(_) => "LightBrowser.humanType",
+            HumanCommand::Scroll(_) => "LightBrowser.humanScroll",
+        };
+        Err(HostError::unsupported(name))
+    }
+
     /// Creates an isolated world in `frame_id` and returns its realm. The
     /// realm is also reported with `ExecutionContextCreated`.
     fn create_isolated_world(
@@ -368,6 +404,22 @@ pub trait PageHost {
     /// Optional; the default is the error Playwright expects to handle.
     fn capture_screenshot(&self, _target_id: &str, _params: &Value) -> HostResult<String> {
         Err(HostError::unsupported("Page.captureScreenshot"))
+    }
+
+    /// Scroll offset and content size for `Page.getLayoutMetrics`. `None`
+    /// (the default) reports no scroll and the viewport as content size.
+    fn page_metrics(&self, _target_id: &str) -> HostResult<Option<PageMetrics>> {
+        Ok(None)
+    }
+
+    /// `Emulation.setDefaultBackgroundColorOverride`: the color under the
+    /// page in screenshots (`None` restores white). Not page-visible.
+    fn set_default_background_color(
+        &self,
+        _target_id: &str,
+        _color: Option<Rgba>,
+    ) -> HostResult<()> {
+        Ok(())
     }
 
     fn handle_javascript_dialog(

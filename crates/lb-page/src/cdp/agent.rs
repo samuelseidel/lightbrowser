@@ -82,6 +82,10 @@ pub(crate) struct AgentState {
     /// Loader ids of child frames' current documents, by frame id.
     pub frame_loaders: HashMap<u64, String>,
     pub next_frame_loader: u64,
+    /// `LightBrowser.human*` state (pointer, call count).
+    pub human: super::human::HumanState,
+    /// `Emulation.setDefaultBackgroundColorOverride` (screenshots only).
+    pub screenshot_bg: Option<lb_cdp::Rgba>,
 }
 
 /// Responses kept for `Network.getResponseBody`.

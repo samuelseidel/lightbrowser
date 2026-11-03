@@ -136,6 +136,7 @@ impl PageState {
         self.closed.set(true);
         self.drop_window(ws);
         self.notify.notify_one();
+        ws.request_gc();
     }
 
     /// A wake function for windows of this page.

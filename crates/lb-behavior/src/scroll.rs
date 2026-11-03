@@ -1,45 +1,34 @@
-// scroll.rs — Momentum/discrete scroll simulation (vendored from stealth-browser)
+// scroll.rs: wheel and trackpad scrolling.
 //
-// ## Why Two Scroll Models?
+// Rewritten in LightBrowser (M5); the vendored generator spaced wheel
+// notches N(130, 30) ms apart with 100-120 px random deltas and ran one
+// exponential decay for trackpads. The model here:
 //
-// Browser `wheel` events carry a `deltaMode` field that indicates the source:
-//
-//   • `DOM_DELTA_LINE` (mode=1): traditional mouse wheel, one notch = ~3 lines
-//     (~100 px).  Events arrive in discrete bursts spaced 80–200 ms apart.
-//
-//   • `DOM_DELTA_PIXEL` (mode=0): trackpad or high-resolution wheel.  Events
-//     arrive at ~60 fps with continuously varying deltas that follow a
-//     momentum curve: they start large and decay exponentially until the
-//     gesture ends.  MacOS inertial scrolling is the canonical example.
-//
-// Bot detectors distinguish these modes and flag implausible combinations
-// (e.g. pixel-mode deltas that jump discontinuously, or line-mode events
-// spaced exactly 100 ms apart).  We must reproduce the statistical fingerprint
-// of each device class.
-//
-// ## Momentum Scroll Physics
-//
-// When a user flicks a trackpad, the OS models the remaining velocity as
-// decaying exponentially:
-//
-//   v(t) = v₀ · α^(t/T)
-//
-// where α ∈ (0, 1) is the deceleration factor and T is the frame period
-// (16.67 ms at 60 fps).  The scroll stops when |v| drops below a threshold.
-// We sample v₀ from the profile's speed distribution and use the profile's
-// `momentum_deceleration` for α.
-//
-// ## Direction Changes
-//
-// Real users occasionally scroll back a little (re-reading a line, hovering
-// over a link they passed).  We model this as brief reversed-direction
-// segments that occur with `direction_change_probability` per generated
-// sequence.
+// - Notched wheel (a Windows mouse): each detent is one `wheel` event with
+//   a fixed delta (`notch_px`; Chrome on Windows reports 100 px per notch
+//   at 100 % scaling). People roll the wheel in flicks: one finger stroke
+//   turns it a few detents (`notches_per_flick`, normal around the mean,
+//   1-8), with detent intervals log-normal around `notch_interval_ms`
+//   (slower at the start and end of a flick, as the finger accelerates and
+//   stops), then lift and re-grip for the next stroke (log-normal around
+//   `regrip_ms`).
+// - Trackpad (macOS): each swipe has a finger phase (5-12 display frames,
+//   speed rising to a peak, log-normal around `speed_mean_px_per_s`) and
+//   then an inertial phase where the speed decays geometrically by
+//   `momentum_deceleration` per 16.7 ms frame until it is below 1 px per
+//   frame. A new swipe (after a re-grip pause) cancels the remaining
+//   momentum. Swipes are a few degrees off-axis, but macOS locks a
+//   gesture to its main axis ("rails") once its direction is clear, so a
+//   cross-axis delta shows up only in the first frames of a swipe.
+//   Deltas are whole pixels with the remainder carried, so the totals stay
+//   exact.
+// - With `direction_change_probability` the user scrolls back a little at
+//   the end (overshot what they were looking for).
 
 use rand::rngs::SmallRng;
 use serde::{Deserialize, Serialize};
 
-use crate::rng::{clamp, normal_sample, uniform};
+use crate::rng::{chance, clamp, log_normal, normal_sample, uniform};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -48,9 +37,9 @@ use crate::rng::{clamp, normal_sample, uniform};
 /// Discriminates between the two scroll device classes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScrollType {
-    /// Discrete mouse wheel — fixed-size steps, line mode.
+    /// Notched mouse wheel: fixed-size steps in flicks.
     Wheel,
-    /// High-resolution trackpad — pixel mode with momentum.
+    /// Trackpad: pixel deltas per frame with momentum.
     Trackpad,
 }
 
@@ -64,9 +53,7 @@ pub enum ScrollDirection {
 }
 
 impl ScrollDirection {
-    /// Returns the sign of the scroll delta (+1 or -1 in device coordinates).
-    ///
-    /// Browser convention: positive deltaY = scroll down (content moves up).
+    /// Browser convention: positive deltaY scrolls down.
     fn delta_sign(self) -> f64 {
         match self {
             ScrollDirection::Down | ScrollDirection::Right => 1.0,
@@ -79,12 +66,12 @@ impl ScrollDirection {
     }
 }
 
-/// A single synthesised scroll (wheel) event.
+/// A single synthesised wheel event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScrollEvent {
-    /// Horizontal scroll delta in pixels (positive = right).
+    /// Horizontal delta in pixels (positive = right).
     pub delta_x: f64,
-    /// Vertical scroll delta in pixels (positive = down).
+    /// Vertical delta in pixels (positive = down).
     pub delta_y: f64,
     /// Milliseconds since the start of the generated sequence.
     pub timestamp_ms: u64,
@@ -93,34 +80,43 @@ pub struct ScrollEvent {
 
 /// Per-session scroll behaviour parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ScrollProfile {
     pub scroll_type: ScrollType,
-    /// Mean scroll speed in pixels per second.
+    /// Wheel: pixels per detent.
+    pub notch_px: f64,
+    /// Wheel: mean detents per finger stroke.
+    pub notches_per_flick: f64,
+    /// Wheel: median time between detents within a stroke (ms).
+    pub notch_interval_ms: f64,
+    /// Median pause between strokes or swipes (ms).
+    pub regrip_ms: f64,
+    /// Trackpad: median peak finger speed in px/s.
     pub speed_mean_px_per_s: f64,
+    /// Trackpad: log-space spread of the peak speed, as a fraction.
     pub speed_std: f64,
-    /// Exponential deceleration factor per 16 ms frame (trackpad only).
-    /// Typical macOS values: 0.75–0.92.
+    /// Trackpad: speed kept per 16.7 ms frame in the inertial phase.
     pub momentum_deceleration: f64,
-    /// Probability [0, 1] that the sequence includes a brief direction reversal.
+    /// Probability that the user scrolls back a little at the end.
     pub direction_change_probability: f64,
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+impl Default for ScrollProfile {
+    fn default() -> Self {
+        crate::BehaviorProfile::casual_user().scroll
+    }
+}
 
-/// Build a single scroll event helper.
-fn make_event(
-    delta_x: f64,
-    delta_y: f64,
-    timestamp_ms: u64,
-    scroll_type: &ScrollType,
-) -> ScrollEvent {
-    ScrollEvent {
-        delta_x,
-        delta_y,
-        timestamp_ms,
-        scroll_type: scroll_type.clone(),
+/// Whole-pixel deltas with the fractional remainder carried forward.
+#[derive(Default)]
+struct Carry(f64);
+
+impl Carry {
+    fn take(&mut self, v: f64) -> f64 {
+        let want = self.0 + v;
+        let r = want.round();
+        self.0 = want - r;
+        r
     }
 }
 
@@ -128,278 +124,201 @@ fn make_event(
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Generate a realistic sequence of scroll events.
+/// Generate wheel events that scroll about `total_px` in `direction`.
 ///
-/// # Arguments
-/// * `direction` — primary scroll direction
-/// * `total_px`  — total pixels to scroll (absolute value; direction is set
-///   by `direction` argument)
-/// * `profile`   — scroll behaviour parameters
-/// * `rng`       — seeded RNG for this session
-///
-/// # Wheel scroll algorithm
-///
-/// Standard mouse wheels move ~100–120 px per notch.  We:
-///   1. Choose a per-notch step size uniformly from [100, 120] px.
-///   2. Compute the number of notches needed to cover `total_px`.
-///   3. Sample the inter-event interval from N(130, 30) ms, clamped to [80, 300].
-///      (Real users roll the wheel at 4–10 notches/second.)
-///   4. With probability `direction_change_probability`, insert a 1–2 notch
-///      reversed segment at a random position in the sequence.
-///
-/// # Trackpad scroll algorithm
-///
-/// Trackpad momentum is modelled as exponential velocity decay:
-///   1. Sample initial velocity v₀ from N(speed_mean, speed_std).
-///   2. Every 16 ms (one display frame), emit a delta of v(t) * 0.016 px.
-///   3. v(t+1) = v(t) * momentum_deceleration.
-///   4. Stop when |v| < 5 px/s (imperceptible motion).
-///   5. Add tiny Gaussian direction perturbations (±2 px/s per axis) to
-///      simulate imprecise finger trajectories.
-///   6. With `direction_change_probability`: briefly reverse for 3–8 frames
-///      mid-sequence.
+/// The wheel model scrolls a whole number of detents (at least one); the
+/// trackpad model covers `total_px` within a few pixels. A trailing
+/// scroll-back (see `direction_change_probability`) is not counted.
 pub fn generate_scroll(
     direction: ScrollDirection,
     total_px: f64,
     profile: &ScrollProfile,
     rng: &mut SmallRng,
 ) -> Vec<ScrollEvent> {
-    let total_px = total_px.abs().max(1.0);
-    let sign = direction.delta_sign();
-    let horizontal = direction.is_horizontal();
-
+    let total_px = total_px.abs();
+    if total_px < 0.5 {
+        return Vec::new();
+    }
     match profile.scroll_type {
-        ScrollType::Wheel => {
-            generate_wheel_scroll(direction, total_px, sign, horizontal, profile, rng)
-        }
-        ScrollType::Trackpad => {
-            generate_trackpad_scroll(direction, total_px, sign, horizontal, profile, rng)
-        }
+        ScrollType::Wheel => wheel(direction, total_px, profile, rng),
+        ScrollType::Trackpad => trackpad(direction, total_px, profile, rng),
     }
 }
 
-fn generate_wheel_scroll(
-    _direction: ScrollDirection,
+fn event(dir: ScrollDirection, along: f64, across: f64, t: f64, ty: ScrollType) -> ScrollEvent {
+    let s = dir.delta_sign();
+    let (dx, dy) = if dir.is_horizontal() {
+        (s * along, across)
+    } else {
+        (across, s * along)
+    };
+    ScrollEvent {
+        delta_x: dx,
+        delta_y: dy,
+        timestamp_ms: t.max(0.0).round() as u64,
+        scroll_type: ty,
+    }
+}
+
+fn reverse(d: ScrollDirection) -> ScrollDirection {
+    match d {
+        ScrollDirection::Down => ScrollDirection::Up,
+        ScrollDirection::Up => ScrollDirection::Down,
+        ScrollDirection::Left => ScrollDirection::Right,
+        ScrollDirection::Right => ScrollDirection::Left,
+    }
+}
+
+fn wheel(
+    dir: ScrollDirection,
     total_px: f64,
-    sign: f64,
-    horizontal: bool,
-    profile: &ScrollProfile,
+    p: &ScrollProfile,
     rng: &mut SmallRng,
 ) -> Vec<ScrollEvent> {
-    // --- Step size per wheel notch ---
-    // Standard HID wheel: 120 units = 1 notch.  Browsers typically translate
-    // this to ~100 px, but there is device variation.
-    let step_px = uniform(rng, 100.0, 120.0);
-    let n_notches = (total_px / step_px).ceil() as usize;
-
-    // --- Decide on a direction-change segment ---
-    let do_reverse = uniform(rng, 0.0, 1.0) < profile.direction_change_probability;
-    // If reversing, choose a position somewhere in the middle of the sequence
-    // and a length of 1–2 notches.
-    let reverse_at = if do_reverse && n_notches > 4 {
-        Some((uniform(rng, 0.3, 0.7) * n_notches as f64) as usize)
-    } else {
-        None
+    let notch = p.notch_px.max(1.0);
+    let mut remaining = ((total_px / notch).round() as i64).max(1);
+    let mut events = Vec::new();
+    let mut t = uniform(rng, 0.0, 20.0);
+    let flick = |rng: &mut SmallRng| {
+        clamp(
+            normal_sample(rng, p.notches_per_flick, 1.2).round(),
+            1.0,
+            8.0,
+        ) as i64
     };
-    let reverse_len = if do_reverse {
-        uniform(rng, 1.0, 2.5) as usize + 1
-    } else {
-        0
-    };
-
-    let mut events: Vec<ScrollEvent> = Vec::with_capacity(n_notches + reverse_len + 2);
-    let mut cursor_ms: u64 = 0;
-    let mut accumulated_px = 0.0_f64;
-    let mut reverse_remaining = 0usize;
-    let mut in_reverse = false;
-
-    for i in 0..n_notches {
-        // Check if we should start a direction reversal.
-        if let Some(rev_pos) = reverse_at
-            && i == rev_pos
-            && !in_reverse
-        {
-            in_reverse = true;
-            reverse_remaining = reverse_len;
-        }
-
-        // Determine this notch's direction.
-        let this_sign = if in_reverse { -sign } else { sign };
-
-        // Actual step for this notch (slight variation).
-        let this_step = uniform(rng, step_px * 0.9, step_px * 1.1);
-
-        // Don't scroll past the total if we're in the forward direction.
-        let clamped_step = if !in_reverse {
-            (total_px - accumulated_px).min(this_step).max(0.0)
-        } else {
-            this_step
-        };
-
-        let (dx, dy) = if horizontal {
-            (this_sign * clamped_step, 0.0)
-        } else {
-            (0.0, this_sign * clamped_step)
-        };
-
-        events.push(make_event(dx, dy, cursor_ms, &ScrollType::Wheel));
-
-        if !in_reverse {
-            accumulated_px += clamped_step;
-        }
-
-        // Inter-notch interval: N(130, 30) ms, clamped to [80, 300].
-        // This corresponds to a scrolling rate of ~7.7 notches/s — typical
-        // for comfortable page scrolling.
-        let interval = clamp(normal_sample(rng, 130.0, 30.0), 80.0, 300.0) as u64;
-        cursor_ms += interval;
-
-        if in_reverse {
-            reverse_remaining = reverse_remaining.saturating_sub(1);
-            if reverse_remaining == 0 {
-                in_reverse = false;
+    while remaining > 0 {
+        let k = flick(rng).min(remaining);
+        for j in 0..k {
+            events.push(event(dir, notch, 0.0, t, ScrollType::Wheel));
+            if j + 1 < k {
+                let edge = if j == 0 || j + 2 == k { 1.3 } else { 1.0 };
+                t += clamp(log_normal(rng, p.notch_interval_ms * edge, 0.3), 8.0, 250.0);
             }
         }
-
-        if accumulated_px >= total_px && !in_reverse {
-            break;
+        remaining -= k;
+        if remaining > 0 {
+            t += clamp(log_normal(rng, p.regrip_ms, 0.35), 60.0, 1500.0);
         }
     }
-
+    if events.len() >= 3 && chance(rng, p.direction_change_probability) {
+        t += clamp(log_normal(rng, 450.0, 0.4), 150.0, 2000.0);
+        events.push(event(reverse(dir), notch, 0.0, t, ScrollType::Wheel));
+    }
     events
 }
 
-fn generate_trackpad_scroll(
-    _direction: ScrollDirection,
+/// Frames of the finger phase and the speed fraction in each.
+fn finger_profile(rng: &mut SmallRng) -> Vec<f64> {
+    let n = uniform(rng, 5.0, 12.99) as usize;
+    (0..n)
+        .map(|k| {
+            let x = (k + 1) as f64 / n as f64;
+            // Raised cosine up to the peak at about 70 % of the phase.
+            if x < 0.7 {
+                0.5 * (1.0 - (std::f64::consts::PI * x / 0.7).cos())
+            } else {
+                1.0
+            }
+        })
+        .collect()
+}
+
+fn trackpad(
+    dir: ScrollDirection,
     total_px: f64,
-    sign: f64,
-    horizontal: bool,
-    profile: &ScrollProfile,
+    p: &ScrollProfile,
     rng: &mut SmallRng,
 ) -> Vec<ScrollEvent> {
-    // --- Initial velocity ---
-    // Sample from N(speed_mean, speed_std), clamped to a reasonable range.
-    let v0 = clamp(
-        normal_sample(rng, profile.speed_mean_px_per_s, profile.speed_std),
-        100.0,
-        8000.0,
-    );
-
-    // Frame period = 16.67 ms (60 Hz display refresh).
-    const FRAME_MS: f64 = 16.667;
-    const STOP_THRESHOLD_PX_S: f64 = 5.0;
-
-    // α per frame: we use the profile's deceleration factor directly.
-    // alpha = 0.85 means velocity retains 85 % each frame, giving a
-    // ~180 ms half-life — consistent with macOS inertial scroll data.
-    let alpha = clamp(profile.momentum_deceleration, 0.50, 0.99);
-
-    // Pre-compute how many frames the momentum will last.
-    // v(n) = v0 * alpha^n < threshold  =>  n > ln(threshold/v0) / ln(alpha)
-    let max_frames = if v0 > STOP_THRESHOLD_PX_S {
-        (((STOP_THRESHOLD_PX_S / v0).ln()) / alpha.ln()).ceil() as usize + 5
-    } else {
-        1
-    };
-
-    // --- Direction change setup ---
-    let do_reverse = uniform(rng, 0.0, 1.0) < profile.direction_change_probability;
-    let reverse_start = if do_reverse && max_frames > 10 {
-        Some((uniform(rng, 0.25, 0.6) * max_frames as f64) as usize)
-    } else {
-        None
-    };
-    let reverse_frames = if do_reverse {
-        (uniform(rng, 3.0, 8.0)) as usize + 1
-    } else {
-        0
-    };
-
-    let mut events: Vec<ScrollEvent> = Vec::with_capacity(max_frames + reverse_frames + 4);
-    let mut v = v0;
-    let mut cursor_ms: f64 = 0.0;
-    let mut accumulated_px = 0.0_f64;
-    let mut reverse_remaining = 0usize;
-    let mut in_reverse = false;
-
-    for frame in 0..max_frames {
-        if v < STOP_THRESHOLD_PX_S && !in_reverse {
+    const FRAME_MS: f64 = 1000.0 / 60.0;
+    const RAIL_FRAMES: usize = 3;
+    let dt = FRAME_MS / 1000.0;
+    let alpha = clamp(p.momentum_deceleration, 0.5, 0.985);
+    let inertia = alpha / (1.0 - alpha);
+    let mut events = Vec::new();
+    let mut t = uniform(rng, 0.0, 10.0);
+    let mut done = 0.0;
+    let mut along_carry = Carry::default();
+    let mut across_carry = Carry::default();
+    let ty = ScrollType::Trackpad;
+    for _ in 0..60 {
+        let remaining = total_px - done;
+        if remaining < 1.0 {
             break;
         }
-
-        // Start a direction reversal if scheduled.
-        if let Some(rs) = reverse_start
-            && frame == rs
-            && !in_reverse
-        {
-            in_reverse = true;
-            reverse_remaining = reverse_frames;
+        let shape = finger_profile(rng);
+        let factor: f64 = shape.iter().sum::<f64>() + inertia;
+        let mut v = log_normal(rng, p.speed_mean_px_per_s, p.speed_std.max(0.01));
+        // Last swipe: aim for what is left.
+        if v * dt * factor > remaining * 1.15 {
+            v = remaining / (dt * factor);
         }
-
-        let this_sign = if in_reverse { -sign } else { sign };
-
-        // Delta for this frame = velocity × frame_duration_s
-        let delta = this_sign * v * (FRAME_MS / 1000.0);
-
-        // Tiny perpendicular perturbation: real fingers wobble slightly
-        // during a swipe, producing small cross-axis deltas.  This is a key
-        // fingerprint of real trackpad input — pure-axis scrolling is rare.
-        let perturb = normal_sample(rng, 0.0, 0.8); // ±0.8 px/frame cross-axis
-
-        let (dx, dy) = if horizontal {
-            (delta, perturb)
-        } else {
-            (perturb, delta)
+        let tilt = normal_sample(rng, 0.0, 2.5_f64.to_radians()).tan();
+        let mut frame_no = 0usize;
+        let mut emit = |d: f64, t: f64, done: &mut f64, events: &mut Vec<ScrollEvent>| {
+            let d = d.min(total_px - *done);
+            let a = along_carry.take(d);
+            // Rails: once a swipe is clearly along one axis, macOS drops
+            // the other one; only the first frames carry the tilt.
+            let c = if frame_no < RAIL_FRAMES {
+                across_carry.take(d * tilt)
+            } else {
+                0.0
+            };
+            frame_no += 1;
+            *done += d;
+            if a != 0.0 || c != 0.0 {
+                events.push(event(dir, a, c, t, ScrollType::Trackpad));
+            }
         };
-
-        events.push(make_event(dx, dy, cursor_ms as u64, &ScrollType::Trackpad));
-
-        if !in_reverse {
-            accumulated_px += delta.abs();
-            if accumulated_px >= total_px {
-                // Reached the target; begin deceleration to stop.
-                // We continue emitting frames until velocity drops naturally.
-                // (Abrupt stop is a bot signal.)
-            }
+        for f in &shape {
+            emit(v * f * dt, t, &mut done, &mut events);
+            t += FRAME_MS + normal_sample(rng, 0.0, 0.5);
         }
-
-        // Advance time by one frame (with slight jitter: ±2 ms).
-        // Real display refresh is not perfectly 60 Hz due to OS scheduling.
-        let frame_jitter = normal_sample(rng, 0.0, 2.0);
-        cursor_ms += (FRAME_MS + frame_jitter).max(10.0);
-
-        // Decay velocity.
-        v *= alpha;
-
-        if in_reverse {
-            reverse_remaining = reverse_remaining.saturating_sub(1);
-            if reverse_remaining == 0 {
-                in_reverse = false;
-                // Resume with slightly reduced velocity after reversal.
-                v *= 0.7;
+        // Inertial phase, cut short by the next swipe while far from done.
+        let mut speed = v * alpha;
+        let next_swipe = t + clamp(log_normal(rng, p.regrip_ms, 0.35), 80.0, 1500.0);
+        while speed * dt >= 1.0 && done < total_px {
+            if total_px - done > v * dt * factor * 0.5 && t >= next_swipe {
+                break;
             }
+            emit(speed * dt, t, &mut done, &mut events);
+            t += FRAME_MS + normal_sample(rng, 0.0, 0.5);
+            speed *= alpha;
+        }
+        t = t.max(next_swipe.min(t + FRAME_MS * 4.0));
+    }
+    // Whatever rounding left over goes in one last event.
+    let sum: f64 = events
+        .iter()
+        .map(|e| {
+            if dir.is_horizontal() {
+                e.delta_x
+            } else {
+                e.delta_y
+            }
+            .abs()
+        })
+        .sum();
+    let left = (total_px - sum).round();
+    if left >= 1.0 {
+        events.push(event(dir, left, 0.0, t, ty.clone()));
+        t += FRAME_MS;
+    }
+    if !events.is_empty() && chance(rng, p.direction_change_probability) {
+        // A short swipe back.
+        t += clamp(log_normal(rng, 450.0, 0.4), 150.0, 2000.0);
+        let back = uniform(rng, 30.0, 120.0).min(total_px * 0.3).max(5.0);
+        let mut c = Carry::default();
+        let n = 6;
+        for k in 0..n {
+            let f = (std::f64::consts::PI * (k as f64 + 0.5) / n as f64).sin();
+            let d = c.take(back * f * std::f64::consts::PI / (2.0 * n as f64));
+            if d != 0.0 {
+                events.push(event(reverse(dir), d, 0.0, t, ty.clone()));
+            }
+            t += FRAME_MS;
         }
     }
-
-    // If we stopped before covering total_px (e.g. initial velocity was low),
-    // add a final event to close the gap — the user would naturally do another
-    // swipe, but for API simplicity we emit one extra event here.
-    if accumulated_px < total_px && !events.is_empty() {
-        let remaining = total_px - accumulated_px;
-        let last_ts = events.last().unwrap().timestamp_ms;
-        let (dx, dy) = if horizontal {
-            (sign * remaining, 0.0)
-        } else {
-            (0.0, sign * remaining)
-        };
-        events.push(make_event(
-            dx,
-            dy,
-            last_ts + FRAME_MS as u64,
-            &ScrollType::Trackpad,
-        ));
-    }
-
     events
 }
 
@@ -409,46 +328,93 @@ mod tests {
     use crate::profile::BehaviorProfile;
     use crate::rng::seeded_rng;
 
+    fn wheel_profile() -> ScrollProfile {
+        let mut p = BehaviorProfile::casual_user().scroll;
+        p.scroll_type = ScrollType::Wheel;
+        p.direction_change_probability = 0.0;
+        p
+    }
+
+    fn pad_profile() -> ScrollProfile {
+        let mut p = BehaviorProfile::casual_user().scroll;
+        p.scroll_type = ScrollType::Trackpad;
+        p.direction_change_probability = 0.0;
+        p
+    }
+
     #[test]
-    fn wheel_scroll_timestamps_monotonic() {
-        let profile = BehaviorProfile::casual_user().scroll;
+    fn wheel_notches_are_fixed_and_in_flicks() {
         let mut rng = seeded_rng(20);
-        let events = generate_scroll(ScrollDirection::Down, 800.0, &profile, &mut rng);
-        assert!(!events.is_empty());
-        for w in events.windows(2) {
-            assert!(w[1].timestamp_ms >= w[0].timestamp_ms);
+        let ev = generate_scroll(ScrollDirection::Down, 900.0, &wheel_profile(), &mut rng);
+        assert_eq!(ev.len(), 9);
+        assert!(ev.iter().all(|e| e.delta_y == 100.0 && e.delta_x == 0.0));
+        let gaps: Vec<u64> = ev
+            .windows(2)
+            .map(|w| w[1].timestamp_ms - w[0].timestamp_ms)
+            .collect();
+        // Short gaps inside flicks, at least one long re-grip pause.
+        let min = *gaps.iter().min().unwrap();
+        let max = *gaps.iter().max().unwrap();
+        assert!(min < 100 && max > 2 * min, "{gaps:?}");
+    }
+
+    #[test]
+    fn wheel_at_least_one_notch() {
+        let mut rng = seeded_rng(2);
+        let ev = generate_scroll(ScrollDirection::Up, 20.0, &wheel_profile(), &mut rng);
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].delta_y, -100.0);
+    }
+
+    #[test]
+    fn trackpad_covers_distance_with_momentum() {
+        for seed in 0..30 {
+            let mut rng = seeded_rng(seed);
+            let ev = generate_scroll(ScrollDirection::Down, 1500.0, &pad_profile(), &mut rng);
+            let total: f64 = ev.iter().map(|e| e.delta_y).sum();
+            assert!((total - 1500.0).abs() <= 1.0, "seed {seed}: {total}");
+            assert!(
+                ev.iter()
+                    .all(|e| e.delta_y.fract() == 0.0 && e.delta_y.abs() < 200.0)
+            );
+            for w in ev.windows(2) {
+                assert!(w[1].timestamp_ms >= w[0].timestamp_ms);
+            }
+            // Deltas vary (not a constant stream).
+            assert!(ev.iter().any(|e| e.delta_y != ev[0].delta_y));
         }
     }
 
     #[test]
-    fn trackpad_scroll_timestamps_monotonic() {
-        let profile = BehaviorProfile::power_user().scroll;
-        let mut rng = seeded_rng(21);
-        let events = generate_scroll(ScrollDirection::Down, 1200.0, &profile, &mut rng);
-        assert!(!events.is_empty());
-        for w in events.windows(2) {
-            assert!(w[1].timestamp_ms >= w[0].timestamp_ms);
-        }
+    fn trackpad_decays() {
+        let mut rng = seeded_rng(5);
+        let ev = generate_scroll(ScrollDirection::Down, 300.0, &pad_profile(), &mut rng);
+        let peak = ev
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.delta_y.total_cmp(&b.1.delta_y))
+            .unwrap()
+            .0;
+        let tail = &ev[peak..];
+        assert!(tail.len() > 3);
+        assert!(tail.last().unwrap().delta_y < tail[0].delta_y);
     }
 
     #[test]
-    fn wheel_scroll_covers_distance() {
-        let profile = BehaviorProfile::casual_user().scroll;
-        let mut rng = seeded_rng(22);
-        let total = 500.0;
-        let events = generate_scroll(ScrollDirection::Down, total, &profile, &mut rng);
-        let net: f64 = events.iter().map(|e| e.delta_y).sum();
-        // Net scroll should be close to total (direction changes reduce it slightly).
-        assert!(net > 0.0, "expected net positive scroll, got {}", net);
+    fn horizontal_and_reverse() {
+        let mut rng = seeded_rng(7);
+        let mut p = wheel_profile();
+        p.direction_change_probability = 1.0;
+        let ev = generate_scroll(ScrollDirection::Right, 500.0, &p, &mut rng);
+        assert!(ev.iter().all(|e| e.delta_y == 0.0));
+        assert_eq!(ev.last().unwrap().delta_x, -100.0);
+        let net: f64 = ev.iter().map(|e| e.delta_x).sum();
+        assert_eq!(net, 400.0);
     }
 
     #[test]
-    fn trackpad_has_cross_axis_noise() {
-        let profile = BehaviorProfile::power_user().scroll;
-        let mut rng = seeded_rng(23);
-        let events = generate_scroll(ScrollDirection::Down, 600.0, &profile, &mut rng);
-        // At least some events should have non-zero delta_x (cross-axis perturbation).
-        let has_cross = events.iter().any(|e| e.delta_x.abs() > 0.001);
-        assert!(has_cross, "expected cross-axis noise in trackpad scroll");
+    fn zero_distance_is_empty() {
+        let mut rng = seeded_rng(1);
+        assert!(generate_scroll(ScrollDirection::Down, 0.0, &pad_profile(), &mut rng).is_empty());
     }
 }

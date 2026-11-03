@@ -1,38 +1,45 @@
-// keyboard.rs — Realistic keystroke timing simulation (vendored from stealth-browser)
+// keyboard.rs: keystroke timing.
 //
-// ## Human Typing Model
+// Rewritten in LightBrowser (M5); the vendored generator emitted strictly
+// sequential keys (no overlap), no Shift key and a Gaussian IKI. The model
+// here, and where each piece comes from:
 //
-// Real typing timing is NOT uniform.  Studies (Arif & Stuerzlinger 2009;
-// Dhakal et al. 2018 "Observations on Typing from 136 Million Keystrokes")
-// show several key properties we must reproduce:
-//
-//   1. **High variance**: Even at constant WPM, inter-key intervals (IKI)
-//      have a coefficient of variation (σ/μ) of about 0.3.  We model IKI as
-//      N(μ, 0.3μ) — a standard deviation equal to 30 % of the mean.
-//
-//   2. **Bigram effects**: Certain key pairs (bigrams) are consistently faster
-//      or slower than the mean, determined by hand-position geometry and
-//      cognitive priming.  "th" (right-hand T followed by right-hand H) is
-//      one of the fastest bigrams; "zx" is one of the slowest.  We apply
-//      multiplicative corrections for known bigrams.
-//
-//   3. **Errors and corrections**: Real typists make ~4 % errors per
-//      character (Dhakal 2018), catch them within 0.5–2 s, and backspace.
-//      The error–detection–correction cycle is a strong human signal that
-//      is absent from programmatic text insertion.
-//
-//   4. **Key-hold duration**: Each key has a press duration (KeyDown to
-//      KeyUp) separate from the inter-key interval.  Mean hold is ~80 ms
-//      with ±40 ms variation.  Bots often emit zero-duration keypresses.
-//
-//   5. **Burst–pause rhythm**: Fluent typists produce bursts of rapid
-//      keystrokes followed by brief pauses (word boundaries, thinking).
-//      We add an extra pause at word boundaries (space key) to capture this.
+// - Inter-key interval (IKI, key-down to key-down): log-normal (right
+//   skewed, as in every large keystroke dataset) with sigma `iki_sigma`
+//   (~0.35-0.45, a coefficient of variation of 0.4-0.5), median set so
+//   the mean matches the session's WPM (1 word = 5 characters). Dhakal et
+//   al. 2018 ("Observations on Typing from 136 Million Keystrokes"): mean
+//   IKI 239 ms at 52 WPM.
+// - Bigram effects: common same-hand rolls and alternating-hand pairs are
+//   faster, awkward reaches slower (multipliers below; Salthouse 1986,
+//   Dhakal 2018). Word-initial keys are slower (x1.25), and with
+//   `hesitation_rate` a word starts after an extra pause (log-normal,
+//   median 400 ms) for planning the next word.
+// - Key hold (dwell): log-normal around a per-session median near
+//   `hold_ms` (Dhakal 2018: mean key press duration ~116 ms) with sigma
+//   `hold_sigma` (within-person CV of holds is about 0.2-0.3 in the CMU
+//   keystroke benchmark, Killourhy & Maxion 2009). Keys are struck by
+//   different fingers, so each key also has its own typical hold: a
+//   factor log-normal with sigma `hold_key_spread`, fixed per session by
+//   `key_seed` (the thumb on the space bar holds about 15 % longer). Because IKI is down-to-down and holds are independent,
+//   fast typists press the next key before releasing the previous one
+//   (rollover), as real typists do; the same key cannot be pressed again
+//   before it was released.
+// - Shift: pressed before the first shifted character of a run (lead
+//   log-normal, median 65 ms) and released after the run's last key-up
+//   (log-normal, median 30 ms), before the next unshifted key goes down.
+//   Shifted keystrokes take longer (extra ~80 ms).
+// - Errors: with `error_rate` per letter a neighbouring QWERTY key is hit
+//   instead; the typist notices it after 0, 1 or 2 more characters (60 /
+//   30 / 10 %), waits `correction_delay_ms`, presses Backspace that many
+//   times (median 160 ms apart) and retypes.
 
 use rand::rngs::SmallRng;
 use serde::{Deserialize, Serialize};
 
-use crate::rng::{clamp, normal_sample, uniform};
+use crate::rng::{
+    chance, clamp, log_normal, mix_seed, normal_sample, seed_from_bytes, seeded_rng, uniform,
+};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -43,7 +50,7 @@ use crate::rng::{clamp, normal_sample, uniform};
 pub enum KeyEventType {
     Down,
     Up,
-    /// Synthetic KeyPress (character insertion) — fires between Down and Up.
+    /// Synthetic KeyPress (character insertion): fires right after Down.
     Press,
 }
 
@@ -59,18 +66,38 @@ pub struct KeystrokeEvent {
 
 /// Per-session keyboard behaviour parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct KeyboardProfile {
     /// Mean words per minute.
     pub wpm_mean: f64,
-    /// Standard deviation of WPM across a session.
+    /// Standard deviation of WPM between typing bursts.
     pub wpm_std: f64,
-    /// Probability of a typo per character (0.0–1.0).
+    /// Probability of a typo per letter (0.0-1.0).
     pub error_rate: f64,
     /// (min_ms, max_ms): delay between noticing an error and pressing
-    /// Backspace.  Uniform over this range.
+    /// Backspace. Uniform over this range.
     pub correction_delay_ms: (u64, u64),
     /// If true, apply bigram-specific timing corrections.
     pub bigram_variation: bool,
+    /// Log-space standard deviation of the inter-key interval.
+    pub iki_sigma: f64,
+    /// Median key hold time in ms.
+    pub hold_ms: f64,
+    /// Log-space standard deviation of the key hold time.
+    pub hold_sigma: f64,
+    /// Probability that a word starts after a planning pause.
+    pub hesitation_rate: f64,
+    /// Log-space spread of the per-key hold factors.
+    pub hold_key_spread: f64,
+    /// Seed of the per-key hold factors (one per session; lb-page sets it
+    /// from the persona).
+    pub key_seed: u64,
+}
+
+impl Default for KeyboardProfile {
+    fn default() -> Self {
+        crate::BehaviorProfile::casual_user().keyboard
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -154,87 +181,169 @@ fn bigram_multiplier(prev: char, curr: char) -> f64 {
     1.0
 }
 
-/// Return a plausible adjacent key for a typo (qwerty layout proximity).
-///
-/// Bot detectors that analyse text-edit events look for realistic error
-/// characters.  Replacing 'e' with 'r' is realistic; replacing 'e' with 'z'
-/// is suspicious.
-fn adjacent_key(c: char) -> char {
-    // Map each key to its nearest neighbours on a standard QWERTY layout.
-    let adjacency: &[(char, &str)] = &[
-        ('q', "wa"),
-        ('w', "qeasd"),
-        ('e', "wrsdf"),
-        ('r', "etdfg"),
-        ('t', "ryfgh"),
-        ('y', "tughj"),
-        ('u', "yihjk"),
-        ('i', "uojkl"),
-        ('o', "ipkl"),
-        ('p', "ol"),
-        ('a', "qwsz"),
-        ('s', "awedxz"),
-        ('d', "serfcx"),
-        ('f', "drtgvc"),
-        ('g', "ftyhbv"),
-        ('h', "gyujnb"),
-        ('j', "huikm"),
-        ('k', "jiol"),
-        ('l', "kop"),
-        ('z', "asx"),
-        ('x', "zsdc"),
-        ('c', "xdfv"),
-        ('v', "cfgb"),
-        ('b', "vghn"),
-        ('n', "bhjm"),
-        ('m', "njk"),
-        (' ', " "), // space → space (no meaningful adjacent key)
-    ];
-
-    let lc = c.to_ascii_lowercase();
-    for (key, neighbours) in adjacency {
-        if *key == lc {
-            if neighbours.is_empty() {
-                return c;
-            }
-            // Return the first neighbour as a deterministic choice.
-            // (The caller's RNG already decided we're making an error.)
-            return neighbours.chars().next().unwrap_or(c);
-        }
+/// Neighbours of a key on a US QWERTY layout (for realistic typos).
+fn neighbours(c: char) -> &'static str {
+    match c.to_ascii_lowercase() {
+        'q' => "wa",
+        'w' => "qeasd",
+        'e' => "wrsdf",
+        'r' => "etdfg",
+        't' => "ryfgh",
+        'y' => "tughj",
+        'u' => "yihjk",
+        'i' => "uojkl",
+        'o' => "ipkl",
+        'p' => "ol",
+        'a' => "qwsz",
+        's' => "awedxz",
+        'd' => "serfcx",
+        'f' => "drtgvc",
+        'g' => "ftyhbv",
+        'h' => "gyujnb",
+        'j' => "huikm",
+        'k' => "jiol",
+        'l' => "kop",
+        'z' => "asx",
+        'x' => "zsdc",
+        'c' => "xdfv",
+        'v' => "cfgb",
+        'b' => "vghn",
+        'n' => "bhjm",
+        'm' => "njk",
+        _ => "",
     }
-    c // Unknown character — return unchanged.
 }
 
-// ---------------------------------------------------------------------------
-// Internal event builder
-// ---------------------------------------------------------------------------
+/// A plausible wrong key for `c`, keeping its case; `None` for keys with
+/// no letter neighbours.
+fn typo_for(c: char, rng: &mut SmallRng) -> Option<char> {
+    let n: Vec<char> = neighbours(c).chars().collect();
+    if n.is_empty() {
+        return None;
+    }
+    let w = n[(uniform(rng, 0.0, n.len() as f64) as usize).min(n.len() - 1)];
+    Some(if c.is_ascii_uppercase() {
+        w.to_ascii_uppercase()
+    } else {
+        w
+    })
+}
 
-/// Append Down → Press → Up events for a single `key` at the given cursor.
-///
-/// Returns the updated cursor position (timestamp_ms after the KeyUp).
-fn push_key_events(
-    events: &mut Vec<KeystrokeEvent>,
-    key: &str,
-    cursor_ms: u64,
-    hold_ms: u64,
-) -> u64 {
-    events.push(KeystrokeEvent {
-        key: key.to_string(),
-        event_type: KeyEventType::Down,
-        timestamp_ms: cursor_ms,
-    });
-    // KeyPress fires immediately after KeyDown in browser event model.
-    events.push(KeystrokeEvent {
-        key: key.to_string(),
-        event_type: KeyEventType::Press,
-        timestamp_ms: cursor_ms,
-    });
-    events.push(KeystrokeEvent {
-        key: key.to_string(),
-        event_type: KeyEventType::Up,
-        timestamp_ms: cursor_ms + hold_ms,
-    });
-    cursor_ms + hold_ms
+/// The character needs Shift on a US layout.
+pub fn needs_shift(c: char) -> bool {
+    c.is_ascii_uppercase() || "~!@#$%^&*()_+{}|:\"<>?".contains(c)
+}
+
+/// One planned keystroke.
+struct Stroke {
+    key: String,
+    ch: Option<char>,
+    shift: bool,
+    /// Extra pause before this key (ms).
+    pause: f64,
+    backspace_run: bool,
+}
+
+/// The typical hold of `key` relative to the session median.
+fn key_hold_factor(key: &str, profile: &KeyboardProfile) -> f64 {
+    let k = key.to_lowercase();
+    let mut r = seeded_rng(mix_seed(profile.key_seed, seed_from_bytes(k.as_bytes())));
+    let base = if k == " " { 1.15 } else { 1.0 };
+    base * log_normal(&mut r, 1.0, profile.hold_key_spread)
+}
+
+fn key_name(ch: char) -> String {
+    match ch {
+        '\n' => "Enter".into(),
+        '\t' => "Tab".into(),
+        _ => ch.to_string(),
+    }
+}
+
+fn stroke(ch: char) -> Stroke {
+    Stroke {
+        key: key_name(ch),
+        ch: Some(ch),
+        shift: needs_shift(ch),
+        pause: 0.0,
+        backspace_run: false,
+    }
+}
+
+/// The keys to press for `text`, typos and corrections included.
+fn plan(text: &[char], profile: &KeyboardProfile, rng: &mut SmallRng) -> Vec<Stroke> {
+    let mut out = Vec::with_capacity(text.len() + 4);
+    let mut i = 0;
+    let mut no_typo_at = usize::MAX;
+    while i < text.len() {
+        let ch = text[i];
+        let typo = if i != no_typo_at
+            && i + 1 < text.len()
+            && ch.is_ascii_alphabetic()
+            && chance(rng, profile.error_rate)
+        {
+            typo_for(ch, rng)
+        } else {
+            None
+        };
+        if let Some(wrong) = typo {
+            out.push(stroke(wrong));
+            // Notice after 0, 1 or 2 more characters.
+            let r = uniform(rng, 0.0, 1.0);
+            let more = if r < 0.6 {
+                0
+            } else if r < 0.9 {
+                1
+            } else {
+                2
+            };
+            let more = more.min(text.len() - i - 1);
+            for &c in &text[i + 1..=i + more] {
+                out.push(stroke(c));
+            }
+            let (lo, hi) = profile.correction_delay_ms;
+            for k in 0..=more {
+                out.push(Stroke {
+                    key: "Backspace".into(),
+                    ch: None,
+                    shift: false,
+                    pause: if k == 0 {
+                        uniform(rng, lo as f64, hi as f64)
+                    } else {
+                        0.0
+                    },
+                    backspace_run: k > 0,
+                });
+            }
+            let mut s = stroke(ch);
+            s.pause = uniform(rng, 30.0, 120.0);
+            out.push(s);
+            no_typo_at = i + 1;
+            i += 1;
+            continue;
+        }
+        let mut s = stroke(ch);
+        let word_start = i > 0 && text[i - 1] == ' ' && ch != ' ';
+        if word_start && chance(rng, profile.hesitation_rate) {
+            s.pause = clamp(log_normal(rng, 400.0, 0.5), 120.0, 2500.0);
+        }
+        out.push(s);
+        i += 1;
+    }
+    out
+}
+
+fn push(events: &mut Vec<(f64, usize, KeystrokeEvent)>, key: &str, kind: KeyEventType, t: f64) {
+    let n = events.len();
+    events.push((
+        t,
+        n,
+        KeystrokeEvent {
+            key: key.to_string(),
+            event_type: kind,
+            timestamp_ms: 0,
+        },
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -243,122 +352,114 @@ fn push_key_events(
 
 /// Generate a realistic sequence of keyboard events to type `text`.
 ///
-/// # Algorithm
-///
-/// 1. Derive the base inter-key interval (IKI) from the session's WPM.
-///    The standard approximation is: 1 word = 5 characters, so:
-///    `IKI_ms = 60_000 / (WPM × 5)`.
-///    We further sample WPM from N(wpm_mean, wpm_std) to vary it across
-///    calls (different paragraphs have slightly different rates).
-///
-/// 2. For each character:
-///    a. Sample the actual IKI from N(base_IKI, base_IKI × 0.3).
-///    b. Apply a bigram multiplier if `bigram_variation` is enabled.
-///    c. Apply a word-boundary pause if the previous character was a space.
-///    d. With probability `error_rate`, inject a typo: type an adjacent key,
-///    wait `correction_delay_ms`, press Backspace, then type the correct
-///    key.
-///    e. Emit Down → Press → Up for each key with a realistic hold duration.
-///
-/// 3. Return the flat, time-ordered `Vec<KeystrokeEvent>`.
+/// Each key yields Down, Press (same time) and Up; Shift yields Down and
+/// Up around runs of shifted characters. Events are time-ordered; keys may
+/// overlap (rollover). `\n` is typed as Enter and `\t` as Tab. Replaying
+/// the Down events (Backspace deleting the previous character) yields
+/// exactly `text`.
 pub fn generate_typing_events(
     text: &str,
     profile: &KeyboardProfile,
     rng: &mut SmallRng,
 ) -> Vec<KeystrokeEvent> {
-    if text.is_empty() {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
         return Vec::new();
     }
-
-    // Sample an effective WPM for this typing chunk.
-    let effective_wpm = clamp(
+    let wpm = clamp(
         normal_sample(rng, profile.wpm_mean, profile.wpm_std),
-        5.0,   // absolute minimum — pathologically slow
-        250.0, // absolute maximum — world-record speed
+        10.0,
+        200.0,
     );
+    // Median of the log-normal so that its mean is the WPM interval.
+    let sigma = profile.iki_sigma.max(0.01);
+    let iki_median = 12_000.0 / wpm / (sigma * sigma / 2.0).exp();
+    let hold_median = clamp(
+        normal_sample(rng, profile.hold_ms, profile.hold_ms * 0.1),
+        40.0,
+        250.0,
+    );
+    let strokes = plan(&chars, profile, rng);
 
-    // Base inter-key interval in milliseconds.
-    // (60_000 ms/min) / (WPM × 5 chars/word) = ms per character.
-    let base_iki_ms = 60_000.0 / (effective_wpm * 5.0);
-
-    let mut events: Vec<KeystrokeEvent> = Vec::new();
-    let mut cursor_ms: u64 = 0;
-    let mut prev_char: Option<char> = None;
-
-    let chars: Vec<char> = text.chars().collect();
-
-    for (idx, &ch) in chars.iter().enumerate() {
-        // ---- 1. Inter-key interval for this character -------------------
-
-        // High-variance Gaussian IKI (CV ≈ 0.3 as per Dhakal 2018).
-        let mut iki = normal_sample(rng, base_iki_ms, base_iki_ms * 0.3);
-        iki = iki.max(20.0); // physical lower bound: key travel + neural latency
-
-        // Apply bigram correction.
+    let mut events: Vec<(f64, usize, KeystrokeEvent)> = Vec::new();
+    let mut prev_down: Option<f64> = None;
+    let mut prev_up = 0.0f64;
+    let mut prev: Option<&Stroke> = None;
+    let mut shift_held = false;
+    let mut shifted_up = 0.0f64;
+    for s in &strokes {
+        // Inter-key interval.
+        let mut med = iki_median;
         if profile.bigram_variation
-            && let Some(p) = prev_char
+            && let (Some(p), Some(c)) = (prev.and_then(|p| p.ch), s.ch)
         {
-            let mult = bigram_multiplier(p, ch);
-            iki *= mult;
+            med *= bigram_multiplier(p, c);
         }
-
-        // Word-boundary pause: after typing a space, typists often pause
-        // briefly before the next word (cognitive planning of the next word).
-        // This pause is absent within words.  We add 50–200 ms extra.
-        if prev_char == Some(' ') {
-            iki += uniform(rng, 50.0, 200.0);
+        if prev.and_then(|p| p.ch) == Some(' ') && s.ch.is_some_and(|c| c != ' ') {
+            med *= 1.25;
         }
-
-        // Advance the cursor by the inter-key interval.
-        // For the first character, IKI is the "startup" delay before typing.
-        cursor_ms += iki as u64;
-
-        // ---- 2. Key-hold duration ----------------------------------------
-        // Hold time is the duration from KeyDown to KeyUp.
-        // Mean ~80 ms, std ~40 ms, clamped to [15, 200] ms.
-        // Short holds for common keys (home row), longer for awkward reaches.
-        let hold_ms = clamp(normal_sample(rng, 80.0, 40.0), 15.0, 200.0) as u64;
-
-        // ---- 3. Typo injection -------------------------------------------
-        // With probability `error_rate`, type an adjacent wrong key first.
-        let make_error = uniform(rng, 0.0, 1.0) < profile.error_rate
-            && ch != ' '    // spaces are rarely mistyped as a character
-            && idx < chars.len().saturating_sub(1); // don't error on last char
-
-        if make_error {
-            // Type the wrong key.
-            let wrong_ch = adjacent_key(ch);
-            let wrong_key = wrong_ch.to_string();
-            let wrong_hold = clamp(normal_sample(rng, 80.0, 40.0), 15.0, 200.0) as u64;
-            cursor_ms = push_key_events(&mut events, &wrong_key, cursor_ms, wrong_hold);
-
-            // Detection and correction delay: time before user notices the
-            // error and reaches for Backspace.  Uniform over the profile range.
-            let (corr_min, corr_max) = profile.correction_delay_ms;
-            let correction_delay = uniform(rng, corr_min as f64, corr_max as f64) as u64;
-            cursor_ms += correction_delay;
-
-            // Press Backspace.
-            let bs_hold = clamp(normal_sample(rng, 80.0, 30.0), 15.0, 150.0) as u64;
-            cursor_ms = push_key_events(&mut events, "Backspace", cursor_ms, bs_hold);
-
-            // Brief pause after correction before re-typing.
-            cursor_ms += uniform(rng, 30.0, 100.0) as u64;
+        if s.backspace_run {
+            med = 160.0;
         }
-
-        // ---- 4. Type the correct key ------------------------------------
-        let key = match ch {
-            '\n' => "Enter".to_string(),
-            '\t' => "Tab".to_string(),
-            _ => ch.to_string(),
-        };
-
-        cursor_ms = push_key_events(&mut events, &key, cursor_ms, hold_ms);
-
-        prev_char = Some(ch);
+        let gap = clamp(log_normal(rng, med, sigma), 30.0, 3000.0);
+        let mut down = match prev_down {
+            None => uniform(rng, 0.0, 60.0),
+            Some(t) => t + gap,
+        } + s.pause;
+        if s.shift && !shift_held {
+            down += clamp(log_normal(rng, 80.0, 0.3), 30.0, 300.0);
+        }
+        // The same key again needs a release first.
+        if prev.is_some_and(|p| p.key == s.key) {
+            down = down.max(prev_up + clamp(log_normal(rng, 40.0, 0.4), 15.0, 200.0));
+        }
+        // Shift transitions.
+        if s.shift && !shift_held {
+            let lead = clamp(log_normal(rng, 65.0, 0.35), 20.0, 250.0);
+            let floor = prev_down.map_or(0.0, |t| t + 10.0);
+            let at = (down - lead).max(floor);
+            down = down.max(at + 15.0);
+            push(&mut events, "Shift", KeyEventType::Down, at);
+            shift_held = true;
+        } else if !s.shift && shift_held {
+            let rel = shifted_up + clamp(log_normal(rng, 30.0, 0.5), 5.0, 200.0);
+            down = down.max(rel + 10.0);
+            push(&mut events, "Shift", KeyEventType::Up, rel);
+            shift_held = false;
+        }
+        let hold = clamp(
+            log_normal(
+                rng,
+                hold_median * key_hold_factor(&s.key, profile),
+                profile.hold_sigma,
+            ),
+            30.0,
+            400.0,
+        );
+        let up = down + hold;
+        push(&mut events, &s.key, KeyEventType::Down, down);
+        push(&mut events, &s.key, KeyEventType::Press, down);
+        push(&mut events, &s.key, KeyEventType::Up, up);
+        if s.shift {
+            shifted_up = shifted_up.max(up);
+        }
+        prev_down = Some(down);
+        prev_up = up;
+        prev = Some(s);
     }
-
+    if shift_held {
+        let rel = shifted_up + clamp(log_normal(rng, 30.0, 0.5), 5.0, 200.0);
+        push(&mut events, "Shift", KeyEventType::Up, rel);
+    }
+    // Time order; equal times keep insertion order (Down before Press).
+    events.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     events
+        .into_iter()
+        .map(|(t, _, mut e)| {
+            e.timestamp_ms = t.max(0.0).round() as u64;
+            e
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -367,75 +468,185 @@ mod tests {
     use crate::profile::BehaviorProfile;
     use crate::rng::seeded_rng;
 
-    fn default_profile() -> KeyboardProfile {
+    fn profile() -> KeyboardProfile {
         BehaviorProfile::casual_user().keyboard
+    }
+
+    /// Replay Down events: Backspace deletes, Shift and Press do nothing.
+    fn replay(events: &[KeystrokeEvent]) -> String {
+        let mut s = String::new();
+        for e in events.iter().filter(|e| e.event_type == KeyEventType::Down) {
+            match e.key.as_str() {
+                "Backspace" => {
+                    s.pop();
+                }
+                "Shift" => {}
+                "Enter" => s.push('\n'),
+                "Tab" => s.push('\t'),
+                k => s.push_str(k),
+            }
+        }
+        s
     }
 
     #[test]
     fn events_are_monotonic() {
-        let profile = default_profile();
         let mut rng = seeded_rng(10);
-        let events = generate_typing_events("Hello, world!", &profile, &mut rng);
+        let events = generate_typing_events("Hello, World! It's 5 PM.", &profile(), &mut rng);
         for w in events.windows(2) {
-            assert!(
-                w[1].timestamp_ms >= w[0].timestamp_ms,
-                "non-monotonic: {} > {}",
-                w[0].timestamp_ms,
-                w[1].timestamp_ms
-            );
+            assert!(w[1].timestamp_ms >= w[0].timestamp_ms);
         }
     }
 
     #[test]
-    fn events_contain_expected_characters() {
-        let text = "hi";
-        let profile = default_profile();
-        let mut rng = seeded_rng(11);
-        let events = generate_typing_events(text, &profile, &mut rng);
-
-        // At minimum, 'h' and 'i' must appear as KeyDown events.
-        let down_keys: Vec<&str> = events
-            .iter()
-            .filter(|e| e.event_type == KeyEventType::Down)
-            .map(|e| e.key.as_str())
-            .collect();
-
-        assert!(down_keys.contains(&"h"), "missing 'h': {:?}", down_keys);
-        assert!(down_keys.contains(&"i"), "missing 'i': {:?}", down_keys);
+    fn replay_gives_the_text_for_many_seeds() {
+        let text = "The Quick brown fox, said \"Hi!\"\nok\t(done)";
+        let mut p = profile();
+        p.error_rate = 0.15;
+        let mut typos = 0;
+        for seed in 0..200 {
+            let mut rng = seeded_rng(seed);
+            let ev = generate_typing_events(text, &p, &mut rng);
+            assert_eq!(replay(&ev), text, "seed {seed}");
+            if ev.iter().any(|e| e.key == "Backspace") {
+                typos += 1;
+            }
+        }
+        assert!(typos > 50, "{typos} runs with typos");
     }
 
     #[test]
-    fn backspace_appears_on_error_injection() {
-        // Use a profile with 100 % error rate to guarantee a Backspace.
-        let mut profile = default_profile();
-        profile.error_rate = 1.0;
-        profile.correction_delay_ms = (50, 100);
-        let mut rng = seeded_rng(12);
-        let events = generate_typing_events("abc", &profile, &mut rng);
-        let has_backspace = events.iter().any(|e| e.key == "Backspace");
-        assert!(
-            has_backspace,
-            "expected Backspace events with 100% error rate"
-        );
+    fn shift_wraps_shifted_characters() {
+        for seed in 0..100 {
+            let mut rng = seeded_rng(seed);
+            let ev = generate_typing_events(
+                "aB!c",
+                &KeyboardProfile {
+                    error_rate: 0.0,
+                    ..profile()
+                },
+                &mut rng,
+            );
+            let mut shift = false;
+            let mut down_keys = std::collections::HashSet::new();
+            for e in &ev {
+                match (e.key.as_str(), &e.event_type) {
+                    ("Shift", KeyEventType::Down) => shift = true,
+                    ("Shift", KeyEventType::Up) => shift = false,
+                    (_, KeyEventType::Press) => {}
+                    (k, KeyEventType::Down) => {
+                        assert_eq!(
+                            shift,
+                            needs_shift(k.chars().next().unwrap()),
+                            "seed {seed} {k}"
+                        );
+                        down_keys.insert(k.to_string());
+                    }
+                    (k, KeyEventType::Up) => {
+                        if needs_shift(k.chars().next().unwrap()) {
+                            assert!(shift, "seed {seed}: {k} released after Shift");
+                        }
+                        assert!(down_keys.remove(k));
+                    }
+                }
+            }
+            assert!(!shift);
+        }
+    }
+
+    #[test]
+    fn rollover_happens_and_same_key_never_overlaps() {
+        let mut p = BehaviorProfile::power_user().keyboard;
+        p.error_rate = 0.0;
+        let mut overlaps = 0;
+        for seed in 0..20 {
+            let mut rng = seeded_rng(seed);
+            let ev =
+                generate_typing_events("the letters keep rolling over all the time", &p, &mut rng);
+            let mut held: Vec<String> = Vec::new();
+            for e in &ev {
+                match e.event_type {
+                    KeyEventType::Down => {
+                        assert!(
+                            !held.contains(&e.key),
+                            "seed {seed}: {} pressed twice",
+                            e.key
+                        );
+                        if !held.is_empty() {
+                            overlaps += 1;
+                        }
+                        held.push(e.key.clone());
+                    }
+                    KeyEventType::Up => held.retain(|k| k != &e.key),
+                    KeyEventType::Press => {}
+                }
+            }
+        }
+        assert!(overlaps > 20, "{overlaps} overlapping presses");
+    }
+
+    #[test]
+    fn timing_statistics_are_human() {
+        let mut p = profile();
+        p.error_rate = 0.0;
+        let mut rng = seeded_rng(77);
+        let text = "a fairly long sentence that is typed by a casual typist at about sixty words per minute";
+        let ev = generate_typing_events(text, &p, &mut rng);
+        let downs: Vec<&KeystrokeEvent> = ev
+            .iter()
+            .filter(|e| e.event_type == KeyEventType::Down)
+            .collect();
+        let iki: Vec<f64> = downs
+            .windows(2)
+            .map(|w| (w[1].timestamp_ms - w[0].timestamp_ms) as f64)
+            .collect();
+        let mean = iki.iter().sum::<f64>() / iki.len() as f64;
+        let sd = (iki.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / iki.len() as f64).sqrt();
+        // 60 WPM = 200 ms per character (word pauses add a little).
+        assert!(mean > 140.0 && mean < 320.0, "mean IKI {mean}");
+        assert!(sd / mean > 0.25, "cv {}", sd / mean);
+        // Holds: median around 100 ms, spread out.
+        let mut holds: Vec<f64> = Vec::new();
+        for (i, d) in ev.iter().enumerate() {
+            if d.event_type == KeyEventType::Down {
+                let u = ev[i..]
+                    .iter()
+                    .find(|e| e.event_type == KeyEventType::Up && e.key == d.key)
+                    .unwrap();
+                holds.push((u.timestamp_ms - d.timestamp_ms) as f64);
+            }
+        }
+        holds.sort_by(f64::total_cmp);
+        let med = holds[holds.len() / 2];
+        assert!(med > 70.0 && med < 140.0, "median hold {med}");
+        assert!(holds[holds.len() - 1] - holds[0] > 30.0);
+    }
+
+    #[test]
+    fn per_key_hold_factors_are_stable_per_session() {
+        let mut p = profile();
+        p.key_seed = 42;
+        let a = key_hold_factor("j", &p);
+        assert_eq!(a, key_hold_factor("J", &p));
+        assert_ne!(a, key_hold_factor("k", &p));
+        p.key_seed = 43;
+        assert_ne!(a, key_hold_factor("j", &p));
+        let spread: Vec<f64> = "abcdefghijklmnop"
+            .chars()
+            .map(|c| key_hold_factor(&c.to_string(), &p))
+            .collect();
+        assert!(spread.iter().all(|f| (0.5..2.0).contains(f)));
     }
 
     #[test]
     fn empty_text_returns_empty() {
-        let profile = default_profile();
         let mut rng = seeded_rng(13);
-        let events = generate_typing_events("", &profile, &mut rng);
-        assert!(events.is_empty());
+        assert!(generate_typing_events("", &profile(), &mut rng).is_empty());
     }
 
     #[test]
-    fn bigram_multiplier_fast() {
-        // "th" should be less than 1.0 (faster than mean).
+    fn bigram_multipliers() {
         assert!(bigram_multiplier('t', 'h') < 1.0);
-    }
-
-    #[test]
-    fn bigram_multiplier_slow() {
-        // "zx" should be greater than 1.0 (slower than mean).
         assert!(bigram_multiplier('z', 'x') > 1.0);
     }
 }

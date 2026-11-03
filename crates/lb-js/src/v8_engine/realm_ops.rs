@@ -18,6 +18,12 @@ use super::*;
 pub trait RealmOps {
     /// Create a realm (V8 context), see [`Engine::new_realm`].
     fn new_realm(&mut self, options: RealmOptions) -> Result<RealmId, JsError>;
+    /// Whether `realm` was deserialized from the startup snapshot context
+    /// (its init script already ran; see [`Engine::use_snapshot_context`]).
+    fn is_snapshot_realm(&self, realm: RealmId) -> bool {
+        let _ = realm;
+        false
+    }
     /// Drop a realm, its wrappers, handles and resolvers.
     fn drop_realm(&mut self, realm: RealmId);
     fn evaluate(
@@ -108,6 +114,9 @@ fn set_token(scope: &mut v8::PinScope<'_, '_>, token: &str) -> Result<(), JsErro
 impl RealmOps for Engine {
     fn new_realm(&mut self, options: RealmOptions) -> Result<RealmId, JsError> {
         Engine::new_realm(self, options)
+    }
+    fn is_snapshot_realm(&self, realm: RealmId) -> bool {
+        is_snapshot_realm(&self.state, realm)
     }
     fn drop_realm(&mut self, realm: RealmId) {
         Engine::drop_realm(self, realm)
@@ -262,7 +271,7 @@ impl CallCtx<'_, '_, '_> {
     /// functions. Used for cross-origin checks.
     pub fn entered_realm(&mut self) -> RealmId {
         let ctx = self.scope.get_entered_or_microtask_context();
-        ctx.get_slot::<RealmTag>().map_or(self.realm, |t| t.0)
+        realm_of_context(self.scope, ctx).unwrap_or(self.realm)
     }
 }
 
@@ -271,6 +280,9 @@ impl RealmOps for CallCtx<'_, '_, '_> {
         let state = self.state.clone();
         v8::scope!(let hs, self.scope);
         new_realm_in(hs, &state, options)
+    }
+    fn is_snapshot_realm(&self, realm: RealmId) -> bool {
+        is_snapshot_realm(&self.state, realm)
     }
     fn drop_realm(&mut self, realm: RealmId) {
         drop_realm_state(&self.state, realm);

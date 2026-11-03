@@ -16,3 +16,8 @@ firefox = []
 lb-persona = { path = "../lb-persona" }
 # rusty_v8. Downloads a prebuilt static library at build time (cache it in CI).
 v8 = { version = "=152.2.0", optional = true }
+
+# Binary-size floor of linking V8 (M6, ADR 0013).
+[[example]]
+name = "v8_floor"
+required-features = ["chrome"]

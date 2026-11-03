@@ -56,9 +56,15 @@ pub(super) fn mouse(ws: &Rc<WorkerState>, p: &Rc<PageState>, ev: MouseEvent) -> 
         delta_y: ev.delta_y.unwrap_or(0.0),
         pointer_type: ev.pointer_type.unwrap_or_else(|| "mouse".into()),
     };
+    let at = (m.x, m.y);
     with_main(ws, p, ev.timestamp, |js, w| {
         input::dispatch_mouse(js, w, &m)
-    })
+    })?;
+    // `LightBrowser.human*` continues from wherever the pointer is.
+    if let Some(a) = p.agent() {
+        a.st.borrow_mut().human.pointer = Some(at);
+    }
+    Ok(())
 }
 
 pub(super) fn key(ws: &Rc<WorkerState>, p: &Rc<PageState>, ev: KeyEvent) -> HostResult<()> {

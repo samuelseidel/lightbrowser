@@ -167,6 +167,80 @@ impl TextRun {
         Lines { count, max_width }
     }
 
+    /// The font the run was measured with.
+    pub(crate) fn font(&self) -> Option<&TextFont> {
+        self.font.as_ref()
+    }
+
+    /// The lines `layout` produces for `max`, as (text, width) pairs,
+    /// for painting. Trailing spaces at a line break are dropped.
+    pub(crate) fn lines(&self, max: Option<f32>) -> Vec<(String, f32)> {
+        let Some(font) = &self.font else {
+            return vec![(self.text.clone(), 0.0)];
+        };
+        // Split exactly like `new`: (word text, trailing spaces, newline).
+        let wraps = self.wraps;
+        let mut words: Vec<(String, usize, bool)> = Vec::new();
+        let mut cur = String::new();
+        let mut chars = self.text.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\n' => words.push((std::mem::take(&mut cur), 0, true)),
+                ' ' if wraps => {
+                    let mut n = 1;
+                    while chars.peek() == Some(&' ') {
+                        chars.next();
+                        n += 1;
+                    }
+                    words.push((std::mem::take(&mut cur), n, false));
+                }
+                c => cur.push(c),
+            }
+        }
+        if !cur.is_empty() || words.is_empty() {
+            words.push((cur, 0, false));
+        }
+        let max = if wraps { max } else { None };
+        let mut out = Vec::new();
+        let mut line = String::new();
+        let mut line_w: f32 = 0.0;
+        let mut trailing = String::new();
+        let mut trailing_w: f32 = 0.0;
+        let mut empty = true;
+        for (i, (text, spaces, newline)) in words.iter().enumerate() {
+            let ww = self
+                .words
+                .get(i)
+                .map_or_else(|| font.measure(text), |w| w.width);
+            let sw = self.words.get(i).map_or(0.0, |w| w.space);
+            if !empty
+                && let Some(m) = max
+                && line_w + trailing_w + ww > m + 0.01
+            {
+                out.push((std::mem::take(&mut line), line_w));
+                line_w = 0.0;
+                trailing.clear();
+                trailing_w = 0.0;
+            }
+            line.push_str(&trailing);
+            line.push_str(text);
+            line_w += trailing_w + ww;
+            trailing = " ".repeat(*spaces);
+            trailing_w = sw;
+            empty = false;
+            if *newline {
+                out.push((std::mem::take(&mut line), line_w));
+                line_w = 0.0;
+                trailing.clear();
+                trailing_w = 0.0;
+                empty = true;
+            }
+        }
+        line.push_str(&trailing);
+        out.push((line, line_w + trailing_w));
+        out
+    }
+
     /// Size for an available width (`None` = max-content).
     pub(crate) fn size(&self, max: Option<f32>) -> (f32, f32) {
         let lines = self.layout(max);
@@ -177,6 +251,29 @@ impl TextRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lines_match_layout() {
+        let db = crate::fonts::FontDb::for_os(lb_css::OsKind::Windows);
+        let avail = crate::fonts::FontAvailability::everything();
+        let style =
+            lb_css::ComputedStyle::initial(&lb_css::Defaults::for_os(lb_css::OsKind::Windows));
+        let font = crate::fonts::resolve_font(&db, &avail, &style);
+        let run = TextRun::new(
+            "the quick brown fox jumps".into(),
+            &font,
+            18.0,
+            WhiteSpace::Normal,
+        );
+        let w = font.measure("the quick brown");
+        let lines = run.lines(Some(w + 1.0));
+        assert_eq!(lines.len(), run.layout(Some(w + 1.0)).count);
+        assert_eq!(lines[0].0, "the quick brown");
+        assert_eq!(lines[1].0, "fox jumps");
+        let pre = TextRun::new("a\nb c".into(), &font, 18.0, WhiteSpace::Pre);
+        let l: Vec<_> = pre.lines(Some(1.0)).into_iter().map(|l| l.0).collect();
+        assert_eq!(l, ["a", "b c"]);
+    }
 
     #[test]
     fn collapses_white_space() {

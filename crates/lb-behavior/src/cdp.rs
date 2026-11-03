@@ -22,16 +22,18 @@
 //! optionals omitted), so `serde_json::to_value(&cmd.params)` can go straight
 //! into a CDP message. Key data uses a US QWERTY layout.
 //!
-//! Known gaps: no synthetic `Shift` key events are emitted around shifted
-//! characters (only the Shift modifier bit is set), and the wheel position is
-//! the last mouse position seen in the stream.
+//! Shift: the keyboard generator emits `Shift` key events around shifted
+//! characters; the conversion tracks whether Shift is held and sets the
+//! Shift modifier bit on every key event while it is (and on shifted
+//! characters in streams without Shift events). The wheel position is the
+//! last mouse position seen in the stream.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::InputEvent;
 use crate::keyboard::{KeyEventType, KeystrokeEvent};
-use crate::mouse::{MouseEvent, MouseEventType};
+use crate::mouse::{Button, MouseEvent, MouseEventType};
 use crate::scroll::ScrollEvent;
 
 /// CDP modifier bit for Shift (Alt = 1, Ctrl = 2, Meta = 4, Shift = 8).
@@ -108,6 +110,9 @@ pub struct DispatchKeyEvent {
     pub code: String,
     pub windows_virtual_key_code: u32,
     pub native_virtual_key_code: u32,
+    /// DOM `KeyboardEvent.location` (1 = left modifier key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<u32>,
 }
 
 /// Parameters of `Input.insertText`.
@@ -222,6 +227,7 @@ pub fn events_to_cdp_with(events: &[InputEvent], opts: &CdpOptions) -> Vec<CdpIn
     let mut base: u64 = 0;
     let mut current: Option<(Modality, u64)> = None;
     let mut pointer = opts.initial_pointer;
+    let mut shift = false;
 
     for event in events {
         let (modality, raw_ts) = match event {
@@ -247,7 +253,7 @@ pub fn events_to_cdp_with(events: &[InputEvent], opts: &CdpOptions) -> Vec<CdpIn
                 pointer = (m.x, m.y);
                 mouse_command(m)
             }
-            InputEvent::Keyboard(k) => key_command(k),
+            InputEvent::Keyboard(k) => key_command(k, &mut shift),
             InputEvent::Scroll(s) => Some(wheel_command(s, pointer)),
             InputEvent::Wait(_) => None,
         };
@@ -259,18 +265,27 @@ pub fn events_to_cdp_with(events: &[InputEvent], opts: &CdpOptions) -> Vec<CdpIn
 }
 
 fn mouse_command(m: &MouseEvent) -> Option<CdpInputCommand> {
+    let pressed = match m.button {
+        Button::Left => MouseButton::Left,
+        Button::Middle => MouseButton::Middle,
+        Button::Right => MouseButton::Right,
+    };
     let (kind, button, click_count) = match m.event_type {
         MouseEventType::Move => (
             MouseEventKind::MouseMoved,
             if m.buttons & 1 != 0 {
                 MouseButton::Left
+            } else if m.buttons & 2 != 0 {
+                MouseButton::Right
+            } else if m.buttons & 4 != 0 {
+                MouseButton::Middle
             } else {
                 MouseButton::None
             },
             0,
         ),
-        MouseEventType::Down => (MouseEventKind::MousePressed, MouseButton::Left, 1),
-        MouseEventType::Up => (MouseEventKind::MouseReleased, MouseButton::Left, 1),
+        MouseEventType::Down => (MouseEventKind::MousePressed, pressed, m.click_count.max(1)),
+        MouseEventType::Up => (MouseEventKind::MouseReleased, pressed, m.click_count.max(1)),
         // The browser synthesises `click` from the press and release.
         MouseEventType::Click => return None,
     };
@@ -301,8 +316,15 @@ fn wheel_command(s: &ScrollEvent, pointer: (f64, f64)) -> CdpInputCommand {
     })
 }
 
-fn key_command(k: &KeystrokeEvent) -> Option<CdpInputCommand> {
+fn key_command(k: &KeystrokeEvent, shift: &mut bool) -> Option<CdpInputCommand> {
     let info = key_info(&k.key);
+    if k.key == "Shift" {
+        match k.event_type {
+            KeyEventType::Down => *shift = true,
+            KeyEventType::Up => *shift = false,
+            KeyEventType::Press => {}
+        }
+    }
     let kind = match k.event_type {
         // `keyDown` with `text` also fires keypress and inserts the text, so
         // the separate Press event needs no command of its own.
@@ -312,9 +334,10 @@ fn key_command(k: &KeystrokeEvent) -> Option<CdpInputCommand> {
         KeyEventType::Up => KeyEventKind::KeyUp,
     };
     let with_text = kind == KeyEventKind::KeyDown;
+    let shifted = *shift || (info.shift && k.event_type == KeyEventType::Down);
     Some(CdpInputCommand::DispatchKeyEvent(DispatchKeyEvent {
         kind,
-        modifiers: if info.shift { MODIFIER_SHIFT } else { 0 },
+        modifiers: if shifted { MODIFIER_SHIFT } else { 0 },
         text: if with_text { info.text.clone() } else { None },
         unmodified_text: if with_text {
             info.unmodified.clone()
@@ -325,6 +348,7 @@ fn key_command(k: &KeystrokeEvent) -> Option<CdpInputCommand> {
         code: info.code,
         windows_virtual_key_code: info.vk,
         native_virtual_key_code: info.vk,
+        location: info.location,
     }))
 }
 
@@ -336,6 +360,7 @@ struct KeyInfo {
     text: Option<String>,
     unmodified: Option<String>,
     shift: bool,
+    location: Option<u32>,
 }
 
 /// Map a source key (a character or a name such as `Backspace`) to CDP key
@@ -349,6 +374,10 @@ fn key_info(key: &str) -> KeyInfo {
         text: text.map(str::to_string),
         unmodified: text.map(str::to_string),
         shift: false,
+        location: code
+            .ends_with("Left")
+            .then_some(1)
+            .filter(|_| matches!(key, "Shift" | "Control" | "Alt" | "Meta")),
     };
     match key {
         "Enter" => return named("Enter", 13, Some("\r")),
@@ -383,6 +412,7 @@ fn key_info(key: &str) -> KeyInfo {
         text: Some(key.to_string()),
         unmodified: Some(base.to_string()),
         shift,
+        location: None,
     }
 }
 
@@ -435,7 +465,8 @@ mod tests {
     };
 
     fn session() -> Vec<InputEvent> {
-        let profile = BehaviorProfile::casual_user();
+        let mut profile = BehaviorProfile::casual_user();
+        profile.scroll.direction_change_probability = 0.0;
         let mut events = human_click_events(
             Point::new(10.0, 10.0),
             Point::new(400.0, 300.0),
@@ -580,23 +611,26 @@ mod tests {
         let out = events_to_cdp(&session());
         let keys = key_events(&out);
         assert!(!keys.is_empty());
-        let mut stack: Vec<&str> = Vec::new();
+        let mut held: Vec<&str> = Vec::new();
         let mut downs = 0;
         for k in &keys {
             match k.kind {
                 KeyEventKind::KeyDown | KeyEventKind::RawKeyDown => {
-                    assert!(
-                        stack.is_empty(),
-                        "keys do not overlap in the generated stream"
-                    );
-                    stack.push(&k.key);
+                    assert!(!held.contains(&k.key.as_str()), "{} pressed twice", k.key);
+                    held.push(&k.key);
                     downs += 1;
                 }
-                KeyEventKind::KeyUp => assert_eq!(stack.pop(), Some(k.key.as_str())),
+                KeyEventKind::KeyUp => {
+                    let at = held
+                        .iter()
+                        .position(|h| *h == k.key)
+                        .expect("up after down");
+                    held.remove(at);
+                }
                 KeyEventKind::Char => unreachable!(),
             }
         }
-        assert!(stack.is_empty());
+        assert!(held.is_empty());
         assert!(downs > 0);
         assert_eq!(
             keys.iter()
@@ -604,50 +638,96 @@ mod tests {
                 .count(),
             downs
         );
-        // Down and Up of one key are at least as far apart as the hold time.
-        let key_offsets: Vec<(KeyEventKind, u64)> = out
+    }
+
+    #[test]
+    fn shift_events_and_modifiers() {
+        let mut profile = BehaviorProfile::casual_user();
+        profile.keyboard.error_rate = 0.0;
+        let out = events_to_cdp(&human_type_events("aB", &profile, 3));
+        let keys = key_events(&out);
+        let names: Vec<(&str, KeyEventKind, u32)> = keys
             .iter()
-            .filter_map(|e| match &e.command {
-                CdpInputCommand::DispatchKeyEvent(k) => Some((k.kind, e.offset_ms)),
-                _ => None,
-            })
+            .map(|k| (k.key.as_str(), k.kind, k.modifiers))
             .collect();
-        for pair in key_offsets.chunks(2) {
-            assert!(pair[1].1 >= pair[0].1);
-        }
+        let shift_down = names
+            .iter()
+            .position(|n| n.0 == "Shift" && n.1 == KeyEventKind::RawKeyDown)
+            .expect("Shift down");
+        let b_down = names
+            .iter()
+            .position(|n| n.0 == "B" && n.1 == KeyEventKind::KeyDown)
+            .unwrap();
+        let shift_up = names
+            .iter()
+            .position(|n| n.0 == "Shift" && n.1 == KeyEventKind::KeyUp)
+            .unwrap();
+        assert!(shift_down < b_down && b_down < shift_up);
+        assert_eq!(names[shift_down].2, MODIFIER_SHIFT);
+        assert_eq!(names[b_down].2, MODIFIER_SHIFT);
+        assert_eq!(names[shift_up].2, 0);
+        assert_eq!(keys[shift_down].location, Some(1));
+        assert_eq!(keys[shift_down].code, "ShiftLeft");
+        let a = names.iter().find(|n| n.0 == "a").unwrap();
+        assert_eq!(a.2, 0);
     }
 
     #[test]
     fn typed_text_survives_conversion() {
         let profile = BehaviorProfile::power_user();
-        let events = human_type_events("Hi, 5!\n", &profile, 3);
-        let out = events_to_cdp(&events);
-        let keys = key_events(&out);
-        // Typos add wrong keys followed by Backspace; replay the edits.
-        let mut typed = String::new();
-        for k in keys.iter().filter(|k| k.kind == KeyEventKind::KeyDown) {
-            typed.push_str(k.text.as_deref().unwrap_or(""));
-        }
-        let mut result = String::new();
-        let mut rawdowns = keys
-            .iter()
-            .filter(|k| k.kind == KeyEventKind::RawKeyDown)
-            .count();
-        // Backspace is the only raw key down here; apply its effect by walking the stream.
-        for k in keys
-            .iter()
-            .filter(|k| matches!(k.kind, KeyEventKind::KeyDown | KeyEventKind::RawKeyDown))
-        {
-            if k.key == "Backspace" {
-                result.pop();
-                rawdowns -= 1;
-            } else if let Some(t) = &k.text {
-                result.push_str(t);
+        for seed in 0..20 {
+            let events = human_type_events("Hi, 5!\n", &profile, seed);
+            let out = events_to_cdp(&events);
+            let mut result = String::new();
+            for k in key_events(&out)
+                .iter()
+                .filter(|k| matches!(k.kind, KeyEventKind::KeyDown | KeyEventKind::RawKeyDown))
+            {
+                if k.key == "Backspace" {
+                    result.pop();
+                } else if let Some(t) = &k.text {
+                    result.push_str(t);
+                } else {
+                    assert_eq!(k.key, "Shift");
+                }
             }
+            assert_eq!(result, "Hi, 5!\r");
         }
-        assert_eq!(rawdowns, 0);
-        assert_eq!(result, "Hi, 5!\r");
-        assert!(typed.ends_with('\r'));
+    }
+
+    #[test]
+    fn right_double_click() {
+        let mut rng = crate::rng::seeded_rng(1);
+        let (mice, _) = crate::mouse::generate_click_in(
+            crate::Point::new(0.0, 0.0),
+            &crate::TargetBox::new(50.0, 50.0, 40.0, 20.0),
+            crate::ClickOptions {
+                button: Button::Right,
+                click_count: 2,
+            },
+            &BehaviorProfile::casual_user().mouse,
+            &mut rng,
+        );
+        let ev: Vec<InputEvent> = mice.into_iter().map(InputEvent::Mouse).collect();
+        let out = events_to_cdp(&ev);
+        let presses: Vec<&DispatchMouseEvent> = out
+            .iter()
+            .filter_map(|e| match &e.command {
+                CdpInputCommand::DispatchMouseEvent(m)
+                    if m.kind == MouseEventKind::MousePressed =>
+                {
+                    Some(m)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(presses.len(), 2);
+        assert_eq!(presses[1].click_count, 2);
+        assert!(
+            presses
+                .iter()
+                .all(|p| p.button == MouseButton::Right && p.buttons == 2)
+        );
     }
 
     #[test]

@@ -770,3 +770,68 @@ pub struct TargetInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub browser_context_id: Option<BrowserContextId>,
 }
+
+/// `LightBrowser.humanMove` params.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanMove {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// `LightBrowser.humanClick` params: a CSS `selector` (resolved in the
+/// main document) or a viewport point `x`, `y`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanClick {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
+    /// `left` (default), `middle` or `right`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub button: Option<String>,
+    /// Default 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub click_count: Option<u32>,
+}
+
+/// `LightBrowser.humanType` params.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanType {
+    pub text: String,
+    /// Clicked first (with `humanClick`) when given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+}
+
+/// `LightBrowser.humanScroll` params.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanScroll {
+    #[serde(default)]
+    pub delta_y: f64,
+    #[serde(default)]
+    pub delta_x: f64,
+    /// Pointer position for the wheel events (the pointer moves there
+    /// first).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
+    /// Scroll until this element is in view (the deltas are then ignored).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+}
+
+/// One `LightBrowser.human*` command.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HumanCommand {
+    Move(HumanMove),
+    Click(HumanClick),
+    Type(HumanType),
+    Scroll(HumanScroll),
+}

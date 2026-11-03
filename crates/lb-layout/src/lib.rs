@@ -17,15 +17,19 @@
 //!   wrapping flex row of text runs, inline boxes and atomic inlines.
 //!   Tables are blocks with flex rows. Transforms are ignored for layout.
 //! - [`AxTree`]: roles, accessible names, states for CDP Accessibility.
+//! - [`DisplayList`]: boxes in paint order with page geometry, clips,
+//!   opacity groups and text lines, for lb-paint's page screenshots.
 
 mod ax;
 mod build;
+mod display;
 mod engine;
 mod fonts;
 mod text;
 mod tree;
 
 pub use ax::{AxNode, AxStates, AxTree, Checked};
+pub use display::{DisplayItem, DisplayKind, DisplayList, DisplayStep, TextLine};
 pub use engine::{BoxModel, LayoutEngine, LayoutStats, Rect, ScrollAlign};
 pub use fonts::{
     FontAvailability, FontDb, FontFace, FontFamily, LineMetrics, TextFont, bundled_table_count,

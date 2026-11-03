@@ -55,6 +55,7 @@ mod misc;
 mod navigator;
 mod net;
 mod rtc;
+pub mod screenshot;
 pub mod script;
 mod serializer;
 mod style;

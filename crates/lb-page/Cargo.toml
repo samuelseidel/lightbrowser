@@ -9,7 +9,7 @@ publish = false
 # One JS engine per binary. The firefox build has the browser context,
 # networking and script-less document loading until SpiderMonkey lands.
 default = ["chrome"]
-chrome = ["lb-js/chrome", "lb-webapi/chrome"]
+chrome = ["lb-js/chrome", "lb-webapi/chrome", "dep:lb-paint", "dep:lb-css"]
 firefox = ["lb-js/firefox", "lb-webapi/firefox"]
 
 [dependencies]
@@ -20,6 +20,10 @@ lb-net = { path = "../lb-net" }
 lb-persona = { path = "../lb-persona" }
 lb-cdp = { path = "../lb-cdp" }
 lb-layout = { path = "../lb-layout" }
+# Page screenshots (chrome build).
+lb-paint = { path = "../lb-paint", optional = true }
+lb-css = { path = "../lb-css", optional = true }
+lb-behavior = { path = "../lb-behavior" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 url = "2"

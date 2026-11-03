@@ -1,36 +1,64 @@
-// mouse.rs — Bézier-curve mouse movement simulation (vendored from stealth-browser)
+// mouse.rs: pointer movement and clicks.
 //
-// ## Why Bézier curves?
+// Rewritten in LightBrowser (M5); the vendored Bezier generator used a
+// smooth-step speed profile with 8 px arc-length samples and N(0, 3 px)
+// click scatter regardless of target size. The model here, and where each
+// piece comes from:
 //
-// Human cursor trajectories are not straight lines.  Fitts' Law experiments
-// and large-scale telemetry studies (e.g. Huang et al. 2011, "Improving the
-// Usability of Online Map Interfaces") show that:
-//
-//   1. Paths curve naturally because the hand swings from the shoulder/elbow
-//      pivot rather than translating linearly.
-//   2. The speed profile follows a roughly bell-shaped curve: slow start
-//      (movement initiation), fast transit, slow finish (homing onto target).
-//      This is captured by Minimum Jerk Theory (Flash & Hogan 1985).
-//   3. Approximately 20–40 % of movements include an overshoot followed by a
-//      corrective sub-movement.
-//   4. During hovering (e.g. reading a tooltip) the cursor drifts slightly —
-//      "micro-movements" caused by involuntary hand tremor.
-//
-// A cubic Bézier with randomly perturbed control points reproduces the
-// curvature characteristic while being cheap to evaluate.  The ease-in-out
-// speed profile is a smooth approximation to the minimum-jerk trajectory.
+// - Movement time: Fitts' law in Shannon form, MT = a + b * log2(D/W + 1)
+//   (Fitts 1954; MacKenzie 1992). `a` and `b` are per profile (mouse
+//   throughput in ISO 9241-9 studies is about 3.5-5 bits/s, so b is
+//   roughly 200-280 ms/bit); each movement gets log-normal noise (sigma
+//   0.15) on top.
+// - Submovements: the optimised-submovement model (Meyer et al. 1988). A
+//   primary ballistic submovement covers most of the distance and ends with
+//   an error proportional to its length (here sigma 3 % along the path and
+//   2.5 % across). Undershoot is the common case (primary amplitude about
+//   95 % of D); overshoot happens with `overshoot_rate`. When the primary
+//   lands off the aim point by more than a small tolerance, one or two
+//   short corrective submovements follow after a 50-150 ms pause.
+// - Speed profile: minimum jerk (Flash & Hogan 1985),
+//   s(tau) = 10 tau^3 - 15 tau^4 + 6 tau^5, time-warped with tau^g
+//   (g in 0.8..1) so peak speed comes at 40-50 % of the movement: aimed
+//   movements have a longer deceleration phase than acceleration phase.
+// - Path shape: a cubic Bezier bowed sideways by N(0, curvature * D)
+//   (arm and wrist rotation; typical maximum deviation 5-10 % of D), plus
+//   lateral motor noise: an Ornstein-Uhlenbeck process (correlation time
+//   ~60 ms, SD `path_noise` * D + 0.4 px) faded in and out with the
+//   movement, so the path wobbles around its arc. Motor noise grows with
+//   the size of the command (Harris & Wolpert 1998); mouse paths in
+//   ISO 9241-9 tasks show a movement variability of several pixels and
+//   a few movement-direction changes per trial (MacKenzie, Kauppinen &
+//   Silfverberg 2001), which a smooth arc alone does not have.
+// - Endpoint scatter: aim points are normal around the target centre with
+//   sigma = W / 4.133 per axis (the "effective width" of ISO 9241-9: 96 %
+//   of hits inside W), truncated to the target, with a small bias toward
+//   the side the pointer comes from (undershoot).
+// - Sampling: the device reports at `device_hz` (USB mice poll at 125 Hz
+//   by default) with sub-millisecond jitter; Chrome aligns continuous
+//   input to display frames (`display_hz`), so the page sees at most one
+//   mousemove per frame, carrying the latest device sample, and none when
+//   the integer position did not change. Positions are whole CSS pixels,
+//   as in Chrome's `MouseEvent.clientX`.
+// - Tremor: physiological tremor at 8-12 Hz with about 0.3 px amplitude at
+//   the cursor, plus small sensor noise.
+// - Pressing: a verification pause between the cursor stopping and the
+//   press (log-normal, median 60 ms), a button hold time log-normal around
+//   `press_hold_ms` (sigma 0.25; measured click durations are typically
+//   80-150 ms), and for double clicks a release-to-press gap with median
+//   110 ms (well inside the 500 ms OS double-click time).
 
 use rand::rngs::SmallRng;
 use serde::{Deserialize, Serialize};
 
-use crate::rng::{clamp, normal_sample, uniform};
+use crate::rng::{chance, clamp, log_normal, normal_sample, uniform};
 
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
-/// A 2-D screen coordinate in pixels.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// A 2-D viewport coordinate in CSS pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Point {
     pub x: f64,
     pub y: f64,
@@ -47,6 +75,44 @@ impl Point {
         let dy = self.y - other.y;
         (dx * dx + dy * dy).sqrt()
     }
+
+    fn rounded(self) -> Point {
+        Point::new(self.x.round(), self.y.round())
+    }
+}
+
+/// A click target: an element's border box in viewport CSS pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TargetBox {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl TargetBox {
+    pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// A box of `size` x `size` centred on `p` (targets known only by a
+    /// point).
+    pub fn around(p: Point, size: f64) -> Self {
+        Self::new(p.x - size / 2.0, p.y - size / 2.0, size, size)
+    }
+
+    pub fn center(&self) -> Point {
+        Point::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
+    }
+
+    pub fn contains(&self, p: Point) -> bool {
+        p.x >= self.x && p.x <= self.x + self.width && p.y >= self.y && p.y <= self.y + self.height
+    }
 }
 
 /// The type of mouse event, matching browser MouseEvent.type values.
@@ -59,6 +125,31 @@ pub enum MouseEventType {
     Click,
 }
 
+/// A mouse button.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Button {
+    #[default]
+    Left,
+    Middle,
+    Right,
+}
+
+impl Button {
+    /// Bit in `MouseEvent.buttons`.
+    pub fn bit(self) -> u8 {
+        match self {
+            Button::Left => 1,
+            Button::Right => 2,
+            Button::Middle => 4,
+        }
+    }
+}
+
+fn one() -> u32 {
+    1
+}
+
 /// A single synthesised mouse event ready to be injected into the browser.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MouseEvent {
@@ -66,406 +157,550 @@ pub struct MouseEvent {
     pub y: f64,
     /// Milliseconds since the start of the generated sequence.
     pub timestamp_ms: u64,
-    /// Bitmask of currently-held buttons (0 = none, 1 = primary/left).
+    /// Bitmask of buttons held after this event (left 1, right 2, middle 4).
     pub buttons: u8,
     pub event_type: MouseEventType,
+    /// Button of a Down/Up/Click.
+    #[serde(default)]
+    pub button: Button,
+    /// Click count of a Down/Up/Click (2 for the second press of a double
+    /// click).
+    #[serde(default = "one")]
+    pub click_count: u32,
+}
+
+impl MouseEvent {
+    fn moved(p: Point, t: f64) -> Self {
+        Self {
+            x: p.x,
+            y: p.y,
+            timestamp_ms: t.max(0.0).round() as u64,
+            buttons: 0,
+            event_type: MouseEventType::Move,
+            button: Button::Left,
+            click_count: 1,
+        }
+    }
 }
 
 /// Per-session mouse behaviour parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MouseProfile {
-    /// Mean cursor speed in pixels per second.
-    pub speed_mean_px_per_s: f64,
-    /// Standard deviation of cursor speed (session-to-session variation).
-    pub speed_std: f64,
-    /// Probability [0, 1] that any given movement overshoots the target.
+    /// Fitts' law intercept in ms.
+    pub fitts_a_ms: f64,
+    /// Fitts' law slope in ms per bit.
+    pub fitts_b_ms: f64,
+    /// Sideways bow of a path, as the standard deviation of the Bezier
+    /// control-point offset relative to the distance.
+    pub curvature: f64,
+    /// Lateral motor noise: SD of the path's wobble around its arc, as a
+    /// fraction of the distance (plus 0.4 px).
+    pub path_noise: f64,
+    /// Probability [0, 1] that the primary submovement overshoots the aim
+    /// point (otherwise it undershoots).
     pub overshoot_rate: f64,
-    /// Mean overshoot distance in pixels (Gaussian, always positive via abs).
+    /// Mean overshoot distance in pixels for a long (>= 400 px) movement;
+    /// shorter movements overshoot proportionally less.
     pub overshoot_distance_px: f64,
+    /// Device report rate (Hz).
+    pub device_hz: f64,
+    /// Display refresh rate (Hz): Chrome dispatches at most one mousemove
+    /// per frame.
+    pub display_hz: f64,
+    /// Median button hold time in ms.
+    pub press_hold_ms: f64,
+    /// Scale of endpoint scatter: 1.0 is sigma = W / 4.133.
+    pub endpoint_spread: f64,
     /// Whether to add micro-movement drift while the cursor is stationary.
     pub micro_movement_enabled: bool,
     /// Std-dev of per-sample micro-movement jitter in pixels.
     pub micro_movement_std_px: f64,
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/// Evaluate a cubic Bézier at parameter t ∈ [0, 1].
-///
-/// B(t) = (1-t)³·P0 + 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³·P3
-fn bezier(p0: Point, p1: Point, p2: Point, p3: Point, t: f64) -> Point {
-    let u = 1.0 - t;
-    let uu = u * u;
-    let uuu = uu * u;
-    let tt = t * t;
-    let ttt = tt * t;
-
-    Point {
-        x: uuu * p0.x + 3.0 * uu * t * p1.x + 3.0 * u * tt * p2.x + ttt * p3.x,
-        y: uuu * p0.y + 3.0 * uu * t * p1.y + 3.0 * u * tt * p2.y + ttt * p3.y,
+impl Default for MouseProfile {
+    fn default() -> Self {
+        crate::BehaviorProfile::casual_user().mouse
     }
 }
 
-/// Ease-in-out speed multiplier at normalised path position `s` ∈ [0, 1].
-///
-/// This is a smooth-step (Hermite) function that produces:
-///   • 0 at s=0 (cursor is still at the start)
-///   • 1 at s=0.5 (peak speed at midpoint)
-///   • 0 at s=1 (cursor stops at target)
-///
-/// The resulting speed profile is a rough approximation of the minimum-jerk
-/// trajectory from computational motor-control theory, which is known to fit
-/// human movement data well.
-fn ease_in_out(s: f64) -> f64 {
-    // Smooth-step: 3s² - 2s³
-    s * s * (3.0 - 2.0 * s)
+// ---------------------------------------------------------------------------
+// Trajectory model
+// ---------------------------------------------------------------------------
+
+/// Default target width (px) for movements with no known target.
+pub const DEFAULT_TARGET_PX: f64 = 24.0;
+
+/// Fitts' law movement time (ms) for distance `d` and target width `w`.
+pub fn fitts_ms(profile: &MouseProfile, d: f64, w: f64) -> f64 {
+    let id = (d / w.max(1.0) + 1.0).log2();
+    profile.fitts_a_ms + profile.fitts_b_ms * id
 }
 
-/// Generate random control points that produce a naturally curving path.
-///
-/// The two interior control points P1 and P2 are placed at 1/3 and 2/3 of
-/// the straight-line distance, then displaced laterally by a random amount.
-/// The lateral displacement is proportional to the total distance so that
-/// short movements curve less than long ones — matching human motor data.
-fn random_control_points(from: Point, to: Point, rng: &mut SmallRng) -> (Point, Point) {
-    let dist = from.dist(&to);
+/// One ballistic submovement.
+#[derive(Debug, Clone)]
+struct Submovement {
+    start_ms: f64,
+    duration_ms: f64,
+    p0: Point,
+    c1: Point,
+    c2: Point,
+    p3: Point,
+    /// Time warp exponent of the minimum-jerk profile.
+    warp: f64,
+    /// Arc-length lookup table: (t, cumulative length).
+    lut: Vec<(f64, f64)>,
+    /// Unit vector across the movement.
+    perp: (f64, f64),
+    /// Lateral noise every [`WOBBLE_STEP_MS`] over the movement (px).
+    wobble: Vec<f64>,
+}
 
-    // Unit vector along the direct path.
-    let dx = to.x - from.x;
-    let dy = to.y - from.y;
-    let len = dist.max(1.0);
-    let ux = dx / len;
-    let uy = dy / len;
+/// Time step of the lateral noise process.
+const WOBBLE_STEP_MS: f64 = 4.0;
 
-    // Perpendicular unit vector (rotate 90°).
-    let px = -uy;
-    let py = ux;
+fn bezier(p0: Point, p1: Point, p2: Point, p3: Point, t: f64) -> Point {
+    let u = 1.0 - t;
+    let (uu, tt) = (u * u, t * t);
+    Point {
+        x: uu * u * p0.x + 3.0 * uu * t * p1.x + 3.0 * u * tt * p2.x + tt * t * p3.x,
+        y: uu * u * p0.y + 3.0 * uu * t * p1.y + 3.0 * u * tt * p2.y + tt * t * p3.y,
+    }
+}
 
-    // Lateral deviation: humans rarely deviate more than ~30 % of path length.
-    // The sign is randomised so curves can go either way.
-    let max_deviation = dist * 0.25;
-    let d1 = uniform(rng, -max_deviation, max_deviation);
-    let d2 = uniform(rng, -max_deviation, max_deviation);
+/// Minimum-jerk position profile on [0, 1].
+fn min_jerk(tau: f64) -> f64 {
+    let t = tau.clamp(0.0, 1.0);
+    let t3 = t * t * t;
+    t3 * (10.0 - 15.0 * t + 6.0 * t * t)
+}
 
-    // Place control points at 1/3 and 2/3 along the straight line.
-    let p1 = Point {
-        x: from.x + dx / 3.0 + px * d1,
-        y: from.y + dy / 3.0 + py * d1,
+impl Submovement {
+    fn new(
+        from: Point,
+        to: Point,
+        start_ms: f64,
+        duration_ms: f64,
+        curvature: f64,
+        noise: f64,
+        rng: &mut SmallRng,
+    ) -> Self {
+        let d = from.dist(&to).max(1e-6);
+        let (ux, uy) = ((to.x - from.x) / d, (to.y - from.y) / d);
+        let (px, py) = (-uy, ux);
+        // One main bow, sometimes slightly S-shaped.
+        let b1 = normal_sample(rng, 0.0, curvature * d);
+        let b2 = b1 * uniform(rng, 0.2, 1.0) + normal_sample(rng, 0.0, 0.3 * curvature * d);
+        let c1 = Point::new(
+            from.x + ux * d / 3.0 + px * b1,
+            from.y + uy * d / 3.0 + py * b1,
+        );
+        let c2 = Point::new(
+            from.x + ux * 2.0 * d / 3.0 + px * b2,
+            from.y + uy * 2.0 * d / 3.0 + py * b2,
+        );
+        const STEPS: usize = 200;
+        let mut lut = Vec::with_capacity(STEPS + 1);
+        let mut len = 0.0;
+        let mut prev = from;
+        lut.push((0.0, 0.0));
+        for i in 1..=STEPS {
+            let t = i as f64 / STEPS as f64;
+            let p = bezier(from, c1, c2, to, t);
+            len += prev.dist(&p);
+            lut.push((t, len));
+            prev = p;
+        }
+        // Lateral noise: Ornstein-Uhlenbeck with correlation time tau.
+        let duration_ms = duration_ms.max(1.0);
+        let sd = noise * d + 0.4;
+        let tau = uniform(rng, 45.0, 80.0);
+        let a = (-WOBBLE_STEP_MS / tau).exp();
+        let n = (duration_ms / WOBBLE_STEP_MS).ceil() as usize + 2;
+        let mut e = normal_sample(rng, 0.0, sd);
+        let wobble = (0..n)
+            .map(|_| {
+                let v = e;
+                e = e * a + normal_sample(rng, 0.0, sd * (1.0 - a * a).sqrt());
+                v
+            })
+            .collect();
+        Self {
+            start_ms,
+            duration_ms,
+            p0: from,
+            c1,
+            c2,
+            p3: to,
+            warp: uniform(rng, 0.8, 1.0),
+            lut,
+            perp: (px, py),
+            wobble,
+        }
+    }
+
+    fn end_ms(&self) -> f64 {
+        self.start_ms + self.duration_ms
+    }
+
+    /// Position at absolute time `t`.
+    fn at(&self, t: f64) -> Point {
+        let tau = ((t - self.start_ms) / self.duration_ms).clamp(0.0, 1.0);
+        let s = min_jerk(tau.powf(self.warp));
+        let total = self.lut.last().map_or(0.0, |l| l.1);
+        let want = s * total;
+        let i = self.lut.partition_point(|&(_, l)| l < want);
+        let t_param = if i == 0 {
+            0.0
+        } else if i >= self.lut.len() {
+            1.0
+        } else {
+            let (t0, l0) = self.lut[i - 1];
+            let (t1, l1) = self.lut[i];
+            if l1 - l0 < 1e-9 {
+                t1
+            } else {
+                t0 + (want - l0) / (l1 - l0) * (t1 - t0)
+            }
+        };
+        let p = bezier(self.p0, self.c1, self.c2, self.p3, t_param);
+        // Lateral noise, zero at both ends so the endpoints stay exact.
+        let k = ((t - self.start_ms) / WOBBLE_STEP_MS).clamp(0.0, (self.wobble.len() - 1) as f64);
+        let (i, f) = (k.floor() as usize, k.fract());
+        let w0 = self.wobble[i];
+        let w1 = self.wobble[(i + 1).min(self.wobble.len() - 1)];
+        let off = (w0 + (w1 - w0) * f) * (std::f64::consts::PI * tau).sin();
+        Point::new(p.x + self.perp.0 * off, p.y + self.perp.1 * off)
+    }
+}
+
+/// Plan the submovements that bring the pointer from `from` to `aim` for a
+/// target of width `w` (px, measured along the movement).
+fn plan(
+    from: Point,
+    aim: Point,
+    w: f64,
+    profile: &MouseProfile,
+    rng: &mut SmallRng,
+) -> Vec<Submovement> {
+    let d = from.dist(&aim);
+    if d < 1.0 {
+        return Vec::new();
+    }
+    let mt = fitts_ms(profile, d, w) * log_normal(rng, 1.0, 0.15);
+    let (ux, uy) = ((aim.x - from.x) / d, (aim.y - from.y) / d);
+    let (px, py) = (-uy, ux);
+    // Primary submovement endpoint.
+    let along = if d > 40.0 && chance(rng, profile.overshoot_rate) {
+        let mean = profile.overshoot_distance_px * (d / 400.0).min(1.0);
+        d + normal_sample(rng, mean, 0.4 * mean).abs().max(2.0)
+    } else {
+        d * clamp(normal_sample(rng, 0.95, 0.03), 0.85, 1.0)
     };
-    let p2 = Point {
-        x: from.x + 2.0 * dx / 3.0 + px * d2,
-        y: from.y + 2.0 * dy / 3.0 + py * d2,
-    };
+    let across = normal_sample(rng, 0.0, 0.025 * d);
+    let p1 = Point::new(
+        from.x + ux * along + px * across,
+        from.y + uy * along + py * across,
+    );
+    let tolerance = (0.15 * w).max(1.5);
+    if p1.dist(&aim) <= tolerance {
+        // The primary submovement lands on the aim point.
+        return vec![Submovement::new(
+            from,
+            aim,
+            0.0,
+            mt,
+            profile.curvature,
+            profile.path_noise,
+            rng,
+        )];
+    }
+    let primary_ms = mt * uniform(rng, 0.75, 0.9);
+    let mut subs = vec![Submovement::new(
+        from,
+        p1,
+        0.0,
+        primary_ms,
+        profile.curvature,
+        profile.path_noise,
+        rng,
+    )];
+    // Corrective submovements: the first lands near the aim, a second (if
+    // needed) on it.
+    let mut cur = p1;
+    for k in 0..2 {
+        let err = cur.dist(&aim);
+        if err < 1.0 {
+            break;
+        }
+        let pause = clamp(log_normal(rng, 70.0, 0.4), 30.0, 250.0);
+        let dur = (fitts_ms(profile, err, w) * 0.6).max(70.0) * log_normal(rng, 1.0, 0.15);
+        let next = if k == 0 && err > 2.0 * tolerance {
+            Point::new(
+                aim.x + normal_sample(rng, 0.0, 0.1 * err),
+                aim.y + normal_sample(rng, 0.0, 0.1 * err),
+            )
+        } else {
+            aim
+        };
+        let start = subs.last().map_or(0.0, Submovement::end_ms) + pause;
+        subs.push(Submovement::new(
+            cur,
+            next,
+            start,
+            dur,
+            profile.curvature * 0.5,
+            profile.path_noise,
+            rng,
+        ));
+        cur = next;
+    }
+    if cur.dist(&aim) >= 1.0 {
+        let start = subs.last().map_or(0.0, Submovement::end_ms) + 40.0;
+        subs.push(Submovement::new(cur, aim, start, 60.0, 0.0, 0.0, rng));
+    }
+    subs
+}
 
-    (p1, p2)
+/// Position of the planned trajectory at `t` (at rest between and after
+/// submovements).
+fn position(subs: &[Submovement], from: Point, t: f64) -> Point {
+    let mut p = from;
+    for s in subs {
+        if t < s.start_ms {
+            return p;
+        }
+        p = s.at(t);
+        if t <= s.end_ms() {
+            return p;
+        }
+    }
+    p
+}
+
+/// Sample a planned trajectory the way the page sees it: device reports,
+/// coalesced to one event per display frame, whole pixels, no event when
+/// the position did not change. The last event is at `aim` (rounded).
+fn sample(
+    subs: &[Submovement],
+    from: Point,
+    aim: Point,
+    profile: &MouseProfile,
+    rng: &mut SmallRng,
+) -> (Vec<MouseEvent>, f64) {
+    let end = subs.last().map_or(0.0, Submovement::end_ms);
+    let device = 1000.0 / profile.device_hz.max(1.0);
+    let frame = 1000.0 / profile.display_hz.max(1.0);
+    // Tremor: two sinusoids (x, y) at 8-12 Hz plus sensor noise.
+    let f = uniform(rng, 8.0, 12.0) / 1000.0 * std::f64::consts::TAU;
+    let (phx, phy) = (
+        uniform(rng, 0.0, std::f64::consts::TAU),
+        uniform(rng, 0.0, std::f64::consts::TAU),
+    );
+    let amp = uniform(rng, 0.2, 0.4);
+
+    // Device samples.
+    let mut samples: Vec<(f64, Point)> = Vec::new();
+    let mut t = uniform(rng, 0.0, device);
+    while t <= end + device {
+        let ts = t + normal_sample(rng, 0.0, 0.3);
+        let mut p = position(subs, from, ts);
+        if ts < end {
+            p.x += amp * (f * ts + phx).sin() + normal_sample(rng, 0.0, 0.15);
+            p.y += amp * (f * ts + phy).sin() + normal_sample(rng, 0.0, 0.15);
+        }
+        samples.push((ts.max(0.0), p));
+        t += device;
+    }
+    // Coalesce to frames.
+    let mut events = Vec::new();
+    let mut last = from.rounded();
+    let mut next = 0usize;
+    let mut fr = uniform(rng, 0.0, frame);
+    let mut last_t = 0.0f64;
+    while next < samples.len() {
+        let mut pick = None;
+        while next < samples.len() && samples[next].0 <= fr {
+            pick = Some(samples[next]);
+            next += 1;
+        }
+        if let Some((ts, p)) = pick {
+            let p = p.rounded();
+            if p != last {
+                events.push(MouseEvent::moved(p, ts.max(last_t)));
+                last = p;
+                last_t = ts.max(last_t);
+            }
+        }
+        fr += frame + normal_sample(rng, 0.0, 0.4);
+    }
+    let aim_r = aim.rounded();
+    if last != aim_r {
+        last_t = last_t.max(end) + frame;
+        events.push(MouseEvent::moved(aim_r, last_t));
+    }
+    (events, last_t.max(end))
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Generate a realistic human mouse-movement sequence from `from` to `to`.
-///
-/// # Algorithm
-///
-/// 1. Compute total Euclidean distance.
-/// 2. Sample an effective speed for this movement from N(mean, std).
-/// 3. Generate two random interior Bézier control points with lateral deviation.
-/// 4. Optionally add an overshoot: extend the path past the target by a small
-///    Gaussian distance, then add a corrective straight-line return path.
-/// 5. Arc-length–parameterise the Bézier so that we can apply the ease-in-out
-///    speed profile uniformly along the curve (naïve t-parameterisation gives
-///    non-uniform speed because Béziers are not arc-length parameterised by
-///    default).
-/// 6. For each sample point, add ±0.5 px Gaussian jitter to simulate hand
-///    tremor and quantisation noise from the HID layer.
-/// 7. Derive timestamps from the cumulative distance and the speed profile.
-///
-/// Returns a `Vec<MouseEvent>` containing only `Move` events; click events
-/// are appended separately by `generate_click`.
+/// Pointer movement from `from` to `to` (no particular target: Fitts width
+/// [`DEFAULT_TARGET_PX`]). Returns only `Move` events; the last one is at
+/// `to` rounded to whole pixels.
 pub fn generate_mouse_path(
     from: Point,
     to: Point,
     profile: &MouseProfile,
     rng: &mut SmallRng,
 ) -> Vec<MouseEvent> {
-    let dist = from.dist(&to);
-
-    // Very short movements (< 3 px) — just emit one event at the destination.
-    if dist < 3.0 {
-        return vec![MouseEvent {
-            x: to.x,
-            y: to.y,
-            timestamp_ms: 0,
-            buttons: 0,
-            event_type: MouseEventType::Move,
-        }];
-    }
-
-    // Sample an effective speed for this individual movement.
-    // We clamp to a sensible human range (50 – 5000 px/s).
-    let speed = clamp(
-        normal_sample(rng, profile.speed_mean_px_per_s, profile.speed_std),
-        50.0,
-        5000.0,
-    );
-
-    // --- Bézier control points -------------------------------------------
-    let (p1, p2) = random_control_points(from, to, rng);
-
-    // --- Overshoot --------------------------------------------------------
-    // Some movements over-run the target (Fitts' Law predicts this is more
-    // common for fast movements toward small targets).  We model overshoot as
-    // a second, shorter Bézier segment that continues past `to` by a small
-    // amount and then returns.
-    let do_overshoot = uniform(rng, 0.0, 1.0) < profile.overshoot_rate;
-
-    // Build path segment(s): list of (from, p1, p2, to) tuples.
-    let mut segments: Vec<(Point, Point, Point, Point)> = Vec::new();
-
-    if do_overshoot {
-        // Compute a point slightly past the target along the final tangent.
-        let tangent_dx = to.x - p2.x;
-        let tangent_dy = to.y - p2.y;
-        let tangent_len = (tangent_dx * tangent_dx + tangent_dy * tangent_dy)
-            .sqrt()
-            .max(1.0);
-        let overshoot_dist = clamp(
-            normal_sample(
-                rng,
-                profile.overshoot_distance_px,
-                profile.overshoot_distance_px * 0.4,
-            ),
-            2.0,
-            profile.overshoot_distance_px * 2.5,
-        );
-        let overshoot_pt = Point {
-            x: to.x + (tangent_dx / tangent_len) * overshoot_dist,
-            y: to.y + (tangent_dy / tangent_len) * overshoot_dist,
-        };
-
-        // Primary segment: from → overshoot_pt
-        let (op1, op2) = random_control_points(from, overshoot_pt, rng);
-        segments.push((from, op1, op2, overshoot_pt));
-
-        // Corrective segment: overshoot_pt → to (short, nearly straight)
-        let (cp1, cp2) = random_control_points(overshoot_pt, to, rng);
-        segments.push((overshoot_pt, cp1, cp2, to));
-    } else {
-        segments.push((from, p1, p2, to));
-    }
-
-    // --- Arc-length parameterisation -------------------------------------
-    // We sample the Bézier at a large number of t values to build an
-    // approximate arc-length lookup table, then use it to place samples at
-    // equal arc-length intervals.
-    //
-    // This is necessary because raw Bézier parameterisation produces
-    // non-uniform speed: samples bunch up near inflection points and spread
-    // out near the endpoints, which would look robotic.
-
-    // Target sampling interval: ~8 px of arc-length gives ~100 events per
-    // 800 px path, which is realistic for 60 Hz mouse reports at ~800 px/s.
-    const SAMPLE_INTERVAL_PX: f64 = 8.0;
-    const LUT_STEPS: usize = 500; // granularity of the arc-length LUT
-
-    let mut all_points: Vec<Point> = Vec::new();
-
-    for (sp0, sp1, sp2, sp3) in &segments {
-        // Build LUT for this segment.
-        let mut lut: Vec<(f64, f64)> = Vec::with_capacity(LUT_STEPS + 1); // (t, arc_length)
-        let mut arc_len = 0.0_f64;
-        let mut prev = *sp0;
-        lut.push((0.0, 0.0));
-        for i in 1..=LUT_STEPS {
-            let t = i as f64 / LUT_STEPS as f64;
-            let pt = bezier(*sp0, *sp1, *sp2, *sp3, t);
-            arc_len += prev.dist(&pt);
-            lut.push((t, arc_len));
-            prev = pt;
-        }
-
-        let seg_len = arc_len;
-        if seg_len < 1.0 {
-            continue;
-        }
-
-        // Walk along the arc at SAMPLE_INTERVAL_PX steps.
-        let n_samples = (seg_len / SAMPLE_INTERVAL_PX).ceil() as usize;
-        let mut lut_idx = 0usize;
-        for s in 0..=n_samples {
-            let target_len = (s as f64 / n_samples as f64) * seg_len;
-            // Advance LUT index until we bracket the target arc length.
-            while lut_idx + 1 < lut.len() && lut[lut_idx + 1].1 < target_len {
-                lut_idx += 1;
-            }
-            // Linear interpolation between adjacent LUT entries.
-            let t = if lut_idx + 1 < lut.len() {
-                let (t0, l0) = lut[lut_idx];
-                let (t1, l1) = lut[lut_idx + 1];
-                let frac = if (l1 - l0).abs() < 1e-9 {
-                    0.0
-                } else {
-                    (target_len - l0) / (l1 - l0)
-                };
-                t0 + frac * (t1 - t0)
-            } else {
-                1.0
-            };
-
-            let pt = bezier(*sp0, *sp1, *sp2, *sp3, t);
-            all_points.push(pt);
-        }
-    }
-
-    if all_points.is_empty() {
-        all_points.push(to);
-    }
-
-    // --- Speed profile & timestamp calculation ---------------------------
-    // Apply ease-in-out speed modulation.  The speed at each point is:
-    //   v(s) = v_peak * ease_in_out(s)
-    // where s is the normalised position along the whole path.
-    //
-    // Integrating v(s) over the path gives the total travel time.  We use
-    // the sampled points to compute cumulative distances and from those derive
-    // timestamps.
-    //
-    // The constant `v_peak` is chosen so that the total time equals
-    // dist / (speed * integral_of_ease_in_out).
-    //
-    // ∫₀¹ ease_in_out(s) ds = ∫₀¹ (3s²-2s³) ds = [s³ - s⁴/2]₀¹ = 0.5
-    // So v_peak = speed / 0.5 = 2 * speed.
-    let v_peak = 2.0 * speed;
-
-    let n = all_points.len();
-    let mut events: Vec<MouseEvent> = Vec::with_capacity(n);
-    let mut timestamp_ms: f64 = 0.0;
-
-    for (i, pt) in all_points.iter().enumerate() {
-        // Normalised position along the path [0, 1].
-        let s = i as f64 / (n - 1).max(1) as f64;
-
-        // Instantaneous speed at this position.
-        let v_inst = (v_peak * ease_in_out(s)).max(1.0); // avoid division by zero
-
-        // Time to advance one arc-length sample at this speed.
-        // Each sample is approximately SAMPLE_INTERVAL_PX apart.
-        if i > 0 {
-            let dt_s = SAMPLE_INTERVAL_PX / v_inst;
-            timestamp_ms += dt_s * 1000.0;
-        }
-
-        // Apply micro-jitter: small Gaussian noise on every point.
-        // This simulates hand tremor and sub-pixel HID quantisation.
-        // Real mice report at 125–1000 Hz with ±0.5 px noise at the low end.
-        let jitter_x = normal_sample(rng, 0.0, 0.5);
-        let jitter_y = normal_sample(rng, 0.0, 0.5);
-
-        events.push(MouseEvent {
-            x: pt.x + jitter_x,
-            y: pt.y + jitter_y,
-            timestamp_ms: timestamp_ms as u64,
-            buttons: 0,
-            event_type: MouseEventType::Move,
-        });
-    }
-
-    events
+    generate_path_to(from, to, DEFAULT_TARGET_PX, profile, rng).0
 }
 
-/// Generate events for a human-like click at `position`.
-///
-/// # Sequence
-///
-/// 1. Move to the target (via `generate_mouse_path`) with a Gaussian offset
-///    from the exact centre — humans do not click pixel-perfectly.
-/// 2. `MouseDown` with a small random delay after arrival (reaction time +
-///    button-press latency ≈ 10–150 ms).
-/// 3. `MouseUp` after a random button-hold duration (10–150 ms).  The hold
-///    time is log-normally distributed because it has a hard lower bound
-///    (physical button travel time ~10 ms) but a long tail (users sometimes
-///    hold briefly while deciding).
-/// 4. Synthetic `Click` event at the same position.
-///
-/// # Gaussian click offset
-///
-/// Real click positions cluster around the visual centre of a target but are
-/// offset by N(0, 3 px) in each axis.  This is known as "endpoint scatter" in
-/// motor-control literature and is caused by neuromotor noise, not
-/// inattention.  Bot detectors look for pixel-perfect click coordinates as a
-/// strong signal.
+/// Movement to `aim` for a target of width `w`; also returns when the
+/// pointer came to rest (ms).
+pub fn generate_path_to(
+    from: Point,
+    aim: Point,
+    w: f64,
+    profile: &MouseProfile,
+    rng: &mut SmallRng,
+) -> (Vec<MouseEvent>, f64) {
+    let subs = plan(from, aim, w, profile, rng);
+    if subs.is_empty() {
+        let aim_r = aim.rounded();
+        if aim_r == from.rounded() {
+            return (Vec::new(), 0.0);
+        }
+        return (vec![MouseEvent::moved(aim_r, 0.0)], 0.0);
+    }
+    sample(&subs, from, aim, profile, rng)
+}
+
+/// Pick the point inside `target` a person would hit when coming from
+/// `from`: normal around the centre with sigma = W / 4.133 per axis
+/// (scaled by `endpoint_spread`), a small undershoot bias toward `from`,
+/// kept at least 1 px (or 15 %) inside the box. Whole pixels.
+pub fn aim_point(
+    from: Point,
+    target: &TargetBox,
+    profile: &MouseProfile,
+    rng: &mut SmallRng,
+) -> Point {
+    let c = target.center();
+    let d = from.dist(&c).max(1e-6);
+    let (ux, uy) = ((c.x - from.x) / d, (c.y - from.y) / d);
+    let k = profile.endpoint_spread / 4.133;
+    let bias = 0.04;
+    let x = c.x - ux * bias * target.width + normal_sample(rng, 0.0, k * target.width);
+    let y = c.y - uy * bias * target.height + normal_sample(rng, 0.0, k * target.height);
+    let inset_x = (0.15 * target.width)
+        .min(4.0)
+        .max(target.width.min(1.0) * 0.5);
+    let inset_y = (0.15 * target.height)
+        .min(4.0)
+        .max(target.height.min(1.0) * 0.5);
+    let lo_x = target.x + inset_x;
+    let hi_x = (target.x + target.width - inset_x).max(lo_x);
+    let lo_y = target.y + inset_y;
+    let hi_y = (target.y + target.height - inset_y).max(lo_y);
+    let p = Point::new(clamp(x, lo_x, hi_x).round(), clamp(y, lo_y, hi_y).round());
+    // Rounding can leave a tiny box; keep the point inside it.
+    Point::new(
+        clamp(
+            p.x,
+            target.x.ceil(),
+            (target.x + target.width).floor().max(target.x.ceil()),
+        ),
+        clamp(
+            p.y,
+            target.y.ceil(),
+            (target.y + target.height).floor().max(target.y.ceil()),
+        ),
+    )
+}
+
+/// Click options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClickOptions {
+    pub button: Button,
+    /// 1 for a click, 2 for a double click, ...
+    pub click_count: u32,
+}
+
+impl Default for ClickOptions {
+    fn default() -> Self {
+        Self {
+            button: Button::Left,
+            click_count: 1,
+        }
+    }
+}
+
+/// Move to a point inside `target` and click it. Returns the events (moves,
+/// then Down/Up/Click per click) and the clicked point.
+pub fn generate_click_in(
+    from: Point,
+    target: &TargetBox,
+    opts: ClickOptions,
+    profile: &MouseProfile,
+    rng: &mut SmallRng,
+) -> (Vec<MouseEvent>, Point) {
+    let aim = aim_point(from, target, profile, rng);
+    // Fitts width along the movement direction.
+    let d = from.dist(&aim).max(1e-6);
+    let (ux, uy) = ((aim.x - from.x) / d, (aim.y - from.y) / d);
+    let w = (ux.abs() * target.width + uy.abs() * target.height).max(4.0);
+    let (mut events, rest) = generate_path_to(from, aim, w, profile, rng);
+    let mut t = rest + clamp(log_normal(rng, 60.0, 0.5), 15.0, 400.0);
+    for n in 1..=opts.click_count.max(1) {
+        let hold = clamp(log_normal(rng, profile.press_hold_ms, 0.25), 35.0, 350.0);
+        let base = MouseEvent {
+            x: aim.x,
+            y: aim.y,
+            timestamp_ms: t.round() as u64,
+            buttons: opts.button.bit(),
+            event_type: MouseEventType::Down,
+            button: opts.button,
+            click_count: n,
+        };
+        let up_t = (t + hold).round() as u64;
+        events.push(base.clone());
+        events.push(MouseEvent {
+            timestamp_ms: up_t,
+            buttons: 0,
+            event_type: MouseEventType::Up,
+            ..base.clone()
+        });
+        events.push(MouseEvent {
+            timestamp_ms: up_t,
+            buttons: 0,
+            event_type: MouseEventType::Click,
+            ..base
+        });
+        t += hold + clamp(log_normal(rng, 110.0, 0.25), 50.0, 300.0);
+    }
+    (events, aim)
+}
+
+/// Move to `position` (a target known only by its centre, treated as a
+/// [`DEFAULT_TARGET_PX`] box) and left-click it.
 pub fn generate_click(
     from: Point,
     position: Point,
     profile: &MouseProfile,
     rng: &mut SmallRng,
 ) -> Vec<MouseEvent> {
-    // Move events to the target.
-    let mut events = generate_mouse_path(from, position, profile, rng);
-
-    // Determine the timestamp of arrival.
-    let arrive_ts = events.last().map(|e| e.timestamp_ms).unwrap_or(0);
-
-    // Apply Gaussian endpoint scatter: N(0, 3 px) per axis.
-    // This is the key anti-bot signal — do not reduce this.
-    let click_x = position.x + normal_sample(rng, 0.0, 3.0);
-    let click_y = position.y + normal_sample(rng, 0.0, 3.0);
-
-    // Pre-click pause: time between cursor stop and button press.
-    // Uniform 10–80 ms (reaction lag + button actuation latency).
-    let pre_click_pause = uniform(rng, 10.0, 80.0) as u64;
-
-    // Button hold duration: time from MouseDown to MouseUp.
-    // Log-normal with μ=60, σ=30 ms, clamped to [10, 150].
-    let hold_raw = normal_sample(rng, 60.0, 30.0);
-    let hold_ms = clamp(hold_raw, 10.0, 150.0) as u64;
-
-    let down_ts = arrive_ts + pre_click_pause;
-    let up_ts = down_ts + hold_ms;
-
-    events.push(MouseEvent {
-        x: click_x,
-        y: click_y,
-        timestamp_ms: down_ts,
-        buttons: 1,
-        event_type: MouseEventType::Down,
-    });
-
-    events.push(MouseEvent {
-        x: click_x,
-        y: click_y,
-        timestamp_ms: up_ts,
-        buttons: 0,
-        event_type: MouseEventType::Up,
-    });
-
-    // Synthetic Click immediately follows MouseUp (browser fires it at the
-    // same tick in most implementations).
-    events.push(MouseEvent {
-        x: click_x,
-        y: click_y,
-        timestamp_ms: up_ts,
-        buttons: 0,
-        event_type: MouseEventType::Click,
-    });
-
-    events
+    let target = TargetBox::around(position, DEFAULT_TARGET_PX);
+    generate_click_in(from, &target, ClickOptions::default(), profile, rng).0
 }
 
 /// Generate micro-movement events for hovering over a fixed point.
 ///
-/// While a user reads a tooltip or a modal, the cursor is not perfectly still
-/// — involuntary hand tremor produces drifts of 1–3 px over seconds.  Bot
-/// detectors measure cursor variance during pauses; zero variance is a strong
-/// bot signal.
-///
-/// # Arguments
-/// * `position`    — nominal hover position
-/// * `duration_ms` — how long to generate micro-movements for
-/// * `profile`     — provides `micro_movement_std_px`
+/// While a user reads a tooltip or a modal, the cursor is not perfectly
+/// still. A random walk with a soft pull back to `position`, one step every
+/// ~200 ms, whole pixels; steps that do not change the pixel are dropped.
 pub fn generate_micro_movements(
     position: Point,
     duration_ms: u64,
@@ -475,37 +710,25 @@ pub fn generate_micro_movements(
     if !profile.micro_movement_enabled || profile.micro_movement_std_px <= 0.0 {
         return Vec::new();
     }
-
-    // Emit one micro-movement event roughly every 200 ms.
-    // Real hover variance studies sample at this cadence.
-    let interval_ms = 200u64;
-    let n = (duration_ms / interval_ms).max(1) as usize;
-
-    // We use a random walk so consecutive positions are correlated (more
-    // realistic than independent Gaussian samples).
-    let mut x = position.x;
-    let mut y = position.y;
-    let mut events = Vec::with_capacity(n);
-
-    for i in 0..n {
-        // Each step is a small Gaussian increment.
+    let mut t = 0.0;
+    let (mut x, mut y) = (position.x, position.y);
+    let mut last = position.rounded();
+    let mut events = Vec::new();
+    loop {
+        t += clamp(log_normal(rng, 200.0, 0.3), 50.0, 600.0);
+        if t > duration_ms as f64 {
+            break;
+        }
         x += normal_sample(rng, 0.0, profile.micro_movement_std_px);
         y += normal_sample(rng, 0.0, profile.micro_movement_std_px);
-
-        // Soft pull back toward the nominal position to prevent unbounded drift.
-        let pull = 0.1;
-        x = x * (1.0 - pull) + position.x * pull;
-        y = y * (1.0 - pull) + position.y * pull;
-
-        events.push(MouseEvent {
-            x,
-            y,
-            timestamp_ms: (i as u64 + 1) * interval_ms,
-            buttons: 0,
-            event_type: MouseEventType::Move,
-        });
+        x = x * 0.9 + position.x * 0.1;
+        y = y * 0.9 + position.y * 0.1;
+        let p = Point::new(x, y).rounded();
+        if p != last {
+            events.push(MouseEvent::moved(p, t));
+            last = p;
+        }
     }
-
     events
 }
 
@@ -515,63 +738,256 @@ mod tests {
     use crate::profile::BehaviorProfile;
     use crate::rng::seeded_rng;
 
-    fn default_profile() -> MouseProfile {
+    fn profile() -> MouseProfile {
         BehaviorProfile::casual_user().mouse
     }
 
-    #[test]
-    fn path_ends_near_target() {
-        let profile = default_profile();
-        let mut rng = seeded_rng(1);
-        let from = Point::new(100.0, 100.0);
-        let to = Point::new(800.0, 400.0);
-        let events = generate_mouse_path(from, to, &profile, &mut rng);
-        assert!(!events.is_empty());
-        let last = events.last().unwrap();
-        // With overshoot the last move event can be the corrective return;
-        // allow up to 60 px tolerance.
-        let d = ((last.x - to.x).powi(2) + (last.y - to.y).powi(2)).sqrt();
-        assert!(d < 60.0, "path ended too far from target: {:.1} px", d);
+    fn moves(events: &[MouseEvent]) -> Vec<&MouseEvent> {
+        events
+            .iter()
+            .filter(|e| e.event_type == MouseEventType::Move)
+            .collect()
     }
 
     #[test]
-    fn click_events_have_correct_order() {
-        let profile = default_profile();
-        let mut rng = seeded_rng(2);
-        let from = Point::new(0.0, 0.0);
-        let target = Point::new(300.0, 200.0);
-        let events = generate_click(from, target, &profile, &mut rng);
-
-        // Last three events must be Down, Up, Click in that order.
-        let n = events.len();
-        assert!(n >= 3);
-        assert_eq!(events[n - 3].event_type, MouseEventType::Down);
-        assert_eq!(events[n - 2].event_type, MouseEventType::Up);
-        assert_eq!(events[n - 1].event_type, MouseEventType::Click);
-
-        // Timestamps must be non-decreasing.
-        for w in events.windows(2) {
-            assert!(
-                w[1].timestamp_ms >= w[0].timestamp_ms,
-                "timestamps not monotonic: {} > {}",
-                w[0].timestamp_ms,
-                w[1].timestamp_ms
-            );
+    fn path_ends_exactly_on_target() {
+        for seed in 0..50 {
+            let mut rng = seeded_rng(seed);
+            let to = Point::new(800.0, 400.0);
+            let ev = generate_mouse_path(Point::new(100.0, 100.0), to, &profile(), &mut rng);
+            let last = ev.last().unwrap();
+            assert_eq!((last.x, last.y), (800.0, 400.0), "seed {seed}");
         }
     }
 
     #[test]
-    fn timestamps_are_monotonic() {
-        let profile = default_profile();
-        let mut rng = seeded_rng(3);
-        let events = generate_mouse_path(
-            Point::new(0.0, 0.0),
-            Point::new(1000.0, 500.0),
-            &profile,
+    fn timestamps_monotonic_and_whole_pixels() {
+        for seed in 0..50 {
+            let mut rng = seeded_rng(seed);
+            let ev = generate_mouse_path(
+                Point::new(0.0, 0.0),
+                Point::new(1000.0, 500.0),
+                &profile(),
+                &mut rng,
+            );
+            for w in ev.windows(2) {
+                assert!(w[1].timestamp_ms >= w[0].timestamp_ms);
+                assert!((w[0].x, w[0].y) != (w[1].x, w[1].y), "duplicate position");
+            }
+            assert!(ev.iter().all(|e| e.x.fract() == 0.0 && e.y.fract() == 0.0));
+        }
+    }
+
+    #[test]
+    fn sampling_is_frame_coalesced() {
+        // At 60 Hz, no two moves are much closer than a frame apart and the
+        // gaps are not all identical.
+        let mut rng = seeded_rng(9);
+        let ev = generate_mouse_path(
+            Point::new(50.0, 50.0),
+            Point::new(900.0, 600.0),
+            &profile(),
             &mut rng,
         );
-        for w in events.windows(2) {
-            assert!(w[1].timestamp_ms >= w[0].timestamp_ms);
+        let gaps: Vec<u64> = ev
+            .windows(2)
+            .map(|w| w[1].timestamp_ms - w[0].timestamp_ms)
+            .collect();
+        assert!(gaps.len() > 20);
+        assert!(gaps.iter().all(|&g| g >= 8), "{gaps:?}");
+        assert!(gaps.iter().any(|&g| g != gaps[0]));
+    }
+
+    #[test]
+    fn fitts_duration_grows_with_difficulty() {
+        let p = profile();
+        let mean = |d: f64, w: f64| {
+            (0..200)
+                .map(|s| {
+                    let mut rng = seeded_rng(s);
+                    generate_path_to(Point::new(0.0, 0.0), Point::new(d, 0.0), w, &p, &mut rng).1
+                })
+                .sum::<f64>()
+                / 200.0
+        };
+        let easy = mean(100.0, 100.0);
+        let hard = mean(800.0, 10.0);
+        assert!(hard > easy * 2.0, "easy {easy} hard {hard}");
+        // Roughly Fitts: within 40 % of the prediction plus corrections.
+        let pred = fitts_ms(&p, 800.0, 10.0);
+        assert!(
+            hard > pred * 0.8 && hard < pred * 1.8,
+            "hard {hard} pred {pred}"
+        );
+    }
+
+    #[test]
+    fn speed_profile_is_bell_shaped() {
+        // Middle of the primary movement is faster than its ends.
+        let mut rng = seeded_rng(4);
+        let mut p = profile();
+        p.overshoot_rate = 0.0;
+        let ev = generate_mouse_path(Point::new(0.0, 0.0), Point::new(900.0, 0.0), &p, &mut rng);
+        let v: Vec<f64> = ev
+            .windows(2)
+            .filter(|w| w[1].timestamp_ms > w[0].timestamp_ms)
+            .map(|w| {
+                ((w[1].x - w[0].x).hypot(w[1].y - w[0].y))
+                    / (w[1].timestamp_ms - w[0].timestamp_ms) as f64
+            })
+            .collect();
+        let q = v.len() / 4;
+        let ends: f64 =
+            (v[..q].iter().sum::<f64>() + v[v.len() - q..].iter().sum::<f64>()) / (2 * q) as f64;
+        let mid: f64 = v[q..v.len() - q].iter().sum::<f64>() / (v.len() - 2 * q) as f64;
+        assert!(mid > ends * 1.3, "mid {mid} ends {ends}");
+    }
+
+    #[test]
+    fn paths_curve() {
+        // Maximum sideways deviation from the chord is usually > 1 px for a
+        // long movement, and small relative to its length.
+        let mut curved = 0;
+        for seed in 0..40 {
+            let mut rng = seeded_rng(seed);
+            let ev = generate_mouse_path(
+                Point::new(0.0, 0.0),
+                Point::new(600.0, 0.0),
+                &profile(),
+                &mut rng,
+            );
+            let dev = ev.iter().map(|e| e.y.abs()).fold(0.0, f64::max);
+            assert!(dev < 200.0, "seed {seed}: {dev}");
+            if dev > 3.0 {
+                curved += 1;
+            }
         }
+        assert!(curved >= 30, "{curved}/40 curved");
+    }
+
+    #[test]
+    fn paths_wobble_around_their_arc() {
+        // Movement direction changes (sign changes of the lateral motion,
+        // MacKenzie et al. 2001) happen several times on a long movement.
+        let mut total = 0;
+        for seed in 0..40 {
+            let mut rng = seeded_rng(seed);
+            let ev = generate_mouse_path(
+                Point::new(0.0, 300.0),
+                Point::new(700.0, 300.0),
+                &profile(),
+                &mut rng,
+            );
+            let mut last = 0.0f64;
+            for w in ev.windows(2) {
+                let dy = w[1].y - w[0].y;
+                if dy != 0.0 {
+                    if last != 0.0 && dy.signum() != last.signum() {
+                        total += 1;
+                    }
+                    last = dy;
+                }
+            }
+        }
+        let mean = total as f64 / 40.0;
+        assert!(mean >= 2.0, "mean direction changes {mean}");
+    }
+
+    #[test]
+    fn clicks_scatter_inside_the_target() {
+        let target = TargetBox::new(300.0, 200.0, 120.0, 40.0);
+        let mut off_centre = 0;
+        let mut xs = Vec::new();
+        for seed in 0..200 {
+            let mut rng = seeded_rng(seed);
+            let (ev, p) = generate_click_in(
+                Point::new(10.0, 10.0),
+                &target,
+                ClickOptions::default(),
+                &profile(),
+                &mut rng,
+            );
+            assert!(target.contains(p), "{p:?}");
+            let down = ev
+                .iter()
+                .find(|e| e.event_type == MouseEventType::Down)
+                .unwrap();
+            assert_eq!((down.x, down.y), (p.x, p.y));
+            let last_move = moves(&ev).last().map(|m| (m.x, m.y));
+            assert_eq!(last_move, Some((p.x, p.y)));
+            let c = target.center();
+            if (p.x - c.x).abs() >= 1.0 || (p.y - c.y).abs() >= 1.0 {
+                off_centre += 1;
+            }
+            xs.push(p.x - c.x);
+        }
+        assert!(off_centre > 150, "{off_centre}/200 off centre");
+        let sd = (xs.iter().map(|x| x * x).sum::<f64>() / xs.len() as f64).sqrt();
+        // sigma = W / 4.133 = 29 px, truncated by the box.
+        assert!(sd > 15.0 && sd < 35.0, "sd {sd}");
+    }
+
+    #[test]
+    fn click_order_and_hold() {
+        let mut holds = Vec::new();
+        for seed in 0..100 {
+            let mut rng = seeded_rng(seed);
+            let ev = generate_click(
+                Point::new(0.0, 0.0),
+                Point::new(300.0, 200.0),
+                &profile(),
+                &mut rng,
+            );
+            let n = ev.len();
+            assert_eq!(ev[n - 3].event_type, MouseEventType::Down);
+            assert_eq!(ev[n - 2].event_type, MouseEventType::Up);
+            assert_eq!(ev[n - 1].event_type, MouseEventType::Click);
+            assert_eq!(ev[n - 3].buttons, 1);
+            assert_eq!(ev[n - 2].buttons, 0);
+            for w in ev.windows(2) {
+                assert!(w[1].timestamp_ms >= w[0].timestamp_ms);
+            }
+            assert!(ev[n - 3].timestamp_ms > ev[n - 4].timestamp_ms);
+            holds.push(ev[n - 2].timestamp_ms - ev[n - 3].timestamp_ms);
+        }
+        holds.sort_unstable();
+        let med = holds[50];
+        assert!((70..=130).contains(&med), "median hold {med}");
+        assert!(holds[0] >= 35 && holds[99] <= 350);
+    }
+
+    #[test]
+    fn double_click_counts() {
+        let mut rng = seeded_rng(3);
+        let (ev, _) = generate_click_in(
+            Point::new(0.0, 0.0),
+            &TargetBox::new(100.0, 100.0, 50.0, 20.0),
+            ClickOptions {
+                button: Button::Right,
+                click_count: 2,
+            },
+            &profile(),
+            &mut rng,
+        );
+        let downs: Vec<&MouseEvent> = ev
+            .iter()
+            .filter(|e| e.event_type == MouseEventType::Down)
+            .collect();
+        assert_eq!(downs.len(), 2);
+        assert_eq!((downs[0].click_count, downs[1].click_count), (1, 2));
+        assert!(
+            downs
+                .iter()
+                .all(|d| d.button == Button::Right && d.buttons == 2)
+        );
+    }
+
+    #[test]
+    fn short_or_zero_moves() {
+        let mut rng = seeded_rng(1);
+        let p = Point::new(10.0, 10.0);
+        assert!(generate_mouse_path(p, p, &profile(), &mut rng).is_empty());
+        let ev = generate_mouse_path(p, Point::new(11.0, 10.0), &profile(), &mut rng);
+        assert_eq!(ev.last().map(|e| (e.x, e.y)), Some((11.0, 10.0)));
     }
 }
