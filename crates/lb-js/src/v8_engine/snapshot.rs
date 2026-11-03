@@ -678,7 +678,6 @@ impl Engine {
             st.handles.clear();
             st.resolvers.clear();
             st.realms.clear();
-            st.detached.clear();
             st.interfaces.clear();
             st.callbacks.clear();
             st.creating = None;

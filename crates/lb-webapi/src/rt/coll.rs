@@ -241,7 +241,7 @@ fn indexed(
 ) -> IndexedGetter {
     let rt = rt.clone();
     Rc::new(move |cx, i| {
-        let Some(w) = rt.window(cx.realm()) else {
+        let Some(w) = rt.window(cx.holder_realm()) else {
             return Ok(None);
         };
         let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -258,7 +258,7 @@ fn named(
 ) -> NamedGetter {
     let rt = rt.clone();
     Rc::new(move |cx, name| {
-        let Some(w) = rt.window(cx.realm()) else {
+        let Some(w) = rt.window(cx.holder_realm()) else {
             return Ok(None);
         };
         let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -817,7 +817,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     );
     let rt2 = rt.clone();
     reg.named_setter("DOMStringMap", Rc::new(move |cx, name, value| {
-        let Some(w) = rt2.window(cx.realm()) else { return Ok(false) };
+        let Some(w) = rt2.window(cx.holder_realm()) else { return Ok(false) };
         let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else { return Ok(false) };
         let Some((slot, n)) = sm(&w, h.id) else { return Ok(false) };
         let Some(attr) = camel_to_data(name) else {
@@ -834,7 +834,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.named_deleter(
         "DOMStringMap",
         Rc::new(move |cx, name| {
-            let Some(w) = rt3.window(cx.realm()) else {
+            let Some(w) = rt3.window(cx.holder_realm()) else {
                 return Ok(None);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -858,7 +858,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.named_enumerator(
         "DOMStringMap",
         Rc::new(move |cx| {
-            let Some(w) = rt4.window(cx.realm()) else {
+            let Some(w) = rt4.window(cx.holder_realm()) else {
                 return Vec::new();
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {

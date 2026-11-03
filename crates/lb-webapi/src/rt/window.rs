@@ -225,6 +225,10 @@ impl Window {
 }
 
 fn set_timer(cx: &mut CallCtx<'_, '_, '_>, w: &Window, repeat: bool) -> Result<(), HostError> {
+    // A removed frame's window schedules nothing (Chrome returns 0).
+    if super::frames::is_detached(w) {
+        return cx.ret(0);
+    }
     let cb = if cx.arg_kind(0) == ValueKind::Function {
         TimerCallback::Function(cx.arg_handle(0))
     } else {
@@ -619,6 +623,19 @@ fn storage_of(w: &Window, id: u32) -> Option<crate::host::StorageArea> {
     })
 }
 
+/// History of a removed frame's document: Chrome throws.
+fn not_fully_active(w: &Window, prop: &str) -> Result<(), HostError> {
+    if super::frames::is_detached(w) {
+        return Err(w.rt.err(
+            "SecurityError",
+            format!(
+                "Failed to read the '{prop}' property from 'History': May not use a History object associated with a Document that is not fully active"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     // Timers and callbacks
     method(reg, rt, "Window", "setTimeout", |cx, w| {
@@ -646,6 +663,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 "Failed to execute 'requestAnimationFrame' on 'Window': The callback provided as parameter 1 is not a function.",
             ));
         }
+        if super::frames::is_detached(w) {
+            return cx.ret(0);
+        }
         let f = cx.arg_handle(0);
         cx.ret(w.add_raf(f))
     });
@@ -664,6 +684,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Window", "requestIdleCallback", |cx, w| {
         need_args(cx, 1, "requestIdleCallback", "Window")?;
+        if super::frames::is_detached(w) {
+            return cx.ret(0);
+        }
         let f = cx.arg_handle(0);
         let id = w.add_timer(TimerCallback::Function(f), 1.0, Vec::new(), false);
         cx.ret(id)
@@ -674,6 +697,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     macro_rules! win_num {
         ($name:literal, |$w:ident| $e:expr) => {
             getter(reg, rt, "Window", $name, |cx, $w| {
+                // A removed frame has no geometry (Chrome: 0).
+                if super::frames::is_detached($w) {
+                    return cx.ret(0);
+                }
                 let v: f64 = $e;
                 cx.ret(v)
             });
@@ -749,11 +776,17 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         cx.ret(singleton(w, "navigator", || Obj::Navigator))
     });
     getter(reg, rt, "Window", "localStorage", |cx, w| {
+        if super::frames::is_detached(w) {
+            return cx.ret(Arg::Null);
+        }
         cx.ret(singleton(w, "localStorage", || Obj::Storage {
             local: true,
         }))
     });
     getter(reg, rt, "Window", "sessionStorage", |cx, w| {
+        if super::frames::is_detached(w) {
+            return cx.ret(Arg::Null);
+        }
         cx.ret(singleton(w, "sessionStorage", || Obj::Storage {
             local: false,
         }))
@@ -773,7 +806,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Window", "crossOriginIsolated", |cx, _w| {
         cx.ret(false)
     });
-    getter(reg, rt, "Window", "closed", |cx, _w| cx.ret(false));
+    getter(reg, rt, "Window", "closed", |cx, w| {
+        cx.ret(super::frames::is_detached(w))
+    });
     getter(reg, rt, "Window", "length", |cx, _w| cx.ret(0));
     getter(reg, rt, "Window", "opener", |cx, _w| cx.ret(Arg::Null));
     getter(reg, rt, "Window", "frameElement", |cx, _w| {
@@ -958,10 +993,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
 
     // History
     getter(reg, rt, "History", "length", |cx, w| {
+        not_fully_active(w, "length")?;
         let h = w.history.borrow();
         cx.ret(h.before + h.entries.len() as u32)
     });
     getter(reg, rt, "History", "state", |cx, w| {
+        not_fully_active(w, "state")?;
         let s = {
             let h = w.history.borrow();
             h.entries[h.index].state.clone()
@@ -969,6 +1006,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         cx.ret(s.map_or(Arg::Null, Arg::Json))
     });
     getter(reg, rt, "History", "scrollRestoration", |cx, w| {
+        not_fully_active(w, "scrollRestoration")?;
         cx.ret(w.history.borrow().scroll_restoration.clone())
     });
     setter(reg, rt, "History", "scrollRestoration", |cx, w| {
@@ -1135,7 +1173,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.named_getter(
         "Storage",
         Rc::new(move |cx, name| {
-            let Some(w) = rs.window(cx.realm()) else {
+            let Some(w) = rs.window(cx.holder_realm()) else {
                 return Ok(None);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -1165,7 +1203,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.named_setter(
         "Storage",
         Rc::new(move |cx, name, value| {
-            let Some(w) = rs.window(cx.realm()) else {
+            let Some(w) = rs.window(cx.holder_realm()) else {
                 return Ok(false);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -1182,7 +1220,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.named_deleter(
         "Storage",
         Rc::new(move |cx, name| {
-            let Some(w) = rs.window(cx.realm()) else {
+            let Some(w) = rs.window(cx.holder_realm()) else {
                 return Ok(None);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -1198,7 +1236,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.named_enumerator(
         "Storage",
         Rc::new(move |cx| {
-            let Some(w) = rs.window(cx.realm()) else {
+            let Some(w) = rs.window(cx.holder_realm()) else {
                 return Vec::new();
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -1242,12 +1280,24 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             });
         };
     }
-    scr!("width", |s| s.width);
-    scr!("height", |s| s.height);
-    scr!("availWidth", |s| s.avail_width);
-    scr!("availHeight", |s| s.avail_height);
-    scr!("availLeft", |s| s.avail_left);
-    scr!("availTop", |s| s.avail_top);
+    // Sizes of a removed frame's screen read 0 (Chrome); depths stay.
+    macro_rules! scr_size {
+        ($name:literal, |$s:ident| $e:expr) => {
+            getter(reg, rt, "Screen", $name, |cx, w| {
+                if super::frames::is_detached(w) {
+                    return cx.ret(0);
+                }
+                let $s = screen_dims(w);
+                cx.ret($e)
+            });
+        };
+    }
+    scr_size!("width", |s| s.width);
+    scr_size!("height", |s| s.height);
+    scr_size!("availWidth", |s| s.avail_width);
+    scr_size!("availHeight", |s| s.avail_height);
+    scr_size!("availLeft", |s| s.avail_left);
+    scr_size!("availTop", |s| s.avail_top);
     scr!("colorDepth", |s| s.color_depth);
     scr!("pixelDepth", |s| s.pixel_depth);
     getter(reg, rt, "Screen", "isExtended", |cx, _w| cx.ret(false));
@@ -1262,8 +1312,14 @@ fn register_navigator(reg: &mut Registry, rt: &Runtime) {
             });
         };
     }
-    nav!("userAgent", |w| w.persona.user_agent.clone());
+    // A removed frame's navigator has no user agent (Chrome: "").
+    nav!("userAgent", |w| if super::frames::is_detached(w) {
+        String::new()
+    } else {
+        w.persona.user_agent.clone()
+    });
     nav!("appVersion", |w| match &w.profile {
+        _ if super::frames::is_detached(w) => String::new(),
         Some(p) => p.browser.app_version.clone(),
         None => w
             .persona
@@ -1303,10 +1359,10 @@ fn register_navigator(reg: &mut Registry, rt: &Runtime) {
         || "Mozilla".to_owned(),
         |p| p.browser.app_code_name.clone()
     ));
-    nav!("cookieEnabled", |w| w
-        .profile
-        .as_ref()
-        .is_none_or(|p| p.browser.cookie_enabled));
+    nav!("cookieEnabled", |w| !super::frames::is_detached(w)
+        && w.profile
+            .as_ref()
+            .is_none_or(|p| p.browser.cookie_enabled));
     nav!("onLine", |_w| true);
     nav!("webdriver", |_w| false);
     nav!("pdfViewerEnabled", |w| w

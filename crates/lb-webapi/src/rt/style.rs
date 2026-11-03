@@ -472,11 +472,26 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 "Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'.",
             ));
         };
-        let id = w.new_obj(Obj::Style {
-            slot,
-            node: n,
-            computed: true,
-        });
+        // A removed frame computes no style: an empty declaration (Chrome).
+        let id = if super::frames::is_detached(w) {
+            let n = w.doc_slot_mut(slot, |d| {
+                d.create_element(
+                    lb_dom::QualName::new(None, lb_dom::ns!(html), lb_dom::local_name!("div")),
+                    Vec::new(),
+                )
+            });
+            w.new_obj(Obj::Style {
+                slot,
+                node: n,
+                computed: false,
+            })
+        } else {
+            w.new_obj(Obj::Style {
+                slot,
+                node: n,
+                computed: true,
+            })
+        };
         cx.ret(w.obj_arg(id))
     });
     getter(reg, rt, "CSSStyleDeclaration", "cssText", |cx, w| {
@@ -609,7 +624,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.indexed_getter(
         "CSSStyleDeclaration",
         Rc::new(move |cx, i| {
-            let Some(w) = rt1.window(cx.realm()) else {
+            let Some(w) = rt1.window(cx.holder_realm()) else {
                 return Ok(None);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -636,7 +651,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(css) = css_name(name) else {
                 return Ok(None);
             };
-            let Some(w) = rt2.window(cx.realm()) else {
+            let Some(w) = rt2.window(cx.holder_realm()) else {
                 return Ok(None);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -655,7 +670,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(css) = css_name(name) else {
                 return Ok(false);
             };
-            let Some(w) = rt3.window(cx.realm()) else {
+            let Some(w) = rt3.window(cx.holder_realm()) else {
                 return Ok(false);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -880,7 +895,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     reg.indexed_getter(
         "DOMRectList",
         Rc::new(move |cx, i| {
-            let Some(w) = rt4.window(cx.realm()) else {
+            let Some(w) = rt4.window(cx.holder_realm()) else {
                 return Ok(None);
             };
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
@@ -915,6 +930,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, "MediaQueryList", "matches", |cx, w| {
         let m = mql(cx, w)?;
+        if super::frames::is_detached(w) {
+            return cx.ret(false);
+        }
         cx.ret(w.with_layout(0, |l, _| l.styles().match_media(&m).matches))
     });
     method(reg, rt, "MediaQueryList", "addListener", |cx, w| {

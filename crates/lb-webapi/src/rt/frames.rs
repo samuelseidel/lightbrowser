@@ -68,7 +68,16 @@ pub struct FrameState {
     /// Restricted cross-origin stand-ins handed to other windows, by the
     /// accessing window's realm.
     remote: RefCell<Vec<(lb_js::RealmId, Handle)>>,
+    /// This window's frame was removed from its parent's document; the
+    /// window stays usable for scripts holding it (see [`detach_window`]).
+    detached: Cell<bool>,
+    /// Top-level window only: removed frames kept usable, oldest first.
+    gone: RefCell<Vec<Rc<Window>>>,
 }
+
+/// Removed frames a page keeps usable (realm alive) at most; past that the
+/// oldest is dropped (its functions then throw `Illegal invocation`).
+const MAX_DETACHED: usize = 16;
 
 /// A child frame of a window.
 #[derive(Clone)]
@@ -268,6 +277,15 @@ pub fn drop_children(ops: &mut dyn RealmOps, w: &Window) {
     for c in kids {
         drop_window_tree(ops, &c.window, true);
     }
+    let gone = std::mem::take(&mut *w.frames.gone.borrow_mut());
+    for g in gone {
+        drop_realm_of(ops, &g);
+    }
+}
+
+/// Whether `w`'s frame was removed from its parent's document.
+pub fn is_detached(w: &Window) -> bool {
+    w.frames.detached.get()
 }
 
 /// Fire `load` at frame `frame`'s `<iframe>` element (after the frame's
@@ -368,7 +386,7 @@ pub(crate) fn on_mutations(js: &mut dyn super::Js, w: &Rc<Window>, batch: &[(u32
         };
         for c in gone {
             w.frames.children.borrow_mut().retain(|x| x.id != c.id);
-            drop_window_tree(js.realm_ops(), &c.window, true);
+            detach_window(js.realm_ops(), w, &c.window);
         }
     }
     for el in attach {
@@ -483,12 +501,46 @@ fn drop_window_tree(ops: &mut dyn RealmOps, w: &Rc<Window>, gone: bool) {
         h.detached(ops, w, gone);
     }
     w.close();
+    drop_realm_of(ops, w);
+}
+
+fn drop_realm_of(ops: &mut dyn RealmOps, w: &Window) {
     let realm = w.realm();
     w.rt.detach(realm);
     ops.drop_realm(realm);
     w.frames.global.set(None);
     w.frames.document.set(None);
     w.frames.remote.borrow_mut().clear();
+}
+
+/// A frame removed from `parent`'s document: as in Chrome its window
+/// stays usable for scripts that hold it (its document, `eval`, built-ins,
+/// interface objects already made), but it is closed (no tasks or
+/// timers), has no parent, and interface objects not made yet read
+/// `undefined`. Its realm lives until the page navigates (at most
+/// [`MAX_DETACHED`] per page). Frames inside it are dropped.
+fn detach_window(ops: &mut dyn RealmOps, parent: &Rc<Window>, w: &Rc<Window>) {
+    let kids = std::mem::take(&mut *w.frames.children.borrow_mut());
+    for c in kids {
+        drop_window_tree(ops, &c.window, true);
+    }
+    if let Some(h) = hooks(w) {
+        h.detached(ops, w, true);
+    }
+    w.close();
+    w.frames.detached.set(true);
+    w.hidden.set(true);
+    ops.detach_realm(w.realm());
+    let t = top(parent);
+    *w.frames.parent.borrow_mut() = Weak::new();
+    let old = {
+        let mut gone = t.frames.gone.borrow_mut();
+        gone.push(w.clone());
+        (gone.len() > MAX_DETACHED).then(|| gone.remove(0))
+    };
+    if let Some(old) = old {
+        drop_realm_of(ops, &old);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -669,10 +721,14 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let v = window_for(cx, &from, &p)?;
             cx.ret(v)
         }
+        None if is_detached(w) => cx.ret(Arg::Null),
         None => self_global(cx, w),
     });
     let r = rt.clone();
     getter(reg, rt, "Window", "top", move |cx, w| {
+        if is_detached(w) {
+            return cx.ret(Arg::Null);
+        }
         let t = top(w);
         if Rc::ptr_eq(&t, w) {
             return self_global(cx, w);

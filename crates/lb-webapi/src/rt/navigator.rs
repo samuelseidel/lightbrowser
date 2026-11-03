@@ -283,7 +283,7 @@ enum Holder {
 /// Window and collection kind of an interceptor's holder (no borrow is
 /// kept while the caller builds results).
 fn holder(rt: &Runtime, cx: &mut lb_js::PropCtx<'_, '_, '_>) -> Option<(Rc<Window>, Holder)> {
-    let w = rt.window(cx.realm())?;
+    let w = rt.window(cx.holder_realm())?;
     let h = cx.holder_host().filter(|h| h.kind == super::K_OBJ)?;
     let k = nav(&w, h.id, |o| match o {
         NavObj::PluginArray => Some(Holder::PluginArray),
@@ -1434,6 +1434,9 @@ fn register_speech(reg: &mut Registry, rt: &Runtime) {
 fn register_screen_extras(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Screen", "orientation", |cx, w| {
         this_obj(cx)?;
+        if super::frames::is_detached(w) {
+            return cx.ret(Arg::Null);
+        }
         cx.ret(single(w, "nav:orientation", 0, || NavObj::Orientation))
     });
     fn check(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(), HostError> {
@@ -1754,6 +1757,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, "Navigator", "connection", |cx, w| {
         this_obj(cx)?;
+        if super::frames::is_detached(w) {
+            return cx.ret(Arg::Null);
+        }
         cx.ret(single(w, "nav:connection", 0, || NavObj::Connection))
     });
     getter(reg, rt, "Navigator", "permissions", |cx, w| {

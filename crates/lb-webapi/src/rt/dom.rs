@@ -1402,7 +1402,8 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, "Document", "defaultView", |cx, w| {
         let (slot, _) = this_node(cx, w)?;
-        if slot == 0 {
+        // A removed frame's document has no browsing context (null).
+        if slot == 0 && !super::frames::is_detached(w) {
             cx.ret(w.host_arg(super::WINDOW_REF))
         } else {
             cx.ret(Arg::Null)
@@ -1438,7 +1439,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Document", "hasFocus", |cx, w| {
         this_node(cx, w)?;
-        cx.ret(true)
+        cx.ret(!super::frames::is_detached(w))
     });
     getter(reg, rt, "Document", "activeElement", |cx, w| {
         let (slot, _) = this_node(cx, w)?;

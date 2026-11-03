@@ -26,6 +26,10 @@ pub trait RealmOps {
     }
     /// Drop a realm, its wrappers, handles and resolvers.
     fn drop_realm(&mut self, realm: RealmId);
+    /// The realm's frame was removed from its document: the realm keeps
+    /// working for scripts that hold its objects, but its global's
+    /// interface objects not made yet read `undefined` (Chrome).
+    fn detach_realm(&mut self, realm: RealmId);
     fn evaluate(
         &mut self,
         realm: RealmId,
@@ -171,6 +175,9 @@ impl RealmOps for Engine {
     }
     fn drop_realm(&mut self, realm: RealmId) {
         Engine::drop_realm(self, realm)
+    }
+    fn detach_realm(&mut self, realm: RealmId) {
+        detach_realm_state(&self.state, realm);
     }
     fn evaluate(
         &mut self,
@@ -343,7 +350,10 @@ impl RealmOps for CallCtx<'_, '_, '_> {
         is_snapshot_realm(&self.state, realm)
     }
     fn drop_realm(&mut self, realm: RealmId) {
-        drop_realm_state(self.scope, &self.state, realm);
+        drop_realm_state(&self.state, realm);
+    }
+    fn detach_realm(&mut self, realm: RealmId) {
+        detach_realm_state(&self.state, realm);
     }
     fn evaluate(
         &mut self,

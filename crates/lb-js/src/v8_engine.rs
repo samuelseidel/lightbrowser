@@ -845,6 +845,8 @@ struct RealmEntry {
     world: World,
     loader: Option<ModuleLoader>,
     modules: Vec<ModuleEntry>,
+    /// Its frame was removed ([`RealmOps::detach_realm`]).
+    detached: bool,
 }
 
 /// Shared with the near-heap-limit callback through a raw pointer.
@@ -881,9 +883,6 @@ struct State {
     snap: SnapState,
     /// The snapshot context while it is being made (it is no realm).
     creating: Option<Rc<RealmMat>>,
-    /// Dropped realms whose context is still alive (see
-    /// `drop_realm_state`).
-    detached: Vec<(v8::Weak<v8::Context>, Rc<RealmMat>)>,
     /// Large classic scripts compiled in this engine, most recent last,
     /// with their V8 code cache once they were compiled twice (see
     /// `run_script`).
@@ -1130,7 +1129,6 @@ impl Engine {
             heap: heap.clone(),
             snap,
             creating: None,
-            detached: Vec::new(),
             code_cache: Vec::new(),
         }));
         {
@@ -1233,7 +1231,7 @@ impl Engine {
 
     /// Drop a realm, its wrappers, handles and resolvers.
     pub fn drop_realm(&mut self, realm: RealmId) {
-        drop_realm_state(&mut self.isolate, &self.state, realm);
+        drop_realm_state(&self.state, realm);
     }
 
     /// Run `f` inside `realm`'s context, then clean up termination state.
@@ -1681,7 +1679,6 @@ impl Drop for Engine {
             st.handles.clear();
             st.resolvers.clear();
             st.realms.clear();
-            st.detached.clear();
             st.interfaces.clear();
             st.callbacks.clear();
             st.heap.take()
@@ -2030,6 +2027,7 @@ fn new_realm_in(
                 world: options.world,
                 loader: options.module_loader,
                 modules: Vec::new(),
+                detached: false,
             },
         );
     }
@@ -2039,7 +2037,7 @@ fn new_realm_in(
         None => Ok(()),
     };
     if let Err(e) = result {
-        drop_realm_state(scope, state, id);
+        drop_realm_state(state, id);
         return Err(e);
     }
     Ok(id)
@@ -2412,15 +2410,16 @@ fn lazy_interface_getter<'s>(
     let mat = match creating {
         Some(m) => m,
         None => {
-            let live = realm_of_context(scope, ctx).and_then(|r| state.borrow().mat(r));
-            let mat = live.or_else(|| {
+            // A detached realm (removed frame) or a dropped one: as in
+            // Chrome, interface objects not made yet read `undefined`.
+            let live = realm_of_context(scope, ctx).and_then(|r| {
                 let st = state.borrow();
-                st.detached
-                    .iter()
-                    .find(|(w, _)| w.to_local(scope) == Some(ctx))
-                    .map(|(_, m)| m.clone())
+                st.realms
+                    .get(&r)
+                    .filter(|e| !e.detached)
+                    .map(|e| e.mat.clone())
             });
-            let Some(m) = mat else {
+            let Some(m) = live else {
                 return;
             };
             m
@@ -2429,6 +2428,13 @@ fn lazy_interface_getter<'s>(
     let scope = &mut v8::ContextScope::new(scope, ctx);
     if let Some(f) = interface_object(scope, &state, &mat, id) {
         rv.set(f.into());
+    }
+}
+
+/// Mark `realm` detached (see [`RealmOps::detach_realm`]).
+fn detach_realm_state(state: &SharedState, realm: RealmId) {
+    if let Some(e) = state.borrow_mut().realms.get_mut(&realm) {
+        e.detached = true;
     }
 }
 
@@ -2441,16 +2447,9 @@ fn is_snapshot_realm(state: &SharedState, realm: RealmId) -> bool {
         .is_some_and(|r| r.from_snapshot)
 }
 
-fn drop_realm_state(isolate: &mut v8::Isolate, state: &SharedState, realm: RealmId) {
+fn drop_realm_state(state: &SharedState, realm: RealmId) {
     let mut st = state.borrow_mut();
-    if let Some(entry) = st.realms.remove(&realm) {
-        // Scripts may still hold the realm's global (a removed frame's
-        // `contentWindow`): its lazy interface objects must still be made
-        // with this realm's fixups. Kept until the context is collected.
-        st.detached.retain(|(w, _)| !w.is_empty());
-        let weak = v8::Weak::new(isolate, &entry.context);
-        st.detached.push((weak, entry.mat));
-    }
+    st.realms.remove(&realm);
     st.realm_by_global.retain(|_, ids| {
         ids.retain(|r| *r != realm);
         !ids.is_empty()
