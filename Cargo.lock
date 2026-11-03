@@ -1360,6 +1360,7 @@ dependencies = [
  "lb-paint",
  "lb-persona",
  "lb-webapi",
+ "libc",
  "serde_json",
  "tokio",
  "tracing",

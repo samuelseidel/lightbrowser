@@ -16,7 +16,62 @@ fn rss() -> String {
     format!("rss {:.1} hwm {:.1}", get("VmRSS:"), get("VmHWM:"))
 }
 
+static mut ICU: (usize, usize) = (0, 0);
+static TOUCHED: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
+static mut PAGES: [u8; 4096] = [0; 4096];
+
+extern "C" fn on_segv(_sig: i32, info: *mut libc::siginfo_t, _ctx: *mut libc::c_void) {
+    unsafe {
+        let addr = (*info).si_addr() as usize;
+        let (start, len) = ICU;
+        if addr >= start && addr < start + len {
+            let page = (addr - start) / 4096;
+            PAGES[page] = 1;
+            libc::mprotect((start + page * 4096) as *mut libc::c_void, 4096, libc::PROT_READ);
+            return;
+        }
+        libc::signal(libc::SIGSEGV, libc::SIG_DFL);
+    }
+}
+
+fn icu_trace_start() {
+    let d = lb_js::icu_data::data();
+    let start = (d.as_ptr() as usize).div_ceil(4096) * 4096;
+    let end = (d.as_ptr() as usize + d.len()) / 4096 * 4096;
+    unsafe {
+        ICU = (start, end - start);
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = on_segv as usize;
+        sa.sa_flags = libc::SA_SIGINFO;
+        libc::sigaction(libc::SIGSEGV, &sa, std::ptr::null_mut());
+        libc::mprotect(start as *mut libc::c_void, end - start, libc::PROT_NONE);
+    }
+    let _ = &TOUCHED;
+}
+
+fn icu_trace_report() {
+    unsafe {
+        let (_, len) = ICU;
+        let n = len / 4096;
+        let touched: Vec<usize> = (0..n).filter(|&i| PAGES[i] == 1).collect();
+        eprintln!("ICU pages touched: {} of {} ({:.1} KB)", touched.len(), n, touched.len() as f64 * 4.0);
+        let mut runs = Vec::new();
+        let mut i = 0;
+        while i < touched.len() {
+            let s = touched[i];
+            let mut e = s;
+            while i + 1 < touched.len() && touched[i + 1] == e + 1 { i += 1; e += 1; }
+            runs.push(format!("{}-{}", s * 4096, (e + 1) * 4096));
+            i += 1;
+        }
+        eprintln!("runs: {}", runs.join(" "));
+    }
+}
+
 fn main() {
+    if std::env::var("PROBE_ICU").is_ok() {
+        icu_trace_start();
+    }
     let t0 = Instant::now();
     let lap = |what: &str| eprintln!("{:8.1} ms  {what:30} {}", t0.elapsed().as_secs_f64() * 1e3, rss());
     if let Ok(out) = std::env::var("PROBE_DUMP") {
@@ -71,4 +126,7 @@ fn main() {
         let _ = page.close().await;
         lap("closed");
     });
+    if std::env::var("PROBE_ICU").is_ok() {
+        icu_trace_report();
+    }
 }
