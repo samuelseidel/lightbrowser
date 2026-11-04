@@ -18,21 +18,21 @@ Each milestone ends with something we can run and measure.
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019) | M1 proxies; M2/M3/M4 leftovers in their status sections |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021) | M1 proxies; M2/M3/M4 leftovers in their status sections; service workers, dynamic `import()` |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
-| M6 Performance | Snapshot, memory, binary size (40.76 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018) | Service workers; CDP crawl wall time 0.82 vs Lightpanda 0.74 s (5 of 6 checks pass, see "Style sheets and screenshot decorations") |
+| M6 Performance | Snapshot, memory, binary size (40.95 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018) | Service workers; CDP crawl wall time 0.84 vs Lightpanda 0.75 s (5 of 6 checks pass, see "Workers") |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 6.13 MB after "Style sheets and screenshot decorations"; 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
+| Idle RSS < 15 MB | Met: 6.06 MB after "Workers"; 6.13 MB after "Style sheets and screenshot decorations"; 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
+| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.95 MB (40,951,672 bytes) after "Workers"; 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
 | Realm creation < 5 ms | Met: 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
+| Wall time, peak RSS and CPU <= Lightpanda | 5 of 6 after "Workers" (`bench/results/2026-11-04-67c904b.json`): `fetch` wall 0.99 vs 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs 0.79 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.91 vs 23.28 MB, see "Workers"). 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -148,11 +148,12 @@ Still open from M2:
 - Bindings: no `WindowProperties` object (`Image`/`Option`/`Audio`
   share their interface's prototype since "Frames fidelity"); `NodeFilter` has a `prototype`; no weak
   wrappers (host objects live until the window drops); no `DOMException`
-  `stack`; namespace and worker-only member order is from the IDL, not a
-  fixture.
-- Pages: no workers, no cross-document history, form POST sent as GET.
+  `stack`; namespace member order is from the IDL, not a fixture (worker
+  globals and worker-only interfaces follow a capture since "Workers").
+- Pages: no cross-document history, form POST sent as GET. (Dedicated
+  and shared workers landed 2026-11-04, see "Workers".)
   (Nested browsing contexts landed in M4, see "M4 status: frames".)
-- Scripts: no dynamic `import()` or `import.meta`; script-inserted module
+- Scripts: no dynamic `import()` (`import.meta.url` since "Workers"); script-inserted module
   scripts are skipped; dynamic `async = false` scripts are not ordered;
   scripts written by `document.write` run after the writer returns; no
   unhandled-rejection reporting.
@@ -236,7 +237,7 @@ the frames spec).
 
 Open (CDP and page host):
 
-- No workers or popups. Screenshots landed in M6 (see "M6 status: screenshots").
+- No popups; workers (since "Workers") are not CDP targets. Screenshots landed in M6 (see "M6 status: screenshots").
 - `DOM.*` and `Input.*` on nodes inside child frames are refused (see
   "M4 status: frames and fingerprint report").
 - Same-document navigations are not reported (`navigatedWithinDocument`).
@@ -287,8 +288,8 @@ by the context's `PersonaProfile` (never statics or env):
 
 Known gaps after M4 (details in the sections below):
 
-- Workers do not exist, so there is no navigator or `Worker` in workers
-  (the `worker_mismatch` probe sees `Illegal constructor`). Firefox has no
+- Workers did not exist (the `worker_mismatch` probe saw `Illegal
+  constructor`); done 2026-11-04, see "Workers". Firefox has no
   JS engine yet (M4b).
 - WebGL runs no shaders and has no textures, framebuffers, blending or
   depth; `decodeAudioData` rejects; no `AudioWorklet`; no
@@ -586,8 +587,7 @@ Open: `DOM.*` and `Input.*` on nodes inside frames (clicks into frames)
 are refused; no named frame access (`window.frameName`), `sandbox`, or
 browsing contexts for `<frame>`/`<object>`/`<embed>`; nodes passed between
 frames' DOM methods are not supported; frame network events are
-attributed to the main frame; workers still missing (`worker_mismatch`
-probe reports `Illegal constructor`).
+attributed to the main frame; workers landed 2026-11-04 (see "Workers").
 
 ## M4 status: detect-bench target and determinism (2026-11-03)
 
@@ -2260,6 +2260,136 @@ Open:
   transforms, filters. The `Referer` of CSS images is the document, not
   the style sheet. A capture waits (up to 5 s) for background images on
   the CDP thread.
+
+## Workers (2026-11-04)
+
+Dedicated and shared workers, checked against local Chrome for Testing
+153.0.8010.12 on loopback pages. ADR 0021.
+
+**Threads and engines** (`lb-page` `worker.rs`, `lb-webapi` `rt/worker.rs`):
+
+- `new Worker()` / `new SharedWorker()` start one OS thread with a
+  `current_thread` runtime and a V8 isolate; nothing exists until a page
+  makes a worker (start-up, realm and idle memory unchanged). The scope is
+  an `rt::Window` without a document, so timers, `fetch`, XHR, events,
+  `URL`, encoders and `performance` are the window's code.
+- Requests go through the context's stack: same header profile, cookie jar
+  (`fetch` in a worker sends the page's `document.cookie`) and connection
+  pool. `importScripts` fetches synchronously on a helper thread.
+- Dedicated workers end with their document (`terminate()` stops running
+  script through the isolate's terminate handle); `close()` ends the worker
+  after the current task, whose messages are still delivered (as Chrome).
+  Shared workers are per context, by script URL and name, and end with
+  the context.
+
+**Surface** (`lb-webidl-gen`, `Bindings::define_worker`): the dedicated and
+shared worker globals were captured from Chrome
+(`tools/dump_worker_surface.js` -> `tests/fixtures/chromium_153_worker_surface.json`:
+335 and 287 own properties, 294 and 251 interface objects). The generator
+emits `WORKER_SCOPES` (own properties in order, late start) and order
+overrides for the 16 (dedicated) / 11 (shared) interfaces whose members
+differ in workers (`Performance` without `timing`/`navigation`/`memory`,
+`XMLHttpRequest` without `responseXML`, `MediaSource.handle`,
+`WorkerNavigator` without `hid`/`serial`/`usb` in shared workers, ...).
+Test `workers::surface_matches_chrome` compares every own property,
+interface prototype and statics, namespaces and the prototype chain of
+both globals with the capture: equal, except three engine built-ins the
+window lacks too (V8 152 has no `Iterator.zip`, `zipKeyed`,
+`Iterator.prototype.join`; Blink's `WebAssembly.compileStreaming` /
+`instantiateStreaming` are not installed).
+
+**Persona** (the point for detectors): the worker gets the page's
+`Arc<Persona>` / `Arc<PersonaProfile>`; `WorkerNavigator` uses the
+window's `Navigator` getters (`userAgent`, `platform`,
+`hardwareConcurrency`, `deviceMemory`, `language(s)`, `userAgentData` with
+`getHighEntropyValues`, `gpu`, `connection`, `permissions`, ...); the realm
+sets the same ICU time zone and locale.
+
+**Messages**: `postMessage` and `structuredClone` use V8's
+`ValueSerializer` (`lb_js::Serialized`; before, `structuredClone` went
+through JSON): `Map`, `Set`, `Date`, `RegExp`, errors, typed arrays,
+`BigInt`, cycles, V8's `DataCloneError` texts. `ArrayBuffer`s transfer
+(sender detached; bytes copied, a backing store cannot cross isolates
+without `unsafe`), `MessagePort`s transfer, `Blob`s clone, other host
+objects throw Chrome's "X object could not be cloned.". `MessageChannel`
+and `MessagePort` (`start`, `close`, implicit start on `onmessage`,
+queueing until started) work within a page and across threads. Windows
+on other threads receive tasks through inboxes (the posted-message task
+source), made on first use.
+
+**URLs and modules**: `blob:` URLs are stored (they were random strings
+before; revoked with their document), `data:` workers get origin `null`,
+module workers (`{type: 'module'}`) prefetch static imports (also
+`blob:` imports); `import.meta.url` now exists (pages too).
+
+**Errors**: an uncaught error fires `error` at the scope (`self.onerror`
+gets the five arguments) and, not canceled, an `ErrorEvent` at the
+`Worker` (`error` null, as Chrome) that is logged unless canceled; a
+script that fails to load fires a plain `Event`. Error events now take
+their location from the error's creation site (Chrome reports `throw new
+Error()` at `new`) and `ErrorEvent.error` is the thrown value, for
+windows too (both were wrong before: column of `throw`, `error` null).
+
+**Tests**: `lb-page` `tests/workers/` (10 cases, Chrome's logs in
+`chrome.json`, re-recorded with `serve.py` and `chrome.mjs`): messages and
+`MessageEvent` fields, the scope's globals and descriptors, errors (scope,
+`Worker`, load failure, syntax error, constructor errors), terminate and
+close, `importScripts` (order, relative URLs, 404, syntax and runtime
+errors), `fetch`/XHR with cookies, transfers and ports, `blob:`/`data:`/
+module workers, shared workers, `structuredClone`. All 10 match Chrome
+line for line, plus `surface_matches_chrome`. `lb-js`: clone across two
+engines.
+
+**Bench and report**: new info probe `worker_navigator` and rule
+`worker_navigator_mismatch` (45, automation): userAgent, appVersion,
+platform, hardwareConcurrency, deviceMemory, language(s), `gpu` presence,
+`userAgentData` and every high-entropy hint, page against a dedicated
+worker. 5 unit tests (`WorkerNavigatorRule`). Stock Chromium 153 passes
+(T-001 headless; T-010 over CDP headed under `xvfb-run`). All 8 reference
+personas: T-010 fp 0 and `--input human` beh 0, the worker probe equal on
+every page, neither worker rule fires. `fingerprint-report` adds 42 checks
+(dedicated and shared: navigator, UA-CH, `gpu`, time zone, locale): 0
+mismatches for every reference persona (`pages report`).
+
+**Checks.** WPT 2556/2788 (unchanged); Playwright 20/20; `pages` 52/52
+(incl. `report`, 8 personas, 0 mismatch, and the worker cases); lb-js,
+lb-webapi, lb-page tests; clippy (chrome workspace, firefox packages) and
+firefox tests; `tools/surface_diff` (build `5f17a1e` against this step, 3
+personas, `fetch` and CDP): in all six dumps the only changes are the
+intended ones, 32 lines each: `Worker`, `SharedWorker` and
+`MessageChannel` construct (called without `new` they now throw Chrome's
+"Please use the 'new' operator" instead of "Illegal constructor") and
+`URL.createObjectURL()` / `revokeObjectURL()` without arguments throw
+Chrome's argument-count `TypeError`.
+
+**Bench** (5x50, hot-symbol order regenerated for this step, binary 40.95
+MB = 40,951,672 bytes, idle RSS 6.0 MB, realm 1.30 / 1.08 ms, no disk
+writes). Two full runs of the same build:
+`bench/results/2026-11-04-67c904b.json` (second run): `fetch` wall 0.99 vs
+Lightpanda 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP
+wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs
+0.79 s: 5 of 6, as before this step. The first run (same file name,
+overwritten) passed 4 of 6: `fetch` peak RSS **23.91 vs 23.28 MB**
+(Lightpanda's own peak moved by 1.1 MB between the runs), CDP wall 0.84
+vs 0.74 s. An A/B on the same machine of this build against the
+previous step's release binary (3x50 `fetch`, three pairs) gives the same
+per-process median peak (22.42-22.74 vs 22.51-22.66 MB) and run maxima
+0.1-0.2 MB higher (24.13-24.70 vs 24.00-24.12 MB); the previous binary
+itself now measures about 24.0 MB, against 22.68 MB when its step
+recorded it, so most of the rise is the machine, not the code. No worker
+runs on the corpus pages.
+
+Open:
+- Service workers; workers are not CDP targets (no `Target.attachedToTarget`
+  for them; Playwright's `page.workers()` stays empty).
+- Dynamic `import()` (pages and workers); `OffscreenCanvas` transfer;
+  synchronous XHR; `Atomics.wait` across workers (no `SharedArrayBuffer`).
+- Worker script requests are sent as script requests (Chrome:
+  `Sec-Fetch-Dest: worker` / `sharedworker`, not captured yet); `blob:`
+  URLs work for workers and module imports, not in `fetch()`.
+- `fetch` errors inside workers name `Window` in their message.
+- Shared workers live until their context closes (Chrome ends them when
+  the last client document goes).
 
 ## Risks
 

@@ -51,9 +51,11 @@ regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), service workers, shader execution in
-WebGL, CDP crawl wall time vs Lightpanda (0.82 vs 0.74 s in
-`bench/results/2026-11-04-5490a8e.json`, 5 of 6 checks; `fetch` peak
-RSS 22.7 vs 24.4 MB). Style sheets (ADR 0019): links and `@import`s load
+WebGL, CDP crawl wall time vs Lightpanda (0.84 vs 0.75 s in
+`bench/results/2026-11-04-67c904b.json` after the worker work, 5 of 6
+checks; `fetch` peak RSS 23.85 vs 24.40 MB, which failed in a first run
+of the same build at 23.91 vs 23.28 MB: the margin is noise-sized; binary
+40.95 MB). Style sheets (ADR 0019): links and `@import`s load
 on insertion; parser-made sheets block parser, `defer` and module
 scripts, and sheets after `<body>` stop the parser, as in Chrome;
 `document.styleSheets` and the CSSOM (`insertRule`, rules, `MediaList`)
