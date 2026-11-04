@@ -120,6 +120,19 @@ longhands! {
     WordSpacing = "word-spacing", true;
     Direction = "direction", true;
     AspectRatio = "aspect-ratio", false;
+    BackgroundImage = "background-image", false;
+    BackgroundPositionX = "background-position-x", false;
+    BackgroundPositionY = "background-position-y", false;
+    BackgroundSize = "background-size", false;
+    BackgroundRepeat = "background-repeat", false;
+    BackgroundAttachment = "background-attachment", false;
+    BackgroundOrigin = "background-origin", false;
+    BackgroundClip = "background-clip", false;
+    BorderTopLeftRadius = "border-top-left-radius", false;
+    BorderTopRightRadius = "border-top-right-radius", false;
+    BorderBottomRightRadius = "border-bottom-right-radius", false;
+    BorderBottomLeftRadius = "border-bottom-left-radius", false;
+    BoxShadow = "box-shadow", false;
 }
 
 /// One `font-family` entry.
@@ -231,6 +244,16 @@ pub enum Sv {
     Ratio(f32, f32),
     /// `font-family` of a system font keyword (`font: menu`), per persona.
     SystemFont(SystemFont),
+    /// Background layer lists.
+    Images(Rc<[crate::bg::ImageSpec]>),
+    Positions(Rc<[Calc]>),
+    Sizes(Rc<[crate::bg::BgSize<Calc>]>),
+    Repeats(Rc<[(crate::bg::Repeat, crate::bg::Repeat)]>),
+    Attachments(Rc<[crate::bg::Attachment]>),
+    Boxes(Rc<[crate::bg::BgBox]>),
+    /// A corner radius (horizontal, vertical).
+    Radius(Calc, Calc),
+    Shadows(Rc<[crate::bg::ShadowSpec]>),
 }
 
 /// The system font keywords of the `font` shorthand. Family and size come
@@ -531,7 +554,24 @@ pub(crate) fn shorthand_longhands(name: &str) -> Option<&'static [LonghandId]> {
             L::LineHeight,
             L::FontFamily,
         ],
-        "background" => &[L::BackgroundColor],
+        "background" => &[
+            L::BackgroundColor,
+            L::BackgroundImage,
+            L::BackgroundPositionX,
+            L::BackgroundPositionY,
+            L::BackgroundSize,
+            L::BackgroundRepeat,
+            L::BackgroundAttachment,
+            L::BackgroundOrigin,
+            L::BackgroundClip,
+        ],
+        "background-position" => &[L::BackgroundPositionX, L::BackgroundPositionY],
+        "border-radius" => &[
+            L::BorderTopLeftRadius,
+            L::BorderTopRightRadius,
+            L::BorderBottomRightRadius,
+            L::BorderBottomLeftRadius,
+        ],
         "grid-row" => &[L::GridRowStart, L::GridRowEnd],
         "grid-column" => &[L::GridColumnStart, L::GridColumnEnd],
         "grid-area" => &[
@@ -1167,24 +1207,20 @@ fn font_shorthand<'i>(p: &mut Parser<'i>) -> PResult<Vec<Sv>> {
     ])
 }
 
-/// `background`: only the color matters to us.
+/// `background`: color and image layers.
 fn background<'i>(p: &mut Parser<'i>) -> PResult<Vec<Sv>> {
-    let mut found = None;
-    while !p.is_exhausted() {
-        if let Ok(c) = p.try_parse(parse_color) {
-            found = Some(c);
-            continue;
-        }
-        if p.try_parse(|p| p.expect_comma()).is_ok() {
-            // Only the final layer may hold a color.
-            found = None;
-            continue;
-        }
-        p.next()?;
-    }
-    Ok(vec![Sv::Color(found.unwrap_or(ColorValue::Rgba(
-        crate::values::Color::TRANSPARENT,
-    )))])
+    let b = crate::bg::shorthand(p)?;
+    Ok(vec![
+        Sv::Color(b.color),
+        Sv::Images(b.images.into()),
+        Sv::Positions(b.pos_x.into()),
+        Sv::Positions(b.pos_y.into()),
+        Sv::Sizes(b.size.into()),
+        Sv::Repeats(b.repeat.into()),
+        Sv::Attachments(b.attachment.into()),
+        Sv::Boxes(b.origin.into()),
+        Sv::Boxes(b.clip.into()),
+    ])
 }
 
 fn overflow_kw<'i>(p: &mut Parser<'i>) -> PResult<Sv> {
@@ -1255,6 +1291,14 @@ fn parse_property_inner<'i>(name: &str, p: &mut Parser<'i>) -> PResult<Vec<(Long
         "place-items" | "place-content" | "place-self" => two(p, align)?.into(),
         "font" => font_shorthand(p)?,
         "background" => background(p)?,
+        "background-position" => {
+            let (x, y) = crate::bg::position_lists(p)?;
+            vec![Sv::Positions(x.into()), Sv::Positions(y.into())]
+        }
+        "border-radius" => crate::bg::radius_shorthand(p)?
+            .into_iter()
+            .map(|(a, b)| Sv::Radius(a, b))
+            .collect(),
         "grid-row" | "grid-column" => grid_pair(p)?,
         "grid-area" => {
             let mut v = vec![grid_line(p)?];
@@ -1407,6 +1451,21 @@ pub(crate) fn parse_longhand<'i>(id: LonghandId, p: &mut Parser<'i>) -> PResult<
                 Sv::Ratio(a, b)
             }
         }
+        L::BackgroundImage => Sv::Images(crate::bg::images(p)?.into()),
+        L::BackgroundPositionX => Sv::Positions(crate::bg::positions(p, true)?.into()),
+        L::BackgroundPositionY => Sv::Positions(crate::bg::positions(p, false)?.into()),
+        L::BackgroundSize => Sv::Sizes(crate::bg::sizes(p)?.into()),
+        L::BackgroundRepeat => Sv::Repeats(crate::bg::repeats(p)?.into()),
+        L::BackgroundAttachment => Sv::Attachments(crate::bg::attachments(p)?.into()),
+        L::BackgroundOrigin | L::BackgroundClip => Sv::Boxes(crate::bg::boxes(p)?.into()),
+        L::BorderTopLeftRadius
+        | L::BorderTopRightRadius
+        | L::BorderBottomRightRadius
+        | L::BorderBottomLeftRadius => {
+            let (a, b) = crate::bg::radius(p)?;
+            Sv::Radius(a, b)
+        }
+        L::BoxShadow => Sv::Shadows(crate::bg::shadows(p)?.into()),
     })
 }
 

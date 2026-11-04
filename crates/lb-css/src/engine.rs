@@ -92,6 +92,9 @@ pub struct StyleEngine {
     key: Option<(u64, u64)>,
     epoch: u64,
     stats: StyleStats,
+    /// The document's base URL, for relative `url()`s in `<style>` and
+    /// `style` attributes (link sheets come with absolute URLs).
+    base_url: Option<url::Url>,
 }
 
 impl std::fmt::Debug for StyleEngine {
@@ -139,6 +142,7 @@ impl StyleEngine {
             key: None,
             epoch: 0,
             stats: StyleStats::default(),
+            base_url: None,
         }
     }
 
@@ -166,6 +170,14 @@ impl StyleEngine {
                 self.ua = Rc::new(Stylesheet::parse(&ua_stylesheet(env.os), Origin::UserAgent));
             }
             self.env = env;
+            self.invalidate();
+        }
+    }
+
+    /// The document's base URL (for relative `url()`s).
+    pub fn set_base_url(&mut self, base: Option<url::Url>) {
+        if base != self.base_url {
+            self.base_url = base;
             self.invalidate();
         }
     }
@@ -404,6 +416,57 @@ impl StyleEngine {
         }
     }
 
+    /// URLs of the `url()` background images of rendered elements (not in
+    /// a `display: none` subtree), in tree order without repeats. Quick
+    /// when no sheet or `style` attribute mentions `url(`.
+    pub fn background_urls(&mut self, doc: &Document) -> Vec<String> {
+        self.refresh(doc);
+        let sheets = self.active.iter().any(|r| {
+            r.rank != RANK_UA
+                && r.sheet.rules[r.index as usize]
+                    .block
+                    .decls
+                    .iter()
+                    .any(|d| match &d.value {
+                        Decl::Value(crate::props::Sv::Images(l)) => {
+                            l.iter().any(|i| matches!(i, crate::bg::Image::Url(_)))
+                        }
+                        Decl::Pending(p) => p.css.to_ascii_lowercase().contains("url("),
+                        _ => false,
+                    })
+        });
+        let inline = || {
+            doc.descendants(Document::DOCUMENT).any(|n| {
+                doc.get_attribute(n, "style")
+                    .is_some_and(|s| s.to_ascii_lowercase().contains("url("))
+            })
+        };
+        if !sheets && !inline() {
+            return Vec::new();
+        }
+        let mut out: Vec<String> = Vec::new();
+        let Some(root) = doc.document_element() else {
+            return out;
+        };
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            let Some(s) = self.computed_style(doc, n) else {
+                continue;
+            };
+            if s.is_display_none() {
+                continue;
+            }
+            for u in s.background.urls() {
+                if !out.iter().any(|x| x == u) {
+                    out.push(u.to_owned());
+                }
+            }
+            let kids: Vec<NodeId> = doc.children(n).filter(|&c| doc.is_element(c)).collect();
+            stack.extend(kids.into_iter().rev());
+        }
+        out
+    }
+
     /// Computed style of element `id`, or `None` for non-elements and
     /// elements not in the document (Chrome returns empty values there).
     pub fn computed_style(&mut self, doc: &Document, id: NodeId) -> Option<Rc<ComputedStyle>> {
@@ -512,6 +575,7 @@ impl StyleEngine {
             initial: &self.initial,
             root_font_size: if is_root { None } else { root_font },
             is_root,
+            base: self.base_url.as_ref(),
         };
         compute(&cascaded, &customs, parent, parent_display, &ctx)
     }

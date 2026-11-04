@@ -14,8 +14,17 @@
 //!   boxes and radio buttons;
 //! - `opacity` groups, `overflow` clips and `visibility`.
 //!
-//! Not painted: CSS background images and gradients, border radius,
-//! shadows, outlines, text decoration, transforms, filters, scrollbars.
+//! - background image layers: `url()` images the host supplies
+//!   ([`ReplacedSource::background`]) and linear / radial gradients
+//!   (repeating too), with `background-size`, `-position`, `-repeat`
+//!   (`repeat`, `no-repeat`, `space`, `round`), `-origin`, `-clip` and
+//!   `-attachment: fixed`; the root's layers cover the canvas;
+//! - `border-radius` (backgrounds, borders and replaced content clipped to
+//!   the rounded corners) and `box-shadow` (outer and inset, blurred);
+//!   see `decor.rs`.
+//!
+//! Not painted: outlines, text decoration, transforms, filters,
+//! scrollbars, `background-clip: text` (painted as `border-box`).
 //!
 //! The result is never noised: a screenshot is not a page-visible readback.
 
@@ -30,6 +39,7 @@ use tiny_skia::{
     Transform,
 };
 
+use crate::decor;
 use crate::encode::{Bitmap, encode};
 use crate::font::{FontSet, TextAlign, TextBaseline, TextStyle};
 
@@ -58,9 +68,14 @@ pub enum ReplacedContent {
     Check { checked: bool, radio: bool },
 }
 
-/// Supplies replaced element content to the painter.
+/// Supplies replaced element content and background images to the
+/// painter.
 pub trait ReplacedSource {
     fn content(&self, node: NodeId) -> ReplacedContent;
+    /// Decoded pixels of a background image URL, if loaded.
+    fn background(&self, _url: &str) -> Option<Rc<Pixmap>> {
+        None
+    }
 }
 
 impl<F: Fn(NodeId) -> ReplacedContent> ReplacedSource for F {
@@ -164,26 +179,45 @@ pub fn paint_page(
         height: h,
         canvas_owner: None,
         visible: capture.visible,
+        viewport: Rect::new(
+            list.scroll.0,
+            list.scroll.1,
+            list.viewport.0,
+            list.viewport.1,
+        ),
     };
     // Canvas background: base color, then the root's (or body's).
     let base_color = capture.base.unwrap_or(Color::WHITE);
     if base_color.a > 0.0 {
         base.fill(skia_color(base_color));
     }
-    let bg_of = |n: Option<NodeId>| {
-        n.and_then(|n| list.items().find(|i| i.node == n))
-            .map(|i| (i.node, i.style.background_color))
-    };
-    let canvas_bg = match bg_of(list.root) {
-        Some((n, c)) if c.a > 0.0 => Some((n, c)),
-        _ => bg_of(list.body).filter(|(_, c)| c.a > 0.0),
-    };
-    if let Some((n, c)) = canvas_bg {
-        p.canvas_owner = Some(n);
-        let mut paint = Paint::default();
-        paint.set_color(skia_color(c));
-        if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, w as f32, h as f32) {
-            base.fill_rect(r, &paint, Transform::identity(), None);
+    let item_of = |n: Option<NodeId>| n.and_then(|n| list.items().find(|i| i.node == n));
+    let has_bg =
+        |i: &&DisplayItem| i.style.background_color.a > 0.0 || !i.style.background.is_none();
+    let canvas_bg = item_of(list.root)
+        .filter(has_bg)
+        .or_else(|| item_of(list.body).filter(has_bg));
+    if let Some(item) = canvas_bg {
+        p.canvas_owner = Some(item.node);
+        let c = item.style.background_color;
+        if c.a > 0.0 {
+            let mut paint = Paint::default();
+            paint.set_color(skia_color(c));
+            if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, w as f32, h as f32) {
+                base.fill_rect(r, &paint, Transform::identity(), None);
+            }
+        }
+        if !item.style.background.is_none() {
+            let images = |u: &str| source.background(u);
+            let env = decor::BgEnv {
+                ts,
+                width: w,
+                height: h,
+                images: &images,
+                viewport: p.viewport,
+            };
+            let canvas = Rect::new(0.0, 0.0, w as f32, h as f32);
+            decor::background(&mut base, item, &env, None, Some(canvas), false);
         }
     }
     // Opacity groups paint into layers composited on EndGroup.
@@ -276,6 +310,8 @@ struct Painter<'a> {
     canvas_owner: Option<NodeId>,
     /// See [`Capture::visible`].
     visible: Option<Rect>,
+    /// The viewport in page coordinates.
+    viewport: Rect,
 }
 
 impl Painter<'_> {
@@ -339,7 +375,22 @@ impl Painter<'_> {
                     item.rect.height + 2.0 * m,
                 )
             }
-            _ => item.rect,
+            _ => {
+                // Outer shadows reach beyond the box.
+                let m = item
+                    .style
+                    .box_shadow
+                    .iter()
+                    .filter(|s| !s.inset)
+                    .map(|s| s.x.abs().max(s.y.abs()) + s.blur * 1.5 + s.spread.max(0.0))
+                    .fold(0.0f32, f32::max);
+                Rect::new(
+                    item.rect.x - m,
+                    item.rect.y - m,
+                    item.rect.width + 2.0 * m,
+                    item.rect.height + 2.0 * m,
+                )
+            }
         };
         let ts = self.ts;
         let fonts = self.fonts;
@@ -349,6 +400,7 @@ impl Painter<'_> {
             (Some(c), Some(v)) => Some(c.intersect(&v)),
             (c, v) => c.or(v),
         };
+        let (w, h, viewport) = (self.width, self.height, self.viewport);
         let Ok(mask) = self.mask(clip, bounds) else {
             return;
         };
@@ -369,34 +421,46 @@ impl Painter<'_> {
                     );
                 }
             }
-            DisplayKind::Element => {
-                if canvas_owner != Some(item.node) {
-                    background(px, item, ts, mask);
+            DisplayKind::Element | DisplayKind::Replaced { .. } => {
+                if !item.style.box_shadow.is_empty() {
+                    decor::outer_shadows(px, item, ts, mask);
                 }
-                borders(px, item, ts, mask);
-            }
-            DisplayKind::Replaced { font } => {
                 if canvas_owner != Some(item.node) {
-                    background(px, item, ts, mask);
+                    let images = |u: &str| source.background(u);
+                    let env = decor::BgEnv {
+                        ts,
+                        width: w,
+                        height: h,
+                        images: &images,
+                        viewport,
+                    };
+                    decor::background(px, item, &env, mask, None, true);
                 }
-                borders(px, item, ts, mask);
-                replaced(px, item, font, source.content(item.node), fonts, ts, mask);
+                if !item.style.box_shadow.is_empty() {
+                    decor::inset_shadows(px, item, ts, mask, w, h);
+                }
+                let radii = decor::used_radii(&item.style, item.rect);
+                if decor::is_zero(&radii) {
+                    borders(px, item, ts, mask);
+                } else {
+                    let st = &item.style;
+                    let side = |i: usize| {
+                        let style = st.border_style[i];
+                        let color = st.border_color[i];
+                        (item.border[i] > 0.0
+                            && !matches!(style, BorderStyle::None | BorderStyle::Hidden)
+                            && color.a > 0.0)
+                            .then(|| side_colors(style, color)[usize::from(i == 1 || i == 2)])
+                    };
+                    decor::rounded_borders(px, item, ts, mask, w, h, &side);
+                }
+                if let DisplayKind::Replaced { font } = &item.kind {
+                    let clip = decor::content_clip(item, ts, mask, w, h);
+                    let m = clip.as_ref().or(mask);
+                    replaced(px, item, font, source.content(item.node), fonts, ts, m);
+                }
             }
         }
-    }
-}
-
-fn sk_rect(r: Rect) -> Option<tiny_skia::Rect> {
-    tiny_skia::Rect::from_xywh(r.x, r.y, r.width, r.height)
-}
-
-fn background(px: &mut Pixmap, item: &DisplayItem, ts: Transform, mask: Option<&Mask>) {
-    let c = item.style.background_color;
-    if c.a <= 0.0 {
-        return;
-    }
-    if let Some(r) = sk_rect(item.rect) {
-        px.fill_rect(r, &solid(c, false), ts, mask);
     }
 }
 

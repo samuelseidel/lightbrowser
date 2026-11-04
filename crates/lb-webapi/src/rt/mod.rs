@@ -47,6 +47,7 @@
 
 mod audio;
 mod audio_dsp;
+mod bgimage;
 pub mod canvas;
 mod chrome;
 mod coll;
@@ -684,6 +685,8 @@ pub struct Window {
     pub(crate) layout: RefCell<Option<lb_layout::LayoutEngine>>,
     /// Style sheets: loads, blocking counters, CSSOM (`sheets.rs`).
     pub(crate) css: RefCell<sheets::CssState>,
+    /// CSS background images by URL (`bgimage.rs`).
+    pub(crate) bg: RefCell<bgimage::BgImages>,
     ready_state: Cell<ReadyState>,
     pub(crate) history: RefCell<History>,
     pub(crate) observers: RefCell<Vec<u32>>,
@@ -784,6 +787,7 @@ impl Window {
             clock: Clock::new(init.virtual_time),
             layout: RefCell::new(None),
             css: RefCell::new(sheets::CssState::default()),
+            bg: RefCell::new(bgimage::BgImages::default()),
             ready_state: Cell::new(ReadyState::Loading),
             history: RefCell::new(History {
                 entries: vec![HistEntry { url, state: None }],
@@ -1381,6 +1385,7 @@ impl Window {
         });
         if created {
             image::apply_intrinsic(self, engine);
+            engine.styles().set_base_url(Some(self.base_url()));
         }
         let updates = std::mem::take(&mut self.css.borrow_mut().updates);
         for u in updates {
@@ -1404,7 +1409,7 @@ impl Window {
         self.base_url().join(s.trim()).ok()
     }
 
-    pub(crate) fn base_url(&self) -> Url {
+    pub fn base_url(&self) -> Url {
         let url = self.url();
         let href = self.with_doc(|d| {
             d.descendants(Document::DOCUMENT)

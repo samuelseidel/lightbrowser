@@ -20,6 +20,7 @@
 //! No JS here; bindings call these APIs. Fingerprint inputs (screen, OS)
 //! come from the persona via [`MediaEnv::from_persona`].
 
+pub mod bg;
 mod computed;
 pub mod cssom;
 mod engine;

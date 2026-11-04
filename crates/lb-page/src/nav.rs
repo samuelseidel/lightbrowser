@@ -469,6 +469,7 @@ pub(crate) async fn load(
     });
     doc_event(page, doc, "DOMContentLoaded");
     w.set_script_waiting_for_sheets(false);
+    w.load_background_images();
 
     // Wait for async scripts, stylesheets and script-inserted scripts.
     loop {

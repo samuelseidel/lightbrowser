@@ -1037,6 +1037,14 @@ impl PageHost for CdpHost {
         params: &serde_json::Value,
     ) -> HostResult<String> {
         let req = screenshot::Request::parse(params)?;
+        // Background images still loading: let the page's worker fetch
+        // them (up to 5 s), then paint.
+        for _ in 0..250 {
+            if !self.blocking(target_id, |_, _, w| Ok(screenshot::images_pending(w)))? {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         let bytes = self.blocking(target_id, move |_, a, w| {
             let bg = a.st.borrow().screenshot_bg;
             screenshot::capture(w, &req, bg)

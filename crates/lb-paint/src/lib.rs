@@ -23,6 +23,7 @@
 pub mod canvas;
 pub mod color;
 pub mod decode;
+mod decor;
 pub mod encode;
 pub mod font;
 pub mod noise;

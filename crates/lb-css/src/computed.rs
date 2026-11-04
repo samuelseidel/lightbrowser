@@ -156,6 +156,12 @@ pub struct ComputedStyle {
     pub direction: Direction,
     /// `None` = `auto`.
     pub aspect_ratio: Option<f32>,
+    /// Background layers (shared until changed).
+    pub background: Rc<crate::bg::Background>,
+    /// Corner radii: top-left, top-right, bottom-right, bottom-left, each
+    /// (horizontal, vertical).
+    pub radius: [(Lp, Lp); 4],
+    pub box_shadow: Rc<[crate::bg::BoxShadow]>,
     pub custom: Rc<CustomMap>,
 }
 
@@ -230,6 +236,14 @@ impl ComputedStyle {
             word_spacing: 0.0,
             direction: Direction::Ltr,
             aspect_ratio: None,
+            background: Rc::new(crate::bg::Background::default()),
+            radius: [
+                (Lp::ZERO, Lp::ZERO),
+                (Lp::ZERO, Lp::ZERO),
+                (Lp::ZERO, Lp::ZERO),
+                (Lp::ZERO, Lp::ZERO),
+            ],
+            box_shadow: Rc::from(Vec::new()),
             custom: Rc::new(CustomMap::new()),
         }
     }
@@ -357,6 +371,31 @@ pub(crate) fn copy_field(id: LonghandId, from: &ComputedStyle, to: &mut Computed
         L::WordSpacing => to.word_spacing = from.word_spacing,
         L::Direction => to.direction = from.direction,
         L::AspectRatio => to.aspect_ratio = from.aspect_ratio,
+        L::BackgroundImage => {
+            Rc::make_mut(&mut to.background).images = from.background.images.clone()
+        }
+        L::BackgroundPositionX => {
+            Rc::make_mut(&mut to.background).pos_x = from.background.pos_x.clone()
+        }
+        L::BackgroundPositionY => {
+            Rc::make_mut(&mut to.background).pos_y = from.background.pos_y.clone()
+        }
+        L::BackgroundSize => Rc::make_mut(&mut to.background).size = from.background.size.clone(),
+        L::BackgroundRepeat => {
+            Rc::make_mut(&mut to.background).repeat = from.background.repeat.clone()
+        }
+        L::BackgroundAttachment => {
+            Rc::make_mut(&mut to.background).attachment = from.background.attachment.clone()
+        }
+        L::BackgroundOrigin => {
+            Rc::make_mut(&mut to.background).origin = from.background.origin.clone()
+        }
+        L::BackgroundClip => Rc::make_mut(&mut to.background).clip = from.background.clip.clone(),
+        L::BorderTopLeftRadius => to.radius[0] = from.radius[0].clone(),
+        L::BorderTopRightRadius => to.radius[1] = from.radius[1].clone(),
+        L::BorderBottomRightRadius => to.radius[2] = from.radius[2].clone(),
+        L::BorderBottomLeftRadius => to.radius[3] = from.radius[3].clone(),
+        L::BoxShadow => to.box_shadow = from.box_shadow.clone(),
     }
 }
 
@@ -369,6 +408,8 @@ pub(crate) struct ComputeCtx<'a> {
     pub root_font_size: Option<f32>,
     /// The element is the root element.
     pub is_root: bool,
+    /// Base URL for relative `url()`s (the document's).
+    pub base: Option<&'a url::Url>,
 }
 
 /// What the cascade found for each longhand (`None` = not declared).
@@ -794,6 +835,50 @@ fn apply(
                 _ => None,
             }
         }
+        (L::BackgroundImage, Sv::Images(list)) => {
+            let current = s.color;
+            let images = list
+                .iter()
+                .map(|i| crate::bg::compute_image(i, &lp, current, ctx.base))
+                .collect();
+            Rc::make_mut(&mut s.background).images = images;
+        }
+        (L::BackgroundPositionX, Sv::Positions(list)) => {
+            Rc::make_mut(&mut s.background).pos_x = list.iter().map(lp).collect();
+        }
+        (L::BackgroundPositionY, Sv::Positions(list)) => {
+            Rc::make_mut(&mut s.background).pos_y = list.iter().map(lp).collect();
+        }
+        (L::BackgroundSize, Sv::Sizes(list)) => {
+            Rc::make_mut(&mut s.background).size = list
+                .iter()
+                .map(|z| crate::bg::compute_size(z, &lp))
+                .collect();
+        }
+        (L::BackgroundRepeat, Sv::Repeats(list)) => {
+            Rc::make_mut(&mut s.background).repeat = list.to_vec();
+        }
+        (L::BackgroundAttachment, Sv::Attachments(list)) => {
+            Rc::make_mut(&mut s.background).attachment = list.to_vec();
+        }
+        (L::BackgroundOrigin, Sv::Boxes(list)) => {
+            Rc::make_mut(&mut s.background).origin = list.to_vec();
+        }
+        (L::BackgroundClip, Sv::Boxes(list)) => {
+            Rc::make_mut(&mut s.background).clip = list.to_vec();
+        }
+        (L::BorderTopLeftRadius, Sv::Radius(a, b)) => s.radius[0] = (lp(a), lp(b)),
+        (L::BorderTopRightRadius, Sv::Radius(a, b)) => s.radius[1] = (lp(a), lp(b)),
+        (L::BorderBottomRightRadius, Sv::Radius(a, b)) => s.radius[2] = (lp(a), lp(b)),
+        (L::BorderBottomLeftRadius, Sv::Radius(a, b)) => s.radius[3] = (lp(a), lp(b)),
+        (L::BoxShadow, Sv::Shadows(list)) => {
+            let current = s.color;
+            let px = |c: &Calc| lp(c).resolve(0.0);
+            s.box_shadow = list
+                .iter()
+                .map(|x| crate::bg::compute_shadow(x, &px, current))
+                .collect();
+        }
         _ => {}
     }
 }
@@ -1026,6 +1111,7 @@ mod tests {
             initial: &init,
             root_font_size: None,
             is_root: false,
+            base: None,
         };
         let m = transform_matrix("translate(10px, 5px) scale(2)", 16.0, &ctx).unwrap();
         assert_eq!(m, [2.0, 0.0, 0.0, 2.0, 10.0, 5.0]);

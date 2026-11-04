@@ -7,7 +7,13 @@ use crate::values::{GridLine, LineHeight, LpAuto, fmt_num, fmt_px};
 /// Properties [`computed_value`] can serialize, in Chrome's
 /// `CSSStyleDeclaration` order (alphabetical, prefixed last).
 pub fn computed_property_names() -> Vec<&'static str> {
-    let mut v: Vec<&'static str> = LonghandId::ALL.iter().map(|l| l.name()).collect();
+    // Chrome lists `background-position`, not its x / y longhands.
+    let mut v: Vec<&'static str> = LonghandId::ALL
+        .iter()
+        .map(|l| l.name())
+        .filter(|n| !matches!(*n, "background-position-x" | "background-position-y"))
+        .chain(["background-position"])
+        .collect();
     v.sort_unstable();
     v
 }
@@ -71,6 +77,9 @@ pub fn computed_value(s: &ComputedStyle, name: &str) -> Option<String> {
             lp_auto(&s.flex_basis)
         ),
         "flex-flow" => format!("{} {}", s.flex_direction.as_str(), s.flex_wrap.as_str()),
+        "background-position" => crate::bg::list_css(&s.background, "background-position")?,
+        "background" => crate::bg::shorthand_css(&s.background, s.background_color),
+        "border-radius" => crate::bg::radius_shorthand_css(&s.radius),
         other => {
             let id = LonghandId::from_name(other)?;
             longhand_value(s, id)
@@ -195,5 +204,18 @@ pub fn longhand_value(s: &ComputedStyle, id: LonghandId) -> String {
         L::AspectRatio => s
             .aspect_ratio
             .map_or("auto".into(), |r| format!("{} / 1", fmt_num(r))),
+        L::BackgroundImage
+        | L::BackgroundPositionX
+        | L::BackgroundPositionY
+        | L::BackgroundSize
+        | L::BackgroundRepeat
+        | L::BackgroundAttachment
+        | L::BackgroundOrigin
+        | L::BackgroundClip => crate::bg::list_css(&s.background, id.name()).unwrap_or_default(),
+        L::BorderTopLeftRadius => crate::bg::radius_css(&s.radius[0]),
+        L::BorderTopRightRadius => crate::bg::radius_css(&s.radius[1]),
+        L::BorderBottomRightRadius => crate::bg::radius_css(&s.radius[2]),
+        L::BorderBottomLeftRadius => crate::bg::radius_css(&s.radius[3]),
+        L::BoxShadow => crate::bg::shadows_css(&s.box_shadow),
     }
 }

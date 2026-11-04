@@ -68,6 +68,55 @@ impl Stylesheet {
     }
 }
 
+impl Stylesheet {
+    /// Makes relative `url()` images absolute against `base` (the sheet's
+    /// URL, for linked and imported sheets).
+    pub fn resolve_urls(&mut self, base: &url::Url) {
+        use crate::bg::Image;
+        use crate::props::{Decl, Sv};
+        for rule in &mut self.rules {
+            let has = rule
+                .block
+                .decls
+                .iter()
+                .any(|d| matches!(d.value, Decl::Value(Sv::Images(_))));
+            if !has {
+                continue;
+            }
+            let block = Rc::make_mut(&mut rule.block);
+            for d in &mut block.decls {
+                if let Decl::Value(Sv::Images(list)) = &mut d.value {
+                    let fixed: Vec<_> = list
+                        .iter()
+                        .map(|i| match i {
+                            Image::Url(u) => match base.join(u.trim()) {
+                                Ok(abs) => Image::Url(Rc::from(abs.as_str())),
+                                Err(_) => i.clone(),
+                            },
+                            other => other.clone(),
+                        })
+                        .collect();
+                    *list = fixed.into();
+                }
+            }
+        }
+    }
+
+    /// True if a rule sets a `url()` background image.
+    pub fn has_url_images(&self) -> bool {
+        use crate::props::{Decl, Sv};
+        self.rules.iter().any(|r| {
+            r.block.decls.iter().any(|d| match &d.value {
+                Decl::Value(Sv::Images(l)) => {
+                    l.iter().any(|i| matches!(i, crate::bg::Image::Url(_)))
+                }
+                Decl::Pending(p) => p.css.to_ascii_lowercase().contains("url("),
+                _ => false,
+            })
+        })
+    }
+}
+
 struct RuleParser<'a> {
     sheet: &'a mut Stylesheet,
     media: Vec<Rc<MediaQueryList>>,

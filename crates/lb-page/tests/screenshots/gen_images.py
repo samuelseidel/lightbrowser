@@ -1,0 +1,32 @@
+"""Makes the small test images under pages/img (PNG, JPEG, WebP, GIF).
+Run once; the images are committed. The GIF's first frame shows for a
+minute, so Chrome paints that frame too."""
+from PIL import Image, ImageDraw
+import os
+d = os.path.join(os.path.dirname(__file__), 'pages', 'img')
+os.makedirs(d, exist_ok=True)
+g = Image.new('RGBA', (20, 20), (0, 0, 0, 0))
+dr = ImageDraw.Draw(g)
+dr.rectangle([0, 0, 9, 9], fill=(220, 40, 40, 255))
+dr.rectangle([10, 0, 19, 9], fill=(40, 160, 40, 255))
+dr.rectangle([0, 10, 9, 19], fill=(40, 40, 220, 255))
+dr.rectangle([10, 10, 19, 19], fill=(240, 200, 0, 128))
+g.save(os.path.join(d, 'grid.png'))
+p = Image.new('RGB', (80, 60), (250, 250, 250))
+dr = ImageDraw.Draw(p)
+dr.rectangle([0, 0, 39, 29], fill=(200, 60, 20))
+dr.rectangle([40, 30, 79, 59], fill=(20, 60, 200))
+dr.ellipse([25, 15, 55, 45], fill=(30, 140, 60))
+p.save(os.path.join(d, 'photo.jpg'), quality=95)
+w = Image.new('RGBA', (16, 16), (255, 255, 255, 0))
+dr = ImageDraw.Draw(w)
+dr.ellipse([3, 3, 12, 12], fill=(120, 0, 160, 255))
+w.save(os.path.join(d, 'dots.webp'), lossless=True)
+f1 = Image.new('P', (24, 24), 0)
+f1.putpalette([255, 255, 255, 0, 120, 200, 200, 120, 0] + [0] * 759)
+dr = ImageDraw.Draw(f1)
+dr.rectangle([4, 4, 19, 19], fill=1)
+f2 = Image.new('P', (24, 24), 0)
+f2.putpalette([255, 255, 255, 0, 120, 200, 200, 120, 0] + [0] * 759)
+ImageDraw.Draw(f2).rectangle([0, 0, 23, 23], fill=2)
+f1.save(os.path.join(d, 'anim.gif'), save_all=True, append_images=[f2], duration=[60000, 100], loop=0)

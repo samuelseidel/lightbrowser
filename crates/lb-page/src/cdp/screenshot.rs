@@ -140,8 +140,32 @@ fn paint(
     fonts: &FontSet,
     depth: u32,
 ) -> Result<Pixmap, PaintError> {
-    let source = |n: NodeId| content(w, n, cap.scale, fonts, depth);
+    struct Source<'a> {
+        w: &'a Rc<Window>,
+        scale: f32,
+        fonts: &'a FontSet,
+        depth: u32,
+    }
+    impl lb_paint::page::ReplacedSource for Source<'_> {
+        fn content(&self, n: NodeId) -> ReplacedContent {
+            content(self.w, n, self.scale, self.fonts, self.depth)
+        }
+        fn background(&self, url: &str) -> Option<Rc<Pixmap>> {
+            self.w.background_image(url)
+        }
+    }
+    let source = Source {
+        w,
+        scale: cap.scale,
+        fonts,
+        depth,
+    };
     lb_paint::paint_page(list, cap, fonts, &source)
+}
+
+/// Starts the background images a capture needs; true while some load.
+pub(crate) fn images_pending(w: &Rc<Window>) -> bool {
+    w.load_background_images()
 }
 
 /// Replaced content of element `n` of `w`'s main document.

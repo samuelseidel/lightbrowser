@@ -111,6 +111,7 @@ macro_rules! cases {
 cases!(
     body_link_pause,
     body_pause,
+    computed_bg,
     cssom_edit,
     defer_async,
     dynamic_link,

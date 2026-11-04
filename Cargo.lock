@@ -1262,6 +1262,7 @@ dependencies = [
  "cssparser",
  "lb-dom",
  "lb-persona",
+ "url",
 ]
 
 [[package]]

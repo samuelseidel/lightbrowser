@@ -325,7 +325,11 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
         return;
     }
     // New text: a new sheet (the CSSOM entry follows the text).
-    let has_imports = text.to_ascii_lowercase().contains("@import");
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("url(") {
+        w.bg.borrow_mut().hint = true;
+    }
+    let has_imports = lower.contains("@import");
     let parsed = has_imports.then(|| Rc::new(Stylesheet::parse(&text, Origin::Author)));
     let urls: Vec<Option<Url>> = parsed
         .as_ref()
@@ -595,6 +599,9 @@ fn sheet_event(n: NodeId, ok: bool) -> super::TaskFn {
             false,
         );
         w.css.borrow_mut().events -= 1;
+        // New rules may show background images (Chrome requests them at
+        // the next style update).
+        w.load_background_images();
         w.pending_loads.set(w.pending_loads.get().saturating_sub(1));
         w.wake();
     })
@@ -705,8 +712,13 @@ fn got_sheet(
     } else {
         String::new()
     };
-    let parsed = Rc::new(Stylesheet::parse(&text, Origin::Author));
+    if text.to_ascii_lowercase().contains("url(") {
+        w.bg.borrow_mut().hint = true;
+    }
     let base = resp.url.clone();
+    let mut sheet = Stylesheet::parse(&text, Origin::Author);
+    sheet.resolve_urls(&base);
+    let parsed = Rc::new(sheet);
     let mut loaded = Loaded {
         url,
         ok: true,
@@ -968,7 +980,15 @@ fn sheet_modified(w: &Rc<Window>, sheet: u32) {
         .as_ref()
         .map(|r| r.iter().map(entry_text).collect::<Vec<_>>().join("\n"))
         .unwrap_or_default();
-    let parsed = Rc::new(Stylesheet::parse(&text, Origin::Author));
+    let mut parsed = Stylesheet::parse(&text, Origin::Author);
+    if let Some(base) = st.sheets[sheet as usize]
+        .href
+        .as_deref()
+        .and_then(|h| Url::parse(h).ok())
+    {
+        parsed.resolve_urls(&base);
+    }
+    let parsed = Rc::new(parsed);
     {
         let e = &mut st.sheets[sheet as usize];
         // Imports keep their loaded sheets by position.
