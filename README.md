@@ -21,15 +21,19 @@ macOS Intel and Apple Silicon, Ubuntu X11, Fedora Wayland), each scoring
 fp 0 and beh 0 on the bench with all OS rules in force (Linux values
 captured, Windows and macOS from a reference; TCP/IP signals are the
 host's).
-Idle RSS is 6-7 MB, realm creation 1.4 ms, and the release binary
-40.4 MB (budget < 50 MB, raised from < 40 MB by user decision, ADR 0013).
-On the `bench/` corpus every LightBrowser page is faster than headless
-Chromium's median, and against Lightpanda (a user-approved 1.1.0 nightly,
-run on loopback with telemetry off) all 6 checks pass: wall time, peak
-RSS and CPU in both `fetch` and CDP mode (see `bench/results/README.md`;
-the `fetch` peak RSS margin is small).
-Not done: Firefox (M4b, no SpiderMonkey backend yet), workers and service
-workers.
+Idle RSS is 6.1 MB, realm creation 1.3 ms, and the release binary
+41.19 MB (budget < 50 MB, raised from < 40 MB by user decision, ADR 0013).
+Connections are reused as in Chrome (keep-alive, one HTTP/2 session per
+group, TLS resumption), style sheets block scripts, screenshots paint CSS
+backgrounds, radius and shadows, and dedicated, shared and service workers
+and the Cache API run in memory per browser context. On the `bench/` corpus
+every LightBrowser page is faster than headless Chromium's median. Against
+Lightpanda (a user-approved 1.1.0 nightly, loopback only, telemetry off) 5 of
+6 checks pass: CDP crawl wall time loses (0.80 vs 0.74 s), and `fetch` peak
+RSS passes or loses by about 0.5 MB depending on Lightpanda's own peak (see
+`bench/results/README.md`).
+Not done: Firefox (M4b, no SpiderMonkey backend yet), proxies, workers as
+CDP targets, dynamic `import()`, shader execution in WebGL, shadow DOM.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only

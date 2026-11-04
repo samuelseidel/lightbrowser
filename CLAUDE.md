@@ -24,9 +24,9 @@ WebGL backends, audio, wheel and shortcuts per OS; `Accept-CH` /
 Windows and macOS values come from a reference, not a capture. TCP/IP-level
 signals are always the host's. M6: lazy interface
 objects (ADR 0016: lazy data properties of the global as in Blink,
-templates on demand, no startup snapshot by default; realm 1.4 ms), idle
-RSS 6.2 MB, `bench/` runner (every corpus page faster than headless
-Chromium's median), release binary 40.51 MB against < 50 MB (the user
+templates on demand, no startup snapshot by default; realm 1.3 ms), idle
+RSS 6.1 MB, `bench/` runner (every corpus page faster than headless
+Chromium's median), release binary 41.19 MB against < 50 MB (the user
 raised the budget from < 40 MB, ADR 0013 revision 4; ICU data in 4 KiB
 zstd chunks paged in on first touch, no unwind tables, V8 code only
 off-by-default flags reach not linked, root crate and bindings at
@@ -51,11 +51,14 @@ regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), shader execution in
-WebGL, CDP crawl wall time vs Lightpanda (0.84 vs 0.77 s in
-`bench/results/2026-11-04-a4fc4ca.json` after the service worker work, 5
-of 6 checks; `fetch` peak RSS 23.66 vs 24.41 MB, which failed in a first
-run of the same build at 23.89 vs 23.21 MB: the margin is noise-sized, an
-A/B against the previous binary shows no rise; binary 41.19 MB). Style sheets (ADR 0019): links and `@import`s load
+WebGL, CDP crawl wall time vs Lightpanda (0.80-0.83 vs 0.74 s in the
+close-out re-run on a clean tree, `bench/results/2026-11-04-27e7f1a.json`:
+5 of 6 checks, 4 of 6 in a first run, where `fetch` peak RSS lost 23.71 vs
+23.17 MB because Lightpanda's own peak moves between 23.2 and 24.4 MB; binary
+41.19 MB, idle RSS 6.1 MB, realm 1.3 ms). Also open: workers as CDP
+targets, idle service workers are never stopped, dynamic `import()`, M1
+proxies, shadow DOM, `crypto`, `WebSocket`, `customElements`, `indexedDB`
+(full list in ROADMAP "Close-out verification"). Style sheets (ADR 0019): links and `@import`s load
 on insertion; parser-made sheets block parser, `defer` and module
 scripts, and sheets after `<body>` stop the parser, as in Chrome;
 `document.styleSheets` and the CSSOM (`insertRule`, rules, `MediaList`)
