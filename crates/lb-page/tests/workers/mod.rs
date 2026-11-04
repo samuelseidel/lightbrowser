@@ -87,8 +87,9 @@ cases!(
     basic, clone, errors, imports, network, scope, shared, terminate, transfer, urls,
 );
 
-/// The worker globals' surface, dumped in a dedicated and a shared worker
-/// by the same code as `tools/dump_worker_surface.js`: own properties of
+/// The worker globals' surface, dumped in a dedicated, a shared and a
+/// service worker (ADR 0022) by the same code as
+/// `tools/dump_worker_surface.js`: own properties of
 /// the global (names, descriptor kinds, lengths, order) and every
 /// interface object's prototype and statics must equal the capture of
 /// Chrome 153 (`tests/fixtures/chromium_153_worker_surface.json`).
@@ -102,21 +103,30 @@ async fn surface_matches_chrome() {
     let start = tool.find("function dumpScope()").unwrap();
     let end = tool[start..].find("\n}\n").unwrap() + start + 2;
     let dump = &tool[start..end];
-    let worker_src = |shared: bool| {
+    let worker_src = |kind: &str| {
         let body = format!("({dump})()");
-        if shared {
-            format!("onconnect = (e) => e.ports[0].postMessage(JSON.stringify({body}));")
-        } else {
-            format!("postMessage(JSON.stringify({body}));")
+        match kind {
+            "shared" => {
+                format!("onconnect = (e) => e.ports[0].postMessage(JSON.stringify({body}));")
+            }
+            // A listener: the capture's footprint is the same as Chrome's.
+            "service" => format!(
+                "addEventListener('message', (e) => e.source.postMessage(JSON.stringify({body})));"
+            ),
+            _ => format!("postMessage(JSON.stringify({body}));"),
         }
     };
     let page = "<!doctype html><script>var R={};\
         var w=new Worker('/d.js');w.onmessage=e=>R.dedicated=e.data;\
-        var s=new SharedWorker('/s.js');s.port.onmessage=e=>R.shared=e.data;</script>";
+        var s=new SharedWorker('/s.js');s.port.onmessage=e=>R.shared=e.data;\
+        navigator.serviceWorker.onmessage=e=>R.service=e.data;\
+        navigator.serviceWorker.register('/v.js').then(()=>navigator.serviceWorker.ready)\
+        .then(r=>r.active.postMessage('dump'));</script>";
     let srv = super::common::serve(vec![
         ("/", Resource::html(page)),
-        ("/d.js", Resource::js(&worker_src(false))),
-        ("/s.js", Resource::js(&worker_src(true))),
+        ("/d.js", Resource::js(&worker_src("dedicated"))),
+        ("/s.js", Resource::js(&worker_src("shared"))),
+        ("/v.js", Resource::js(&worker_src("service"))),
     ])
     .await;
     let (b, ctx) = (browser(), context(false));
@@ -124,7 +134,7 @@ async fn surface_matches_chrome() {
     let t0 = Instant::now();
     let got = loop {
         let v = page
-            .evaluate("R.dedicated && R.shared ? JSON.stringify(R) : ''")
+            .evaluate("R.dedicated && R.shared && R.service ? JSON.stringify(R) : ''")
             .await
             .unwrap();
         if let lb_js::JsValue::String(s) = &v
@@ -167,7 +177,7 @@ async fn surface_matches_chrome() {
         )
     };
     let mut bad = Vec::new();
-    for kind in ["dedicated", "shared"] {
+    for kind in ["dedicated", "shared", "service"] {
         let g: serde_json::Value = serde_json::from_str(got[kind].as_str().unwrap()).unwrap();
         let w = &want[kind];
         for key in ["globalProps", "globalSymbols", "protoChain", "toString"] {
