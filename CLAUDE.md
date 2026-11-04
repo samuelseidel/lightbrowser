@@ -74,7 +74,9 @@ shaders on a 16-lane interpreter and rasterizes with clipping, 4x MSAA,
 depth, stencil, blending, textures and framebuffers; `lb-webapi`
 `rt/webgl_pipe.rs` wires it to WebGL 1/2 (88 Chrome-recorded API results
 match; 9 scenes within 0.1-1.7 mean abs difference of SwiftShader); the
-readback noise (`webgl_noise_seed`) applies to rendered pixels only. Workers as CDP
+readback noise (`webgl_noise_seed`) applies to rendered pixels only;
+binary 42.72 MB (+537 KB); bench 6 of 6 in two 5 x 50 runs (`fetch`
+peak RSS 21.50 / 21.35 vs 23.18 MB, CDP wall 0.68 vs 0.77 s). Workers as CDP
 targets (ADR 0029, ROADMAP "Workers as CDP targets and idle service
 workers"): a worker of an inspected context announces a target
 (`worker`, `shared_worker`, `service_worker`) before its script runs
@@ -190,7 +192,7 @@ See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
 | `sdk/python` | `lightbrowser` package: launcher, `Persona`, sync/async Playwright wrappers with `human_*` and `verify_fingerprint`, scenarios T-001..T-007 | Done; needs Python Playwright >= 1.63 |
-| `bench/` | Crawl benchmark (generated 50-page corpus, loopback only) vs headless Chromium and Lightpanda; results in `bench/results/` | Runner done; Lightpanda compared (5 of 6 checks pass: CDP wall time fails, see ROADMAP) |
+| `bench/` | Crawl benchmark (generated 50-page corpus, loopback only) vs headless Chromium and Lightpanda; results in `bench/results/` | Runner done; Lightpanda compared (6 of 6 checks pass in the latest runs, see ROADMAP) |
 | `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate`, `serve`, `fingerprint-report` | All done for chrome; the firefox build's `serve` uses `MockHost` and `fingerprint-report` needs the JS engine |
 
 ## Commands

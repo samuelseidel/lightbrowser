@@ -28,11 +28,11 @@ Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 5.97 / 5.95 MB after "Workers as CDP targets"; 6.63 / 5.90 MB after "Proxies and IndexedDB"; 6.25 / 6.41 MB after "Shadow DOM and custom elements"; 6.36 / 6.34 MB after "Web platform APIs"; 6.27 / 6.40 MB after "CDP crawl speed"; 5.92 MB after "Service workers"; 6.06 MB after "Workers"; 6.13 MB after "Style sheets and screenshot decorations"; 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 42.18 MB (42,184,568 bytes) after "Workers as CDP targets"; 42.07 MB (42,073,976 bytes) after "Proxies and IndexedDB"; 41.69 MB (41,693,048 bytes) after "Shadow DOM and custom elements"; 41.50 MB (41,496,440 bytes) after "Web platform APIs"; 41.22 MB (41,222,008 bytes) after "CDP crawl speed"; 41.19 MB (41,193,336 bytes) after "Service workers"; 40.95 MB (40,951,672 bytes) after "Workers"; 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
-| Realm creation < 5 ms | Met: 1.51 / 0.87 ms and 1.42 / 0.85 ms after "Workers as CDP targets"; 1.41 / 0.86 ms and 1.42 / 0.85 ms after "Proxies and IndexedDB"; 1.45 / 0.85 ms and 1.47 / 0.87 ms (`realm_bench` snapshot line) after "Shadow DOM and custom elements"; 1.29 ms first, 0.82 ms next after "CDP crawl speed" (a realm built without the snapshot, as `serve` and `fetch` make them: 1.59 → 0.92 ms, `realm_loop` median); 1.28 ms first, 1.08 ms next after "Service workers"; 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
+| Idle RSS < 15 MB | Met: 5.78 / 5.81 MB after "Software WebGL"; 5.97 / 5.95 MB after "Workers as CDP targets"; 6.63 / 5.90 MB after "Proxies and IndexedDB"; 6.25 / 6.41 MB after "Shadow DOM and custom elements"; 6.36 / 6.34 MB after "Web platform APIs"; 6.27 / 6.40 MB after "CDP crawl speed"; 5.92 MB after "Service workers"; 6.06 MB after "Workers"; 6.13 MB after "Style sheets and screenshot decorations"; 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
+| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 42.72 MB (42,721,144 bytes, +537 KB for `lb-gl`) after "Software WebGL"; 42.18 MB (42,184,568 bytes) after "Workers as CDP targets"; 42.07 MB (42,073,976 bytes) after "Proxies and IndexedDB"; 41.69 MB (41,693,048 bytes) after "Shadow DOM and custom elements"; 41.50 MB (41,496,440 bytes) after "Web platform APIs"; 41.22 MB (41,222,008 bytes) after "CDP crawl speed"; 41.19 MB (41,193,336 bytes) after "Service workers"; 40.95 MB (40,951,672 bytes) after "Workers"; 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
+| Realm creation < 5 ms | Met: 1.28 / 0.82 ms and 1.36 / 0.84 ms after "Software WebGL"; 1.51 / 0.87 ms and 1.42 / 0.85 ms after "Workers as CDP targets"; 1.41 / 0.86 ms and 1.42 / 0.85 ms after "Proxies and IndexedDB"; 1.45 / 0.85 ms and 1.47 / 0.87 ms (`realm_bench` snapshot line) after "Shadow DOM and custom elements"; 1.29 ms first, 0.82 ms next after "CDP crawl speed" (a realm built without the snapshot, as `serve` and `fetch` make them: 1.59 → 0.92 ms, `realm_loop` median); 1.28 ms first, 1.08 ms next after "Service workers"; 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | After "Workers as CDP targets" (5294bae): 6 of 6 in both runs, binaries' page cache evicted before each (`fetch` peak RSS 21.86 / 21.75 vs 23.21 / 23.22 MB; CDP wall 0.73 / 0.79 vs 0.81 / 0.84 s; see that section). After "Proxies and IndexedDB" (fca2955): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.20 vs 23.195 MB; see that section). After "Shadow DOM and custom elements" (7d6707e): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.28 vs 23.23 MB; see that section). After "Web platform APIs" (a57aee9): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.23 vs 23.20 MB, Lightpanda's low end; see that section). **Met, 6 of 6 in both runs** after "CDP crawl speed" (2026-11-04, same binary, sha256 in the files). Run 1 (`bench/results/2026-11-04-14b1a77-1.json`): `fetch` wall 0.97 vs 1.09 s, peak RSS 23.72 vs 24.36 MB, CPU 0.85 vs 1.08 s; CDP wall 0.67 vs 0.77 s, peak RSS 29.02 vs 31.29 MB, CPU 0.57 vs 0.78 s. Run 2 (`2026-11-04-e5abb20.json`): `fetch` 0.97 vs 1.05 s, 23.79 vs 24.40 MB, 0.85 vs 1.04 s; CDP 0.67 vs 0.76 s, 29.01 vs 31.29 MB, 0.57 vs 0.77 s. Before: close-out re-run on the clean committed tree 27e7f1a (2026-11-04, "Close-out verification", `bench/results/2026-11-04-27e7f1a.json`): 5 of 6; a first run of the same binary passed 4 of 6. Second run: `fetch` wall 0.98 vs 1.08 s, peak RSS 23.72 vs 24.45 MB, CPU 0.85 vs 1.06 s; CDP wall **0.80 vs 0.74 s (fails)**, peak RSS 28.90 vs 31.39 MB, CPU 0.62 vs 0.76 s. First run: `fetch` peak RSS 23.71 vs 23.17 MB (**fails**, Lightpanda's own peak moves between 23.2 and 24.4 MB; ours stays at 23.7), CDP wall 0.83 vs 0.74 s (fails). 5 of 6 after "Service workers" (`bench/results/2026-11-04-a4fc4ca.json`): `fetch` wall 0.98 vs 1.07 s, peak RSS 23.66 vs 24.41 MB, CPU 0.86 vs 1.06 s; CDP wall **0.84 vs 0.77 s (fails)**, peak RSS 28.62 vs 31.31 MB, CPU 0.64 vs 0.78 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.89 vs 23.21 MB; an A/B against the previous binary shows no rise, see "Service workers"). 5 of 6 after "Workers" (`bench/results/2026-11-04-67c904b.json`): `fetch` wall 0.99 vs 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs 0.79 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.91 vs 23.28 MB, see "Workers"). 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
+| Wall time, peak RSS and CPU <= Lightpanda | After "Software WebGL" (de4a7c4, binaries evicted): 6 of 6 in both runs (`bench/results/2026-11-04-de4a7c4-1.json`, `2026-11-04-de4a7c4.json`; `fetch` peak RSS 21.50 / 21.35 vs 23.18 / 23.18 MB, CDP wall 0.68 / 0.68 vs 0.77 / 0.77 s; see that section). After "Workers as CDP targets" (5294bae): 6 of 6 in both runs, binaries' page cache evicted before each (`fetch` peak RSS 21.86 / 21.75 vs 23.21 / 23.22 MB; CDP wall 0.73 / 0.79 vs 0.81 / 0.84 s; see that section). After "Proxies and IndexedDB" (fca2955): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.20 vs 23.195 MB; see that section). After "Shadow DOM and custom elements" (7d6707e): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.28 vs 23.23 MB; see that section). After "Web platform APIs" (a57aee9): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.23 vs 23.20 MB, Lightpanda's low end; see that section). **Met, 6 of 6 in both runs** after "CDP crawl speed" (2026-11-04, same binary, sha256 in the files). Run 1 (`bench/results/2026-11-04-14b1a77-1.json`): `fetch` wall 0.97 vs 1.09 s, peak RSS 23.72 vs 24.36 MB, CPU 0.85 vs 1.08 s; CDP wall 0.67 vs 0.77 s, peak RSS 29.02 vs 31.29 MB, CPU 0.57 vs 0.78 s. Run 2 (`2026-11-04-e5abb20.json`): `fetch` 0.97 vs 1.05 s, 23.79 vs 24.40 MB, 0.85 vs 1.04 s; CDP 0.67 vs 0.76 s, 29.01 vs 31.29 MB, 0.57 vs 0.77 s. Before: close-out re-run on the clean committed tree 27e7f1a (2026-11-04, "Close-out verification", `bench/results/2026-11-04-27e7f1a.json`): 5 of 6; a first run of the same binary passed 4 of 6. Second run: `fetch` wall 0.98 vs 1.08 s, peak RSS 23.72 vs 24.45 MB, CPU 0.85 vs 1.06 s; CDP wall **0.80 vs 0.74 s (fails)**, peak RSS 28.90 vs 31.39 MB, CPU 0.62 vs 0.76 s. First run: `fetch` peak RSS 23.71 vs 23.17 MB (**fails**, Lightpanda's own peak moves between 23.2 and 24.4 MB; ours stays at 23.7), CDP wall 0.83 vs 0.74 s (fails). 5 of 6 after "Service workers" (`bench/results/2026-11-04-a4fc4ca.json`): `fetch` wall 0.98 vs 1.07 s, peak RSS 23.66 vs 24.41 MB, CPU 0.86 vs 1.06 s; CDP wall **0.84 vs 0.77 s (fails)**, peak RSS 28.62 vs 31.31 MB, CPU 0.64 vs 0.78 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.89 vs 23.21 MB; an A/B against the previous binary shows no rise, see "Service workers"). 5 of 6 after "Workers" (`bench/results/2026-11-04-67c904b.json`): `fetch` wall 0.99 vs 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs 0.79 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.91 vs 23.28 MB, see "Workers"). 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -2971,6 +2971,84 @@ previous build and this one give 20.3-20.5 vs 20.0 MB mean per `fetch`
 binary gives about 1 MB more (larger page-cache folios map more per
 fault; callgrind shows the same 284.4M instructions per page for both).
 Both runs above were made with both browsers' binaries evicted first.
+
+## Software WebGL (2026-11-04)
+
+Closes "shader execution in WebGL" of "What is still open after this run"
+(ADR 0030). WebGL 1/2 used to answer every query from the persona but ran
+no shaders. Rendering is now done in software by a new crate, `lb-gl`
+(pure Rust, no dependencies), wired to the bindings in `lb-webapi`
+`rt/webgl_pipe.rs`. Compared on loopback with local Chrome for Testing
+153.0.8010.12, which renders WebGL with SwiftShader in this container
+(`crates/lb-gl/tests/chrome/`: `record.mjs`, `scenes.mjs`, `api.mjs`).
+
+- **Compiler.** GLSL ES 1.00 and 3.00: ANGLE's preprocessor directives
+  and messages, a parser that types and checks in one pass with ANGLE's
+  recovery, constant folding, exact built-in overloads, ES 1.00 loop
+  limits, uniform blocks, extension directives gated by the enabled WebGL
+  extensions. 72 compile results and info logs recorded in Chrome match
+  byte for byte (`cargo test -p lb-gl --test logs`). Link logs follow
+  ANGLE (`FRAGMENT varying v does not match any VERTEX varying`, type and
+  precision mismatches, `Too many attributes`, shader not compiled).
+- **Interpreter.** Functions are inlined; values are 32-bit cells; every
+  operation runs on 16 lanes with masked stores, so `if`, loops, `break`,
+  `continue`, `return` and `discard` diverge per lane, and 2x2 quads give
+  derivatives and texture LOD. A runaway shader loses the context.
+- **Pipeline.** Vertex fetch (all formats, divisors, robust out-of-range
+  reads as in Chrome), clipping, culling, edge functions with a top-left
+  rule, 4x MSAA when `antialias` (lines as one-pixel rectangles), points,
+  perspective-correct/flat/`noperspective` varyings, depth, stencil,
+  polygon offset, blending, sRGB, MRT, integer and float targets;
+  textures (2D, cube, 3D, 2D array, mipmaps, filtering, wrap, shadow
+  compare, sampler objects, `texStorage*`, all client upload formats,
+  `ImageData` and canvas/image sources with the unpack flags),
+  renderbuffers (multisampled too), framebuffers with Chrome's
+  completeness rules (equal sizes in WebGL 2 too), blits, `clearBuffer*`,
+  `readPixels` (formats, pack alignment, pack buffers). Uniform order is
+  ANGLE's (bool uniforms first, samplers last); std140 offsets match.
+- **Results vs Chrome.** 88 of 88 API results equal (errors, uniform round
+  trips, active uniforms, framebuffer status, link logs, readback;
+  `cargo test -p lb-page --test webgl api_results_equal_chrome`). Nine
+  scenes (gradient triangle with and without antialiasing, a
+  FingerprintJS-style strip, a mipmapped texture, depth plus blending,
+  lines and points, a fractal shader, WebGL 2 instancing with a uniform
+  block, render to texture) differ from SwiftShader by a mean of 0.14-1.72
+  per channel; 0-4.3 % of pixels differ by more than 48, all on edges
+  (sample pattern) or, for the fractal's hash channel, where `sin` of large
+  arguments differs (its iteration-count channel equals Chrome's).
+- **Noise.** ADR 0014's rule keyed by `webgl_noise_seed`, as before, now on
+  real pixels: the drawing buffer and framebuffers a draw rasterized into;
+  uploaded or cleared contents read back exactly, as on a GPU (Chrome
+  returns a texture's bytes unchanged). The gradient fingerprint is the
+  same for a persona across runs and differs between all 8 reference
+  personas and with another seed (`webgl` test).
+
+Open: transform feedback and queries do nothing; compressed textures are
+not decoded (levels read black); `WEBGL_debug_shaders` returns an empty
+translated source; `preserveDrawingBuffer: false` is still not cleared
+after compositing; `WEBGL_multi_draw` and line widths other than 1 are
+missing; one thread: a 1024x1024 full-screen fractal takes 266 ms against
+SwiftShader's 38 ms (256x256: 17 vs 16 ms).
+
+Checks: fmt, clippy (chrome workspace with all targets, firefox
+packages) clean; tests: lb-gl (logs 72/72, interpreter, pipeline),
+lb-webapi, lb-page (lib and every target; `pages` 104 incl. the report gate,
+8 personas, 0 mismatch; `webgl` 3; `fingerprint_surfaces` 2; `canvas`;
+`screenshot_golden`), firefox (15 pass); Playwright 24/24; WPT 11734/12465
+(unchanged; 2566/2788 of the pre-shadow-DOM files); T-010 over CDP with a
+fresh `serve` per run: fp 0 for all 8 reference personas (no WebGL rule
+fires), `chrome153_win10_rtx3060_1080p` `--input human` fp 0 / beh 0.
+`tools/surface_diff` (previous build vs this one, win10 / macOS 15 /
+Ubuntu, `fetch` and CDP): all six dumps identical (the WebGL methods
+existed before; their results changed). Release 42,721,144 bytes (+537 KB),
+idle RSS 5.78 / 5.81 MB, realm 1.28 / 0.82 and 1.36 / 0.84 ms, no disk
+writes. Hot-symbol order regenerated. Bench with Lightpanda, 5 x 50, two
+runs with both binaries evicted first, 6 of 6 in both
+(`bench/results/2026-11-04-de4a7c4-1.json`, `2026-11-04-de4a7c4.json`):
+`fetch` wall 0.95 / 1.02 vs 1.06 / 1.11 s, peak RSS 21.50 / 21.35 vs
+23.18 / 23.18 MB, CPU 0.85 / 0.91 vs 1.05 / 1.10 s; CDP wall 0.68 / 0.68
+vs 0.77 / 0.77 s, peak RSS 26.50 / 26.25 vs 29.04 / 29.05 MB, CPU 0.57 /
+0.58 vs 0.79 / 0.79 s.
 
 ## Risks
 

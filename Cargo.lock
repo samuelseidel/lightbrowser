@@ -1413,6 +1413,7 @@ dependencies = [
  "form_urlencoded",
  "lb-css",
  "lb-dom",
+ "lb-gl",
  "lb-js",
  "lb-layout",
  "lb-paint",
