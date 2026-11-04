@@ -741,6 +741,33 @@ pub(crate) fn body_forwards_to_window(name: &str) -> bool {
 
 /// Report an uncaught exception: an `error` event at the window, then the
 /// console unless a listener canceled it.
+/// Report an error object made by the host (not thrown by script):
+/// `window.onerror` / `error` event with `error` set, else the console.
+pub(crate) fn report_error_value(js: &mut dyn Js, w: &Rc<Window>, message: &str, error: Handle) {
+    let message = format!("Uncaught {message}");
+    let mut canceled = false;
+    if w.error_depth.get() == 0 {
+        w.error_depth.set(1);
+        let extra = EventExtra::Error {
+            message: message.clone(),
+            filename: String::new(),
+            lineno: 0,
+            colno: 0,
+            error: Some(error),
+        };
+        canceled = !fire_event_with(js, w, WINDOW_REF, "ErrorEvent", "error", false, true, extra);
+        w.error_depth.set(0);
+    }
+    if !canceled {
+        w.log(crate::host::ConsoleMessage {
+            level: "error".into(),
+            text: message,
+            url: None,
+            line: None,
+        });
+    }
+}
+
 pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
     if e.kind == lb_js::JsErrorKind::Terminated || e.kind == lb_js::JsErrorKind::OutOfMemory {
         w.log(crate::host::ConsoleMessage {

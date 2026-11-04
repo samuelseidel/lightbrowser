@@ -281,10 +281,12 @@ fn upgrade(js: &mut dyn Js, w: &Rc<Window>, slot: u32, n: NodeId) {
                 }
             } else {
                 fail(w, slot, n);
-                let e = js_type_error(
+                report_new_error(
+                    js,
+                    w,
+                    None,
                     "Failed to execute 'upgrade' on 'CustomElementRegistry': custom element constructors must call super() first and must not return a different object",
                 );
-                super::events::report_exception(js, w, &e);
             }
         }
         Err(e) => {
@@ -299,8 +301,48 @@ fn fail(w: &Window, slot: u32, n: NodeId) {
     w.ce.borrow_mut().queues.remove(&(slot, n));
 }
 
-fn js_type_error(msg: &str) -> JsError {
-    JsError::new(lb_js::JsErrorKind::Exception, format!("TypeError: {msg}"))
+/// Report a new `TypeError` (or a `DOMException` named `dom`) with
+/// `msg`, as an uncaught exception of the page.
+fn report_new_error(js: &mut dyn Js, w: &Rc<Window>, dom: Option<&str>, msg: &str) {
+    let (made, head) = match dom {
+        None => {
+            let (rc, te) = {
+                let h = w.helpers.borrow();
+                (h.reflect_construct, h.type_error)
+            };
+            let made = match (rc, te) {
+                (Some(rc), Some(te)) => js
+                    .call_handle(
+                        rc,
+                        Arg::Undefined,
+                        &[
+                            Arg::Handle(te),
+                            Arg::Array(vec![Arg::String(msg.to_owned())]),
+                        ],
+                    )
+                    .ok(),
+                _ => None,
+            };
+            (made, format!("TypeError: {msg}"))
+        }
+        Some(name) => {
+            let v = Arg::Construct(
+                w.rt.iface("DOMException"),
+                vec![Arg::String(msg.to_owned()), Arg::String(name.to_owned())],
+            );
+            (js.make(v), format!("{name}: {msg}"))
+        }
+    };
+    match made {
+        Some(h) => {
+            super::events::report_error_value(js, w, &head, h);
+            js.release(h);
+        }
+        None => {
+            let e = JsError::new(lb_js::JsErrorKind::Exception, head);
+            super::events::report_exception(js, w, &e);
+        }
+    }
 }
 
 /// Run queued reactions (the end of a `[CEReactions]` operation).
@@ -579,35 +621,73 @@ pub(crate) fn create_element(
     };
     if autonomous {
         let r = construct(js, w, ctor_h);
-        let made = match r {
+        // The checks of "create an element" on the constructed result.
+        let made: Result<NodeId, Option<(Option<&str>, &str)>> = match r {
             Ok(h) => {
                 let node = js.host_of(h).and_then(|x| w.decode_node(x));
                 js.release(h);
-                let valid = node.filter(|&(s, x)| {
-                    s == 0
-                        && w.with_doc(|d| {
-                            d.qual_name(x)
-                                .is_some_and(|q| q.ns == ns!(html) && &*q.local == local)
-                                && d.attributes(x).is_empty()
-                                && d.first_child(x).is_none()
-                                && d.parent(x).is_none()
-                        })
-                });
-                match valid {
-                    Some((_, x)) => Ok(x),
-                    None => Err(JsError::new(
-                        lb_js::JsErrorKind::Exception,
-                        "NotSupportedError: Failed to execute 'createElement' on 'Document': The result must not have attributes",
-                    )),
+                match node {
+                    Some((0, x)) if w.with_doc(|d| d.is_element(x)) => {
+                        let problem = w.with_doc(|d| {
+                            let q = d.qual_name(x).expect("element");
+                            if q.ns != ns!(html) {
+                                Some((None, "The result must implement HTMLElement interface"))
+                            } else if !d.attributes(x).is_empty() {
+                                Some((
+                                    Some("NotSupportedError"),
+                                    "The result must not have attributes",
+                                ))
+                            } else if d.first_child(x).is_some() {
+                                Some((
+                                    Some("NotSupportedError"),
+                                    "The result must not have children",
+                                ))
+                            } else if d.parent(x).is_some() {
+                                Some((
+                                    Some("NotSupportedError"),
+                                    "The result must not have a parent",
+                                ))
+                            } else if *q.local != *local {
+                                Some((
+                                    Some("NotSupportedError"),
+                                    "The result must have the same localName",
+                                ))
+                            } else {
+                                None
+                            }
+                        });
+                        match problem {
+                            None => Ok(x),
+                            Some(p) => Err(Some(p)),
+                        }
+                    }
+                    Some((_, _)) => Err(Some((
+                        Some("NotSupportedError"),
+                        "The result must be in the same document",
+                    ))),
+                    None => Err(Some((
+                        None,
+                        "The result must implement HTMLElement interface",
+                    ))),
                 }
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                super::events::report_exception(js, w, &e);
+                Err(None)
+            }
         };
         advance_watermark(w);
         return Some(match made {
             Ok(x) => x,
-            Err(e) => {
-                super::events::report_exception(js, w, &e);
+            Err(problem) => {
+                if let Some((dom, msg)) = problem {
+                    report_new_error(
+                        js,
+                        w,
+                        dom,
+                        &format!("Failed to execute 'createElement' on 'Document': {msg}"),
+                    );
+                }
                 let x = w.with_doc_mut(|d| {
                     let x =
                         d.create_element(QualName::new(None, ns!(html), local.into()), Vec::new());

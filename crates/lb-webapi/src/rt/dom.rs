@@ -1016,7 +1016,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Element", "getAttributeNS", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;
-        let ns = Namespace::from(opt_string(cx, 0)?.unwrap_or_default());
+        let ns = Namespace::from(super::nullable_string(cx, 0)?.unwrap_or_default());
         let local = cx.arg_string(1)?;
         match w.doc_slot(slot, |d| {
             d.get_attribute_ns(n, &ns, &local).map(str::to_owned)
@@ -1042,7 +1042,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "Element", "setAttributeNS", |cx, w| {
         need_args(cx, 3, "setAttributeNS", "Element")?;
         let (slot, n) = this_elem(cx, w)?;
-        let ns = Namespace::from(opt_string(cx, 0)?.unwrap_or_default());
+        let ns = Namespace::from(super::nullable_string(cx, 0)?.unwrap_or_default());
         let name = cx.arg_string(1)?;
         let value = cx.arg_string(2)?;
         let r = w.doc_slot_mut(slot, |d| d.set_attribute_ns(n, ns, &name, &value));
@@ -1058,7 +1058,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Element", "removeAttributeNS", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;
-        let ns = Namespace::from(opt_string(cx, 0)?.unwrap_or_default());
+        let ns = Namespace::from(super::nullable_string(cx, 0)?.unwrap_or_default());
         let local = cx.arg_string(1)?;
         w.doc_slot_mut(slot, |d| d.remove_attribute_ns(n, &ns, &local));
         w.after_mutation(cx);
@@ -1071,7 +1071,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Element", "hasAttributeNS", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;
-        let ns = Namespace::from(opt_string(cx, 0)?.unwrap_or_default());
+        let ns = Namespace::from(super::nullable_string(cx, 0)?.unwrap_or_default());
         let local = cx.arg_string(1)?;
         cx.ret(w.doc_slot(slot, |d| d.get_attribute_ns(n, &ns, &local).is_some()))
     });
@@ -1549,7 +1549,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "Document", "createElementNS", |cx, w| {
         need_args(cx, 2, "createElementNS", "Document")?;
         let (slot, _) = this_node(cx, w)?;
-        let ns = Namespace::from(opt_string(cx, 0)?.unwrap_or_default());
+        let ns = Namespace::from(super::nullable_string(cx, 0)?.unwrap_or_default());
         let name = cx.arg_string(1)?;
         let is = element_creation_is(cx, 2)?;
         match w.doc_slot_mut(slot, |d| d.create_element_ns(ns, &name)) {

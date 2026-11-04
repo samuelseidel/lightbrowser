@@ -768,6 +768,8 @@ pub(crate) struct Helpers {
     pub freeze: Option<Handle>,
     /// `Reflect.construct` (custom element construction).
     pub reflect_construct: Option<Handle>,
+    /// `TypeError` (errors the host reports without throwing).
+    pub type_error: Option<Handle>,
     pub languages: Option<Handle>,
 }
 
@@ -1077,6 +1079,7 @@ impl Window {
         let freeze = engine.get_property(realm, object, "freeze")?;
         let reflect = engine.get_property(realm, g, "Reflect")?;
         let construct = engine.get_property(realm, reflect, "construct")?;
+        let type_error = engine.get_property(realm, g, "TypeError")?;
         for h in [g, array, proto, json, object, reflect] {
             engine.release(h);
         }
@@ -1087,6 +1090,7 @@ impl Window {
         hp.json_stringify = Some(stringify);
         hp.freeze = Some(freeze);
         hp.reflect_construct = Some(construct);
+        hp.type_error = Some(type_error);
         Ok(())
     }
 
@@ -2065,6 +2069,18 @@ pub(crate) fn opt_string(
     i: usize,
 ) -> Result<Option<String>, HostError> {
     if i >= cx.len() || cx.arg_kind(i) == ValueKind::Undefined {
+        Ok(None)
+    } else {
+        cx.arg_string(i).map(Some)
+    }
+}
+
+/// Argument `i` as a `DOMString?`: `None` for null, undefined or missing.
+pub(crate) fn nullable_string(
+    cx: &mut CallCtx<'_, '_, '_>,
+    i: usize,
+) -> Result<Option<String>, HostError> {
+    if i >= cx.len() || matches!(cx.arg_kind(i), ValueKind::Undefined | ValueKind::Null) {
         Ok(None)
     } else {
         cx.arg_string(i).map(Some)
