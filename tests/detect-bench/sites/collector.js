@@ -719,6 +719,36 @@
     wk.onerror = () => { clearTimeout(timer); done([{ error: 'worker error' }, false]); };
   }));
 
+  // Navigator and UA client hints as a dedicated worker sees them, next to
+  // the page's (info only; scoring.py's worker_navigator_mismatch compares
+  // them). A persona patched into the page but not into workers differs.
+  const navValues = 'async function navValues() {' +
+    'const n = navigator, d = n.userAgentData, v = {userAgent: n.userAgent, appVersion: n.appVersion,' +
+    'platform: n.platform, hardwareConcurrency: n.hardwareConcurrency, deviceMemory: n.deviceMemory,' +
+    'language: n.language, languages: Array.from(n.languages || []), gpu: "gpu" in n};' +
+    'if (d) { v.uaData = {brands: d.brands, mobile: d.mobile, platform: d.platform};' +
+    'try { v.high = await d.getHighEntropyValues(["architecture", "bitness", "model", "platformVersion",' +
+    '"fullVersionList", "uaFullVersion", "wow64", "formFactors"]); } catch (e) { v.high = {error: e.name}; } }' +
+    'return v; }';
+  probe('worker_navigator', 'automation', 0, () => new Promise((resolve) => {
+    if (!window.Worker || !window.Blob) { resolve([{ supported: false }, false]); return; }
+    let url, wk;
+    try {
+      url = URL.createObjectURL(new Blob([navValues + ';navValues().then((v) => postMessage(v));'],
+        { type: 'text/javascript' }));
+      wk = new Worker(url);
+    } catch (e) { resolve([{ error: String(e.message) }, false]); return; }
+    const done = (v) => { try { wk.terminate(); URL.revokeObjectURL(url); } catch (_) { /* ignore */ } resolve(v); };
+    const timer = setTimeout(() => done([{ timeout: true }, false]), 2000);
+    wk.onmessage = async (e) => {
+      clearTimeout(timer);
+      // Same code in the page (indirect eval: global scope).
+      const mine = await (0, eval)('(' + navValues + ')')();
+      done([{ window: mine, worker: e.data }, false]);
+    };
+    wk.onerror = () => { clearTimeout(timer); done([{ error: 'worker error' }, false]); };
+  }));
+
   function lbStackSample() { return new Error('lb').stack || ''; }
 
   probe('stack_engine', 'consistency', 60, () => {

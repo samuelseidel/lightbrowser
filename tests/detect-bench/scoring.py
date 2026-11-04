@@ -756,6 +756,28 @@ def chk_window_work_area(s, cfg):
     return None
 
 
+# Navigator fields a dedicated worker must see as the page does (Chrome
+# derives both from the same browser state).
+WORKER_NAV_KEYS = ("userAgent", "appVersion", "platform", "hardwareConcurrency", "deviceMemory",
+                   "language", "languages", "gpu", "uaData", "high")
+
+
+def chk_worker_navigator_mismatch(s, cfg):
+    """The `worker_navigator` info probe: page and worker values differ."""
+    v = probe_value(s, "worker_navigator")
+    if not v or not isinstance(v.get("window"), dict) or not isinstance(v.get("worker"), dict):
+        return None
+    win, wk = v["window"], v["worker"]
+    diff = []
+    for k in WORKER_NAV_KEYS:
+        a, b = win.get(k), wk.get(k)
+        if k == "high" and isinstance(a, dict) and isinstance(b, dict):
+            diff += [f"high.{h}" for h in sorted(set(a) | set(b)) if a.get(h) != b.get(h)]
+        elif a != b:
+            diff.append(k)
+    return ("worker differs: " + ", ".join(diff)) if diff else None
+
+
 # ---- the catalogue ----------------------------------------------------------
 
 def P(id_, weight, cat, why, probe=None):
@@ -778,6 +800,9 @@ RULES: list[dict] = [
     P("native_functions", 50, "automation", "A native getter or method has visible source, a prototype or a wrapper frame."),
     P("iframe_mismatch", 45, "automation", "A fresh iframe sees different navigator values: patching missed frames."),
     P("worker_mismatch", 45, "automation", "A worker sees different navigator values: patching missed workers."),
+    P("worker_navigator", 0, "automation", "Info only: navigator and UA-CH values in the page and in a dedicated worker."),
+    S("worker_navigator_mismatch", 45, "automation", chk_worker_navigator_mismatch,
+      "A dedicated worker's navigator or UA client hints (incl. high entropy, gpu) differ from the page's."),
     P("webdriver_tamper", 40, "automation", "navigator.webdriver was deleted, moved or redefined."),
     P("extra_globals", 30, "automation", "The page window has globals a clean iframe does not: injected script."),
     P("property_order", 30, "automation", "navigator enumerates keys that are not on its prototype chain."),

@@ -422,3 +422,67 @@ class Config(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def with_worker_navigator(s: dict, edit=None) -> dict:
+    """Add a `worker_navigator` probe (stock Chrome 153 shape: page and
+    worker agree) to the first page; `edit(worker_values)` may change the
+    worker side."""
+    high = list(s["pages"].values())[0]["probes"]["os_media"]["value"]["high"]
+    nav = {"userAgent": scoring.doc_ua(s), "appVersion": scoring.doc_ua(s)[len("Mozilla/"):],
+           "platform": "Linux x86_64", "hardwareConcurrency": 8, "deviceMemory": 8,
+           "language": "en-US", "languages": ["en-US", "en"], "gpu": True,
+           "uaData": {"brands": high["brands"], "mobile": False, "platform": "Linux"},
+           "high": dict(high, uaFullVersion="153.0.8010.12")}
+    worker = json.loads(json.dumps(nav))
+    if edit:
+        edit(worker)
+    pg = list(s["pages"].values())[0]
+    pg["probes"]["worker_navigator"] = {"id": "worker_navigator", "cat": "automation", "weight": 0,
+                                        "suspicious": False, "value": {"window": nav, "worker": worker}}
+    return s
+
+
+class WorkerNavigatorRule(unittest.TestCase):
+    def detail(self, s):
+        return {f["id"]: f["detail"] for f in scoring.score_session(s)["fired"]}.get("worker_navigator_mismatch")
+
+    def test_in_catalogue_with_weight(self):
+        rule = next(r for r in scoring.RULES if r["id"] == "worker_navigator_mismatch")
+        self.assertEqual((rule["weight"], rule["cat"]), (45, "automation"))
+
+    def test_agreeing_worker_is_quiet(self):
+        self.assertIsNone(self.detail(with_worker_navigator(os_session("linux"))))
+
+    def test_sessions_without_the_probe_are_quiet(self):
+        self.assertIsNone(self.detail(os_session("linux")))
+        for v in ({"supported": False}, {"timeout": True}, {"error": "worker error"}):
+            s = with_worker_navigator(os_session("linux"))
+            list(s["pages"].values())[0]["probes"]["worker_navigator"]["value"] = v
+            self.assertIsNone(self.detail(s))
+
+    def test_each_field_fires(self):
+        edits = {
+            "userAgent": lambda w: w.update(userAgent=w["userAgent"].replace("Linux", "Windows NT 10.0")),
+            "platform": lambda w: w.update(platform="Win32"),
+            "hardwareConcurrency": lambda w: w.update(hardwareConcurrency=4),
+            "deviceMemory": lambda w: w.update(deviceMemory=4),
+            "languages": lambda w: w.update(languages=["en-US"]),
+            "gpu": lambda w: w.update(gpu=False),
+            "uaData": lambda w: w["uaData"].update(platform="Windows"),
+            "high.platformVersion": lambda w: w["high"].update(platformVersion="10.0.0"),
+            "high.architecture": lambda w: w["high"].update(architecture="arm"),
+            "high.fullVersionList": lambda w: w["high"]["fullVersionList"].pop(),
+            "high.uaFullVersion": lambda w: w["high"].pop("uaFullVersion"),
+        }
+        for field, edit in edits.items():
+            with self.subTest(field=field):
+                d = self.detail(with_worker_navigator(os_session("linux"), edit))
+                self.assertIsNotNone(d)
+                self.assertIn(field, d)
+
+    def test_real_chrome_shapes_stay_quiet(self):
+        for name in ("linux", "windows", "mac"):
+            with self.subTest(os=name):
+                s = with_worker_navigator(os_session(name))
+                self.assertNotIn("worker_navigator_mismatch", fired(scoring.score_session(s)))

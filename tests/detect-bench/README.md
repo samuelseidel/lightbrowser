@@ -211,6 +211,8 @@ contradict the claimed browser or OS), `fingerprint` (device surfaces),
 | `native_functions` | 50 | automation | A native getter or method has visible source, a prototype or a wrapper frame. |
 | `iframe_mismatch` | 45 | automation | A fresh iframe sees different navigator values: patching missed frames. |
 | `worker_mismatch` | 45 | automation | A worker sees different navigator values: patching missed workers. |
+| `worker_navigator` | 0 | automation | Info only: navigator and UA-CH values in the page and in a dedicated worker. |
+| `worker_navigator_mismatch` | 45 | automation | A dedicated worker's `userAgent`, `appVersion`, `platform`, `hardwareConcurrency`, `deviceMemory`, `language(s)`, `gpu` presence, `userAgentData` or any high-entropy hint (`getHighEntropyValues`) differs from the page's: a persona patched into the page but not into workers. Stock Chromium passes (2026-11-04, see "Stock check"). |
 | `webdriver_tamper` | 40 | automation | navigator.webdriver was deleted, moved or redefined. |
 | `extra_globals` | 30 | automation | The page window has globals a clean iframe does not: injected script. |
 | `property_order` | 30 | automation | navigator enumerates keys that are not on its prototype chain. |
@@ -356,6 +358,11 @@ from `os.kernel`, but the page sees only the renderer; no UA, client hint or
 API exposes the kernel, so there is nothing to compare it with (mapping DRM
 versions to kernels would be a table we cannot check against a capture).
 ADR 0015 records the same.
+
+Worker check (2026-11-04): `worker_navigator_mismatch` is quiet for stock
+Chromium 153 in T-001 (headless) and in T-010 over CDP (headed under
+`xvfb-run`): on every page the dedicated worker's values equal the page's.
+Its unit tests are in `test_scoring.py` (`WorkerNavigatorRule`).
 
 Stock check (2026-11-03): T-010 with stock Chrome 153 over CDP, headed
 under `xvfb-run` and `--headless=new`, fires no OS rule, also with the info
