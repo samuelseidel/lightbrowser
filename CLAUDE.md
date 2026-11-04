@@ -11,8 +11,9 @@ first and do not contradict them. Current state (Chrome build): M1 (network),
 M2 (DOM + V8), M3 (layout + CDP), M4 (Chrome fingerprints), M5 (human input
 and Python SDK), most of M6 and M7 (OS personas) are done. `lightbrowser serve` runs real V8
 pages through `lb_page::CdpHost`; stock Playwright `connectOverCDP` passes
-21 tests (including screenshots and shadow DOM); the WPT subset passes
-10480/11177 (2568/2788 of the pre-shadow-DOM files). On our
+22 tests (including screenshots, shadow DOM and proxies); the WPT subset
+passes 11734/12465 (2566/2788 of the pre-shadow-DOM files, the same per
+file as the previous code here; 1249/1288 of the IndexedDB files). On our
 detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for all
 8 reference Chrome personas, with the M7 OS rules at full weight. With
 `--input human` (`LightBrowser.human*`) all 8 score beh 0 on their own
@@ -62,9 +63,27 @@ regenerate the hot-symbol list after code changes
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), shader execution in
 WebGL, the thin `fetch` peak RSS margin (above). Also open: workers as CDP
-targets, idle service workers are never stopped, M1 proxies, `indexedDB`,
-named access on `window` (full list in ROADMAP "Close-out
-verification"). Shadow DOM and custom elements (ADR 0026, ROADMAP
+targets, idle service workers are never stopped, named access on
+`window` (full list in ROADMAP "Close-out verification"). Proxies (ADR
+0027, ROADMAP "Proxies and IndexedDB"): `lb-net` `proxy.rs`, one `Proxy`
+per browser context (`Target.createBrowserContext` `proxyServer`/
+`proxyBypassList`, `--proxy`/`--proxy-bypass-list` for `serve` and
+`fetch`): HTTP `CONNECT` tunnels for `https:`/`ws(s):` (the ClientHello and
+H2 fingerprint equal a direct connection's), absolute-form forward
+requests for `http:` with `Proxy-Connection`, SOCKS5 with remote DNS
+(RFC 1929 auth as an extension), Chrome's `407` round (configured
+`user:pass@` or CDP `Fetch.authRequired`/`continueWithAuth`), Chrome's
+bypass rules (loopback implicit unless `<-loopback>`); recorded from
+Chrome in `lb-net` `tests/proxy/` (`proxy.py`, `chrome.jsonl`); requests
+to non-trustworthy `http:` hosts get Chrome's header set for them
+(`profiles/headers/captures/chrome_153_linux_insecure.jsonl`). IndexedDB
+(ADR 0028): `lb-webapi` `rt/idb/` (`backend.rs` per browser context and
+origin, in memory; `key.rs`; `mod.rs` bindings), replies as window tasks
+in backend order, transactions active until the next task boundary
+(`Window::take_task`) and auto-committed, `versionchange`/`blocked`
+across windows and workers; 10 Chrome-recorded cases in `lb-page`
+`tests/idb/`, 207 WPT IndexedDB files. Page and worker loops let a due
+timer run after 50 tasks in a row. Shadow DOM and custom elements (ADR 0026, ROADMAP
 "Shadow DOM and custom elements"): shadow roots in `lb-dom` (`shadow.rs`:
 arena nodes without a parent link, slot assignment on demand, flat tree,
 declarative roots from the parser, `getHTML`), scoped style with
@@ -137,11 +156,11 @@ See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R26, sfc32 done; OS axis and per-OS accessors (M7), `profiles/catalog/` + `gen_personas` example; optional `preferences`, media devices, battery |
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
-| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints, connection pool (`pool.rs`, ADR 0018), WebSocket client (`websocket.rs`, ADR 0025) | Done for Chrome; cookies shared across clones; Firefox headers generic; keep-alive, HTTP/2 sessions and TLS resumption per context (a `NetContext` without a pool still uses one connection per request); cache, proxies, HTTP/2 coalescing open |
+| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints, connection pool (`pool.rs`, ADR 0018), WebSocket client (`websocket.rs`, ADR 0025), proxies (`proxy.rs`, ADR 0027) | Done for Chrome; cookies shared across clones; Firefox headers generic; keep-alive, HTTP/2 sessions and TLS resumption per context (a `NetContext` without a pool still uses one connection per request); HTTP `CONNECT`/forward and SOCKS5 proxies per context; cache, HTTPS/SOCKS4 proxies, HTTP/2 coalescing open |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use | M1 done; `site` (ADR 0018) |
 | `lb-dom` | Arena DOM, html5ever sink, selectors, shadow trees | Done (one arena per document; `import_node_mapped` for adoption across documents; `ParseStep::StyleSheet` pauses for style sheets; shadow roots, slots, flat tree and declarative roots in `shadow.rs`; custom element state and `is` values; `ParseStep::CustomElement` pauses) |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`), shadow DOM (`rt/shadow.rs`), custom elements (`rt/custom.rs`), `ElementInternals` and `FormData` (`rt/internals.rs`), Web Crypto (`rt/crypto/`), WebSocket (`rt/websocket.rs`), dynamic `import()` (`rt/modules.rs`), `blob:`/`data:` fetches and synchronous XHR (`rt/net.rs`). WebGL runs no shaders |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`), shadow DOM (`rt/shadow.rs`), custom elements (`rt/custom.rs`), `ElementInternals` and `FormData` (`rt/internals.rs`), Web Crypto (`rt/crypto/`), WebSocket (`rt/websocket.rs`), dynamic `import()` (`rt/modules.rs`), `blob:`/`data:` fetches and synchronous XHR (`rt/net.rs`), IndexedDB (`rt/idb/`, ADR 0028). WebGL runs no shaders |
 | `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; shadow tree scoping with `:host`/`::slotted`, flat-tree inheritance; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
@@ -183,7 +202,7 @@ cargo test -p lb-page --test connections
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
 # WPT subset (loopback) and the Playwright CDP smoke test
 cargo test -p lb-page --test wpt -- --nocapture
-cargo build -p lightbrowser && node --test tests/playwright/   # 21 tests; LIGHTBROWSER_BIN overrides
+cargo build -p lightbrowser && node --test tests/playwright/   # 22 tests; LIGHTBROWSER_BIN overrides
 # Workers vs Chrome (10 cases + dedicated/shared/service worker global surface vs the capture)
 cargo test -p lb-page --test pages workers
 # Service workers and the Cache API vs Chrome (11 cases, with reloads)
@@ -195,6 +214,11 @@ cargo test -p lb-page --test pages service_workers
 cargo test -p lb-page --test pages apis
 cargo test -p lb-net --test websocket     # wss ClientHello (JA4) and handshake header order vs Chrome's capture
 # re-record: crates/lb-page/tests/apis/{serve.py,chrome.mjs} (python3 serve.py 18961 &)
+# IndexedDB vs Chrome (10 cases); re-record: crates/lb-page/tests/idb/{serve.py,chrome.mjs} (python3 serve.py 18981 &)
+cargo test -p lb-page --test pages idb
+# Proxies (loopback proxy.py: CONNECT/forward/SOCKS5, auth, bypass; fingerprint through a tunnel = direct)
+cargo test -p lb-net --test proxy
+# re-record Chrome through the proxy: crates/lb-net/tests/proxy/{proxy.py,chrome.mjs}
 # Shadow DOM and custom elements vs Chrome (9 cases)
 cargo test -p lb-page --test pages shadow
 # re-record: crates/lb-page/tests/shadow/{serve.py,chrome.mjs} (python3 serve.py 18971 &)

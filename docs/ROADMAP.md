@@ -2773,6 +2773,75 @@ when an operation's mutations are processed (attribute reflection
 setters, `Range`, `NamedNodeMap` and `DOMTokenList` reactions follow
 only where those APIs mutate through the DOM).
 
+## Proxies and IndexedDB (2026-11-04)
+
+Closes "M1 proxies" and "no `indexedDB`" of "What is still open after
+this run" (ADRs 0027, 0028). Behaviour was recorded in local Chrome for
+Testing 153.0.8010.12 on loopback only.
+
+**Proxies** (`lb-net` `proxy.rs`, ADR 0027). Chrome was recorded through
+our own logging proxies (`lb-net` `tests/proxy/proxy.py`,
+`chrome.jsonl`): HTTP `CONNECT` (head `Host`, `Proxy-Connection:
+keep-alive`, `User-Agent`, then `Proxy-Authorization` once known), forward
+requests in absolute form (`Proxy-Connection`, `Proxy-Authorization` after
+`Pragma`/`Cache-Control`), SOCKS5 greeting `05 01 00` with the host name
+(remote DNS), the `407` round (first request without, answer on the same
+connection, then up front) and headless Chrome's
+`net::ERR_INVALID_AUTH_CREDENTIALS` without a handler.
+
+| What | How it is checked |
+|---|---|
+| ClientHello (JA4, JA4_r) and Akamai H2 + header names through `CONNECT` and SOCKS5 equal a direct connection's; `wss:` through `CONNECT` keeps Chrome's WebSocket JA4 | `lb-net` `tests/proxy.rs` against `lb-fptest`'s capture server |
+| `CONNECT` head, forward request line and header order (= `chrome.jsonl`), SOCKS5 greeting/address type, auth round on one connection, wrong credentials, RFC 1929 | same |
+| Bypass: implicit loopback rule, `<-loopback>`, host patterns, CIDR, `<local>`; unreachable proxy gives `net::ERR_PROXY_CONNECTION_FAILED` | `proxy.rs` unit tests, `tests/proxy.rs` |
+| Playwright `newContext({ proxy })` with `httpCredentials` (CDP `Target.createBrowserContext` `proxyServer`/`proxyBypassList`, `Fetch.authRequired` → `continueWithAuth`), without credentials (`ERR_INVALID_AUTH_CREDENTIALS`), SOCKS5, `bypass` | `tests/playwright/proxy.spec.mjs` |
+| `--proxy`, `--proxy-bypass-list` for `serve` and `fetch` | manual run on loopback |
+
+Found on the way: Chrome sends a different header set to destinations
+that are not potentially trustworthy (`http:` to a non-loopback host, the
+normal case behind a forward proxy, and for direct requests too): no
+`sec-ch-*`, no `Sec-Fetch-*`, `Accept-Encoding: gzip, deflate`,
+`Accept-Language` last. Recorded for every request kind
+(`profiles/headers/captures/chrome_153_linux_insecure.jsonl`) and now
+applied (`header_profile.rs`, test `insecure_destination_matches_chrome`);
+one existing unit test now uses an `https:` URL because its `http://a.test`
+target falls under this rule.
+
+**IndexedDB** (`lb-webapi` `rt/idb/`, ADR 0028). 10 cases recorded in
+Chrome (`lb-page` `tests/idb/`, `serve.py` + `chrome.mjs`), all equal:
+
+| Case | What |
+|---|---|
+| `idb_basic` | factory, open/upgrade/success event order, stores, put/add/get/getKey/count/delete/getAll/getAllKeys order, `complete`, read-only errors, reopen, `databases()`, delete |
+| `idb_keys` | `cmp` over 32 keys of every type (order and equality), invalid keys, getters on arrays, `IDBKeyRange` and its errors |
+| `idb_keypath` | key path validity, nested and array paths, `length`, key generators (explicit keys, floats, strings, negatives, the 2^53 limit), injection, every DataError text |
+| `idb_index` | unique/multiEntry/compound indexes, index reads, uniqueness errors, a unique index over duplicates aborting the upgrade |
+| `idb_cursor` | all directions on stores and indexes, ranges, `advance`, `continue(key)`, `continuePrimaryKey`, error order, `update`/`delete`, key cursors, cursors after commit |
+| `idb_txn` | auto-commit timing, inactive after the task, active in microtasks, event order across transactions, `abort()`, error propagation request → transaction → database, prevented errors, exceptions in handlers, `commit()`, scheduling, `transaction()` errors |
+| `idb_version` | `versionchange`, `blocked`, close in `versionchange`, VersionError and version TypeErrors, delete with open connections, abort and close during upgrade, `IDBVersionChangeEvent`, open queue order |
+| `idb_values` | structured clone of values (and its errors), copies, ranges and counts, `getAll` options, `getAllRecords`, delete ranges, clear |
+| `idb_errors` | constructors, prototype members, schema errors, renames, pending results, finished transactions |
+| `idb_worker` | a dedicated worker reads the page's data and upgrades while the page holds a connection (`versionchange` across threads) |
+
+WPT: the 207 `IndexedDB/*.any.js` files (WPT 095dcead; no idlharness,
+storage buckets or `.https` tests) were added: 1249/1288 subtests pass,
+176/207 files fully pass. Most remaining failures need `FileReader` (blob
+values), detached `ArrayBuffer` keys, deactivation between two callbacks
+of one task, or lone surrogates in store names.
+
+Event loop change: a page or worker that keeps queueing tasks (an
+IndexedDB request loop, a message ping-pong) used to starve its due
+timers; now a due timer runs after 50 tasks in a row (real clock only).
+The WPT `dom/` results are identical per file with and without the change.
+
+Checks (TBD_CHECKS)
+
+Open: HTTPS and SOCKS4 proxies, PAC, `Digest`/NTLM proxy auth, server
+`401` through `Fetch.authRequired`; IndexedDB quota, `durability`
+effects, blob values read back with `FileReader` (not implemented),
+transaction deactivation between callbacks of one task, lone surrogates
+in store and index names.
+
 ## Risks
 
 - **TCP/IP fingerprint.** SYN TTL and TCP options always come from the host
