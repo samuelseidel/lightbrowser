@@ -97,11 +97,25 @@ impl fmt::Debug for Document {
     }
 }
 
+/// What [`Document::strip_silently`] took from an element.
+#[derive(Debug)]
+pub struct StrippedElement {
+    parent: Option<NodeId>,
+    next: Option<NodeId>,
+    children: Vec<NodeId>,
+    attrs: Vec<Attribute>,
+}
+
 /// Snapshot of a node used by `clone_node` / `import_node`.
 enum ShallowCopy {
     Document,
     Doctype(Doctype),
-    Element(QualName, Vec<Attribute>),
+    Element(
+        QualName,
+        Vec<Attribute>,
+        Option<LocalName>,
+        crate::CustomState,
+    ),
     Text(StrTendril),
     Comment(StrTendril),
     Pi(ProcessingInstruction),
@@ -256,10 +270,22 @@ impl Document {
     pub fn create_element(&mut self, name: QualName, attrs: Vec<Attribute>) -> NodeId {
         let is_template = name.ns == ns!(html) && name.local == local_name!("template");
         let idx = u32::try_from(self.elements.len()).expect("element table full");
-        self.elements.push(ElementData::new(name, attrs));
+        let mut data = ElementData::new(name, attrs);
+        if data.name.ns == ns!(html) {
+            // Valid custom element names and `is` (parser, clone) start
+            // "undefined" until a definition upgrades them.
+            if crate::is_valid_custom_element_name(&data.name.local) {
+                data.custom = crate::CustomState::Undefined;
+            } else if let Some(is) = data.attr("is") {
+                data.is_value = Some(LocalName::from(is));
+                data.custom = crate::CustomState::Undefined;
+            }
+        }
+        self.elements.push(data);
         let id = self.push(NodeData::Element(idx));
         if is_template {
             let contents = self.push(NodeData::DocumentFragment);
+            self.nodes[contents.index()].flags |= NodeFlags::TEMPLATE_CONTENTS;
             self.elements[idx as usize].template_contents = Some(contents);
         }
         id
@@ -1192,6 +1218,82 @@ impl Document {
         self.classes(id).any(|c| c == class)
     }
 
+    /// Custom element state of element `id` (`Uncustomized` otherwise).
+    pub fn custom_state(&self, id: NodeId) -> crate::CustomState {
+        self.element(id)
+            .map_or(crate::CustomState::Uncustomized, |e| e.custom)
+    }
+
+    /// Set the custom element state (bumps the render generation: `:defined`).
+    pub fn set_custom_state(&mut self, id: NodeId, state: crate::CustomState) {
+        if let Some(e) = self.element_mut(id)
+            && e.custom != state
+        {
+            e.custom = state;
+            self.render_extra += 1;
+        }
+    }
+
+    /// The `is` value of element `id`.
+    pub fn is_value(&self, id: NodeId) -> Option<&str> {
+        self.element(id)?.is_value.as_deref()
+    }
+
+    pub fn set_is_value(&mut self, id: NodeId, v: Option<&str>) {
+        if let Some(e) = self.element_mut(id) {
+            e.is_value = v.map(LocalName::from);
+        }
+    }
+
+    /// True if `id` is in a `<template>`'s contents (inert: no custom
+    /// element upgrades, scripts or loads).
+    pub fn in_template_contents(&self, id: NodeId) -> bool {
+        let r = self.shadow_including_root(id);
+        self.node(r).flags.contains(NodeFlags::TEMPLATE_CONTENTS)
+    }
+
+    /// Unlink `id` and take its children and attributes without mutation
+    /// events, so it looks freshly created (custom element construction
+    /// for parser-made elements). Returns what [`Document::restore_silently`]
+    /// puts back.
+    pub fn strip_silently(&mut self, id: NodeId) -> StrippedElement {
+        let parent = self.parent(id);
+        let next = self.next_sibling(id);
+        self.unlink_raw(id);
+        let children = self.take_children_silently(id);
+        let attrs = self
+            .element_mut(id)
+            .map(|e| std::mem::take(&mut e.attrs))
+            .unwrap_or_default();
+        StrippedElement {
+            parent,
+            next,
+            children,
+            attrs,
+        }
+    }
+
+    /// Put back the tree position, children and attributes taken by
+    /// [`Document::strip_silently`] (no events); returns the attributes.
+    pub fn restore_silently(&mut self, id: NodeId, s: StrippedElement) -> Vec<Attribute> {
+        if let Some(p) = s.parent {
+            let before = s.next.filter(|&n| self.parent(n) == Some(p));
+            if self.parent(id).is_none() {
+                self.link_raw(p, id, before);
+            }
+        }
+        for c in s.children {
+            if self.parent(c).is_none() {
+                self.link_raw(id, c, None);
+            }
+        }
+        self.generation += 1;
+        if let Some(e) = self.element_mut(id) {
+            e.attrs = s.attrs.clone();
+        }
+        s.attrs
+    }
+
     /// `<template>` content fragment.
     pub fn template_contents(&self, id: NodeId) -> Option<NodeId> {
         self.element(id)?.template_contents
@@ -1205,7 +1307,12 @@ impl Document {
             NodeData::Doctype(d) => ShallowCopy::Doctype((**d).clone()),
             NodeData::Element(i) => {
                 let e = &self.elements[*i as usize];
-                ShallowCopy::Element(e.name.clone(), e.attrs.clone())
+                ShallowCopy::Element(
+                    e.name.clone(),
+                    e.attrs.clone(),
+                    e.is_value.clone(),
+                    e.custom,
+                )
             }
             NodeData::Text(t) => ShallowCopy::Text(t.clone()),
             NodeData::Comment(t) => ShallowCopy::Comment(t.clone()),
@@ -1221,14 +1328,14 @@ impl Document {
     pub fn clone_node(&mut self, id: NodeId, deep: bool) -> NodeId {
         // Two passes: snapshot under a shared borrow, then build.
         let plan = Self::plan_copy_from(self, id, deep, false, None);
-        self.build_copy_ids(plan)[0]
+        self.build_copy_ids(plan, false)[0]
     }
 
     /// `document.importNode(node, deep)`: copy a node from another document
     /// into this arena.
     pub fn import_node(&mut self, src: &Document, id: NodeId, deep: bool) -> NodeId {
         let plan = Self::plan_copy_from(src, id, deep, false, None);
-        self.build_copy_ids(plan)[0]
+        self.build_copy_ids(plan, false)[0]
     }
 
     /// Move a subtree of another document into this arena (adoption across
@@ -1243,7 +1350,7 @@ impl Document {
     ) -> (NodeId, Vec<(NodeId, NodeId)>) {
         let mut sources = Vec::new();
         let plan = Self::plan_copy_from(src, id, true, true, Some(&mut sources));
-        let ids = self.build_copy_ids(plan);
+        let ids = self.build_copy_ids(plan, true);
         let map: Vec<(NodeId, NodeId)> = sources.into_iter().zip(ids.iter().copied()).collect();
         if !src.manual_slots.is_empty() {
             let lookup: std::collections::HashMap<NodeId, NodeId> = map.iter().copied().collect();
@@ -1309,8 +1416,13 @@ impl Document {
         plan
     }
 
-    /// The copies, one per plan entry, in plan order.
-    fn build_copy_ids(&mut self, plan: Vec<(ShallowCopy, usize, Into)>) -> Vec<NodeId> {
+    /// The copies, one per plan entry, in plan order. `adopt` keeps the
+    /// custom element state (a clone starts over, keeping the `is` value).
+    fn build_copy_ids(
+        &mut self,
+        plan: Vec<(ShallowCopy, usize, Into)>,
+        adopt: bool,
+    ) -> Vec<NodeId> {
         let mut ids: Vec<NodeId> = Vec::with_capacity(plan.len());
         for (copy, parent, into) in plan {
             if let ShallowCopy::Shadow(mut d) = copy {
@@ -1327,7 +1439,21 @@ impl Document {
             let id = match copy {
                 ShallowCopy::Document | ShallowCopy::Fragment => self.create_document_fragment(),
                 ShallowCopy::Doctype(d) => self.create_doctype_tendril(d),
-                ShallowCopy::Element(name, attrs) => self.create_element(name, attrs),
+                ShallowCopy::Element(name, attrs, is, state) => {
+                    let e = self.create_element(name, attrs);
+                    if let Some(d) = self.element_mut(e) {
+                        if is.is_some() {
+                            d.is_value = is;
+                            if d.custom == crate::CustomState::Uncustomized {
+                                d.custom = crate::CustomState::Undefined;
+                            }
+                        }
+                        if adopt {
+                            d.custom = state;
+                        }
+                    }
+                    e
+                }
                 ShallowCopy::Text(t) => self.create_text_tendril(t),
                 ShallowCopy::Comment(t) => self.create_comment_tendril(t),
                 ShallowCopy::Pi(p) => self.create_pi_tendril(p.target, p.data),

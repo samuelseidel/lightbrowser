@@ -121,7 +121,18 @@ impl Serialize for SerializeNode<'_> {
                 Op::Open(id) => match &self.doc.node(id).data {
                     NodeData::Element(i) => {
                         let e = &self.doc.elements[*i as usize];
-                        s.start_elem(e.name.clone(), e.attrs.iter().map(|a| (&a.name, &*a.value)))?;
+                        // A customized built-in's `is` value is written
+                        // when it has no `is` attribute (HTML serializing).
+                        let is_name = html5ever::QualName::new(None, html5ever::ns!(), "is".into());
+                        let extra = e
+                            .is_value
+                            .as_ref()
+                            .filter(|_| e.attr("is").is_none())
+                            .map(|v| (&is_name, &**v));
+                        s.start_elem(
+                            e.name.clone(),
+                            e.attrs.iter().map(|a| (&a.name, &*a.value)).chain(extra),
+                        )?;
                         stack.push(Op::Close(id));
                         self.push_children(&mut stack, id);
                         self.open_shadow(s, &mut stack, id)?;

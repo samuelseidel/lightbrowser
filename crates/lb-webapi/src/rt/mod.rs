@@ -60,6 +60,7 @@ pub mod frames;
 mod gpu;
 mod image;
 pub mod input;
+mod internals;
 mod matrix;
 mod media;
 mod misc;
@@ -189,11 +190,16 @@ pub trait Js {
     fn take_exception(&mut self) -> Option<Handle>;
     /// Realm building (child frames), from the event loop or a callback.
     fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps;
+    /// The host object behind a handle, if it is a wrapper.
+    fn host_of(&mut self, h: Handle) -> Option<HostRef>;
 }
 
 impl Js for CallCtx<'_, '_, '_> {
     fn realm(&self) -> RealmId {
         CallCtx::realm(self)
+    }
+    fn host_of(&mut self, h: Handle) -> Option<HostRef> {
+        self.handle_host(h)
     }
     fn call(&mut self, f: Handle, this: Arg, args: &[Arg]) -> Result<JsValue, JsError> {
         self.try_call(f, this, args)
@@ -258,6 +264,9 @@ pub struct EngineJs<'e> {
 impl Js for EngineJs<'_> {
     fn realm(&self) -> RealmId {
         self.realm
+    }
+    fn host_of(&mut self, h: Handle) -> Option<HostRef> {
+        self.engine.unwrap_host(self.realm, h).ok().flatten()
     }
     fn call(&mut self, f: Handle, this: Arg, args: &[Arg]) -> Result<JsValue, JsError> {
         let r = self.engine.call(self.realm, f, this, args);
@@ -464,6 +473,8 @@ impl Runtime {
         table::register(reg, &rt);
         sheets::register(reg, &rt);
         shadow::register(reg, &rt);
+        custom::register(reg, &rt);
+        internals::register(reg, &rt);
         worker::register(reg, &rt);
         sw::register(reg, &rt);
         crypto::register(reg, &rt);
@@ -755,6 +766,8 @@ pub(crate) struct Helpers {
     pub json_parse: Option<Handle>,
     pub json_stringify: Option<Handle>,
     pub freeze: Option<Handle>,
+    /// `Reflect.construct` (custom element construction).
+    pub reflect_construct: Option<Handle>,
     pub languages: Option<Handle>,
 }
 
@@ -806,6 +819,8 @@ pub struct Window {
     /// (to signal `slotchange`), and the signal slots (DOM "signal slot
     /// list"), fired after the mutation observers.
     pub(crate) slot_state: RefCell<shadow::SlotState>,
+    /// Custom element registries, reactions and internals.
+    pub(crate) ce: RefCell<custom::CeState>,
     /// Loads that delay the `load` event (scripts, stylesheets).
     pub pending_loads: Cell<u32>,
     /// Requests in flight (for `networkidle`).
@@ -917,6 +932,7 @@ impl Window {
             observers: RefCell::new(Vec::new()),
             mo_queued: Cell::new(false),
             slot_state: RefCell::new(shadow::SlotState::default()),
+            ce: RefCell::new(custom::CeState::default()),
             pending_loads: Cell::new(0),
             in_flight: Cell::new(0),
             current_script: Cell::new(None),
@@ -1056,7 +1072,9 @@ impl Window {
         let stringify = engine.get_property(realm, json, "stringify")?;
         let object = engine.get_property(realm, g, "Object")?;
         let freeze = engine.get_property(realm, object, "freeze")?;
-        for h in [g, array, proto, json, object] {
+        let reflect = engine.get_property(realm, g, "Reflect")?;
+        let construct = engine.get_property(realm, reflect, "construct")?;
+        for h in [g, array, proto, json, object, reflect] {
             engine.release(h);
         }
         let mut hp = self.helpers.borrow_mut();
@@ -1065,6 +1083,7 @@ impl Window {
         hp.json_parse = Some(parse);
         hp.json_stringify = Some(stringify);
         hp.freeze = Some(freeze);
+        hp.reflect_construct = Some(construct);
         Ok(())
     }
 
@@ -1672,6 +1691,14 @@ pub fn is_secure_url(u: &Url) -> bool {
 /// Host objects other than nodes and the window.
 pub(crate) enum Obj {
     Event(Box<EventData>),
+    /// A `CustomElementRegistry` (index into the window's registries).
+    CustomElementRegistry(u32),
+    /// `ElementInternals` of an element.
+    ElementInternals(u32, NodeId),
+    /// `CustomStateSet` of an element.
+    CustomStateSet(u32, NodeId),
+    /// `ValidityState` of a form-associated custom element.
+    InternalsValidity(u32, NodeId),
     /// `new EventTarget()`.
     EventTarget,
     NodeList(coll::NodeListSrc),
@@ -1766,6 +1793,10 @@ impl Obj {
     pub(crate) fn iface_name(&self) -> &'static str {
         match self {
             Obj::Event(e) => e.iface,
+            Obj::CustomElementRegistry(_) => "CustomElementRegistry",
+            Obj::ElementInternals(..) => "ElementInternals",
+            Obj::CustomStateSet(..) => "CustomStateSet",
+            Obj::InternalsValidity(..) => "ValidityState",
             Obj::EventTarget => "EventTarget",
             Obj::NodeList(_) => "NodeList",
             Obj::Collection(c) => c.iface,

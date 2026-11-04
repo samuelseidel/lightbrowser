@@ -21,9 +21,11 @@ mod serialize;
 mod shadow;
 mod sink;
 
-pub use document::{Children, Descendants, Document, DomError};
+pub use document::{Children, Descendants, Document, DomError, StrippedElement};
 pub use mutation::{Mutation, MutationHook};
-pub use node::{Doctype, ElementData, NodeFlags, NodeId, NodeType, ProcessingInstruction};
+pub use node::{
+    CustomState, Doctype, ElementData, NodeFlags, NodeId, NodeType, ProcessingInstruction,
+};
 pub use parser::{HtmlParser, ParseStep, ParserOptions};
 pub use select::{ElementFacts, ElementRef, SelectorList, TreeMatch};
 pub use serialize::{SerializeNode, ShadowSerialization};

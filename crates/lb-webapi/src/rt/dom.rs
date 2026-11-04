@@ -17,6 +17,52 @@ use crate::registry::Registry;
 
 type R = Result<(), HostError>;
 
+/// The `is` member of `createElement`'s options (a string argument is
+/// ignored, as in Chrome).
+fn element_creation_is(
+    cx: &mut CallCtx<'_, '_, '_>,
+    i: usize,
+) -> Result<Option<String>, HostError> {
+    if i >= cx.len() || !matches!(cx.arg_kind(i), ValueKind::Object) {
+        return Ok(None);
+    }
+    let d = super::Dict::arg(cx, i);
+    let is = d.string(cx, "is")?;
+    d.release(cx);
+    Ok(is)
+}
+
+/// A freshly created element `n` as a custom element: constructed or
+/// upgraded when a definition exists (the new element replaces `n`),
+/// else given its `is` value.
+fn custom_create(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Rc<Window>,
+    slot: u32,
+    n: NodeId,
+    is: Option<&str>,
+) -> NodeId {
+    let html_local = w.doc_slot(slot, |d| {
+        d.qual_name(n)
+            .filter(|q| q.ns == ns!(html))
+            .map(|q| q.local.to_string())
+    });
+    let Some(local) = html_local else { return n };
+    if let Some(x) = super::custom::create_element(cx, w, slot, &local, is) {
+        super::custom::process(cx, w);
+        return x;
+    }
+    if let Some(is) = is
+        && !lb_dom::is_valid_custom_element_name(&local)
+    {
+        w.doc_slot_mut(slot, |d| {
+            d.set_is_value(n, Some(is));
+            d.set_custom_state(n, lb_dom::CustomState::Undefined);
+        });
+    }
+    n
+}
+
 /// DOMException for a DOM error, with Chrome-like wording.
 pub(crate) fn dom_err(w: &Window, op: &str, iface: &str, e: DomError) -> HostError {
     let detail = match &e {
@@ -65,6 +111,8 @@ pub(crate) fn bring(
         return node;
     }
     let (copy, map) = dst.borrow_mut().import_node_mapped(&src.borrow(), node);
+    let was_connected = src.borrow().is_connected(node);
+    super::custom::adopted(w, from, to, &map, was_connected);
     src.borrow_mut().detach(node);
     let pairs: Vec<(HostRef, HostRef)> = map
         .iter()
@@ -444,6 +492,8 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
                 if let Some(v) = v {
                     w.values.borrow_mut().insert((slot, c), v);
                 }
+                // Custom elements among the copies are upgraded now.
+                w.after_mutation(cx);
                 ret_node(cx, w, slot, Some(c))
             }
             None => Err(w.rt.err(
@@ -1484,8 +1534,12 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         need_args(cx, 1, "createElement", "Document")?;
         let (slot, _) = this_node(cx, w)?;
         let name = cx.arg_string(0)?;
+        let is = element_creation_is(cx, 1)?;
         match w.doc_slot_mut(slot, |d| d.create_element_by_name(&name)) {
-            Ok(n) => ret_node(cx, w, slot, Some(n)),
+            Ok(n) => {
+                let n = custom_create(cx, w, slot, n, is.as_deref());
+                ret_node(cx, w, slot, Some(n))
+            }
             Err(_) => Err(w.rt.err(
                 "InvalidCharacterError",
                 format!("Failed to execute 'createElement' on 'Document': The tag name provided ('{name}') is not a valid name."),
@@ -1497,8 +1551,12 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         let (slot, _) = this_node(cx, w)?;
         let ns = Namespace::from(opt_string(cx, 0)?.unwrap_or_default());
         let name = cx.arg_string(1)?;
+        let is = element_creation_is(cx, 2)?;
         match w.doc_slot_mut(slot, |d| d.create_element_ns(ns, &name)) {
-            Ok(n) => ret_node(cx, w, slot, Some(n)),
+            Ok(n) => {
+                let n = custom_create(cx, w, slot, n, is.as_deref());
+                ret_node(cx, w, slot, Some(n))
+            }
             Err(e) => Err(dom_err(w, "createElementNS", "Document", e)),
         }
     });
@@ -1597,6 +1655,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         } else {
             dst.borrow_mut().import_node(&src.borrow(), n, deep)
         };
+        w.after_mutation(cx);
         ret_node(cx, w, slot, Some(c))
     });
     method(reg, rt, "Document", "adoptNode", |cx, w| {

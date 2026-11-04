@@ -3261,6 +3261,11 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         store_handle(self.scope, &self.state, self.realm, v)
     }
 
+    /// Escape hatch: a handle as a raw V8 value (`None` if stale).
+    pub fn local_of(&mut self, h: Handle) -> Option<v8::Local<'s, v8::Value>> {
+        load_handle(self.scope, &self.state, h).ok()
+    }
+
     /// Escape hatch: the raw V8 scope.
     pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
         self.scope

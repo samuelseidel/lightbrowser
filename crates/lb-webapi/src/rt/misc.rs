@@ -266,6 +266,14 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
     loop {
         let batch = std::mem::take(&mut *w.mutations.borrow_mut());
         if batch.is_empty() {
+            // Elements made without a tree change (cloneNode, importNode)
+            // are upgraded too.
+            if super::custom::active(w) {
+                super::custom::on_mutations(js, w, &[]);
+                if !w.mutations.borrow().is_empty() {
+                    continue;
+                }
+            }
             return;
         }
         let mut scripts = Vec::new();
@@ -278,6 +286,11 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
         }
         super::frames::on_mutations(js, w, &batch);
         super::shadow::on_mutations(js, w, &batch);
+        let batch_copy = if super::custom::active(w) {
+            batch.clone()
+        } else {
+            Vec::new()
+        };
         for (slot, m) in batch {
             if slot != 0 {
                 continue;
@@ -357,6 +370,7 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
         for s in scripts {
             super::script::prepare_dynamic(js, w, s);
         }
+        super::custom::on_mutations(js, w, &batch_copy);
     }
 }
 

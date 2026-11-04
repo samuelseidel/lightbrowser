@@ -481,6 +481,8 @@ pub(crate) async fn load(
             ParseStep::Script(n) => {
                 parser_script(ws, page, w, n, doc, &mut deferred).await?;
             }
+            // Constructed in `after_mutation` above.
+            ParseStep::CustomElement(_) => {}
             ParseStep::StyleSheet(_) => {
                 // A sheet in <body> stops the parser until it loaded and
                 // its `load` event fired (Chrome).

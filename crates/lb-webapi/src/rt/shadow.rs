@@ -328,10 +328,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 "Failed to execute 'attachShadow' on 'Element': This element does not support attachShadow",
             )
         };
-        // Customized built-ins (an `is` value) cannot host.
-        if super::custom::is_value(w, slot, n).is_some() {
-            return Err(not_supported(w));
-        }
         if super::custom::shadow_disabled(w, slot, n) {
             return Err(w.rt.err(
                 "NotSupportedError",

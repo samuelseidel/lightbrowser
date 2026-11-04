@@ -50,6 +50,8 @@ bitflags! {
         const HAS_WRAPPER = 1 << 3;
         /// Style for this element (or a descendant) needs recomputing.
         const STYLE_DIRTY = 1 << 4;
+        /// A `<template>`'s content fragment.
+        const TEMPLATE_CONTENTS = 1 << 5;
         /// `:hover`.
         const HOVER = 1 << 8;
         /// `:active`.
@@ -150,6 +152,24 @@ pub struct ProcessingInstruction {
     pub data: StrTendril,
 }
 
+/// An element's custom element state (HTML "custom element state").
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum CustomState {
+    #[default]
+    Uncustomized,
+    Undefined,
+    Failed,
+    Precustomized,
+    Custom,
+}
+
+impl CustomState {
+    /// `:defined` matches.
+    pub fn is_defined(self) -> bool {
+        matches!(self, CustomState::Uncustomized | CustomState::Custom)
+    }
+}
+
 /// Element payload, stored in the document's element side table.
 #[derive(Clone, Debug)]
 pub struct ElementData {
@@ -161,6 +181,10 @@ pub struct ElementData {
     pub template_contents: Option<NodeId>,
     /// Shadow root hosted by this element.
     pub shadow_root: Option<NodeId>,
+    /// Custom element state (HTML).
+    pub custom: CustomState,
+    /// The `is` value of a customized built-in.
+    pub is_value: Option<html5ever::LocalName>,
     /// MathML `annotation-xml` HTML integration point (parser detail).
     pub mathml_annotation_xml_integration_point: bool,
 }
@@ -172,6 +196,8 @@ impl ElementData {
             attrs,
             template_contents: None,
             shadow_root: None,
+            custom: CustomState::Uncustomized,
+            is_value: None,
             mathml_annotation_xml_integration_point: false,
         }
     }

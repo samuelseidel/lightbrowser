@@ -33,6 +33,12 @@ pub(crate) struct Sink {
     pub(crate) last_style: Cell<Option<NodeId>>,
     /// HTML `<style>` elements the parser closed, for the page layer.
     pub(crate) closed_styles: RefCell<Vec<NodeId>>,
+    /// Elements the document parser made that may be custom elements
+    /// (valid custom element name or an `is` attribute), for the page
+    /// layer to construct.
+    pub(crate) customs: RefCell<Vec<NodeId>>,
+    /// Last such element (a pause point, see `PauseSink`).
+    pub(crate) last_custom: Cell<Option<NodeId>>,
 }
 
 impl Sink {
@@ -48,6 +54,8 @@ impl Sink {
             last_link: Cell::new(None),
             last_style: Cell::new(None),
             closed_styles: RefCell::new(Vec::new()),
+            customs: RefCell::new(Vec::new()),
+            last_custom: Cell::new(None),
         }
     }
 }
@@ -91,6 +99,10 @@ impl TreeSink for Sink {
             && let Some(e) = doc.element_mut(id)
         {
             e.mathml_annotation_xml_integration_point = true;
+        }
+        if self.document_parser && doc.custom_state(id) == crate::CustomState::Undefined {
+            self.customs.borrow_mut().push(id);
+            self.last_custom.set(Some(id));
         }
         if self.document_parser {
             doc.set_flags(id, NodeFlags::PARSER_INSERTED, true);

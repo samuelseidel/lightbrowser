@@ -31,6 +31,10 @@ pub enum ParseStep {
     /// page layer may wait for its style sheet before calling `run` again;
     /// there is no insertion point for `document.write`.
     StyleSheet(NodeId),
+    /// An element that may be a custom element was just created and
+    /// inserted (only after [`HtmlParser::set_pause_at_custom`]). The page
+    /// layer constructs it if a definition exists, then calls `run`.
+    CustomElement(NodeId),
     /// End of input; the tree is complete.
     Done,
 }
@@ -66,6 +70,9 @@ struct PauseSink {
     /// The `<link>` / `<style>` the tokenizer last stopped at (it reports
     /// pauses as `Script`).
     paused_at: std::cell::Cell<Option<NodeId>>,
+    /// Pause after start tags that made a possible custom element.
+    pause_custom: std::cell::Cell<bool>,
+    custom_paused: std::cell::Cell<Option<NodeId>>,
 }
 
 impl html5ever::tokenizer::TokenSink for PauseSink {
@@ -88,7 +95,19 @@ impl html5ever::tokenizer::TokenSink for PauseSink {
             },
             _ => None,
         };
+        let start_tag = matches!(&token, Token::TagToken(t) if t.kind == TagKind::StartTag);
+        if start_tag {
+            self.tb.sink.last_custom.set(None);
+        }
         let r = self.tb.process_token(token, line_number);
+        if start_tag
+            && self.pause_custom.get()
+            && matches!(r, TokenSinkResult::Continue)
+            && let Some(n) = self.tb.sink.last_custom.take()
+        {
+            self.custom_paused.set(Some(n));
+            return TokenSinkResult::Script(n);
+        }
         if let (Some(link), TokenSinkResult::Continue) = (watch, &r) {
             let n = if link {
                 self.tb.sink.last_link.take()
@@ -160,6 +179,8 @@ impl HtmlParser {
             tb,
             pause: opts.pause_at_style_sheets,
             paused_at: std::cell::Cell::new(None),
+            pause_custom: std::cell::Cell::new(false),
+            custom_paused: std::cell::Cell::new(None),
         };
         HtmlParser {
             tok: Tokenizer::new(ps, TokenizerOpts::default()),
@@ -261,6 +282,10 @@ impl HtmlParser {
                 &self.input
             };
             match self.tok.feed(queue) {
+                TokenizerResult::Script(s) if self.tok.sink.custom_paused.get() == Some(s) => {
+                    self.tok.sink.custom_paused.set(None);
+                    break ParseStep::CustomElement(s);
+                }
                 TokenizerResult::Script(s) if self.tok.sink.paused_at.get() == Some(s) => {
                     self.tok.sink.paused_at.set(None);
                     break ParseStep::StyleSheet(s);
@@ -306,6 +331,11 @@ impl HtmlParser {
         self.lend(doc);
         loop {
             match self.tok.feed(&self.inserted) {
+                // Written text does not pause for custom elements (the
+                // page layer constructs them after the write).
+                TokenizerResult::Script(s) if self.tok.sink.custom_paused.get() == Some(s) => {
+                    self.tok.sink.custom_paused.set(None);
+                }
                 // Written text does not pause for style sheets.
                 TokenizerResult::Script(s) if self.tok.sink.paused_at.get() == Some(s) => {
                     self.tok.sink.paused_at.set(None);
@@ -326,6 +356,18 @@ impl HtmlParser {
     /// complete), in order.
     pub fn take_closed_styles(&mut self) -> Vec<NodeId> {
         std::mem::take(&mut *self.sink().closed_styles.borrow_mut())
+    }
+
+    /// Pause after each element that may be a custom element
+    /// ([`ParseStep::CustomElement`]); on once a definition exists.
+    pub fn set_pause_at_custom(&mut self, on: bool) {
+        self.tok.sink.pause_custom.set(on);
+    }
+
+    /// Possible custom elements the parser made since the last call, in
+    /// creation order.
+    pub fn take_custom_candidates(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut *self.sink().customs.borrow_mut())
     }
 
     /// Script the parser is currently stopped at, if any.

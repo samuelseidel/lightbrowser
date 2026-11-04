@@ -807,10 +807,7 @@ impl<'a> Element for ElementRef<'a> {
                 let invalid = self.attr("required").is_some() && self.value_is_empty();
                 invalid == (n == P::Invalid)
             }
-            P::Defined => {
-                let d = self.data();
-                !(d.is_html() && d.name.local.contains('-'))
-            }
+            P::Defined => self.data().custom.is_defined(),
             P::Open => {
                 (self.is_html_named(&local_name!("details"))
                     || self.is_html_named(&local_name!("dialog")))

@@ -265,6 +265,7 @@ fn run_script_parser(js: &mut dyn Js, w: &Rc<Window>, to_end: bool) {
                 }
             }
             ParseStep::StyleSheet(_) => {}
+            ParseStep::CustomElement(_) => w.after_mutation(js),
             ParseStep::NeedInput | ParseStep::Done => {
                 let _ = to_end;
                 return;
