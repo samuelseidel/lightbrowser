@@ -12,7 +12,7 @@ Each milestone ends with something we can run and measure.
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
 | **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015), WP-C (scrollbars, fonts, aliases, emoji per OS) WP-D (OS-gated APIs, codecs, WebGPU, keyboard, WebGL backends, audio, window position, wheel and shortcuts per OS) and WP-E (`Accept-CH` / `Critical-CH` client hints) done: all 8 reference personas fp 0 and beh 0. See "M7 status" |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 40.39 MB against < 50 MB (raised from < 40 MB by user decision, ADR 0013 revision 4); `bench/` runner done; lazy interfaces (ADR 0016); Lightpanda compared (user-approved nightly, loopback only): 5 of 6 checks pass (CDP wall time fails, see "Where we stand"); screenshots paint CSS backgrounds, radius and shadows (ADR 0020); service workers and the Cache API in memory per context (ADR 0022, "Service workers"). See "M6 status". |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 40.39 MB against < 50 MB (raised from < 40 MB by user decision, ADR 0013 revision 4); `bench/` runner done; lazy interfaces (ADR 0016); Lightpanda compared (user-approved nightly, loopback only): 6 of 6 checks pass since "CDP crawl speed" (CDP wall time had failed after the corpus server fix); screenshots paint CSS backgrounds, radius and shadows (ADR 0020); service workers and the Cache API in memory per context (ADR 0022, "Service workers"). See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
 
@@ -22,17 +22,17 @@ Each milestone ends with something we can run and measure.
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
-| M6 Performance | Snapshot, memory, binary size (41.19 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018); service workers (ADR 0022) | CDP crawl wall time 0.80-0.83 vs Lightpanda 0.74 s (5 of 6 checks pass; `fetch` peak RSS passes or fails by about 0.5 MB with Lightpanda's own peak; see "Close-out verification") |
+| M6 Performance | Snapshot, memory, binary size (41.22 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018); service workers (ADR 0022); CDP crawl faster than Lightpanda again (0.67 vs 0.76-0.77 s, 6 of 6 checks in two 5 x 50 runs; ADRs 0023, 0024, "CDP crawl speed") | `fetch` peak RSS margin 0.6 MB (23.7-23.8 vs 24.4 MB): above the run-to-run spread seen here (~0.4 MB) but not by much; see "CDP crawl speed" |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 5.92 MB after "Service workers"; 6.06 MB after "Workers"; 6.13 MB after "Style sheets and screenshot decorations"; 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 41.19 MB (41,193,336 bytes) after "Service workers"; 40.95 MB (40,951,672 bytes) after "Workers"; 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
-| Realm creation < 5 ms | Met: 1.28 ms first, 1.08 ms next after "Service workers"; 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
+| Idle RSS < 15 MB | Met: 6.27 / 6.40 MB after "CDP crawl speed"; 5.92 MB after "Service workers"; 6.06 MB after "Workers"; 6.13 MB after "Style sheets and screenshot decorations"; 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
+| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 41.22 MB (41,222,008 bytes) after "CDP crawl speed"; 41.19 MB (41,193,336 bytes) after "Service workers"; 40.95 MB (40,951,672 bytes) after "Workers"; 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
+| Realm creation < 5 ms | Met: 1.29 ms first, 0.82 ms next after "CDP crawl speed" (a realm built without the snapshot, as `serve` and `fetch` make them: 1.59 → 0.92 ms, `realm_loop` median); 1.28 ms first, 1.08 ms next after "Service workers"; 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | Close-out re-run on the clean committed tree 27e7f1a (2026-11-04, "Close-out verification", `bench/results/2026-11-04-27e7f1a.json`): 5 of 6; a first run of the same binary passed 4 of 6. Second run: `fetch` wall 0.98 vs 1.08 s, peak RSS 23.72 vs 24.45 MB, CPU 0.85 vs 1.06 s; CDP wall **0.80 vs 0.74 s (fails)**, peak RSS 28.90 vs 31.39 MB, CPU 0.62 vs 0.76 s. First run: `fetch` peak RSS 23.71 vs 23.17 MB (**fails**, Lightpanda's own peak moves between 23.2 and 24.4 MB; ours stays at 23.7), CDP wall 0.83 vs 0.74 s (fails). 5 of 6 after "Service workers" (`bench/results/2026-11-04-a4fc4ca.json`): `fetch` wall 0.98 vs 1.07 s, peak RSS 23.66 vs 24.41 MB, CPU 0.86 vs 1.06 s; CDP wall **0.84 vs 0.77 s (fails)**, peak RSS 28.62 vs 31.31 MB, CPU 0.64 vs 0.78 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.89 vs 23.21 MB; an A/B against the previous binary shows no rise, see "Service workers"). 5 of 6 after "Workers" (`bench/results/2026-11-04-67c904b.json`): `fetch` wall 0.99 vs 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs 0.79 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.91 vs 23.28 MB, see "Workers"). 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
+| Wall time, peak RSS and CPU <= Lightpanda | **Met, 6 of 6 in both runs** after "CDP crawl speed" (2026-11-04, same binary, sha256 in the files). Run 1 (`bench/results/2026-11-04-14b1a77-1.json`): `fetch` wall 0.97 vs 1.09 s, peak RSS 23.72 vs 24.36 MB, CPU 0.85 vs 1.08 s; CDP wall 0.67 vs 0.77 s, peak RSS 29.02 vs 31.29 MB, CPU 0.57 vs 0.78 s. Run 2 (`2026-11-04-e5abb20.json`): `fetch` 0.97 vs 1.05 s, 23.79 vs 24.40 MB, 0.85 vs 1.04 s; CDP 0.67 vs 0.76 s, 29.01 vs 31.29 MB, 0.57 vs 0.77 s. Before: close-out re-run on the clean committed tree 27e7f1a (2026-11-04, "Close-out verification", `bench/results/2026-11-04-27e7f1a.json`): 5 of 6; a first run of the same binary passed 4 of 6. Second run: `fetch` wall 0.98 vs 1.08 s, peak RSS 23.72 vs 24.45 MB, CPU 0.85 vs 1.06 s; CDP wall **0.80 vs 0.74 s (fails)**, peak RSS 28.90 vs 31.39 MB, CPU 0.62 vs 0.76 s. First run: `fetch` peak RSS 23.71 vs 23.17 MB (**fails**, Lightpanda's own peak moves between 23.2 and 24.4 MB; ours stays at 23.7), CDP wall 0.83 vs 0.74 s (fails). 5 of 6 after "Service workers" (`bench/results/2026-11-04-a4fc4ca.json`): `fetch` wall 0.98 vs 1.07 s, peak RSS 23.66 vs 24.41 MB, CPU 0.86 vs 1.06 s; CDP wall **0.84 vs 0.77 s (fails)**, peak RSS 28.62 vs 31.31 MB, CPU 0.64 vs 0.78 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.89 vs 23.21 MB; an A/B against the previous binary shows no rise, see "Service workers"). 5 of 6 after "Workers" (`bench/results/2026-11-04-67c904b.json`): `fetch` wall 0.99 vs 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs 0.79 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.91 vs 23.28 MB, see "Workers"). 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -2554,9 +2554,9 @@ Notes on the verification itself:
 
 ### What is still open after this run
 
-- Bench: CDP crawl wall time (0.80-0.83 vs Lightpanda 0.74 s); `fetch` peak
-  RSS passes or fails by about 0.5 MB depending on how Lightpanda's own
-  peak lands.
+- ~~Bench: CDP crawl wall time (0.80-0.83 vs Lightpanda 0.74 s)~~: closed
+  by "CDP crawl speed" below (0.67 vs 0.76-0.77 s, 6 of 6 twice). The
+  `fetch` peak RSS margin is 0.6 MB there (see that section).
 - Firefox (M4b): no SpiderMonkey backend, TLS gaps (ADR 0003).
 - M1 proxies; Windows and macOS values are from a reference, not a capture.
 - Workers are not CDP targets (Playwright `page.workers()` is empty); service
@@ -2573,6 +2573,92 @@ Notes on the verification itself:
 - Connections: HTTP/2 coalescing across hosts, credentialless pools,
   preconnect, the PRIORITY frames for raised images; Firefox resumed
   ClientHello unchecked.
+
+## CDP crawl speed (2026-11-04)
+
+Closes the bench item above: the CDP crawl (`bench/run.py`, 5 x 50 pages,
+Playwright `new_page` + `goto(load)` + `evaluate` + `close`) is faster than
+Lightpanda's again, without changing what the bench measures
+(`bench/run.py` and `bench/serve_corpus.py` untouched). ADRs 0023 and 0024.
+
+**Where the time went.** A trace of every CDP message with server-side
+times (temporary, not committed) split a page's 13-16 ms into the
+Playwright client (~4.3 ms of waits for its next command), the Python
+corpus server (0.5 ms for the document, 0.8-1.3 ms for a batch of 3-6
+parallel requests), and our work: `Target.createTarget` 1.3 ms, the
+navigation commit 1.7 ms, navigation to `load` ~5 ms, two `evaluate`s
+0.75 ms. Callgrind of `serve` over 12 corpus pages (848M instructions) put
+43 % in window realms (two per page: the new target's `about:blank`, which
+Playwright evaluates in, and the document; ~15M instructions each), 21 %
+in the layout `app.js` asks for with `getBoundingClientRect()` (half of it
+style matching: every rule tried against every element, a new matching
+context per rule), and the inline scripts. Per page type, LightBrowser was
+already faster on light pages (`goto` 5.9-7.0 vs 7.2 ms) and slower on the
+product grid, table and image pages (8.2-13.6 vs 7.3 ms). The product
+pages made 19 image requests where Chrome makes 5.
+
+| Change | Where | Effect |
+|---|---|---|
+| Images reused within a document as in Blink (ADR 0024): one request per URL in flight, the list of available images, failed loads refetched, current image kept while a new source loads; 5 cases recorded in Chrome for Testing 153 (`lb-page` `tests/images/`, with request counts) | `lb-webapi` `rt/image.rs` | product pages 19 → 5 requests (Chrome: 5); their `goto` 13.5 → 10.4 ms |
+| Overflow plan of the global shared per interface (keys made once per isolate, `reorder_last` planned once; no per-realm clones and SipHash), namespaces defined from their templates, engine extras deleted by name after the first realm | `lb-js` `v8_engine.rs`, `realm_ops.rs`; `lb-webapi` `install.rs` | realm 1.59 → 0.92 ms (median of 300, `realm_loop`), 15.3M → 9.5M instructions |
+| One matching context per element, ID/class/type pre-check per selector (agreement test against plain matching, quirks and SVG included) | `lb-dom` `select.rs`, `lb-css` `engine.rs` | style computation 98M → 42M instructions over the 12 pages |
+| Spare realms (ADR 0023): made after a navigation's request is sent, and after a CDP page's `load` for the next `about:blank`; the commit takes one with the same options | `lb-webapi` `rt/mod.rs`, `lb-page` `nav.rs`, `RealmOps::set_module_loader` | `createTarget` 1.3 → 0.7 ms, commit ~0.4 ms earlier; CDP crawl 0.77 → 0.66 s (3-run check) |
+| Hot-symbol order regenerated | `bin/lightbrowser/hot-symbols.txt` | `fetch` peak RSS of the largest page 25.1 → 24.1 MB standalone (stale order vs new) |
+
+Total over the 12 profiled pages: 848M → 635M instructions before the
+spare realms (which move work, not remove it). Chrome's event order is
+unchanged: the realm a commit takes is finished exactly as a new one, the
+CDP events and their order are the same, `tools/surface_diff` (old
+`9177e58` vs new, Windows 10, macOS 15 and Ubuntu 24 personas, `fetch` and
+two CDP pages each) is identical.
+
+**Bench, two 5 x 50 runs of the same binary** (41,222,008 bytes,
+Lightpanda 1.1.0-nightly.11582, loopback, telemetry off), 6 of 6 in both:
+
+| | run 1 (`2026-11-04-14b1a77-1.json`) | run 2 (`2026-11-04-e5abb20.json`) |
+|---|---|---|
+| `fetch` wall | 0.97 vs 1.09 s | 0.97 vs 1.05 s |
+| `fetch` peak RSS | 23.72 vs 24.36 MB | 23.79 vs 24.40 MB |
+| `fetch` CPU | 0.85 vs 1.08 s | 0.85 vs 1.04 s |
+| CDP wall | **0.67 vs 0.77 s** | **0.67 vs 0.76 s** |
+| CDP peak RSS | 29.02 vs 31.29 MB | 29.01 vs 31.29 MB |
+| CDP CPU | 0.57 vs 0.78 s | 0.57 vs 0.77 s |
+
+Idle RSS 6.27 / 6.40 MB, realm 1.29 / 0.82 ms (`realm_bench`, snapshot
+line), no files and `write_bytes` 0. CDP page median 12.8-14.1 ms against
+14.1-15.5 ms. CDP peak RSS rose 28.2 → 29.0 MB (one spare realm).
+
+**`fetch` peak RSS.** The margin is 0.6 MB in both runs. Standalone
+(50 pages x 2, largest process) the old binary measured 24.39-24.49 MB and
+this one 24.13 MB after the order regeneration (25.12 MB with the stale
+order). At the peak a `fetch` process holds ~10.5 MB of code pages,
+~4.9 MB of read-only data (V8's snapshot among it), ~3.3 MB in the page
+thread's malloc arena and ~1.7 MB of V8 pages. V8's
+`--max-semi-space-size=1` and `--single-threaded-gc` changed nothing
+measurable; the run-to-run spread of the same binary is ~0.4 MB. No safe
+win beyond the order regeneration was found.
+
+Measured and not kept: no GC after a closed page (1 ms per page faster,
+peak 77 MB); a GC only every 2nd or 3rd close, or above a heap growth
+threshold (no wall-time difference in alternating runs: the GC mostly
+overlaps the client's own time; peak +1-3 MB); V8's moderate memory
+pressure (incremental marking slowed the next page); assuming the root
+scrollbar in the first layout pass (not exact); moving `Temporal` without
+reading it (no public API; it costs 0.2 ms per realm).
+
+Checks on this build: `cargo fmt --check`, clippy `-D warnings` for the
+workspace and the firefox family; tests of every touched package (`lb-dom`
+with the new agreement test, `lb-css`, `lb-js`, `lb-webapi`, `lb-page` all
+targets including `pages` with the 8-persona report gate at 0 mismatch and
+the image cases, `lightbrowser`); firefox tests 15 pass, 2 ignored; WPT
+subset 2556/2788 (unchanged); Playwright 20/20; T-010 on the Windows 10
+persona, fresh `serve` each: fp 0 (Playwright input) and fp 0, beh 0 with
+`--input human`.
+
+Still open: in-document reuse of scripts and style sheets while a document
+loads (Blink reuses them too) and the preload scanner (images on the
+bench's article pages start after the head's script); the second layout
+pass for the root scrollbar; Temporal's materialisation when moved.
 
 ## Risks
 

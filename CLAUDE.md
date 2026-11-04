@@ -26,19 +26,28 @@ signals are always the host's. M6: lazy interface
 objects (ADR 0016: lazy data properties of the global as in Blink,
 templates on demand, no startup snapshot by default; realm 1.3 ms), idle
 RSS 6.1 MB, `bench/` runner (every corpus page faster than headless
-Chromium's median), release binary 41.19 MB against < 50 MB (the user
+Chromium's median), release binary 41.22 MB against < 50 MB (the user
 raised the budget from < 40 MB, ADR 0013 revision 4; ICU data in 4 KiB
 zstd chunks paged in on first touch, no unwind tables, V8 code only
 off-by-default flags reach not linked, root crate and bindings at
 `opt-level = "s"`, hot code first in `.text` from
 `bin/lightbrowser/hot-symbols.txt`). Lightpanda comparison (user-approved
-1.1.0 nightly, loopback only, telemetry off): since 2026-11-04 the corpus
-server sets `TCP_NODELAY` (it stalled every reused connection 40 ms,
-which had slowed Lightpanda) and **5 of 6 checks pass**
-(`bench/results/2026-11-04-cb0a5b0.json`: `fetch` wall 0.93 vs 1.09 s,
-peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall 0.82 vs 0.78 s
-fails, 27.3 vs 31.4 MB, 0.62 vs 0.80 s; see "Connection reuse" in
-ROADMAP). Before that fix ("M6 status: Lightpanda comparison",
+1.1.0 nightly, loopback only, telemetry off): **6 of 6 checks pass in two
+5 x 50 runs** since "CDP crawl speed" in ROADMAP (ADRs 0023, 0024;
+`bench/results/2026-11-04-14b1a77-1.json`, `2026-11-04-e5abb20.json`):
+CDP wall 0.67 vs 0.77 / 0.76 s, peak RSS 29.0 vs 31.3 MB, CPU 0.57 vs
+0.78 / 0.77 s; `fetch` wall 0.97 vs 1.09 / 1.05 s, peak RSS 23.72 / 23.79
+vs 24.36 / 24.40 MB (a 0.6 MB margin; the same binary's spread is ~0.4 MB),
+CPU 0.85 vs 1.08 / 1.04 s; binary 41.22 MB, idle RSS 6.3-6.4 MB. Window
+realms do per-interface work once and spare realms are made while the
+worker waits (a navigation's response, after a CDP page's load), so a
+commit takes a ready realm (ADR 0023); the cascade matches with one
+context per element and a selector pre-check; images are reused within a
+document as in Blink (ADR 0024, 5 Chrome-recorded cases in `lb-page`
+`tests/images/`). Since 2026-11-04 the corpus server sets `TCP_NODELAY`
+(it stalled every reused connection 40 ms, which had slowed Lightpanda);
+on the fixed server the CDP wall check had failed (0.80-0.83 vs 0.74 s, see
+"Connection reuse" and "Close-out verification" in ROADMAP). Before that fix ("M6 status: Lightpanda comparison",
 `bench/results/2026-11-03-af2c264.json`): 6 of 6 checks
 pass (`fetch` wall 1.08 vs 3.37 s, peak RSS 22.1 vs 24.5 MB, CPU 0.88 vs
 1.23 s; CDP 0.99 vs 5.04 s, 27.0 vs 31.4 MB, 0.68 vs 0.95 s); the
@@ -51,11 +60,7 @@ regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), shader execution in
-WebGL, CDP crawl wall time vs Lightpanda (0.80-0.83 vs 0.74 s in the
-close-out re-run on a clean tree, `bench/results/2026-11-04-27e7f1a.json`:
-5 of 6 checks, 4 of 6 in a first run, where `fetch` peak RSS lost 23.71 vs
-23.17 MB because Lightpanda's own peak moves between 23.2 and 24.4 MB; binary
-41.19 MB, idle RSS 6.1 MB, realm 1.3 ms). Also open: workers as CDP
+WebGL, the thin `fetch` peak RSS margin (above). Also open: workers as CDP
 targets, idle service workers are never stopped, dynamic `import()`, M1
 proxies, shadow DOM, `crypto`, `WebSocket`, `customElements`, `indexedDB`
 (full list in ROADMAP "Close-out verification"). Style sheets (ADR 0019): links and `@import`s load
@@ -162,6 +167,9 @@ cargo test -p lb-page --test pages service_workers
 # re-record: crates/lb-page/tests/service_workers/{serve.py,chrome.mjs} (fresh serve.py per recording)
 # re-record: crates/lb-page/tests/workers/{serve.py,chrome.mjs};
 # worker surface fixture: node tools/dump_worker_surface.js tests/fixtures/chromium_153_worker_surface.json
+# Image reuse within a document vs Chrome (5 cases, with request counts)
+cargo test -p lb-page --test pages images
+# re-record: crates/lb-page/tests/images/{serve.py,chrome.mjs}
 # Style sheets vs Chrome (18 cases) and screenshots vs Chrome goldens
 cargo test -p lb-page --test pages stylesheets
 cargo test -p lb-page --test screenshot_golden -- --nocapture

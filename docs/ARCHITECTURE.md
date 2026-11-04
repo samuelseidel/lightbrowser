@@ -35,7 +35,13 @@ telemetry off) all 6 checks pass: `fetch` wall 1.08 vs 3.37 s, peak RSS
 (`bench/results/2026-11-03-02ca87f.json`) also passes 6 of 6 but with
 23.09 vs 23.20 MB (binary 40.38 MB, idle RSS 7.13 MB, realm 1.38/1.13 ms).
 Details:
-`docs/ROADMAP.md`, "M6 status: Lightpanda comparison".
+`docs/ROADMAP.md`, "M6 status: Lightpanda comparison". After the
+connection-reuse fix of the corpus server the CDP crawl fell behind
+Lightpanda (0.80-0.83 vs 0.74 s); since "CDP crawl speed" (2026-11-04, ADRs
+0023 and 0024) all 6 checks pass again in two 5 x 50 runs
+(`bench/results/2026-11-04-14b1a77-1.json`, `2026-11-04-e5abb20.json`):
+CDP wall 0.67 vs 0.77 / 0.76 s, `fetch` peak RSS 23.72 / 23.79 vs 24.36 /
+24.40 MB; binary 41.22 MB, idle RSS 6.3-6.4 MB, realm 1.29 / 0.82 ms.
 
 ## Decisions (see `docs/adr/`)
 
@@ -63,6 +69,8 @@ Details:
 | 0020 | CSS background images of rendered elements load at `DOMContentLoaded`, after sheet loads and before screenshots (delaying `load`); screenshots paint background layers, gradients, border radius and box shadows |
 | 0021 | Dedicated and shared workers each run on their own thread with their own V8 isolate, started only when a page makes one; worker globals and member orders from a Chrome capture; `WorkerNavigator` from the page's `Arc<Persona>`; messages are V8 structured clones with `ArrayBuffer` and `MessagePort` transfer |
 | 0022 | Service workers and the Cache API live in memory per browser context: the registry and its jobs in the page layer, each version a worker thread with `ServiceWorkerGlobalScope` from a Chrome capture, state reaching windows as tasks in Chrome's order, a controlled window's requests and navigations going through the `fetch` event first |
+| 0023 | Window realms do per-interface work once (shared overflow plan, engine extras deleted by name); spare main-world realms are made while the worker waits (a navigation's response, after a CDP page's load) and taken by the next commit with the same options; the cascade matches with one context per element and a selector pre-check |
+| 0024 | Images are reused within a document as in Blink: one request per URL in flight, elements asking for an image another element holds loaded are complete at once, failed loads are refetched, the current image stays while a new source loads |
 
 ## Layers
 
@@ -341,4 +349,5 @@ process and is controlled over CDP.
 - Font metric tables and the UA stylesheet are parsed once per worker and OS (`lb_layout::LayoutBase`), not per document.
 - HTTP cache in memory, bounded LRU, partitioned per context. Nothing goes to disk unless `--cache-dir` is given.
 - Fonts: metric tables only (advance widths, ascent/descent) for persona fonts. Glyph outline packs (205 KB, compiled in) are parsed only when a canvas draws or measures text.
-- Images: `<img>` loads keep the encoded bytes and their size; pixels are decoded on first `drawImage`.
+- Images: `<img>` loads keep the encoded bytes and their size; pixels are decoded on first `drawImage`. Elements of a document share one request per URL and the loaded image (ADR 0024).
+- A worker that loaded a CDP page keeps one spare window realm (~0.4 MB of V8 heap) for the next page's `about:blank` (ADR 0023).
