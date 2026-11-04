@@ -645,7 +645,8 @@ fn running_inbox(ctx: &BrowserContext, sh: &SwShared, vid: u64, event: bool) -> 
     // The script runs again from the version's copy (no fetch); there is
     // no install or activate event.
     let (reg, script, source) = start;
-    let _ = start_version(ctx, sh, vid, reg, &script, source, &script);
+    // Nobody waits for the script's result (the receiver is dropped).
+    drop(start_version(ctx, sh, vid, reg, &script, source, &script));
     lock(sh).versions.get(&vid).and_then(|v| v.inbox.clone())
 }
 

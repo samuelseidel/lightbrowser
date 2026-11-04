@@ -1353,5 +1353,6 @@ fn worker_targets() {
         )
         .await;
         assert_eq!(h.worker_session_count("W3"), Some(1));
-    });
+    })
+    .unwrap();
 }

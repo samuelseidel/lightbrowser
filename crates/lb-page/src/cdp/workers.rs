@@ -617,10 +617,11 @@ impl WorkerAgent {
                 exception_details: None,
             }),
             Err(mut c) => {
-                if in_promise && let Some(v) = c.value {
-                    if let Ok(Inspected::Object(o)) = e.inspect(realm, v, false) {
-                        c.error.stack = o.description.clone();
-                    }
+                if in_promise
+                    && let Some(v) = c.value
+                    && let Ok(Inspected::Object(o)) = e.inspect(realm, v, false)
+                {
+                    c.error.stack = o.description.clone();
                 }
                 let details = super::agent::exception_details(
                     e,
