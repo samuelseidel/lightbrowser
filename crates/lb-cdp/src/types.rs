@@ -31,11 +31,15 @@ pub enum World {
     Main,
     /// An isolated world with this name (Playwright's utility world).
     Isolated(String),
+    /// The global scope of a worker target (dedicated, shared, service),
+    /// with the worker's name. Its context has no `auxData`, as Chrome's.
+    Worker(String),
 }
 
 impl World {
+    /// The target's own world: a page's main world or a worker's scope.
     pub fn is_main(&self) -> bool {
-        matches!(self, World::Main)
+        matches!(self, World::Main | World::Worker(_))
     }
 }
 
@@ -57,6 +61,14 @@ impl ExecutionContext {
         let (name, aux_type, is_default) = match &self.world {
             World::Main => ("", "default", true),
             World::Isolated(n) => (n.as_str(), "isolated", false),
+            World::Worker(n) => {
+                return serde_json::json!({
+                    "id": self.id,
+                    "origin": self.origin,
+                    "name": n,
+                    "uniqueId": self.unique_id,
+                });
+            }
         };
         serde_json::json!({
             "id": self.id,
@@ -825,7 +837,13 @@ pub struct TargetInfo {
     pub attached: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opener_id: Option<TargetId>,
+    /// Dedicated workers: the target that started them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<TargetId>,
     pub can_access_opener: bool,
+    /// Dedicated workers: the frame that started them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_frame_id: Option<FrameId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub browser_context_id: Option<BrowserContextId>,
 }

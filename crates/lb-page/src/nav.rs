@@ -51,6 +51,11 @@ impl lb_webapi::host::NetHost for PageNet {
     fn websocket(&self, open: lb_webapi::host::WsOpen) -> Option<lb_webapi::host::WsChannels> {
         crate::context::open_websocket(&self.ctx, open)
     }
+    fn sw_answered(&self, req: &NetRequest, r: &Result<NetResponse, String>) {
+        if let Some(p) = self.page.upgrade() {
+            crate::cdp::net::report_sw_answer(&p, req, r, None);
+        }
+    }
 }
 
 /// A navigation request through the controlling service worker's `fetch`
@@ -78,10 +83,14 @@ async fn sw_or_network_loader(
     use lb_webapi::rt::sw::{FetchOutcome, SwRequest};
     if let Some((v, true)) = sw {
         let sreq = SwRequest::from_net(&req, replaced, reserved.to_owned(), reload);
-        match crate::sw::navigation_fetch(&page.ctx, v.id, sreq).await {
-            FetchOutcome::Fallback => {}
-            FetchOutcome::Respond(r) => return Ok(r),
-            FetchOutcome::Error => return Err("net::ERR_FAILED".into()),
+        let r = match crate::sw::navigation_fetch(&page.ctx, v.id, sreq).await {
+            FetchOutcome::Fallback => None,
+            FetchOutcome::Respond(r) => Some(Ok(r)),
+            FetchOutcome::Error => Some(Err("net::ERR_FAILED".to_string())),
+        };
+        if let Some(r) = r {
+            crate::cdp::net::report_sw_answer(page, &req, &r, loader.clone());
+            return r;
         }
     }
     crate::cdp::net::page_fetch(page, req, loader).await
@@ -233,7 +242,10 @@ pub(crate) async fn navigate_committed(
         },
     );
     w.set_console_sink(Some(page.console_sink()));
-    w.set_worker_host(Some(crate::worker::Workers::host(&page.ctx)));
+    w.set_worker_host(Some(crate::worker::Workers::host(
+        &page.ctx,
+        page.agent().map(|a| a.target.clone()),
+    )));
     w.set_sw_host(Some(crate::sw::host(&page.ctx)));
     w.set_idb_backend(Some(page.ctx.idb().clone()));
     let controller = sw.map(|(v, _)| v);

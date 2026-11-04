@@ -1356,6 +1356,7 @@ impl Window {
             text: text.into(),
             url: None,
             line: None,
+            from_worker: false,
         });
     }
 

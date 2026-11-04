@@ -82,6 +82,10 @@ struct Shared {
     /// context, chrome build (ADR 0022); in memory only.
     #[cfg(feature = "chrome")]
     pub(crate) service_workers: Arc<crate::sw::SwShared>,
+    /// The CDP host's worker inspector (ADR 0029): set when the context
+    /// belongs to `serve`; worker threads announce themselves to it.
+    #[cfg(feature = "chrome")]
+    inspector: std::sync::OnceLock<Arc<crate::cdp::workers::Inspector>>,
 }
 
 #[cfg(feature = "chrome")]
@@ -187,6 +191,8 @@ impl BrowserContext {
             shared_workers: Mutex::new(std::collections::HashMap::new()),
             #[cfg(feature = "chrome")]
             service_workers: Arc::default(),
+            #[cfg(feature = "chrome")]
+            inspector: std::sync::OnceLock::new(),
         }));
         ctx.put_back(probe);
         Ok(ctx)
@@ -218,6 +224,18 @@ impl BrowserContext {
     #[cfg(feature = "chrome")]
     pub(crate) fn shared_workers(&self) -> &SharedWorkers {
         &self.0.shared_workers
+    }
+
+    /// Make this context's workers CDP targets (ADR 0029). Only the first
+    /// call counts.
+    #[cfg(feature = "chrome")]
+    pub(crate) fn set_inspector(&self, i: Arc<crate::cdp::workers::Inspector>) {
+        let _ = self.0.inspector.set(i);
+    }
+
+    #[cfg(feature = "chrome")]
+    pub(crate) fn inspector(&self) -> Option<&Arc<crate::cdp::workers::Inspector>> {
+        self.0.inspector.get()
     }
 
     /// The service worker registry of this context (ADR 0022).

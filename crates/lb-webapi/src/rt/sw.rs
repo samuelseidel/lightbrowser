@@ -496,7 +496,11 @@ async fn intercept(
                 r.redirected |= redirected;
                 return Ok(r);
             }
-            FetchOutcome::Error => return Err("net::ERR_FAILED".into()),
+            FetchOutcome::Error => {
+                let r = Err("net::ERR_FAILED".to_string());
+                w.net.sw_answered(&req, &r);
+                return r;
+            }
             FetchOutcome::Respond(mut r) => {
                 let loc = (matches!(r.status, 301 | 302 | 303 | 307 | 308)
                     && req.mode != "navigate")
@@ -512,7 +516,9 @@ async fn intercept(
                     continue;
                 }
                 r.redirected |= redirected;
-                return Ok(r);
+                let r = Ok(r);
+                w.net.sw_answered(&req, &r);
+                return r;
             }
         }
     }

@@ -41,10 +41,17 @@ use crate::context::{BrowserContext, WeakContext};
 /// loopback: 1.5-2 s after the navigation).
 const SOFT_UPDATE_DELAY: Duration = Duration::from_millis(1500);
 
+/// A running version with no event in flight is stopped this long after
+/// its last event, and started again by the next one (Chrome 153 on
+/// loopback: exactly 30 s; never while DevTools is attached to it).
+pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The registry of one context.
 #[derive(Default)]
 pub(crate) struct SwShared {
     st: Mutex<Registry>,
+    /// Held while a stopped version is started again (one thread each).
+    restart: Mutex<()>,
     /// The job queue (one job at a time).
     jobs: tokio::sync::Mutex<()>,
     /// Version states changed (fetches wait for `activated`).
@@ -91,6 +98,10 @@ struct Version {
     control: Option<Arc<WorkerControl>>,
     skip_waiting: bool,
     skip_waiters: Vec<Reply<()>>,
+    /// Events dispatched and not answered yet (fetch, lifecycle).
+    inflight: u32,
+    /// When the last event was dispatched or answered.
+    last_event: std::time::Instant,
 }
 
 struct Client {
@@ -401,16 +412,17 @@ impl SwHost for SwHostImpl {
     }
 
     fn worker_inbox(&self, version: u64) -> Option<Inbox> {
-        let sh = self.shared()?;
-        let st = lock(&sh);
-        st.versions.get(&version).and_then(|v| v.inbox.clone())
+        // A message is an event: it starts a stopped version.
+        let ctx = self.ctx.upgrade()?;
+        let sh = ctx.service_workers().clone();
+        running_inbox(&ctx, &sh, version, false)
     }
 
     fn dispatch_fetch(&self, version: u64, req: SwRequest) -> LocalFuture<FetchOutcome> {
-        let sh = self.shared();
+        let ctx = self.ctx.upgrade();
         Box::pin(async move {
-            match sh {
-                Some(sh) => dispatch_fetch(&sh, version, req).await,
+            match ctx {
+                Some(ctx) => dispatch_fetch(&ctx, version, req).await,
                 None => FetchOutcome::Fallback,
             }
         })
@@ -543,7 +555,8 @@ impl SwHost for SwHostImpl {
 // Fetch
 // ---------------------------------------------------------------------------
 
-async fn dispatch_fetch(sh: &SwShared, version: u64, req: SwRequest) -> FetchOutcome {
+async fn dispatch_fetch(ctx: &BrowserContext, version: u64, req: SwRequest) -> FetchOutcome {
+    let sh = &**ctx.service_workers();
     let inbox = loop {
         let notified = sh.changed.notified();
         tokio::pin!(notified);
@@ -557,10 +570,13 @@ async fn dispatch_fetch(sh: &SwShared, version: u64, req: SwRequest) -> FetchOut
                 return FetchOutcome::Fallback;
             }
             match v.state {
-                SwState::Activated => match &v.inbox {
-                    Some(i) => break i.clone(),
-                    None => return FetchOutcome::Fallback,
-                },
+                SwState::Activated => {
+                    drop(st);
+                    match running_inbox(ctx, sh, version, true) {
+                        Some(i) => break i,
+                        None => return FetchOutcome::Fallback,
+                    }
+                }
                 SwState::Redundant => return FetchOutcome::Fallback,
                 _ => {}
             }
@@ -575,9 +591,88 @@ async fn dispatch_fetch(sh: &SwShared, version: u64, req: SwRequest) -> FetchOut
         }),
     ));
     if !sent {
+        event_done(sh, version);
         return FetchOutcome::Fallback;
     }
-    rx.await.unwrap_or(FetchOutcome::Fallback)
+    let r = rx.await.unwrap_or(FetchOutcome::Fallback);
+    event_done(sh, version);
+    r
+}
+
+/// The inbox of version `vid`, starting its thread again when it was
+/// stopped for being idle. `event`: an answered event follows
+/// ([`event_done`] ends it); otherwise the call itself is the event.
+fn running_inbox(ctx: &BrowserContext, sh: &SwShared, vid: u64, event: bool) -> Option<Inbox> {
+    let _one = sh.restart.lock().unwrap_or_else(|e| e.into_inner());
+    let start = {
+        let mut st = lock(sh);
+        let v = st.versions.get_mut(&vid)?;
+        v.last_event = std::time::Instant::now();
+        if event {
+            v.inflight += 1;
+        }
+        if let Some(i) = &v.inbox {
+            return Some(i.clone());
+        }
+        if !matches!(v.state, SwState::Installed | SwState::Activated) {
+            if event {
+                v.inflight -= 1;
+            }
+            return None;
+        }
+        (v.reg, v.script_url.clone(), v.source.clone())
+    };
+    // The script runs again from the version's copy (no fetch); there is
+    // no install or activate event.
+    let (reg, script, source) = start;
+    let _ = start_version(ctx, sh, vid, reg, &script, source, &script);
+    lock(sh).versions.get(&vid).and_then(|v| v.inbox.clone())
+}
+
+/// An event dispatched to `vid` was answered.
+fn event_done(sh: &SwShared, vid: u64) {
+    if let Some(v) = lock(sh).versions.get_mut(&vid) {
+        v.inflight = v.inflight.saturating_sub(1);
+        v.last_event = std::time::Instant::now();
+    }
+}
+
+/// Runs on version `vid`'s own thread: stop it once it has been idle for
+/// [`IDLE_TIMEOUT`] with no event in flight, unless `inspected` (a
+/// DevTools session is attached; Chrome keeps such a worker running).
+pub(crate) async fn idle_watch(ctx: WeakContext, vid: u64, inspected: impl Fn() -> bool) {
+    loop {
+        let wait = {
+            let Some(ctx) = ctx.upgrade() else { return };
+            let sh = ctx.service_workers().clone();
+            let mut st = lock(&sh);
+            let Some(v) = st.versions.get_mut(&vid) else {
+                return;
+            };
+            if v.inbox.is_none() {
+                return;
+            }
+            let idle = v.last_event.elapsed();
+            if inspected() {
+                v.last_event = std::time::Instant::now();
+                IDLE_TIMEOUT
+            } else if v.inflight == 0
+                && idle >= IDLE_TIMEOUT
+                && matches!(v.state, SwState::Installed | SwState::Activated)
+            {
+                v.inbox = None;
+                if let Some(c) = v.control.take() {
+                    c.terminate();
+                }
+                return;
+            } else if v.inflight > 0 {
+                IDLE_TIMEOUT
+            } else {
+                IDLE_TIMEOUT.saturating_sub(idle)
+            }
+        };
+        tokio::time::sleep(wait.max(Duration::from_millis(1))).await;
+    }
 }
 
 /// The controller of a navigation to `url` (the matching registration's
@@ -604,8 +699,7 @@ pub(crate) async fn navigation_fetch(
     version: u64,
     req: SwRequest,
 ) -> FetchOutcome {
-    let sh = ctx.service_workers().clone();
-    dispatch_fetch(&sh, version, req).await
+    dispatch_fetch(ctx, version, req).await
 }
 
 // ---------------------------------------------------------------------------
@@ -853,6 +947,8 @@ async fn run_update(
                 control: None,
                 skip_waiting: false,
                 skip_waiters: Vec::new(),
+                inflight: 0,
+                last_event: std::time::Instant::now(),
             },
         );
         vid
@@ -921,13 +1017,22 @@ fn start_version(
             }),
         }),
     };
-    crate::worker::spawn(ctx.clone(), start);
+    crate::worker::spawn(ctx.clone(), start, crate::worker::Inspect::Yes(None));
     rx
 }
 
 /// Send a lifecycle event to `vid` and wait for its `waitUntil` promises.
 async fn lifecycle(sh: &SwShared, vid: u64, kind: &'static str, after: Vec<Reply<()>>) -> bool {
-    let inbox = lock(sh).versions.get(&vid).and_then(|v| v.inbox.clone());
+    let inbox = {
+        let mut st = lock(sh);
+        let v = st.versions.get_mut(&vid);
+        let inbox = v.as_ref().and_then(|v| v.inbox.clone());
+        if let (Some(v), Some(_)) = (v, &inbox) {
+            v.inflight += 1;
+            v.last_event = std::time::Instant::now();
+        }
+        inbox
+    };
     let Some(inbox) = inbox else { return false };
     let (tx, rx) = oneshot::channel();
     inbox.send(s::lifecycle_task(
@@ -940,7 +1045,9 @@ async fn lifecycle(sh: &SwShared, vid: u64, kind: &'static str, after: Vec<Reply
     for r in after {
         r(());
     }
-    rx.await.unwrap_or(false)
+    let ok = rx.await.unwrap_or(false);
+    event_done(sh, vid);
+    ok
 }
 
 /// "Install".

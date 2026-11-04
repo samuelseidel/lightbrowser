@@ -848,6 +848,7 @@ pub(crate) fn forward_error(w: &Window, message: &str, e: &JsError) {
                 text,
                 url: Some(filename),
                 line: Some(lineno),
+                from_worker: true,
             });
         }
     }));

@@ -435,6 +435,152 @@ pub(crate) async fn page_fetch(
     r.map_err(|e| net_error_text(&e))
 }
 
+/// `Network.requestWillBeSent` for a worker's own request (ADR 0029):
+/// Chrome lists the `User-Agent` and `Referer` it knows of, no frame and
+/// an empty loader id.
+pub(crate) fn worker_request(
+    id: &str,
+    _target: &str,
+    req: &NetRequest,
+    rtype: &str,
+) -> RequestWillBeSent {
+    let mut headers = BTreeMap::new();
+    for (k, v) in &req.headers {
+        headers.insert(k.clone(), v.clone());
+    }
+    if let Some(i) = &req.initiator {
+        headers.insert("Referer".to_string(), i.to_string());
+    }
+    RequestWillBeSent {
+        request_id: id.to_string(),
+        loader_id: String::new(),
+        document_url: req
+            .initiator
+            .as_ref()
+            .map_or_else(|| req.url.to_string(), |u| u.to_string()),
+        request: types::NetRequest {
+            url: req.url.to_string(),
+            method: req.method.clone(),
+            headers,
+            has_post_data: None,
+            post_data: None,
+            initial_priority: "High".into(),
+            referrer_policy: "strict-origin-when-cross-origin".into(),
+        },
+        timestamp: 0.0,
+        wall_time: wall_secs(),
+        initiator: if rtype == "Script" && req.initiator.is_none() {
+            serde_json::json!({ "type": "other" })
+        } else {
+            serde_json::json!({ "type": "script" })
+        },
+        redirect_has_extra_info: false,
+        redirect_response: None,
+        resource_type: rtype.into(),
+        frame_id: None,
+        has_user_gesture: false,
+    }
+}
+
+/// `Network.responseReceived` for a worker's request.
+pub(crate) fn worker_response(
+    id: &str,
+    resp: &NetResponse,
+    rtype: &str,
+    timestamp: f64,
+) -> ResponseReceived {
+    ResponseReceived {
+        request_id: id.to_string(),
+        loader_id: String::new(),
+        timestamp,
+        resource_type: rtype.into(),
+        response: cdp_response(resp),
+        has_extra_info: false,
+        frame_id: None,
+    }
+}
+
+/// A request of the page that its service worker answered
+/// (`respondWith`): Chrome reports it with `fromServiceWorker` and no
+/// wire request. `request_id` is given for navigations (the loader id).
+pub(crate) fn report_sw_answer(
+    page: &Rc<PageState>,
+    req: &NetRequest,
+    r: &Result<NetResponse, String>,
+    request_id: Option<String>,
+) {
+    let Some(agent) = page.agent() else {
+        return;
+    };
+    let fetch_api = req.mode != "navigate" && req.destination == Destination::Empty;
+    let rtype = resource_type(req, fetch_api);
+    let id = request_id.clone().unwrap_or_else(|| {
+        format!(
+            "{}.{}",
+            agent.page_id,
+            agent.shared.next_request.fetch_add(1, Ordering::Relaxed)
+        )
+    });
+    let loader = request_id.unwrap_or_else(|| agent.st.borrow().loader.clone());
+    let frame = agent.target.clone();
+    let doc_url = page
+        .window()
+        .map(|w| w.url().to_string())
+        .unwrap_or_else(|| req.url.to_string());
+    agent.emit(PageEvent::RequestWillBeSent(Box::new(RequestWillBeSent {
+        request_id: id.clone(),
+        loader_id: loader.clone(),
+        document_url: if rtype == "Document" {
+            req.url.to_string()
+        } else {
+            doc_url
+        },
+        request: cdp_request(&agent, page, req),
+        timestamp: agent.mono(),
+        wall_time: wall_secs(),
+        initiator: if req.initiator.is_some() && rtype != "Document" {
+            serde_json::json!({ "type": "script" })
+        } else {
+            serde_json::json!({ "type": "other" })
+        },
+        redirect_has_extra_info: false,
+        redirect_response: None,
+        resource_type: rtype.into(),
+        frame_id: Some(frame.clone()),
+        has_user_gesture: false,
+    })));
+    match r {
+        Ok(resp) => {
+            let mut response = cdp_response(resp);
+            response.from_service_worker = true;
+            response.remote_ip_address = None;
+            response.remote_port = None;
+            agent.emit(PageEvent::ResponseReceived(Box::new(ResponseReceived {
+                request_id: id.clone(),
+                loader_id: loader,
+                timestamp: agent.mono(),
+                resource_type: rtype.into(),
+                response,
+                has_extra_info: false,
+                frame_id: Some(frame),
+            })));
+            agent.store_body(&id, resp.body.clone());
+            agent.emit(PageEvent::LoadingFinished(LoadingFinished {
+                request_id: id,
+                timestamp: agent.mono(),
+                encoded_data_length: resp.body.len() as f64,
+            }));
+        }
+        Err(e) => agent.emit(PageEvent::LoadingFailed(LoadingFailed {
+            request_id: id,
+            timestamp: agent.mono(),
+            resource_type: rtype.into(),
+            error_text: net_error_text(e),
+            canceled: false,
+        })),
+    }
+}
+
 /// The request through the context; a proxy's `407` the network stack
 /// could not answer goes to the client as `Fetch.authRequired` when it
 /// asked for auth requests (`Fetch.enable` `handleAuthRequests`), and the

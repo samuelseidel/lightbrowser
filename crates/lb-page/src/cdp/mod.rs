@@ -26,6 +26,7 @@ pub(crate) mod agent;
 mod human;
 pub(crate) mod net;
 mod screenshot;
+pub(crate) mod workers;
 
 pub use human::behavior_for;
 
@@ -67,6 +68,9 @@ pub(crate) struct Shared {
     pub paused: Mutex<HashMap<String, (String, oneshot::Sender<Decision>)>>,
     start: Instant,
     pub seed: u64,
+    /// Inspected workers by target id (ADR 0029).
+    pub workers: Mutex<HashMap<String, Arc<workers::WorkerEntry>>>,
+    pub next_worker: AtomicU64,
 }
 
 impl Shared {
@@ -214,11 +218,35 @@ impl CdpHost {
                 paused: Mutex::new(HashMap::new()),
                 start: Instant::now(),
                 seed,
+                workers: Mutex::new(HashMap::new()),
+                next_worker: AtomicU64::new(1),
             }),
             contexts: RefCell::new(HashMap::new()),
             pages: RefCell::new(HashMap::new()),
             next_script: Cell::new(0),
         })
+    }
+
+    /// An inspected worker (ADR 0029).
+    fn worker(&self, target: &str) -> Option<Arc<workers::WorkerEntry>> {
+        self.shared
+            .workers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(target)
+            .cloned()
+    }
+
+    /// Run a command on a worker thread and wait for its answer.
+    async fn worker_call<R>(
+        &self,
+        w: Arc<workers::WorkerEntry>,
+        make: impl FnOnce(oneshot::Sender<HostResult<R>>) -> workers::WorkerCmd,
+    ) -> HostResult<R> {
+        let (tx, rx) = oneshot::channel();
+        w.send(make(tx))?;
+        rx.await
+            .map_err(|_| HostError::new("Execution context was destroyed."))?
     }
 
     fn page(&self, target: &str) -> HostResult<Rc<Page>> {
@@ -369,6 +397,10 @@ impl PageHost for CdpHost {
             Some(p) => self.build_context_with(&persona, Some(p))?,
             None => self.build_context(&persona)?,
         };
+        ctx.set_inspector(workers::Inspector::new(
+            self.shared.clone(),
+            context.to_string(),
+        ));
         self.contexts.borrow_mut().insert(
             context.to_string(),
             CtxEntry {
@@ -390,6 +422,7 @@ impl PageHost for CdpHost {
             }
             None => self.build_context(&profile)?,
         };
+        ctx.set_inspector(workers::Inspector::new(self.shared.clone(), id.to_string()));
         self.contexts
             .borrow_mut()
             .insert(id.to_string(), CtxEntry { ctx, profile });
@@ -427,7 +460,23 @@ impl PageHost for CdpHost {
         Ok(())
     }
 
+    fn worker_sessions(&self, target_id: &str, count: usize) {
+        if let Some(w) = self.worker(target_id) {
+            w.set_inspected(count > 0);
+        }
+    }
+
+    fn resume_worker(&self, target_id: &str) {
+        if let Some(w) = self.worker(target_id) {
+            w.resume();
+        }
+    }
+
     fn close_page(&self, target_id: &str) -> HostResult<()> {
+        if let Some(w) = self.worker(target_id) {
+            w.terminate();
+            return Ok(());
+        }
         let entry = self.pages.borrow_mut().remove(target_id);
         if let Some(e) = entry {
             // Release requests still waiting for a decision.
@@ -594,6 +643,12 @@ impl PageHost for CdpHost {
             await_promise: req.await_promise,
             group: req.object_group.clone(),
         };
+        if let Some(w) = self.worker(target_id) {
+            let job = JsJob::Eval(req.expression);
+            return self
+                .worker_call(w, |reply| workers::WorkerCmd::Js { job, opts, reply })
+                .await;
+        }
         let (ctx, expr) = (req.context_id, req.expression);
         self.on_worker(target_id, move |ws, p| {
             agent::run_js(ws, p, ctx, JsJob::Eval(expr), opts)
@@ -612,6 +667,23 @@ impl PageHost for CdpHost {
             await_promise: req.await_promise,
             group: req.object_group.clone(),
         };
+        if let Some(w) = self.worker(target_id) {
+            let job = match req.target {
+                CallTarget::Object(o) => JsJob::Call {
+                    decl: req.function_declaration,
+                    this: Some(o),
+                    args: req.arguments,
+                },
+                CallTarget::Context(_) => JsJob::Call {
+                    decl: req.function_declaration,
+                    this: None,
+                    args: req.arguments,
+                },
+            };
+            return self
+                .worker_call(w, |reply| workers::WorkerCmd::Js { job, opts, reply })
+                .await;
+        }
         self.on_worker(target_id, move |ws, p| async move {
             let agent = p.agent().ok_or_else(|| HostError::new("Target closed"))?;
             let (ctx, this) = match req.target {
@@ -642,12 +714,29 @@ impl PageHost for CdpHost {
     }
 
     fn get_properties(&self, target_id: &str, req: GetPropertiesRequest) -> HostResult<Properties> {
+        if let Some(w) = self.worker(target_id) {
+            // The server thread waits for the worker (which never waits
+            // for the server thread), with a timeout.
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (otx, orx) = oneshot::channel();
+            w.send(workers::WorkerCmd::Props { req, reply: otx })?;
+            std::thread::spawn(move || {
+                let _ = tx.send(orx.blocking_recv());
+            });
+            return match rx.recv_timeout(BLOCK) {
+                Ok(Ok(r)) => r,
+                _ => Err(HostError::new("Execution context was destroyed.")),
+            };
+        }
         let page = self.page(target_id)?;
         page.call_blocking(BLOCK, move |ws, p| agent::get_properties(ws, p, &req))
             .map_err(page_err)?
     }
 
     fn release_object(&self, target_id: &str, object_id: &str) -> HostResult<()> {
+        if let Some(w) = self.worker(target_id) {
+            return w.send(workers::WorkerCmd::Release(object_id.to_string()));
+        }
         let id = object_id.to_string();
         self.post(target_id, move |ws, _, a| {
             let o = a.st.borrow_mut().objects.remove(&id);
@@ -658,6 +747,9 @@ impl PageHost for CdpHost {
     }
 
     fn release_object_group(&self, target_id: &str, group: &str) -> HostResult<()> {
+        if let Some(w) = self.worker(target_id) {
+            return w.send(workers::WorkerCmd::ReleaseGroup(group.to_string()));
+        }
         let group = group.to_string();
         self.post(target_id, move |ws, _, a| {
             let gone: Vec<agent::ObjEntry> = {
@@ -881,6 +973,10 @@ impl PageHost for CdpHost {
         target_id: &str,
         headers: Vec<(String, String)>,
     ) -> HostResult<()> {
+        if self.worker(target_id).is_some() {
+            // Worker requests are reported, not intercepted (ADR 0029).
+            return Ok(());
+        }
         self.post(target_id, move |_, _, a| {
             a.st.borrow_mut().extra_headers = headers
         })
@@ -992,6 +1088,10 @@ impl PageHost for CdpHost {
         target_id: &str,
         patterns: Option<Vec<RequestPattern>>,
     ) -> HostResult<()> {
+        if self.worker(target_id).is_some() {
+            // Worker requests are reported, not intercepted (ADR 0029).
+            return Ok(());
+        }
         if patterns.is_none() {
             // Let requests that are still paused go on.
             let waiting: Vec<oneshot::Sender<Decision>> = {
@@ -1034,6 +1134,10 @@ impl PageHost for CdpHost {
     }
 
     fn set_auth_handling(&self, target_id: &str, on: bool) -> HostResult<()> {
+        if self.worker(target_id).is_some() {
+            // Worker requests are reported, not intercepted (ADR 0029).
+            return Ok(());
+        }
         self.post(target_id, move |_, _, a| a.st.borrow_mut().handle_auth = on)
     }
 

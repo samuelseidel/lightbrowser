@@ -166,6 +166,7 @@ async fn load_graph(w: &Weak<Window>, top: &Url) -> Result<Vec<(String, String)>
                     text: format!("Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of \"{essence}\". Strict MIME type checking is enforced for module scripts per HTML spec."),
                     url: None,
                     line: None,
+                    from_worker: false,
                 });
             }
             return Err(());

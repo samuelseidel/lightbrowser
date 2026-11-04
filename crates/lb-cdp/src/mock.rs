@@ -669,7 +669,7 @@ impl MockHost {
                 .bindings
                 .iter()
                 .filter(|(_, scope)| match (scope, &context.world) {
-                    (_, World::Main) => false,
+                    (_, World::Main | World::Worker(_)) => false,
                     (BindingScope::AllIsolatedWorlds, _) => true,
                     (BindingScope::World(n), World::Isolated(w)) => n == w,
                     (BindingScope::Context(id), _) => *id == ctx,

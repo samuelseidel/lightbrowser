@@ -112,6 +112,11 @@ pub trait NetHost {
         let _ = open;
         None
     }
+    /// The window's service worker answered `req` (`respondWith`, or a
+    /// network error): the CDP layer reports it with `fromServiceWorker`.
+    fn sw_answered(&self, req: &NetRequest, r: &Result<NetResponse, String>) {
+        let _ = (req, r);
+    }
 }
 
 /// A WebSocket the page opens.
@@ -231,6 +236,10 @@ pub struct ConsoleMessage {
     /// Script URL and 1-based line, for exceptions.
     pub url: Option<String>,
     pub line: Option<u32>,
+    /// Logged on a page for one of its dedicated workers (the worker's
+    /// uncaught error): CDP reports it as `Log.entryAdded` with source
+    /// `worker`, not as the page's own exception.
+    pub from_worker: bool,
 }
 
 /// Decode a body to text: BOM, then `Content-Type` charset, then (for

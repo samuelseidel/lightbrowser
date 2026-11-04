@@ -81,6 +81,20 @@ pub(crate) struct ContextState {
 pub(crate) struct TargetState {
     pub info: TargetInfo,
     pub viewport: Option<ViewportOverride>,
+    /// Workers (ADR 0029): sessions attached with `waitingForDebugger`
+    /// that have not sent `Runtime.runIfWaitingForDebugger` yet.
+    pub waiters: HashSet<String>,
+    /// Workers: the host was told to run the script. Pages: always true.
+    pub resumed: bool,
+}
+
+impl TargetState {
+    fn is_worker(&self) -> bool {
+        matches!(
+            self.info.kind.as_str(),
+            "worker" | "shared_worker" | "service_worker"
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -218,16 +232,39 @@ impl<H: PageHost + 'static> Shared<H> {
     /// Drops a connection's sessions and the contexts it asked to dispose
     /// on detach.
     pub fn close_conn(&self, conn: ConnId) {
-        let owned: Vec<BrowserContextId> = {
+        let (owned, mut workers): (Vec<BrowserContextId>, Vec<TargetId>) = {
             let mut st = self.state.borrow_mut();
             st.conns.remove(&conn);
+            let gone: Vec<String> = st
+                .sessions
+                .iter()
+                .filter(|(_, s)| s.conn == conn)
+                .map(|(k, _)| k.clone())
+                .collect();
             st.sessions.retain(|_, s| s.conn != conn);
-            st.contexts
+            // Workers waiting for these sessions run now; every worker's
+            // session count is reported again.
+            let workers: Vec<TargetId> = st
+                .targets
+                .iter()
+                .filter(|t| t.is_worker())
+                .map(|t| t.info.target_id.clone())
+                .collect();
+            for t in st.targets.iter_mut() {
+                t.waiters.retain(|w| !gone.contains(w));
+            }
+            let owned = st
+                .contexts
                 .iter()
                 .filter(|c| c.owner == Some(conn))
                 .map(|c| c.id.clone())
-                .collect()
+                .collect();
+            (owned, workers)
         };
+        for w in workers.drain(..) {
+            self.count_worker_sessions(&w);
+            self.maybe_resume(&w);
+        }
         for ctx in owned {
             let _ = self.dispose_context(&ctx);
         }
@@ -249,6 +286,17 @@ impl<H: PageHost + 'static> Shared<H> {
 
     fn on_host_event(&self, ev: HostEvent) {
         let t = ev.target_id.as_str();
+        match ev.event {
+            PageEvent::WorkerCreated { info, context } => {
+                self.worker_created(t, info, context);
+                return;
+            }
+            PageEvent::WorkerDestroyed => {
+                self.worker_destroyed(t);
+                return;
+            }
+            _ => {}
+        }
         let mut info_changed = false;
         {
             let mut st = self.state.borrow_mut();
@@ -315,6 +363,7 @@ impl<H: PageHost + 'static> Shared<H> {
                 let open = match gate {
                     Gate::Domain(d) => s.domains.contains(*d),
                     Gate::Lifecycle => s.lifecycle && s.domains.contains("Page"),
+                    Gate::Always => true,
                 };
                 if open {
                     st.deliver(key, method, params.clone());
@@ -351,8 +400,11 @@ impl<H: PageHost + 'static> Shared<H> {
                 opener_id: None,
                 can_access_opener: false,
                 browser_context_id: Some(context.clone()),
+                ..Default::default()
             },
             viewport: None,
+            waiters: HashSet::new(),
+            resumed: true,
         });
         if let Err(e) = self.host.create_page(&context, &id).await {
             self.state
@@ -401,10 +453,19 @@ impl<H: PageHost + 'static> Shared<H> {
     /// `Target.attachedToTarget` to the parent. Returns the session id.
     fn attach(&self, parent: &str, target: &str, waiting: bool) -> String {
         let sid = self.ids.hex32();
-        let info = {
+        let (info, waiting) = {
             let mut st = self.state.borrow_mut();
             let Some(conn) = st.sessions.get(parent).map(|s| s.conn) else {
                 return sid;
+            };
+            // A worker that has not run yet waits for this session.
+            let waiting = match st.target_mut(target) {
+                Some(t) if t.is_worker() && !t.resumed && waiting => {
+                    t.waiters.insert(sid.clone());
+                    true
+                }
+                Some(t) if t.is_worker() => false,
+                _ => waiting,
             };
             st.sessions.insert(
                 sid.clone(),
@@ -415,8 +476,9 @@ impl<H: PageHost + 'static> Shared<H> {
                     Some(parent.to_string()),
                 ),
             );
-            st.target_info(target)
+            (st.target_info(target), waiting)
         };
+        self.count_worker_sessions(target);
         if let Some(info) = info {
             self.queue_event(
                 parent,
@@ -432,12 +494,150 @@ impl<H: PageHost + 'static> Shared<H> {
         if let Some(s) = removed
             && let (Some(parent), Some(target)) = (s.parent, s.target)
         {
+            // Chrome lets a waiting worker run when its session detaches.
+            self.stop_waiting(&target, sid);
+            self.count_worker_sessions(&target);
             self.queue_event(
                 &parent,
                 "Target.detachedFromTarget",
                 json!({ "sessionId": sid, "targetId": target }),
             );
         }
+    }
+
+    /// `sid` no longer holds worker `target` (it ran
+    /// `Runtime.runIfWaitingForDebugger` or detached).
+    fn stop_waiting(&self, target: &str, sid: &str) {
+        let removed = self
+            .state
+            .borrow_mut()
+            .target_mut(target)
+            .is_some_and(|t| t.waiters.remove(sid));
+        if removed {
+            self.maybe_resume(target);
+        }
+    }
+
+    /// Tell the host how many sessions worker `target` has.
+    fn count_worker_sessions(&self, target: &str) {
+        let n = {
+            let st = self.state.borrow();
+            if !st.target(target).is_some_and(|t| t.is_worker()) {
+                return;
+            }
+            st.sessions
+                .values()
+                .filter(|s| s.target.as_deref() == Some(target))
+                .count()
+        };
+        self.host.worker_sessions(target, n);
+    }
+
+    /// Run worker `target`'s script once no session waits for it.
+    fn maybe_resume(&self, target: &str) {
+        let go = match self.state.borrow_mut().target_mut(target) {
+            Some(t) if t.is_worker() && !t.resumed && t.waiters.is_empty() => {
+                t.resumed = true;
+                true
+            }
+            _ => false,
+        };
+        if go {
+            self.host.resume_worker(target);
+        }
+    }
+
+    /// A worker target appeared (ADR 0029): announce it to discovering
+    /// sessions, attach it where auto-attach is on (dedicated workers to
+    /// sessions of their parent target, shared and service workers to
+    /// browser sessions), and let it run unless a session waits.
+    fn worker_created(&self, id: &str, mut info: TargetInfo, context: ExecutionContext) {
+        info.target_id = id.to_string();
+        info.attached = false;
+        let (discover, attachers) = {
+            let mut st = self.state.borrow_mut();
+            if st.target(id).is_some() {
+                return;
+            }
+            let parent = info.parent_id.clone();
+            let dedicated = info.kind == "worker";
+            st.targets.push(TargetState {
+                info,
+                viewport: None,
+                waiters: HashSet::new(),
+                resumed: false,
+            });
+            st.exec.insert(id.to_string(), vec![context]);
+            let discover: Vec<String> = st
+                .sessions
+                .iter()
+                .filter(|(_, s)| s.discover)
+                .map(|(k, _)| k.clone())
+                .collect();
+            let mut attachers: Vec<(String, bool)> = st
+                .sessions
+                .iter()
+                .filter(|(_, s)| {
+                    if dedicated {
+                        parent.is_some() && s.target == parent
+                    } else {
+                        s.target.is_none()
+                    }
+                })
+                .filter_map(|(k, s)| s.auto_attach.map(|w| (k.clone(), w)))
+                .collect();
+            attachers.sort();
+            (discover, attachers)
+        };
+        let info = self.state.borrow().target_info(id);
+        if let Some(info) = info {
+            for key in &discover {
+                self.queue_event(key, "Target.targetCreated", json!({ "targetInfo": info }));
+            }
+        }
+        for (key, wait) in attachers {
+            self.attach(&key, id, wait);
+        }
+        self.maybe_resume(id);
+    }
+
+    /// A worker target ended: detach its sessions, destroy the target.
+    fn worker_destroyed(&self, id: &str) {
+        let sessions: Vec<String> = {
+            let st = self.state.borrow();
+            if st.target(id).is_none() {
+                return;
+            }
+            st.sessions
+                .iter()
+                .filter(|(_, s)| s.target.as_deref() == Some(id) && s.wire.is_some())
+                .map(|(k, _)| k.clone())
+                .collect()
+        };
+        for sid in sessions {
+            self.detach_session(&sid);
+        }
+        let discover: Vec<String> = {
+            let mut st = self.state.borrow_mut();
+            st.targets.retain(|t| t.info.target_id != id);
+            st.exec.remove(id);
+            st.sessions
+                .iter()
+                .filter(|(_, s)| s.discover)
+                .map(|(k, _)| k.clone())
+                .collect()
+        };
+        for key in discover {
+            self.queue_event(&key, "Target.targetDestroyed", json!({ "targetId": id }));
+        }
+    }
+
+    /// Whether `id` is a worker target.
+    pub(crate) fn is_worker(&self, id: &str) -> bool {
+        self.state
+            .borrow()
+            .target(id)
+            .is_some_and(|t| t.is_worker())
     }
 
     pub fn close_target(&self, id: &str) -> Result<(), CdpError> {
@@ -547,6 +747,8 @@ impl<H: PageHost + 'static> Shared<H> {
 enum Gate {
     Domain(&'static str),
     Lifecycle,
+    /// Every session of the target (`Inspector.*`).
+    Always,
 }
 
 /// Turns a page event into the CDP events it produces.
@@ -675,6 +877,8 @@ fn translate(target: &str, ev: &PageEvent) -> Vec<(Gate, String, Value)> {
         PageEvent::LoadingFailed(e) => one("Network", "Network.loadingFailed", to_value(e)),
         PageEvent::RequestPaused(e) => one("Fetch", "Fetch.requestPaused", to_value(e)),
         PageEvent::AuthRequired(e) => one("Fetch", "Fetch.authRequired", to_value(e)),
+        // Handled before translation.
+        PageEvent::WorkerCreated { .. } | PageEvent::WorkerDestroyed => Vec::new(),
         PageEvent::Custom { method, params } => {
             let domain = method.split('.').next().unwrap_or("");
             // Only domains we track; others would never be enabled.
@@ -693,6 +897,9 @@ fn translate(target: &str, ev: &PageEvent) -> Vec<(Gate, String, Value)> {
             .find(|d| **d == domain)
             {
                 Some(d) => vec![(Gate::Domain(d), method.clone(), params.clone())],
+                None if domain == "Inspector" => {
+                    vec![(Gate::Always, method.clone(), params.clone())]
+                }
                 None => Vec::new(),
             }
         }
@@ -866,6 +1073,21 @@ pub(crate) async fn dispatch<H: PageHost + 'static>(
     if !crate::methods::is_supported(&cmd.method) {
         return Err(CdpError::method_not_found(&cmd.method));
     }
+    // Worker sessions (ADR 0029) answer the domains a worker has in
+    // Chrome; Playwright uses Runtime, Network, Fetch, Target and
+    // `Emulation.setUserAgentOverride` there.
+    if let Some(t) = &target
+        && sh.is_worker(t)
+    {
+        let ok = match cmd.domain() {
+            "Runtime" | "Network" | "Fetch" | "Target" | "Log" | "Security" => true,
+            "Emulation" => cmd.method == "Emulation.setUserAgentOverride",
+            _ => false,
+        };
+        if !ok {
+            return Err(CdpError::method_not_found(&cmd.method));
+        }
+    }
     let c = Call {
         sh,
         method: &cmd.method,
@@ -894,7 +1116,12 @@ async fn browser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value,
     match c.method {
         "Browser.getVersion" => Ok(c.sh.version_info()),
         "Browser.close" => {
-            let pages: Vec<TargetId> = c.sh.page_infos().into_iter().map(|t| t.target_id).collect();
+            let pages: Vec<TargetId> =
+                c.sh.page_infos()
+                    .into_iter()
+                    .filter(|t| t.kind == "page")
+                    .map(|t| t.target_id)
+                    .collect();
             for p in pages {
                 let _ = c.sh.close_target(&p);
             }
@@ -927,8 +1154,36 @@ async fn target_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, 
             let auto = bool_param(c.p, "autoAttach");
             let wait = bool_param(c.p, "waitForDebuggerOnStart");
             let flatten = bool_param(c.p, "flatten");
-            if c.target.is_some() {
-                // No out-of-process iframes or workers yet: nothing to attach.
+            if let Some(t) = &c.target {
+                // Page and worker sessions: their dedicated workers (no
+                // out-of-process iframes).
+                if auto && !flatten {
+                    return Err(CdpError::server(
+                        "Only flatten mode is supported (pass flatten: true)",
+                    ));
+                }
+                let workers: Vec<TargetId> = {
+                    let mut st = sh.state.borrow_mut();
+                    let was = st.sessions.get(&c.key).and_then(|s| s.auto_attach);
+                    if let Some(s) = st.sessions.get_mut(&c.key) {
+                        s.auto_attach = auto.then_some(wait);
+                    }
+                    if !auto || was.is_some() {
+                        Vec::new()
+                    } else {
+                        st.targets
+                            .iter()
+                            .filter(|x| {
+                                x.info.kind == "worker"
+                                    && x.info.parent_id.as_deref() == Some(t.as_str())
+                            })
+                            .map(|x| x.info.target_id.clone())
+                            .collect()
+                    }
+                };
+                for w in workers {
+                    sh.attach(&c.key, &w, wait);
+                }
                 return Ok(json!({}));
             }
             if auto && !flatten {
@@ -945,9 +1200,11 @@ async fn target_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, 
                 if !auto || was.is_some() {
                     Vec::new()
                 } else {
-                    // Attach to existing pages not yet attached through this session.
+                    // Attach to existing pages, shared and service workers
+                    // not yet attached through this session.
                     st.targets
                         .iter()
+                        .filter(|t| t.info.kind != "worker")
                         .map(|t| t.info.target_id.clone())
                         .filter(|id| {
                             !st.sessions.values().any(|s| {
@@ -1316,7 +1573,10 @@ async fn runtime_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value,
             Ok(json!({}))
         }
         "Runtime.disable" => c.enable("Runtime", false),
-        "Runtime.runIfWaitingForDebugger" => Ok(json!({})),
+        "Runtime.runIfWaitingForDebugger" => {
+            c.sh.stop_waiting(&t, &c.key);
+            Ok(json!({}))
+        }
         "Runtime.evaluate" => {
             let p: EvaluateParams = params(c.p)?;
             let context_id = {

@@ -661,60 +661,7 @@ impl Agent {
     /// Console messages and uncaught exceptions of the page.
     pub(crate) fn console(&self, _page: &PageState, m: &ConsoleMessage) {
         let ctx = self.main_ctx().unwrap_or(0);
-        if m.level == "error"
-            && let Some(rest) = m.text.strip_prefix("Uncaught ")
-        {
-            let class = rest.split(':').next().unwrap_or("Error").trim().to_string();
-            let is_error = class.ends_with("Error") || class == "Error";
-            let exception = if is_error {
-                cdp_remote::remote_object(
-                    &CdpValue::Object(Box::new(ObjectInfo {
-                        class_name: class,
-                        subtype: Some("error".into()),
-                        description: Some(rest.to_string()),
-                        ..Default::default()
-                    })),
-                    None,
-                    RemoteOptions::default(),
-                )
-            } else {
-                cdp_remote::remote_object(
-                    &CdpValue::String(rest.to_string()),
-                    None,
-                    RemoteOptions::default(),
-                )
-            };
-            self.emit(PageEvent::ExceptionThrown {
-                timestamp: now_ms(),
-                details: ExceptionDetails {
-                    exception_id: 1,
-                    text: "Uncaught".into(),
-                    line_number: i64::from(m.line.unwrap_or(1).saturating_sub(1)),
-                    column_number: 0,
-                    script_id: None,
-                    url: m.url.clone(),
-                    stack_trace: None,
-                    exception: Some(exception),
-                    execution_context_id: Some(ctx),
-                },
-            });
-            return;
-        }
-        let kind = match m.level.as_str() {
-            "warn" => "warning",
-            other => other,
-        };
-        self.emit(PageEvent::ConsoleApiCalled {
-            kind: kind.to_string(),
-            args: vec![cdp_remote::remote_object(
-                &CdpValue::String(m.text.clone()),
-                None,
-                RemoteOptions::default(),
-            )],
-            context_id: ctx,
-            timestamp: now_ms(),
-            stack_trace: None,
-        });
+        self.emit(console_event(m, ctx));
     }
 
     pub(crate) fn main_ctx(&self) -> Option<ExecutionContextId> {
@@ -759,7 +706,7 @@ impl Agent {
 
     // ---- remote objects ----
 
-    fn register(
+    pub(crate) fn register(
         &self,
         ctx: ExecutionContextId,
         realm: RealmId,
@@ -796,35 +743,9 @@ impl Agent {
         preview: bool,
         group: Option<&str>,
     ) -> HostResult<RemoteObject> {
-        let ins = engine
-            .inspect(realm, h, preview && !by_value)
-            .map_err(|e| HostError::new(e.message))?;
-        let js = to_cdp(&ins, w);
-        let opts = RemoteOptions {
-            return_by_value: by_value,
-            generate_preview: preview,
-        };
-        let keep = !by_value
-            && matches!(
-                js,
-                CdpValue::Object(_) | CdpValue::Function(_) | CdpValue::Symbol(_)
-            );
-        let mut r = if keep {
-            let id = self.register(ctx, realm, h, group);
-            cdp_remote::remote_object(&js, Some(id), opts)
-        } else {
-            cdp_remote::remote_object(&js, None, opts)
-        };
-        if by_value && matches!(js, CdpValue::Object(_) | CdpValue::Function(_)) {
-            let text = engine
-                .json_by_value(realm, h)
-                .map_err(|e| HostError::new(e.message))?;
-            r.value = Some(serde_json::from_str(&text).map_err(|e| HostError::new(e.to_string()))?);
-        }
-        if !keep {
-            engine.release(h);
-        }
-        Ok(r)
+        remote_value(engine, w, realm, h, by_value, preview, &mut |h| {
+            self.register(ctx, realm, h, group)
+        })
     }
 
     /// `ExceptionDetails` for a caught exception (`in_promise`: a rejected
@@ -840,10 +761,68 @@ impl Agent {
         in_promise: bool,
         group: Option<&str>,
     ) -> ExceptionDetails {
+        exception_details(engine, w, realm, ctx, c, in_promise, &mut |h| {
+            self.register(ctx, realm, h, group)
+        })
+    }
+}
+
+/// The `RemoteObject` for a held value. `register` keeps the handle under
+/// a new object id when the client gets one; otherwise it is released.
+pub(crate) fn remote_value(
+    engine: &mut Engine,
+    w: &Window,
+    realm: RealmId,
+    h: Handle,
+    by_value: bool,
+    preview: bool,
+    register: &mut dyn FnMut(Handle) -> String,
+) -> HostResult<RemoteObject> {
+    let ins = engine
+        .inspect(realm, h, preview && !by_value)
+        .map_err(|e| HostError::new(e.message))?;
+    let js = to_cdp(&ins, w);
+    let opts = RemoteOptions {
+        return_by_value: by_value,
+        generate_preview: preview,
+    };
+    let keep = !by_value
+        && matches!(
+            js,
+            CdpValue::Object(_) | CdpValue::Function(_) | CdpValue::Symbol(_)
+        );
+    let mut r = if keep {
+        let id = register(h);
+        cdp_remote::remote_object(&js, Some(id), opts)
+    } else {
+        cdp_remote::remote_object(&js, None, opts)
+    };
+    if by_value && matches!(js, CdpValue::Object(_) | CdpValue::Function(_)) {
+        let text = engine
+            .json_by_value(realm, h)
+            .map_err(|e| HostError::new(e.message))?;
+        r.value = Some(serde_json::from_str(&text).map_err(|e| HostError::new(e.to_string()))?);
+    }
+    if !keep {
+        engine.release(h);
+    }
+    Ok(r)
+}
+
+/// `ExceptionDetails` for a caught exception (`in_promise`: a rejected
+/// awaited promise); `register` as for [`remote_value`].
+pub(crate) fn exception_details(
+    engine: &mut Engine,
+    w: &Window,
+    realm: RealmId,
+    ctx: ExecutionContextId,
+    c: Caught,
+    in_promise: bool,
+    register: &mut dyn FnMut(Handle) -> String,
+) -> ExceptionDetails {
+    {
         let exception = match c.value {
-            Some(h) => self
-                .remote(engine, w, realm, ctx, h, false, false, group)
-                .ok(),
+            Some(h) => remote_value(engine, w, realm, h, false, false, register).ok(),
             None => None,
         }
         .or_else(|| {
@@ -891,7 +870,9 @@ impl Agent {
             execution_context_id: Some(ctx),
         }
     }
+}
 
+impl Agent {
     // ---- DOM ----
 
     pub(crate) fn ids(&self) -> impl Fn(NodeId) -> BackendNodeId + use<> {
@@ -1011,14 +992,29 @@ pub(crate) fn call_arg(
     realm: RealmId,
     a: &CallArgument,
 ) -> HostResult<Arg> {
+    call_arg_with(
+        &|oid| agent.object(oid).map(|o| (o.realm, o.handle)),
+        engine,
+        realm,
+        a,
+    )
+}
+
+/// [`call_arg`] with object ids resolved by `lookup` (realm, handle).
+pub(crate) fn call_arg_with(
+    lookup: &dyn Fn(&str) -> HostResult<(RealmId, Handle)>,
+    engine: &mut Engine,
+    realm: RealmId,
+    a: &CallArgument,
+) -> HostResult<Arg> {
     if let Some(oid) = &a.object_id {
-        let o = agent.object(oid)?;
-        if o.realm != realm {
+        let (r, h) = lookup(oid)?;
+        if r != realm {
             return Err(HostError::new(
                 "Argument should belong to the same JavaScript world as target object",
             ));
         }
-        return Ok(Arg::Handle(o.handle));
+        return Ok(Arg::Handle(h));
     }
     if let Some(u) = &a.unserializable_value {
         return Ok(match u.as_str() {
@@ -1215,10 +1211,28 @@ pub(crate) fn get_properties(
         .ok_or_else(|| HostError::new("Page is closed"))?;
     let obj = agent.object(&req.object_id)?;
     ws.with_engine(|e| {
+        properties_of(e, &w, obj.realm, obj.handle, req, &mut |h| {
+            agent.register(obj.ctx, obj.realm, h, obj.group.as_deref())
+        })
+    })
+    .ok_or_else(|| HostError::new("Page is closed"))?
+}
+
+/// The `Runtime.getProperties` answer for object `handle`; `register` as
+/// for [`remote_value`].
+pub(crate) fn properties_of(
+    e: &mut Engine,
+    w: &Window,
+    realm: RealmId,
+    handle: Handle,
+    req: &lb_cdp::GetPropertiesRequest,
+    register: &mut dyn FnMut(Handle) -> String,
+) -> HostResult<Properties> {
+    {
         let props = e
             .own_properties(
-                obj.realm,
-                obj.handle,
+                realm,
+                handle,
                 req.own_properties,
                 req.accessor_properties_only,
             )
@@ -1227,18 +1241,7 @@ pub(crate) fn get_properties(
         for p in props {
             let mut conv = |h: Option<Handle>| -> Option<RemoteObject> {
                 h.and_then(|h| {
-                    agent
-                        .remote(
-                            e,
-                            &w,
-                            obj.realm,
-                            obj.ctx,
-                            h,
-                            false,
-                            req.generate_preview,
-                            obj.group.as_deref(),
-                        )
-                        .ok()
+                    remote_value(e, w, realm, h, false, req.generate_preview, register).ok()
                 })
             };
             let value = conv(p.value);
@@ -1271,8 +1274,7 @@ pub(crate) fn get_properties(
             result,
             ..Default::default()
         })
-    })
-    .ok_or_else(|| HostError::new("Page is closed"))?
+    }
 }
 
 fn undefined_remote() -> RemoteObject {
@@ -1315,3 +1317,74 @@ fn mark_frame_owners(agent: &Agent, w: &Window, node: &mut DomNode) {
 
 /// The document node of a window.
 pub(crate) const DOCUMENT: NodeId = Document::DOCUMENT;
+
+/// The CDP event for a console message or uncaught exception of a realm
+/// (`ctx`). Messages a worker forwarded to its page (its uncaught errors)
+/// are `Log.entryAdded` with source `worker`, as in Chrome: Playwright
+/// reports them from the worker's own session.
+pub(crate) fn console_event(m: &ConsoleMessage, ctx: ExecutionContextId) -> PageEvent {
+    if m.from_worker {
+        return PageEvent::Custom {
+            method: "Log.entryAdded".into(),
+            params: serde_json::json!({ "entry": {
+                "source": "worker",
+                "level": if m.level == "warning" { "warning" } else { m.level.as_str() },
+                "text": m.text.lines().next().unwrap_or(""),
+                "timestamp": now_ms(),
+            }}),
+        };
+    }
+    if m.level == "error"
+        && let Some(rest) = m.text.strip_prefix("Uncaught ")
+    {
+        let class = rest.split(':').next().unwrap_or("Error").trim().to_string();
+        let is_error = class.ends_with("Error") || class == "Error";
+        let exception = if is_error {
+            cdp_remote::remote_object(
+                &CdpValue::Object(Box::new(ObjectInfo {
+                    class_name: class,
+                    subtype: Some("error".into()),
+                    description: Some(rest.to_string()),
+                    ..Default::default()
+                })),
+                None,
+                RemoteOptions::default(),
+            )
+        } else {
+            cdp_remote::remote_object(
+                &CdpValue::String(rest.to_string()),
+                None,
+                RemoteOptions::default(),
+            )
+        };
+        return PageEvent::ExceptionThrown {
+            timestamp: now_ms(),
+            details: ExceptionDetails {
+                exception_id: 1,
+                text: "Uncaught".into(),
+                line_number: i64::from(m.line.unwrap_or(1).saturating_sub(1)),
+                column_number: 0,
+                script_id: None,
+                url: m.url.clone(),
+                stack_trace: None,
+                exception: Some(exception),
+                execution_context_id: Some(ctx),
+            },
+        };
+    }
+    let kind = match m.level.as_str() {
+        "warn" => "warning",
+        other => other,
+    };
+    PageEvent::ConsoleApiCalled {
+        kind: kind.to_string(),
+        args: vec![cdp_remote::remote_object(
+            &CdpValue::String(m.text.clone()),
+            None,
+            RemoteOptions::default(),
+        )],
+        context_id: ctx,
+        timestamp: now_ms(),
+        stack_trace: None,
+    }
+}

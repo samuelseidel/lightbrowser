@@ -774,6 +774,7 @@ pub(crate) fn report_error_value(js: &mut dyn Js, w: &Rc<Window>, message: &str,
             text: message,
             url: None,
             line: None,
+            from_worker: false,
         });
     }
 }
@@ -785,6 +786,7 @@ pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
             text: e.message.clone(),
             url: e.url.clone(),
             line: e.line,
+            from_worker: false,
         });
         return;
     }
@@ -812,21 +814,30 @@ pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
         canceled = !fire_event_with(js, w, WINDOW_REF, "ErrorEvent", "error", false, true, extra);
         w.error_depth.set(0);
     }
-    if !canceled && w.is_worker() {
-        // A worker's uncaught error goes on to its `Worker` object.
-        super::worker::forward_error(w, &message, e);
-        return;
-    }
     if !canceled {
         let text = match &e.stack {
             Some(s) => format!("Uncaught {s}"),
-            None => message,
+            None => message.clone(),
         };
+        if w.is_worker() {
+            // The worker's own console (its CDP target, ADR 0029), then
+            // its `Worker` object.
+            w.log(crate::host::ConsoleMessage {
+                level: "error".into(),
+                text,
+                url: e.url.clone(),
+                line: e.line,
+                from_worker: false,
+            });
+            super::worker::forward_error(w, &message, e);
+            return;
+        }
         w.log(crate::host::ConsoleMessage {
             level: "error".into(),
             text,
             url: e.url.clone(),
             line: e.line,
+            from_worker: false,
         });
     }
 }

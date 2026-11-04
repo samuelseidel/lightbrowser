@@ -136,6 +136,7 @@ fn console_call(
         text,
         url: None,
         line: None,
+        from_worker: false,
     });
     Ok(())
 }

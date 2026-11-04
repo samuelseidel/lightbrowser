@@ -23,6 +23,7 @@ use lb_webapi::{Bindings, Registry};
 use tokio::sync::Notify;
 use url::Url;
 
+use crate::cdp::workers::WorkerAgent;
 use crate::context::{BrowserContext, WeakContext};
 
 /// JS heap cap of a worker's engine.
@@ -34,12 +35,16 @@ const FRAME_MS: f64 = 1000.0 / 60.0;
 /// worker threads do not keep their context alive.
 pub(crate) struct Workers {
     ctx: WeakContext,
+    /// The CDP target of the page or worker these workers belong to
+    /// (ADR 0029): the parent of the dedicated workers it starts.
+    owner: Option<String>,
 }
 
 impl Workers {
-    pub(crate) fn host(ctx: &BrowserContext) -> Rc<dyn WorkerHost> {
+    pub(crate) fn host(ctx: &BrowserContext, owner: Option<String>) -> Rc<dyn WorkerHost> {
         Rc::new(Workers {
             ctx: ctx.downgrade(),
+            owner,
         })
     }
 }
@@ -47,7 +52,7 @@ impl Workers {
 impl WorkerHost for Workers {
     fn start(&self, start: WorkerStart) {
         if let Some(ctx) = self.ctx.upgrade() {
-            spawn(ctx, start);
+            spawn(ctx, start, Inspect::Yes(self.owner.clone()));
         }
     }
 
@@ -68,7 +73,7 @@ impl WorkerHost for Workers {
         start.inbox.send(connect);
         reg.insert(key, (start.inbox.clone(), start.control.clone()));
         drop(reg);
-        spawn(ctx.clone(), start);
+        spawn(ctx.clone(), start, Inspect::Yes(None));
     }
 
     fn fetch_sync(&self, req: NetRequest) -> Result<NetResponse, String> {
@@ -93,16 +98,26 @@ impl WorkerHost for Workers {
 /// thread.
 struct WorkerNet {
     ctx: WeakContext,
+    /// Network events for the worker's target, when inspected.
+    agent: Option<Rc<WorkerAgent>>,
 }
 
 impl lb_webapi::host::NetHost for WorkerNet {
     fn fetch(&self, req: NetRequest) -> lb_webapi::host::LocalFuture<Result<NetResponse, String>> {
         let ctx = self.ctx.upgrade();
+        let agent = self.agent.clone();
         Box::pin(async move {
-            match ctx {
-                Some(ctx) => ctx.fetch(req).await,
-                None => Err("context closed".into()),
-            }
+            let Some(ctx) = ctx else {
+                return Err("context closed".into());
+            };
+            let Some(a) = agent else {
+                return ctx.fetch(req).await;
+            };
+            let empty = req.destination == Destination::Empty;
+            let id = a.request_started(&req);
+            let r = ctx.fetch(req).await;
+            a.request_done(&id, empty, &r);
+            r
         })
     }
     fn spawn(&self, fut: lb_webapi::host::LocalFuture<()>) {
@@ -124,8 +139,16 @@ impl lb_webapi::host::NetHost for WorkerNet {
     }
 }
 
+/// Whether a worker becomes a CDP target (ADR 0029).
+pub(crate) enum Inspect {
+    /// When its context is inspected; the dedicated worker's parent target.
+    Yes(Option<String>),
+    /// Never (`fingerprint-report`'s own probe).
+    No,
+}
+
 /// Start the thread of one worker.
-pub(crate) fn spawn(ctx: BrowserContext, start: WorkerStart) {
+pub(crate) fn spawn(ctx: BrowserContext, start: WorkerStart, inspect: Inspect) {
     let name = match start.kind {
         WorkerKind::Dedicated => "lb-dedicated-worker",
         WorkerKind::Shared => "lb-shared-worker",
@@ -134,13 +157,13 @@ pub(crate) fn spawn(ctx: BrowserContext, start: WorkerStart) {
     let ctx = ctx.downgrade();
     let r = std::thread::Builder::new()
         .name(name.into())
-        .spawn(move || thread_main(ctx, start));
+        .spawn(move || thread_main(ctx, start, inspect));
     if let Err(e) = r {
         tracing::warn!("worker thread: {e}");
     }
 }
 
-fn thread_main(ctx: WeakContext, start: WorkerStart) {
+fn thread_main(ctx: WeakContext, start: WorkerStart, inspect: Inspect) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -153,7 +176,7 @@ fn thread_main(ctx: WeakContext, start: WorkerStart) {
     };
     let local = tokio::task::LocalSet::new();
     local.block_on(&rt, async move {
-        if let Err(e) = run(ctx, start).await {
+        if let Err(e) = run(ctx, start, inspect).await {
             tracing::debug!("worker: {e}");
         }
     });
@@ -161,7 +184,7 @@ fn thread_main(ctx: WeakContext, start: WorkerStart) {
 
 /// Load the script, build the scope, run the script, then the event loop
 /// until the worker closes or is terminated.
-async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
+async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<(), String> {
     let WorkerStart {
         kind,
         url,
@@ -189,15 +212,26 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
     };
     // The script (Chrome fires a plain `error` event at the `Worker` when
     // it cannot be loaded).
-    let (script_url, text) = match source {
-        Some(s) => (url.clone(), s),
+    let (script_url, text, script_resp) = match source {
+        Some(s) => {
+            // Service worker versions run the script their job fetched.
+            let resp = (kind == WorkerKind::Service).then(|| NetResponse {
+                status: 200,
+                status_text: "OK".into(),
+                headers: vec![("content-type".into(), "text/javascript".into())],
+                body: bytes::Bytes::from(s.clone().into_bytes()),
+                url: url.clone(),
+                redirected: false,
+            });
+            (url.clone(), s, resp)
+        }
         None => {
             let mut req = NetRequest::get(url.clone(), Destination::Script, Some(creator.clone()));
             req.mode = if module { "cors" } else { "same-origin" };
             match ctx.fetch(req).await {
                 Ok(r) if (200..300).contains(&r.status) => {
                     let t = lb_webapi::rt::script::script_source(&r.body, r.header("content-type"));
-                    (r.url, t)
+                    (r.url.clone(), t, Some(r))
                 }
                 _ => {
                     if let Some((p, id)) = &parent {
@@ -211,6 +245,25 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
     if control.is_terminated() {
         return Ok(());
     }
+    // A CDP target when the context is inspected (ADR 0029).
+    let mut link = match inspect {
+        Inspect::Yes(parent) => crate::cdp::workers::announce(
+            ctx.inspector(),
+            crate::cdp::workers::Announce {
+                kind,
+                url: script_url.clone(),
+                name: name.clone(),
+                parent: if kind == WorkerKind::Dedicated {
+                    parent
+                } else {
+                    None
+                },
+                control: control.clone(),
+            },
+        ),
+        Inspect::No => None,
+    };
+    let agent = link.as_ref().map(|l| l.agent.clone());
 
     let mut engine = Engine::new(
         persona.clone(),
@@ -236,7 +289,10 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
             url: script_url.clone(),
             persona,
             profile,
-            net: Rc::new(WorkerNet { ctx: wctx.clone() }),
+            net: Rc::new(WorkerNet {
+                ctx: wctx.clone(),
+                agent: agent.clone(),
+            }),
             local_storage: StorageArea::new(),
             session_storage: StorageArea::new(),
             virtual_time,
@@ -255,9 +311,17 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
         control: control.clone(),
         parent,
     });
-    w.set_worker_host(Some(Workers::host(&ctx)));
+    w.set_worker_host(Some(Workers::host(
+        &ctx,
+        agent.as_ref().map(|a| a.target.clone()),
+    )));
+    if let Some(a) = &agent {
+        let a = a.clone();
+        w.set_console_sink(Some(Rc::new(move |m| a.console(m))));
+    }
     w.set_sw_host(Some(crate::sw::host(&ctx)));
     w.set_idb_backend(Some(ctx.idb().clone()));
+    let sw_version = service.as_ref().map(|s| s.version);
     let evaluated = service.map(|s| {
         w.init_sw_scope(s.version, s.registration);
         s.evaluated
@@ -269,6 +333,22 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
     w.attach_inbox(inbox, inbox_rx);
     if evaluated.is_some() {
         w.sw_list();
+    }
+    // Paused until the CDP client lets it run (`waitForDebuggerOnStart`).
+    if let Some(l) = link.as_mut() {
+        if !l.wait_resume(&mut engine, &w, &control).await {
+            l.agent.abandon();
+            if let Some(done) = evaluated {
+                done(Err(()));
+            }
+            w.close();
+            rt.detach(realm);
+            engine.drop_realm(realm);
+            return Ok(());
+        }
+        if let Some(r) = &script_resp {
+            l.agent.script_response(kind, r);
+        }
     }
 
     // Run the script (module graph: static imports first).
@@ -283,6 +363,10 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
             .map(|_| ())
     };
     let threw = result.is_err();
+    if let Some(a) = &agent {
+        a.script_loaded();
+        a.script_finished(script_resp.as_ref().map_or(0, |r| r.body.len()));
+    }
     if let Err(e) = result
         && e.kind != JsErrorKind::Host
         && e.kind != JsErrorKind::Terminated
@@ -298,6 +382,9 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
     if let Some(done) = evaluated {
         if threw {
             done(Err(()));
+            if let Some(a) = &agent {
+                a.abandon();
+            }
             w.close();
             rt.detach(realm);
             engine.drop_realm(realm);
@@ -306,8 +393,20 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
         done(Ok(w.has_fetch_handler()));
     }
     drop(ctx);
+    // Service workers stop when idle (ADR 0029), unless inspected.
+    if let Some(vid) = sw_version {
+        let flag = agent.as_ref().map(|a| a.inspected_flag());
+        tokio::task::spawn_local(crate::sw::idle_watch(wctx.clone(), vid, move || {
+            flag.as_ref()
+                .is_some_and(|f| f.load(std::sync::atomic::Ordering::SeqCst))
+        }));
+    }
 
-    event_loop(&mut engine, &w, &notify).await;
+    event_loop(&mut engine, &w, &notify, link.as_mut()).await;
+    if let Some(a) = &agent {
+        a.abandon();
+    }
+    drop(link);
 
     w.close();
     rt.detach(realm);
@@ -347,7 +446,12 @@ async fn prefetch_modules(ctx: &BrowserContext, w: &Rc<Window>, url: &Url, sourc
 /// The worker's event loop: tasks, due timers, animation frames (60 Hz),
 /// a microtask checkpoint after each. Ends when the worker is closed or
 /// terminated.
-async fn event_loop(engine: &mut Engine, w: &Rc<Window>, notify: &Notify) {
+async fn event_loop(
+    engine: &mut Engine,
+    w: &Rc<Window>,
+    notify: &Notify,
+    mut link: Option<&mut crate::cdp::workers::Link>,
+) {
     let realm = w.realm();
     let Some(control) = w.worker_control() else {
         return;
@@ -358,6 +462,10 @@ async fn event_loop(engine: &mut Engine, w: &Rc<Window>, notify: &Notify) {
     loop {
         if control.is_done() {
             return;
+        }
+        // CDP commands and awaited evaluations (ADR 0029).
+        if let Some(l) = link.as_deref_mut() {
+            l.poll(engine, w);
         }
         if streak >= 50 && !w.clock.is_virtual() {
             streak = 0;
@@ -423,15 +531,32 @@ async fn event_loop(engine: &mut Engine, w: &Rc<Window>, notify: &Notify) {
             tokio::task::yield_now().await;
             continue;
         }
-        match deadline {
+        let cmd = match deadline {
             Some(d) => {
                 let ms = (d - now).max(0.0);
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs_f64(ms / 1000.0)) => {}
-                    _ = notify.notified() => {}
+                    _ = tokio::time::sleep(Duration::from_secs_f64(ms / 1000.0)) => None,
+                    _ = notify.notified() => None,
+                    c = next_cmd(&mut link) => c,
                 }
             }
-            None => notify.notified().await,
+            None => tokio::select! {
+                _ = notify.notified() => None,
+                c = next_cmd(&mut link) => c,
+            },
+        };
+        if let (Some(c), Some(l)) = (cmd, link.as_deref_mut()) {
+            l.handle(engine, w, c);
         }
+    }
+}
+
+/// The next CDP command of an inspected worker; never for others.
+async fn next_cmd(
+    link: &mut Option<&mut crate::cdp::workers::Link>,
+) -> Option<crate::cdp::workers::WorkerCmd> {
+    match link {
+        Some(l) => l.next().await,
+        None => std::future::pending().await,
     }
 }

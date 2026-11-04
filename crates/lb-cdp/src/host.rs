@@ -259,8 +259,26 @@ pub enum PageEvent {
     RequestPaused(Box<RequestPaused>),
     /// `Fetch.authRequired` (only with `handleAuthRequests`).
     AuthRequired(Box<AuthRequired>),
+    /// A worker started (ADR 0029). `HostEvent::target_id` is the
+    /// worker's new target id (the host picks it). `info` names its type
+    /// (`worker`, `shared_worker`, `service_worker`), URL, title, browser
+    /// context and, for dedicated workers, the parent target and frame;
+    /// `context` is its global scope (`World::Worker`). The worker waits
+    /// before running its script until the server calls
+    /// [`PageHost::resume_worker`]: at once when no attached session
+    /// waits for the debugger, else after `Runtime.runIfWaitingForDebugger`
+    /// or a detach.
+    WorkerCreated {
+        info: TargetInfo,
+        context: ExecutionContext,
+    },
+    /// The worker ended (terminated, closed, its document went, or an idle
+    /// service worker was stopped): its sessions are detached and the
+    /// target is destroyed.
+    WorkerDestroyed,
     /// Any other event, sent as-is to sessions of the page that enabled
-    /// `method`'s domain.
+    /// `method`'s domain (`Inspector.*` events go to every session of the
+    /// target, as Chrome sends them without `Inspector.enable`).
     Custom {
         method: String,
         params: Value,
@@ -332,6 +350,15 @@ pub trait PageHost {
 
     /// Closes a page and frees its document and realms.
     fn close_page(&self, target_id: &str) -> HostResult<()>;
+
+    /// Lets a worker reported with [`PageEvent::WorkerCreated`] run its
+    /// script. Called exactly once per worker target.
+    fn resume_worker(&self, _target_id: &str) {}
+
+    /// The number of sessions attached to worker `target_id` changed. A
+    /// service worker with a session is never stopped for being idle, as
+    /// in Chrome.
+    fn worker_sessions(&self, _target_id: &str, _count: usize) {}
 
     // ---- Page ----
 

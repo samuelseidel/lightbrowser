@@ -196,7 +196,7 @@ async fn probe_service_worker(page: &Rc<PageState>, url: &url::Url) -> Value {
             }),
         }),
     };
-    crate::worker::spawn(ctx, start);
+    crate::worker::spawn(ctx, start, crate::worker::Inspect::No);
     let run = async {
         erx.await
             .map_err(|_| "service worker did not start".to_owned())?
