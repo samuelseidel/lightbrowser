@@ -137,7 +137,7 @@ pub(crate) async fn navigate_committed(
             .filter(|w| w.url().origin() == url.origin())
             .map(|w| w.client_id())
             .unwrap_or_default();
-        sw_or_network_loader(
+        let mut fetch = std::pin::pin!(sw_or_network_loader(
             &page,
             req,
             sw.as_ref(),
@@ -145,8 +145,16 @@ pub(crate) async fn navigate_committed(
             &reserved,
             reload,
             loader.clone(),
-        )
-        .await
+        ));
+        // Send the request, then make the new document's realm while the
+        // response is on its way (the commit takes it).
+        match std::future::poll_fn(|cx| std::task::Poll::Ready(fetch.as_mut().poll(cx))).await {
+            std::task::Poll::Ready(r) => r,
+            std::task::Poll::Pending => {
+                prepare_spare_realm(&ws, &page, &url);
+                fetch.await
+            }
+        }
     };
     if page.nav_seq.get() != seq || page.closed.get() {
         let _ = committed.send(Err(PageError::Aborted));
@@ -271,7 +279,29 @@ pub(crate) async fn navigate_committed(
     let r = load(&ws, &page, &w, Doc::Main(seq), &text).await;
     page.loading.set(false);
     page.notify.notify_one();
+    // A page a CDP client loaded is often followed by a new one (a
+    // crawl): make the realm of its `about:blank` while the client reads
+    // this load.
+    if r.is_ok() && agent.is_some() && url.scheme() != "about" && !page.closed.get() {
+        tokio::task::yield_now().await;
+        if let Ok(blank) = Url::parse("about:blank") {
+            prepare_spare_realm(&ws, &page, &blank);
+        }
+    }
     r.map(|()| result)
+}
+
+/// Make a spare main-world realm for a document of `url` in `page` (see
+/// `lb_webapi::rt::Runtime::prepare_spare_realm`).
+fn prepare_spare_realm(ws: &WorkerState, page: &PageState, url: &Url) {
+    let Some((rt, _)) = ws.runtime() else { return };
+    let insecure = !lb_webapi::rt::is_secure_url(url);
+    let os_apis = page.ctx.profile().map(|p| p.os_apis());
+    ws.with_engine(|e| {
+        if let Err(e) = rt.prepare_spare_realm(e, insecure, os_apis) {
+            tracing::warn!("spare realm: {e}");
+        }
+    });
 }
 
 /// A script that runs after parsing (`defer`, modules).

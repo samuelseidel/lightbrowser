@@ -104,6 +104,9 @@ pub trait RealmOps {
     /// each other's globals (same-origin frames); V8 denies access
     /// between globals whose tokens differ (`TypeError: no access`).
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError>;
+    /// Replace the realm's module loader (`import()`, module scripts), for
+    /// a realm made before its document was known.
+    fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>);
     /// Delete the configurable own string-keyed properties of the realm's
     /// global whose names `keep` rejects (engine built-ins a browser does
     /// not expose), as a script doing `delete globalThis[name]` would.
@@ -184,6 +187,13 @@ fn delete_configurable<'s>(
         .and_then(|d| v8::Local::<v8::Object>::try_from(d).ok())
         .is_some_and(|d| d.get(scope, k_conf).is_some_and(|v| v.is_true()));
     configurable && global.delete(scope, key) == Some(true)
+}
+
+/// Shared body of [`RealmOps::set_module_loader`].
+fn set_loader(state: &SharedState, realm: RealmId, loader: Option<ModuleLoader>) {
+    if let Some(r) = state.borrow_mut().realms.get_mut(&realm) {
+        r.loader = loader;
+    }
 }
 
 /// Shared body of [`RealmOps::set_security_token`]: the token is an
@@ -305,6 +315,9 @@ impl RealmOps for Engine {
     }
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError> {
         self.run(realm, |scope, _| set_token(scope, token))
+    }
+    fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
+        set_loader(&self.state, realm, loader);
     }
     fn delete_globals_except(
         &mut self,
@@ -565,6 +578,9 @@ impl RealmOps for CallCtx<'_, '_, '_> {
     }
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError> {
         self.run_in(realm, |scope, _| set_token(scope, token))
+    }
+    fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
+        set_loader(&self.state, realm, loader);
     }
     fn delete_globals_except(
         &mut self,

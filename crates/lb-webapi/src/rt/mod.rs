@@ -340,6 +340,31 @@ struct RtInner {
     next_doc_key: Cell<u32>,
     /// Live entries after the last prune.
     docs_live: Cell<usize>,
+    /// Main-world window realms made ahead of their document while the
+    /// worker waited (see [`Runtime::prepare_spare_realm`]), by
+    /// (insecure, OS gates).
+    spare: RefCell<Vec<(SpareKey, RealmId)>>,
+}
+
+/// What a window realm depends on before its document is known.
+type SpareKey = (bool, Option<lb_persona::OsApis>);
+
+/// The options of a window's main-world realm (also of spare ones, which
+/// get their module loader when a window takes them).
+fn spare_options(
+    insecure: bool,
+    os_apis: Option<lb_persona::OsApis>,
+    module_loader: Option<lb_js::ModuleLoader>,
+) -> crate::install::WindowRealmOptions {
+    crate::install::WindowRealmOptions {
+        window_host: Some(WINDOW_REF),
+        world: None,
+        module_loader,
+        insecure,
+        os_apis,
+        // `setup_realm` defines `window.chrome`.
+        host_slots: true,
+    }
 }
 
 /// The implementations of one engine. Cheap to clone.
@@ -355,6 +380,38 @@ impl std::fmt::Debug for Runtime {
 }
 
 impl Runtime {
+    /// Make a main-world window realm now, for the next document that
+    /// needs one with these options (a page's URL scheme decides
+    /// `insecure`; the persona the OS gates), so the commit does not wait
+    /// for it. Call while the worker would otherwise wait (a navigation's
+    /// response). Nothing runs in the realm and it is not attached to any
+    /// window until [`Window::create_realm`] takes it, which then finishes
+    /// it as it would a new one; pages cannot tell the difference. Keeps
+    /// at most one per key. `false` if one was there already.
+    pub fn prepare_spare_realm(
+        &self,
+        engine: &mut dyn lb_js::RealmOps,
+        insecure: bool,
+        os_apis: Option<lb_persona::OsApis>,
+    ) -> Result<bool, JsError> {
+        let key = (insecure, os_apis);
+        if self.0.spare.borrow().iter().any(|(k, _)| *k == key) {
+            return Ok(false);
+        }
+        let Some(bindings) = self.0.bindings.borrow().clone() else {
+            return Ok(false);
+        };
+        let realm = bindings.new_window_realm(engine, spare_options(insecure, os_apis, None))?;
+        self.0.spare.borrow_mut().push((key, realm));
+        Ok(true)
+    }
+
+    fn take_spare_realm(&self, key: SpareKey) -> Option<RealmId> {
+        let mut spare = self.0.spare.borrow_mut();
+        let i = spare.iter().position(|(k, _)| *k == key)?;
+        Some(spare.remove(i).1)
+    }
+
     /// The shared layout inputs for `os` (made on first use).
     pub(crate) fn layout_base(&self, os: lb_css::OsKind) -> lb_layout::LayoutBase {
         let mut bases = self.0.layout_bases.borrow_mut();
@@ -379,6 +436,7 @@ impl Runtime {
             docs: RefCell::new(HashMap::new()),
             next_doc_key: Cell::new(1),
             docs_live: Cell::new(0),
+            spare: RefCell::new(Vec::new()),
         }));
         dom::register(reg, &rt);
         coll::register(reg, &rt);
@@ -892,18 +950,16 @@ impl Window {
                 )),
             }
         });
-        let realm = bindings.new_window_realm(
-            engine,
-            crate::install::WindowRealmOptions {
-                window_host: Some(WINDOW_REF),
-                world: None,
-                module_loader: Some(loader),
-                insecure,
-                os_apis: self.profile.as_deref().map(PersonaProfile::os_apis),
-                // `setup_realm` defines `window.chrome`.
-                host_slots: true,
-            },
-        )?;
+        let os_apis = self.profile.as_deref().map(PersonaProfile::os_apis);
+        let realm = match self.rt.take_spare_realm((insecure, os_apis)) {
+            Some(realm) => {
+                engine.set_module_loader(realm, Some(loader));
+                realm
+            }
+            None => {
+                bindings.new_window_realm(engine, spare_options(insecure, os_apis, Some(loader)))?
+            }
+        };
         self.realm.set(realm);
         self.rt.attach(realm, self.clone());
         engine.set_security_token(realm, &frames::origin(self))?;
