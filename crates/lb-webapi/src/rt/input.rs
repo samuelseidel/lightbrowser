@@ -278,6 +278,21 @@ fn editable_host(d: &Document, n: NodeId) -> Option<NodeId> {
     })?
 }
 
+/// The element `focus()` on `n` focuses: `n`, or for a host with
+/// `delegatesFocus` the first focusable element of its shadow tree.
+pub(crate) fn focus_delegate(d: &Document, n: NodeId) -> NodeId {
+    let Some(sr) = d.shadow_root(n) else {
+        return n;
+    };
+    if !d.shadow_root_data(sr).is_some_and(|x| x.delegates_focus) {
+        return n;
+    }
+    d.shadow_including_descendants(sr)
+        .into_iter()
+        .find(|&c| focusable(d, c) && d.shadow_root(c).is_none())
+        .unwrap_or(n)
+}
+
 fn focusable(d: &Document, n: NodeId) -> bool {
     if !is_element(d, n) || disabled(d, n) {
         return false;
@@ -1840,13 +1855,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     mods!("KeyboardEvent", "shiftKey", MOD_SHIFT, key_of);
     getter(reg, rt, "MouseEvent", "relatedTarget", |cx, w| {
         let e = this_event_data(cx, w)?;
-        cx.ret(mouse_of(&e).related.map_or(Arg::Null, |r| w.host_arg(r)))
+        cx.ret(super::events::related_of(&e).map_or(Arg::Null, |r| w.host_arg(r)))
     });
     getter(reg, rt, "MouseEvent", "fromElement", |cx, w| {
         let e = this_event_data(cx, w)?;
-        let m = mouse_of(&e);
         let r = if matches!(e.type_.as_str(), "mouseover" | "mouseenter") {
-            m.related
+            super::events::related_of(&e)
         } else {
             e.target
         };
@@ -1854,9 +1868,8 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, "MouseEvent", "toElement", |cx, w| {
         let e = this_event_data(cx, w)?;
-        let m = mouse_of(&e);
         let r = if matches!(e.type_.as_str(), "mouseout" | "mouseleave") {
-            m.related
+            super::events::related_of(&e)
         } else {
             e.target
         };
@@ -1997,10 +2010,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     // FocusEvent
     getter(reg, rt, "FocusEvent", "relatedTarget", |cx, w| {
         let e = this_event_data(cx, w)?;
-        cx.ret(match e.extra {
-            EventExtra::Focus { related: Some(r) } => w.host_arg(r),
-            _ => Arg::Null,
-        })
+        cx.ret(super::events::related_of(&e).map_or(Arg::Null, |r| w.host_arg(r)))
     });
 
     register_controls(reg, rt);

@@ -159,7 +159,8 @@ impl Loaded {
 
 /// CSSOM host objects (one `Obj` variant).
 pub(crate) enum CssObj {
-    List,
+    /// `document.styleSheets` / `shadowRoot.styleSheets` (the tree root).
+    List(NodeId),
     Sheet(u32),
     /// `MediaList` of a sheet (`rule: None`) or of a rule.
     Media {
@@ -181,7 +182,7 @@ pub(crate) enum CssObj {
 impl CssObj {
     pub(crate) fn iface_name(&self) -> &'static str {
         match self {
-            CssObj::List => "StyleSheetList",
+            CssObj::List(_) => "StyleSheetList",
             CssObj::Sheet(_) => "CSSStyleSheet",
             CssObj::Media { .. } => "MediaList",
             CssObj::Rules { .. } => "CSSRuleList",
@@ -1082,9 +1083,9 @@ fn owner_sheet(w: &Rc<Window>, n: NodeId) -> Option<u32> {
 }
 
 /// `document.styleSheets`: sheet keys in tree order.
-fn document_sheets(w: &Rc<Window>) -> Vec<u32> {
+fn document_sheets(w: &Rc<Window>, root: NodeId) -> Vec<u32> {
     let nodes: Vec<(NodeId, bool)> = w.with_doc(|d| {
-        d.descendants(Document::DOCUMENT)
+        d.descendants(root)
             .filter_map(|n| {
                 if d.is_html_element_named(n, &local_name!("style")) {
                     css_type(d, n).then_some((n, true))
@@ -1424,10 +1425,25 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Document", "styleSheets", |cx, w| {
         let (slot, _) = this_node(cx, w)?;
         let id = w.cached_obj((slot, 0, "styleSheets", String::new()), || {
-            Obj::Css(Box::new(CssObj::List))
+            Obj::Css(Box::new(CssObj::List(Document::DOCUMENT)))
         });
         cx.ret(w.obj_arg(id))
     });
+    getter(reg, rt, "ShadowRoot", "styleSheets", |cx, w| {
+        let (slot, n) = this_node(cx, w)?;
+        let id = w.cached_obj((slot, n.0, "styleSheets", String::new()), || {
+            Obj::Css(Box::new(CssObj::List(n)))
+        });
+        cx.ret(w.obj_arg(id))
+    });
+    fn list_root(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<NodeId, HostError> {
+        let id = super::this_obj(cx)?;
+        with_css(w, id, |c| match c {
+            CssObj::List(r) => Some(*r),
+            _ => None,
+        })
+        .ok_or_else(super::illegal)
+    }
     for iface in ["HTMLLinkElement", "HTMLStyleElement"] {
         getter(reg, rt, iface, "sheet", |cx, w| {
             let (slot, n) = this_node(cx, w)?;
@@ -1443,12 +1459,14 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
 
     // StyleSheetList
     getter(reg, rt, "StyleSheetList", "length", |cx, w| {
-        cx.ret(document_sheets(w).len() as u32)
+        let root = list_root(cx, w)?;
+        cx.ret(document_sheets(w, root).len() as u32)
     });
     method(reg, rt, "StyleSheetList", "item", |cx, w| {
         need_args(cx, 1, "item", "StyleSheetList")?;
         let i = cx.arg_u32(0)? as usize;
-        match document_sheets(w).get(i) {
+        let root = list_root(cx, w)?;
+        match document_sheets(w, root).get(i) {
             Some(&k) => cx.ret(sheet_arg(w, k)),
             None => cx.ret(Arg::Null),
         }
@@ -1460,10 +1478,16 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(w) = rt1.window(cx.holder_realm()) else {
                 return Ok(None);
             };
-            if cx.holder_host().is_none_or(|h| h.kind != K_OBJ) {
+            let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
                 return Ok(None);
-            }
-            Ok(document_sheets(&w)
+            };
+            let Some(root) = with_css(&w, h.id, |c| match c {
+                CssObj::List(r) => Some(*r),
+                _ => None,
+            }) else {
+                return Ok(None);
+            };
+            Ok(document_sheets(&w, root)
                 .get(i as usize)
                 .map(|&k| sheet_arg(&w, k)))
         }),

@@ -52,6 +52,7 @@ pub mod canvas;
 mod chrome;
 mod coll;
 mod crypto;
+mod custom;
 mod dom;
 mod events;
 mod fonts;
@@ -69,6 +70,7 @@ mod rtc;
 pub mod screenshot;
 pub mod script;
 mod serializer;
+mod shadow;
 mod sheets;
 mod style;
 pub mod sw;
@@ -461,6 +463,7 @@ impl Runtime {
         frames::register(reg, &rt);
         table::register(reg, &rt);
         sheets::register(reg, &rt);
+        shadow::register(reg, &rt);
         worker::register(reg, &rt);
         sw::register(reg, &rt);
         crypto::register(reg, &rt);
@@ -799,6 +802,10 @@ pub struct Window {
     pub(crate) history: RefCell<History>,
     pub(crate) observers: RefCell<Vec<u32>>,
     pub(crate) mo_queued: Cell<bool>,
+    /// Slot assignments of the main document's shadow trees as last seen
+    /// (to signal `slotchange`), and the signal slots (DOM "signal slot
+    /// list"), fired after the mutation observers.
+    pub(crate) slot_state: RefCell<shadow::SlotState>,
     /// Loads that delay the `load` event (scripts, stylesheets).
     pub pending_loads: Cell<u32>,
     /// Requests in flight (for `networkidle`).
@@ -909,6 +916,7 @@ impl Window {
             }),
             observers: RefCell::new(Vec::new()),
             mo_queued: Cell::new(false),
+            slot_state: RefCell::new(shadow::SlotState::default()),
             pending_loads: Cell::new(0),
             in_flight: Cell::new(0),
             current_script: Cell::new(None),

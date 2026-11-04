@@ -44,6 +44,9 @@ pub struct ParserOptions {
     /// ([`ParseStep::StyleSheet`]), so the page layer can pause parsing
     /// for a style sheet in `<body>` as Chrome does.
     pub pause_at_style_sheets: bool,
+    /// `<template shadowrootmode>` attaches declarative shadow roots
+    /// (pages and `parseHTMLUnsafe`; not `DOMParser`).
+    pub declarative_shadow: bool,
 }
 
 impl Default for ParserOptions {
@@ -51,6 +54,7 @@ impl Default for ParserOptions {
         ParserOptions {
             scripting_enabled: true,
             pause_at_style_sheets: false,
+            declarative_shadow: true,
         }
     }
 }
@@ -145,7 +149,8 @@ impl HtmlParser {
     }
 
     pub fn with_options(opts: ParserOptions) -> Self {
-        let sink = Sink::new(Document::placeholder(), Document::DOCUMENT, true);
+        let mut sink = Sink::new(Document::placeholder(), Document::DOCUMENT, true);
+        sink.allow_shadow = opts.declarative_shadow;
         let tb_opts = TreeBuilderOpts {
             scripting_enabled: opts.scripting_enabled,
             ..Default::default()

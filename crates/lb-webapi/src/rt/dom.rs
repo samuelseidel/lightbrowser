@@ -345,11 +345,6 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
         }
         cx.ret(w.node_arg(slot, Document::DOCUMENT))
     });
-    method(reg, rt, "Node", "getRootNode", |cx, w| {
-        let (slot, n) = this_node(cx, w)?;
-        let r = w.doc_slot(slot, |d| d.root(n));
-        cx.ret(w.node_arg(slot, r))
-    });
     getter(reg, rt, "Node", "parentNode", |cx, w| {
         let (slot, n) = this_node(cx, w)?;
         let p = w.doc_slot(slot, |d| d.parent(n));
@@ -428,6 +423,12 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Node", "cloneNode", |cx, w| {
         let (slot, n) = this_node(cx, w)?;
+        if w.doc_slot(slot, |d| d.is_shadow_root(n)) {
+            return Err(w.rt.err(
+                "NotSupportedError",
+                "Failed to execute 'cloneNode' on 'Node': ShadowRoot nodes are not clonable.",
+            ));
+        }
         let deep = cx.arg_bool(0);
         let c = w.doc_slot_mut(slot, |d| {
             if n == Document::DOCUMENT {
@@ -1445,9 +1446,7 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Document", "activeElement", |cx, w| {
         let (slot, _) = this_node(cx, w)?;
         let f = if slot == 0 {
-            w.focused
-                .get()
-                .filter(|&n| w.with_doc(|d| d.is_connected(n)))
+            super::shadow::active_element_in(w, Document::DOCUMENT)
         } else {
             None
         };
@@ -1456,8 +1455,11 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, "Document", "currentScript", |cx, w| {
         let (slot, _) = this_node(cx, w)?;
+        // Scripts in shadow trees are not exposed.
         let r = if slot == 0 {
-            w.current_script.get()
+            w.current_script
+                .get()
+                .filter(|&n| w.with_doc(|d| !d.is_shadow_root(d.root(n))))
         } else {
             None
         };
@@ -2057,13 +2059,23 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
         method(reg, rt, iface, "focus", |cx, w| {
             let (slot, n) = this_elem(cx, w)?;
             if slot == 0 {
-                super::window::focus(cx, w, Some(n));
+                // A host that delegates focus passes it to the first
+                // focusable element of its shadow tree.
+                let target = w.with_doc(|d| super::input::focus_delegate(d, n));
+                super::window::focus(cx, w, Some(target));
             }
             Ok(())
         });
         method(reg, rt, iface, "blur", |cx, w| {
             let (slot, n) = this_elem(cx, w)?;
-            if slot == 0 && w.focused.get() == Some(n) {
+            // blur() on a host whose shadow tree has the focus blurs it.
+            let has_focus = w.focused.get().is_some_and(|f| {
+                f == n
+                    || w.with_doc(|d| {
+                        d.shadow_root(n).is_some() && d.shadow_including_contains(n, f)
+                    })
+            });
+            if slot == 0 && has_focus {
                 super::window::focus(cx, w, None);
             }
             Ok(())

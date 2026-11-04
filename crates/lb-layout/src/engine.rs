@@ -416,21 +416,33 @@ impl LayoutEngine {
             return None;
         }
         let static_pos = style.position == Position::Static;
-        let mut cur = doc.parent_element(node);
+        // Flat-tree ancestors; the result is retargeted against `node`
+        // (a shadow tree `node` is not in yields its host).
+        let retarget = |mut a: NodeId| loop {
+            let r = doc.root(a);
+            if !doc.is_shadow_root(r) || doc.shadow_including_contains(r, node) {
+                break a;
+            }
+            match doc.shadow_host(r) {
+                Some(h) => a = h,
+                None => break a,
+            }
+        };
+        let mut cur = lb_css::style_parent(doc, node);
         while let Some(a) = cur {
             if let Some(s) = self.styles.computed_style(doc, a) {
                 if s.position != Position::Static || Some(a) == doc.body() {
-                    return Some(a);
+                    return Some(retarget(a));
                 }
                 if static_pos
                     && (doc.is_html_element_named(a, &local_name!("td"))
                         || doc.is_html_element_named(a, &local_name!("th"))
                         || doc.is_html_element_named(a, &local_name!("table")))
                 {
-                    return Some(a);
+                    return Some(retarget(a));
                 }
             }
-            cur = doc.parent_element(a);
+            cur = lb_css::style_parent(doc, a);
         }
         None
     }

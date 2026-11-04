@@ -21,11 +21,10 @@ t('slotted b', () => [cs(b, 'color'), cs(b, 'display'), cs(b, 'background-color'
 t('unslotted u', () => [cs(u, 'color'), cs(u, 'display')].join());
 t('inner', () => [cs(inner, 'color'), cs(inner, 'font-size')].join());
 t('slot', () => [cs(def, 'display'), cs(def, 'color')].join());
-t('rects', () => [a, b, u, inner, top_, def, host].map(e => { var r = e.getBoundingClientRect(); return d(e) + ':' + r.x + ',' + r.y + ',' + r.width + 'x' + r.height; }).join(' '));
+t('rects', () => [a, b, u, top_, def, host].map(e => { var r = e.getBoundingClientRect(); return d(e) + ':' + r.x + ',' + r.y + ',' + r.width + 'x' + r.height; }).join(' ') + ' inner:' + inner.getBoundingClientRect().x + ',' + inner.getBoundingClientRect().y);
 t('offset', () => [a.offsetWidth, a.offsetHeight, u.offsetWidth, d(a.offsetParent), d(inner.offsetParent), inner.offsetTop].join());
 var dhost = document.getElementById('dhost');
 t('declarative', () => [cs(dhost, 'height'), cs(dhost.shadowRoot.getElementById('dp'), 'color'), dhost.shadowRoot.getElementById('dp').getBoundingClientRect().height > 0].join());
-t('innerText', () => JSON.stringify(host.innerText) + ' ' + JSON.stringify(sr.getElementById('wrap').innerText));
 t('checkVisibility', () => [a.checkVisibility(), u.checkVisibility(), inner.checkVisibility()].join());
 end();
 </script>

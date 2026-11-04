@@ -300,6 +300,22 @@ pub(crate) fn synthetic_click(js: &mut dyn Js, w: &Rc<Window>, slot: u32, n: Nod
     super::input::synthetic_click(js, w, slot, n);
 }
 
+/// `:focus-within` on the focused element's shadow-including inclusive
+/// ancestors, and `:focus` on the shadow hosts it is inside (Chrome
+/// matches `:focus` on a host whose shadow tree holds the focus).
+fn focus_chain(d: &mut lb_dom::Document, n: NodeId, on: bool) {
+    let mut cur = Some(n);
+    while let Some(x) = cur {
+        if d.is_element(x) {
+            d.set_flags(x, NodeFlags::FOCUS_WITHIN, on);
+        }
+        if let Some(h) = d.shadow_host(x) {
+            d.set_flags(h, NodeFlags::FOCUS, on);
+        }
+        cur = d.parent_or_host(x);
+    }
+}
+
 /// Move focus (`focus()` / `blur()`), firing blur/focusout and
 /// focus/focusin.
 pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
@@ -312,7 +328,10 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
     };
     if let Some(o) = old {
         super::input::before_blur(js, w, o);
-        w.with_doc_mut(|d| d.set_flags(o, NodeFlags::FOCUS | NodeFlags::FOCUS_VISIBLE, false));
+        w.with_doc_mut(|d| {
+            d.set_flags(o, NodeFlags::FOCUS | NodeFlags::FOCUS_VISIBLE, false);
+            focus_chain(d, o, false);
+        });
         w.focused.set(None);
         fire_event_with(
             js,
@@ -336,7 +355,10 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
         );
     }
     if let Some(n) = to {
-        w.with_doc_mut(|d| d.set_flags(n, NodeFlags::FOCUS, true));
+        w.with_doc_mut(|d| {
+            d.set_flags(n, NodeFlags::FOCUS, true);
+            focus_chain(d, n, true);
+        });
         w.focused.set(Some(n));
         super::input::after_focus(w, n);
         fire_event_with(

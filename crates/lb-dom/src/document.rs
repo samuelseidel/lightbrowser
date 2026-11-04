@@ -166,8 +166,14 @@ impl Document {
     /// Parse a whole HTML string in one go. Scripts are not run; the parser
     /// simply continues past them.
     pub fn parse_html(html: &str) -> Self {
+        Self::parse_html_with(html, crate::ParserOptions::default())
+    }
+
+    /// [`Document::parse_html`] with parser options (`DOMParser` turns
+    /// declarative shadow roots off).
+    pub fn parse_html_with(html: &str, opts: crate::ParserOptions) -> Self {
         let mut doc = Document::new();
-        let mut parser = crate::HtmlParser::new();
+        let mut parser = crate::HtmlParser::with_options(opts);
         parser.push_str(html);
         parser.end();
         while let crate::ParseStep::Script(_) | crate::ParseStep::StyleSheet(_) =

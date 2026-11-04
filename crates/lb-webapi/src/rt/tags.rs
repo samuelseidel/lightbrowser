@@ -15,7 +15,13 @@ pub(crate) fn node_interface(doc: &Document, id: NodeId, _slot: u32) -> &'static
         }
         NodeType::Text => "Text",
         NodeType::Comment => "Comment",
-        NodeType::DocumentFragment => "DocumentFragment",
+        NodeType::DocumentFragment => {
+            if doc.is_shadow_root(id) {
+                "ShadowRoot"
+            } else {
+                "DocumentFragment"
+            }
+        }
         NodeType::DocumentType => "DocumentType",
         NodeType::ProcessingInstruction => "ProcessingInstruction",
         NodeType::Element => {

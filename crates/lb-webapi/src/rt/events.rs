@@ -5,6 +5,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use lb_dom::NodeId;
 use lb_js::{Arg, CallCtx, Handle, HostError, HostRef, JsError, JsValue, RealmId, ValueKind};
 
 use super::{
@@ -94,8 +95,36 @@ pub struct EventData {
     pub initialized: bool,
     pub trusted: bool,
     pub time: f64,
-    pub path: Vec<HostRef>,
+    pub path: Vec<PathEntry>,
+    /// The retargeted `relatedTarget` while (and after) dispatching;
+    /// `None` reads the one the event was made with.
+    pub related_view: Option<Option<HostRef>>,
     pub extra: EventExtra,
+}
+
+/// One entry of an event's path (DOM "event path" struct).
+#[derive(Clone, Copy, Debug)]
+pub struct PathEntry {
+    /// The invocation target.
+    pub item: HostRef,
+    /// The shadow-adjusted target (`None` when the target is the same as
+    /// at an earlier entry).
+    pub target: Option<HostRef>,
+    pub related: Option<HostRef>,
+    pub root_of_closed_tree: bool,
+    pub slot_in_closed_tree: bool,
+}
+
+/// `relatedTarget` as listeners see it now.
+pub(crate) fn related_of(e: &EventData) -> Option<HostRef> {
+    if let Some(v) = e.related_view {
+        return v;
+    }
+    match &e.extra {
+        EventExtra::Mouse(m) => m.related,
+        EventExtra::Focus { related } => *related,
+        _ => None,
+    }
 }
 
 impl EventData {
@@ -118,6 +147,7 @@ impl EventData {
             trusted: false,
             time: 0.0,
             path: Vec::new(),
+            related_view: None,
             extra: EventExtra::None,
         }
     }
@@ -151,6 +181,18 @@ pub(crate) fn new_event(
 ) -> u32 {
     let mut e = EventData::new(iface, type_, bubbles, cancelable);
     e.trusted = true;
+    // UI events the browser fires cross shadow boundaries.
+    e.composed = matches!(
+        iface,
+        "FocusEvent"
+            | "MouseEvent"
+            | "PointerEvent"
+            | "WheelEvent"
+            | "KeyboardEvent"
+            | "InputEvent"
+            | "CompositionEvent"
+            | "TouchEvent"
+    );
     e.time = coarse_now(w);
     e.extra = extra;
     w.new_obj(Obj::Event(Box::new(e)))
@@ -199,62 +241,292 @@ fn with_ev<R>(w: &Window, ev: u32, f: impl FnOnce(&mut EventData) -> R) -> Optio
     .flatten()
 }
 
-/// The propagation path, target first.
-fn event_path(w: &Window, target: HostRef, type_: &str) -> Vec<HostRef> {
-    let mut path = vec![target];
-    if let Some((slot, node)) = w.decode_node(target) {
-        let root = w.doc_slot(slot, |d| {
-            for a in d.ancestors(node) {
-                path.push(w.node_ref(slot, a));
-            }
-            d.root(node)
-        });
-        if slot == 0 && root == lb_dom::Document::DOCUMENT && type_ != "load" {
-            path.push(WINDOW_REF);
+/// "Retarget" `a` against `b`: climb out of shadow trees `b` is not in.
+fn retarget(w: &Window, a: Option<HostRef>, b: HostRef) -> Option<HostRef> {
+    let a = a?;
+    let Some((sa, na)) = w.decode_node(a) else {
+        return Some(a);
+    };
+    let b = w.decode_node(b).filter(|&(sb, _)| sb == sa).map(|(_, n)| n);
+    let n = w.doc_slot(sa, |d| {
+        if d.shadow_roots().is_empty() {
+            return na;
         }
+        let mut n = na;
+        loop {
+            let root = d.root(n);
+            if !d.is_shadow_root(root) {
+                break n;
+            }
+            if b.is_some_and(|b| d.shadow_including_contains(root, b)) {
+                break n;
+            }
+            match d.shadow_host(root) {
+                Some(h) => n = h,
+                None => break n,
+            }
+        }
+    });
+    Some(if n == na { a } else { w.node_ref(sa, n) })
+}
+
+/// Facts about a path item: (assigned to a slot, is a closed shadow root,
+/// its root is a closed shadow root).
+fn item_facts(w: &Window, item: HostRef) -> (bool, bool, bool) {
+    let Some((s, n)) = w.decode_node(item) else {
+        return (false, false, false);
+    };
+    w.doc_slot(s, |d| {
+        if d.shadow_roots().is_empty() {
+            return (false, false, false);
+        }
+        let closed = |r: NodeId| {
+            d.shadow_root_data(r)
+                .is_some_and(|x| x.mode == lb_dom::ShadowRootMode::Closed)
+        };
+        (
+            d.find_slot(n, false).is_some(),
+            closed(n),
+            closed(d.root(n)),
+        )
+    })
+}
+
+/// "Get the parent" of an event path item.
+fn get_parent(
+    w: &Window,
+    item: HostRef,
+    first_root: Option<NodeId>,
+    type_: &str,
+    composed: bool,
+) -> Option<HostRef> {
+    let (s, n) = w.decode_node(item)?;
+    let r = w.doc_slot(s, |d| {
+        if !d.shadow_roots().is_empty() {
+            if let Some(slot) = d.find_slot(n, false) {
+                return Some(Ok(slot));
+            }
+            if let Some(host) = d.shadow_host(n) {
+                return if !composed && first_root == Some(n) {
+                    None
+                } else {
+                    Some(Ok(host))
+                };
+            }
+        }
+        if let Some(p) = d.parent(n) {
+            return Some(Ok(p));
+        }
+        (s == 0 && n == lb_dom::Document::DOCUMENT && type_ != "load").then_some(Err(()))
+    })?;
+    Some(match r {
+        Ok(p) => w.node_ref(s, p),
+        Err(()) => WINDOW_REF,
+    })
+}
+
+/// The event path (DOM dispatch steps 5.1-5.9), target first.
+fn event_path(
+    w: &Window,
+    target: HostRef,
+    type_: &str,
+    composed: bool,
+    related: Option<HostRef>,
+) -> Vec<PathEntry> {
+    let mut path = Vec::new();
+    let rel0 = retarget(w, related, target);
+    if Some(target) == rel0 && related != Some(target) {
+        return path;
+    }
+    let first_root = w
+        .decode_node(target)
+        .map(|(s, n)| w.doc_slot(s, |d| d.root(n)));
+    // Root of the current (shadow-adjusted) target.
+    let root_of = |h: HostRef| {
+        w.decode_node(h)
+            .map(|(s, n)| (s, w.doc_slot(s, |d| d.root(n))))
+    };
+    let (assigned, closed_root, _) = item_facts(w, target);
+    path.push(PathEntry {
+        item: target,
+        target: Some(target),
+        related: rel0,
+        root_of_closed_tree: closed_root,
+        slot_in_closed_tree: false,
+    });
+    let mut tgt_root = root_of(target);
+    let mut slottable = assigned;
+    let mut slot_in_closed = false;
+    let mut parent = get_parent(w, target, first_root, type_, composed);
+    while let Some(p) = parent {
+        let (p_assigned, p_closed_root, p_in_closed) = item_facts(w, p);
+        if slottable {
+            slottable = false;
+            if p_in_closed {
+                slot_in_closed = true;
+            }
+        }
+        if p_assigned {
+            slottable = true;
+        }
+        let rel = retarget(w, related, p);
+        let in_target_tree = p.kind == K_WINDOW
+            || match (tgt_root, w.decode_node(p)) {
+                (Some((s, r)), Some((ps, pn))) if s == ps => {
+                    w.doc_slot(s, |d| d.shadow_including_contains(r, pn))
+                }
+                _ => false,
+            };
+        if in_target_tree {
+            path.push(PathEntry {
+                item: p,
+                target: None,
+                related: rel,
+                root_of_closed_tree: p_closed_root,
+                slot_in_closed_tree: slot_in_closed,
+            });
+        } else if rel == Some(p) {
+            break;
+        } else {
+            tgt_root = root_of(p);
+            path.push(PathEntry {
+                item: p,
+                target: Some(p),
+                related: rel,
+                root_of_closed_tree: p_closed_root,
+                slot_in_closed_tree: slot_in_closed,
+            });
+        }
+        parent = get_parent(w, p, first_root, type_, composed);
+        slot_in_closed = false;
     }
     path
 }
 
+/// `Event.composedPath()`: the path as seen from the current target,
+/// without nodes inside closed shadow trees it cannot see.
+fn composed_path(path: &[PathEntry], current: Option<HostRef>) -> Vec<HostRef> {
+    let Some(cur) = current else {
+        return Vec::new();
+    };
+    if path.is_empty() {
+        return Vec::new();
+    }
+    let mut cur_index = 0;
+    let mut cur_level: i32 = 0;
+    for i in (0..path.len()).rev() {
+        if path[i].root_of_closed_tree {
+            cur_level += 1;
+        }
+        if path[i].item == cur {
+            cur_index = i;
+            break;
+        }
+        if path[i].slot_in_closed_tree {
+            cur_level -= 1;
+        }
+    }
+    let mut before = Vec::new();
+    let (mut level, mut max) = (cur_level, cur_level);
+    for i in (0..cur_index).rev() {
+        if path[i].root_of_closed_tree {
+            level += 1;
+        }
+        if level <= max {
+            before.push(path[i].item);
+        }
+        if path[i].slot_in_closed_tree {
+            level -= 1;
+            max = max.min(level);
+        }
+    }
+    before.reverse();
+    before.push(cur);
+    let (mut level, mut max) = (cur_level, cur_level);
+    for e in &path[cur_index + 1..] {
+        if e.slot_in_closed_tree {
+            level += 1;
+        }
+        if level <= max {
+            before.push(e.item);
+        }
+        if e.root_of_closed_tree {
+            level -= 1;
+            max = max.min(level);
+        }
+    }
+    before
+}
+
 /// The DOM dispatch algorithm. Returns false if the event was canceled.
 pub(crate) fn dispatch(js: &mut dyn Js, w: &Rc<Window>, target: HostRef, ev: u32) -> bool {
-    let Some(type_) = with_ev(w, ev, |e| {
+    let Some((type_, composed, related)) = with_ev(w, ev, |e| {
         e.dispatching = true;
         e.target = Some(target);
-        e.type_.clone()
+        e.related_view = None;
+        (e.type_.clone(), e.composed, related_of(e))
     }) else {
         return true;
     };
-    let path = event_path(w, target, &type_);
+    let path = event_path(w, target, &type_, composed, related);
     with_ev(w, ev, |e| e.path = path.clone());
     let stopped = |w: &Window| with_ev(w, ev, |e| e.stop).unwrap_or(true);
+    // The shadow-adjusted target for entry `i`: the nearest one at or
+    // before it.
+    let adjusted = |i: usize| path[..=i].iter().rev().find_map(|p| p.target);
+    let enter = |w: &Window, i: usize, phase: u16| {
+        let t = adjusted(i);
+        let entry = path[i];
+        with_ev(w, ev, |e| {
+            e.phase = phase;
+            e.current_target = Some(entry.item);
+            e.target = t;
+            if related.is_some() {
+                e.related_view = Some(entry.related);
+            }
+        });
+    };
 
-    // Capture: window → parent of target, then capture listeners at target.
-    for (i, &t) in path.iter().enumerate().rev() {
+    // Capture: window → target, capture listeners (AT_TARGET at targets).
+    for i in (0..path.len()).rev() {
         if stopped(w) {
             break;
         }
-        let phase = if i == 0 { 2 } else { 1 };
-        with_ev(w, ev, |e| {
-            e.phase = phase;
-            e.current_target = Some(t);
-        });
-        invoke(js, w, t, ev, true);
+        let phase = if path[i].target.is_some() { 2 } else { 1 };
+        enter(w, i, phase);
+        invoke(js, w, path[i].item, ev, true);
     }
-    // Target (non-capture), then bubble.
+    // Bubble: targets (non-capture listeners), then ancestors if bubbling.
     let bubbles = with_ev(w, ev, |e| e.bubbles).unwrap_or(false);
-    for (i, &t) in path.iter().enumerate() {
-        if stopped(w) || (i > 0 && !bubbles) {
+    for i in 0..path.len() {
+        if stopped(w) {
             break;
         }
-        let phase = if i == 0 { 2 } else { 3 };
-        with_ev(w, ev, |e| {
-            e.phase = phase;
-            e.current_target = Some(t);
-        });
-        invoke(js, w, t, ev, false);
+        let phase = if path[i].target.is_some() {
+            2
+        } else if bubbles {
+            3
+        } else {
+            continue;
+        };
+        enter(w, i, phase);
+        invoke(js, w, path[i].item, ev, false);
     }
+    // After dispatch the target is the last shadow-adjusted one, unless it
+    // (or the related target) is inside a shadow tree ("clear targets").
+    let last = path.iter().rev().find(|p| p.target.is_some()).copied();
+    let in_shadow = |h: Option<HostRef>| {
+        h.and_then(|h| w.decode_node(h))
+            .is_some_and(|(s, n)| w.doc_slot(s, |d| d.is_shadow_root(d.root(n))))
+    };
+    let clear = last.is_some_and(|l| in_shadow(l.target) || in_shadow(l.related));
     with_ev(w, ev, |e| {
+        if let Some(l) = last {
+            e.target = if clear { None } else { l.target };
+            if related.is_some() {
+                e.related_view = Some(if clear { None } else { l.related });
+            }
+        }
         e.phase = 0;
         e.current_target = None;
         e.dispatching = false;
@@ -962,8 +1234,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     ev_get!("timeStamp", |cx, w, e| cx.ret(e.time));
     method(reg, rt, "Event", "composedPath", |cx, w| {
         let id = this_event(cx, w)?;
-        let path = with_ev(w, id, |e| e.path.clone()).unwrap_or_default();
-        let items = path.into_iter().map(|h| w.host_arg(h)).collect();
+        let (path, cur) =
+            with_ev(w, id, |e| (e.path.clone(), e.current_target)).unwrap_or_default();
+        let items = composed_path(&path, cur)
+            .into_iter()
+            .map(|h| w.host_arg(h))
+            .collect();
         cx.ret(Arg::Array(items))
     });
     method(reg, rt, "Event", "stopPropagation", |cx, w| {

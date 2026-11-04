@@ -277,6 +277,7 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
             observe_record(js, w, slot, &m);
         }
         super::frames::on_mutations(js, w, &batch);
+        super::shadow::on_mutations(js, w, &batch);
         for (slot, m) in batch {
             if slot != 0 {
                 continue;
@@ -714,6 +715,7 @@ fn observe_record(js: &mut dyn Js, w: &Rc<Window>, slot: u32, c: &Change) {
 pub(crate) fn deliver_mutation_records(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) {
     w.mo_queued.set(false);
     let observers = w.observers.borrow().clone();
+    let signals = super::shadow::take_signals(w);
     for ob in observers {
         let Some(Some((cb, records))) = w.with_obj(ob, |o| match o {
             Obj::MutationObserver(m) if !m.records.is_empty() => {
@@ -729,6 +731,7 @@ pub(crate) fn deliver_mutation_records(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Wind
             super::events::report_exception(cx, w, &e);
         }
     }
+    super::shadow::fire_slotchange(cx, w, signals);
     process_mutations(cx, w);
 }
 
@@ -1124,7 +1127,13 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 "DOMParser: {ty} is parsed as HTML (no XML parser yet)"
             ));
         }
-        let mut d = Document::parse_html(&s);
+        let mut d = Document::parse_html_with(
+            &s,
+            lb_dom::ParserOptions {
+                declarative_shadow: false,
+                ..Default::default()
+            },
+        );
         // Scripts in parsed documents never run.
         let scripts: Vec<NodeId> = d
             .descendants(Document::DOCUMENT)

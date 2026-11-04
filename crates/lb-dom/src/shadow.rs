@@ -409,6 +409,11 @@ impl Document {
         }
     }
 
+    /// A slot's manually assigned nodes (`slot.assign()` order).
+    pub fn manual_assigned(&self, slot: NodeId) -> Vec<NodeId> {
+        self.manual_slots.get(&slot).cloned().unwrap_or_default()
+    }
+
     /// `slot.assign(...nodes)`: set the manually assigned nodes.
     pub fn assign_slot(&mut self, slot: NodeId, nodes: &[NodeId]) {
         // A node is assigned to at most one slot; repeated nodes keep

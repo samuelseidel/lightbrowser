@@ -844,14 +844,26 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         need_args(cx, 2, "elementFromPoint", "Document")?;
         let (slot, _) = this_node(cx, w)?;
         let (x, y) = (cx.arg_f64(0)? as f32, cx.arg_f64(1)? as f32);
-        let r = w.with_layout(slot, |l, d| l.element_from_point(d, x, y));
+        let r = w.with_layout(slot, |l, d| {
+            l.element_from_point(d, x, y)
+                .map(|n| super::shadow::retarget_to_document(d, n))
+        });
         cx.ret(w.opt_node_arg(slot, r))
     });
     method(reg, rt, "Document", "elementsFromPoint", |cx, w| {
         need_args(cx, 2, "elementsFromPoint", "Document")?;
         let (slot, _) = this_node(cx, w)?;
         let (x, y) = (cx.arg_f64(0)? as f32, cx.arg_f64(1)? as f32);
-        let r = w.with_layout(slot, |l, d| l.elements_from_point(d, x, y));
+        let r = w.with_layout(slot, |l, d| {
+            let mut out: Vec<NodeId> = Vec::new();
+            for n in l.elements_from_point(d, x, y) {
+                let t = super::shadow::retarget_to_document(d, n);
+                if !out.contains(&t) {
+                    out.push(t);
+                }
+            }
+            out
+        });
         cx.ret(Arg::Array(
             r.into_iter().map(|n| w.node_arg(slot, n)).collect(),
         ))

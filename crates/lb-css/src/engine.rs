@@ -515,6 +515,11 @@ impl StyleEngine {
         if !doc.is_element(id) || !doc.is_connected(id) {
             return None;
         }
+        // Children of a shadow host that are not slotted are not in the
+        // flat tree and have no style (Chrome: empty values).
+        if !doc.shadow_roots().is_empty() && !in_flat_tree(doc, id) {
+            return None;
+        }
         self.refresh(doc);
         if self.cache.len() < doc.node_count() {
             self.cache.resize(doc.node_count(), None);
@@ -711,6 +716,24 @@ pub fn style_parent(doc: &Document, n: NodeId) -> Option<NodeId> {
     doc.flat_parent(n)
         .filter(|&p| doc.is_element(p))
         .or_else(|| doc.parent_element(n))
+}
+
+/// True if every light-tree child of a host on `id`'s ancestor chain is
+/// slotted (so `id` is in the flat tree).
+fn in_flat_tree(doc: &Document, id: NodeId) -> bool {
+    let mut n = id;
+    loop {
+        let Some(p) = doc.parent_or_host(n) else {
+            return true;
+        };
+        if doc.shadow_root(p).is_some()
+            && !doc.is_shadow_root(n)
+            && doc.find_slot(n, false).is_none()
+        {
+            return false;
+        }
+        n = p;
+    }
 }
 
 fn is_stylesheet_link(doc: &Document, n: NodeId) -> bool {
