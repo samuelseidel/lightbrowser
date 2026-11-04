@@ -838,6 +838,28 @@ pub fn lifecycle_task(kind: &'static str, reply: Reply<bool>) -> RemoteTask {
     })
 }
 
+/// Evaluate `src` (an expression whose value, or promise, is a string)
+/// in a service worker scope and reply with the string. For the
+/// fingerprint report's probe of a version started outside the registry.
+pub fn eval_task(src: String, reply: Reply<Result<String, String>>) -> RemoteTask {
+    Box::new(move |js, w| match js.eval_handle(&src, lb_js::ScriptOrigin::new("")) {
+        Err(e) => reply(Err(e.message)),
+        Ok(h) => on_settled(
+            js,
+            w,
+            h,
+            Box::new(move |cx, _w, ok, v| {
+                let s = match cx.handle_value(v) {
+                    lb_js::JsValue::String(s) => s,
+                    other => format!("{other:?}"),
+                };
+                cx.release(v);
+                reply(if ok { Ok(s) } else { Err(s) });
+            }),
+        ),
+    })
+}
+
 /// Resolve a `skipWaiting()` promise of the scope.
 fn resolve_task(r: lb_js::Resolver) -> RemoteTask {
     Box::new(move |js, _w| js.resolve(r, Arg::Undefined))

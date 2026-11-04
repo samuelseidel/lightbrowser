@@ -10,7 +10,8 @@
 //!   measurement of the persona's list), permissions, battery, media
 //!   devices, voices, media queries and `performance.now` resolution, and
 //!   the navigator, UA client hints, WebGPU presence, time zone and locale
-//!   as a dedicated and a shared worker see them (ADR 0021). The
+//!   as a dedicated, a shared and a service worker see them (ADR 0021,
+//!   0022; the service worker runs outside the registry). The
 //!   main world's global is inspected natively for automation tells.
 //! - **Compare** ([`diff`]): one check per value, with status `ok`,
 //!   `mismatch`, `unimplemented` (the surface is missing or threw) or
@@ -141,7 +142,79 @@ pub(crate) async fn collect(
         "chrome": globals.iter().any(|n| n == "chrome"),
     });
     surface["url"] = json!(w.url().to_string());
+    // A service worker sees the same persona (ADR 0022): probed in a
+    // version started outside the registry (nothing the page can see).
+    if surface["workers"].is_object() {
+        surface["workers"]["service"] = probe_service_worker(page, &w.url()).await;
+    }
     Ok(surface)
+}
+
+/// The worker probe's values in a `ServiceWorkerGlobalScope`.
+const SW_PROBE: &str = "(async function v() { const n = navigator, d = n.userAgentData, o = Intl.DateTimeFormat().resolvedOptions();\
+const r = { userAgent: n.userAgent, appVersion: n.appVersion, platform: n.platform, language: n.language,\
+languages: Array.from(n.languages || []), hardwareConcurrency: n.hardwareConcurrency,\
+deviceMemory: n.deviceMemory === undefined ? null : n.deviceMemory, gpu: 'gpu' in n,\
+timeZone: o.timeZone, locale: o.locale };\
+if (d) { r.uaData = { brands: d.brands.map((b) => ({ brand: b.brand, version: b.version })), mobile: d.mobile, platform: d.platform };\
+const h = await d.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'uaFullVersion', 'fullVersionList', 'wow64', 'formFactors']);\
+r.uaHigh = { architecture: h.architecture, bitness: h.bitness, model: h.model, platformVersion: h.platformVersion,\
+uaFullVersion: h.uaFullVersion, wow64: h.wow64, formFactors: h.formFactors,\
+fullVersionList: (h.fullVersionList || []).map((b) => ({ brand: b.brand, version: b.version })) }; }\
+return JSON.stringify(r); })()";
+
+/// Run [`SW_PROBE`] in a service worker scope of the page's context
+/// (its own thread and isolate, never registered, ended afterwards).
+async fn probe_service_worker(page: &Rc<PageState>, url: &url::Url) -> Value {
+    use lb_webapi::rt::{WorkerControl, WorkerKind, WorkerStart, sw, worker};
+    let ctx = page.ctx.clone();
+    let (inbox, inbox_rx) = worker::inbox();
+    let control = WorkerControl::new(inbox.clone());
+    let (etx, erx) = tokio::sync::oneshot::channel();
+    let start = WorkerStart {
+        kind: WorkerKind::Service,
+        url: url.join("/__lb_probe_sw.js").unwrap_or_else(|_| url.clone()),
+        source: Some(String::new()),
+        module: false,
+        name: String::new(),
+        origin: url.origin().ascii_serialization(),
+        creator: url.clone(),
+        persona: ctx.persona().clone(),
+        profile: ctx.profile().cloned(),
+        virtual_time: false,
+        inbox: inbox.clone(),
+        inbox_rx,
+        control: control.clone(),
+        parent: None,
+        service: Some(sw::ServiceStart {
+            version: 0,
+            registration: 0,
+            evaluated: Box::new(move |r| {
+                let _ = etx.send(r);
+            }),
+        }),
+    };
+    crate::worker::spawn(ctx, start);
+    let run = async {
+        erx.await
+            .map_err(|_| "service worker did not start".to_owned())?
+            .map_err(|()| "service worker script failed".to_owned())?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        inbox.send(sw::eval_task(
+            SW_PROBE.to_owned(),
+            Box::new(move |r| {
+                let _ = tx.send(r);
+            }),
+        ));
+        rx.await.map_err(|_| "service worker ended".to_owned())?
+    };
+    let r = tokio::time::timeout(Duration::from_secs(5), run).await;
+    control.terminate();
+    match r {
+        Ok(Ok(s)) => serde_json::from_str(&s).unwrap_or_else(|e| json!({ "__error": e.to_string() })),
+        Ok(Err(e)) => json!({ "__error": e }),
+        Err(_) => json!({ "__error": "service worker timeout" }),
+    }
 }
 
 /// Evaluate the collector and wait for its promise.
@@ -675,11 +748,11 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
     c.eq(s, "intl.locale", "locale.locale", json!(p.locale.language));
     c.info(s, "date.timezoneOffset", "locale.offset");
 
-    // Workers (ADR 0021): a dedicated and a shared worker see the same
-    // persona as the page (navigator, UA client hints, WebGPU presence,
-    // time zone and locale).
+    // Workers (ADR 0021, 0022): a dedicated, a shared and a service
+    // worker see the same persona as the page (navigator, UA client hints,
+    // WebGPU presence, time zone and locale).
     if chrome {
-        for scope in ["dedicated", "shared"] {
+        for scope in ["dedicated", "shared", "service"] {
             let w = |k: &str| format!("workers.{scope}.{k}");
             let n = |k: &str| format!("worker.{scope}.{k}");
             for (k, v) in [
