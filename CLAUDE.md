@@ -83,7 +83,9 @@ in backend order, transactions active until the next task boundary
 (`Window::take_task`) and auto-committed, `versionchange`/`blocked`
 across windows and workers; 10 Chrome-recorded cases in `lb-page`
 `tests/idb/`, 207 WPT IndexedDB files. Page and worker loops let a due
-timer run after 50 tasks in a row. Shadow DOM and custom elements (ADR 0026, ROADMAP
+timer run after 50 tasks in a row. Binary 42.07 MB; bench 6 of 6 in
+one 5 x 50 run, 5 of 6 in another (`fetch` peak RSS 23.20 vs Lightpanda
+23.195 MB). Shadow DOM and custom elements (ADR 0026, ROADMAP
 "Shadow DOM and custom elements"): shadow roots in `lb-dom` (`shadow.rs`:
 arena nodes without a parent link, slot assignment on demand, flat tree,
 declarative roots from the parser, `getHTML`), scoped style with
