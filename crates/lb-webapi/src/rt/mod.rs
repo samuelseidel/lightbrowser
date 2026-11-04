@@ -41,7 +41,7 @@
 //!
 //! Known gaps: no weak wrappers (host objects live until the window is
 //! dropped), listeners from isolated worlds are called with wrappers of
-//! the dispatching realm, no shadow DOM, no synchronous XHR.
+//! the dispatching realm, no shadow DOM.
 
 #![allow(clippy::type_complexity)]
 

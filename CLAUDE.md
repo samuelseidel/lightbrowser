@@ -61,9 +61,18 @@ regenerate the hot-symbol list after code changes
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), shader execution in
 WebGL, the thin `fetch` peak RSS margin (above). Also open: workers as CDP
-targets, idle service workers are never stopped, dynamic `import()`, M1
-proxies, shadow DOM, `crypto`, `WebSocket`, `customElements`, `indexedDB`
-(full list in ROADMAP "Close-out verification"). Style sheets (ADR 0019): links and `@import`s load
+targets, idle service workers are never stopped, M1 proxies, shadow DOM,
+`customElements`, `indexedDB` (full list in ROADMAP "Close-out
+verification"). Web platform APIs (ADR 0025, ROADMAP "Web platform APIs"):
+Web Crypto (`crypto.getRandomValues`/`randomUUID` from BoringSSL's OS
+randomness, `SubtleCrypto` with Blink's normalization and Chromium's
+texts on BoringSSL: digests, HMAC, AES-GCM/CBC/CTR/KW, ECDSA/ECDH, RSA,
+PBKDF2, HKDF, Ed25519/X25519, all key formats), WebSocket (lb-net's own
+client: Chrome's handshake and header order, cookies, permessage-deflate,
+`wss:` ClientHello with ALPN `http/1.1` only, as captured), dynamic
+`import()` (module map shared with static imports, `import.meta.resolve`),
+`blob:`/`data:` in `fetch()`/XHR and synchronous XHR (main thread and
+workers); 15 Chrome-recorded cases in `lb-page` `tests/apis/`. Style sheets (ADR 0019): links and `@import`s load
 on insertion; parser-made sheets block parser, `defer` and module
 scripts, and sheets after `<body>` stop the parser, as in Chrome;
 `document.styleSheets` and the CSSOM (`insertRule`, rules, `MediaList`)
@@ -113,11 +122,11 @@ See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R26, sfc32 done; OS axis and per-OS accessors (M7), `profiles/catalog/` + `gen_personas` example; optional `preferences`, media devices, battery |
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
-| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints, connection pool (`pool.rs`, ADR 0018) | Done for Chrome; cookies shared across clones; Firefox headers generic; keep-alive, HTTP/2 sessions and TLS resumption per context (a `NetContext` without a pool still uses one connection per request); cache, proxies, HTTP/2 coalescing open |
+| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints, connection pool (`pool.rs`, ADR 0018), WebSocket client (`websocket.rs`, ADR 0025) | Done for Chrome; cookies shared across clones; Firefox headers generic; keep-alive, HTTP/2 sessions and TLS resumption per context (a `NetContext` without a pool still uses one connection per request); cache, proxies, HTTP/2 coalescing open |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use | M1 done; `site` (ADR 0018) |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done (one arena per document; `import_node_mapped` for adoption across documents; `ParseStep::StyleSheet` pauses for style sheets); no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`). WebGL runs no shaders; no crypto or WebSocket |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`), Web Crypto (`rt/crypto/`), WebSocket (`rt/websocket.rs`), dynamic `import()` (`rt/modules.rs`), `blob:`/`data:` fetches and synchronous XHR (`rt/net.rs`). WebGL runs no shaders |
 | `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
@@ -167,6 +176,10 @@ cargo test -p lb-page --test pages service_workers
 # re-record: crates/lb-page/tests/service_workers/{serve.py,chrome.mjs} (fresh serve.py per recording)
 # re-record: crates/lb-page/tests/workers/{serve.py,chrome.mjs};
 # worker surface fixture: node tools/dump_worker_surface.js tests/fixtures/chromium_153_worker_surface.json
+# Web Crypto, WebSocket, dynamic import(), blob:/sync XHR vs Chrome (15 cases; python3 runs tests/apis/serve.py)
+cargo test -p lb-page --test pages apis
+cargo test -p lb-net --test websocket     # wss ClientHello (JA4) and handshake header order vs Chrome's capture
+# re-record: crates/lb-page/tests/apis/{serve.py,chrome.mjs} (python3 serve.py 18961 &)
 # Image reuse within a document vs Chrome (5 cases, with request counts)
 cargo test -p lb-page --test pages images
 # re-record: crates/lb-page/tests/images/{serve.py,chrome.mjs}

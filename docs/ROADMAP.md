@@ -18,7 +18,7 @@ Each milestone ends with something we can run and measure.
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022) | M1 proxies; M2/M3/M4 leftovers in their status sections; dynamic `import()`; idle service workers are not stopped |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022) | M1 proxies; M2/M3/M4 leftovers in their status sections; idle service workers are not stopped (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
@@ -2560,9 +2560,10 @@ Notes on the verification itself:
 - Firefox (M4b): no SpiderMonkey backend, TLS gaps (ADR 0003).
 - M1 proxies; Windows and macOS values are from a reference, not a capture.
 - Workers are not CDP targets (Playwright `page.workers()` is empty); service
-  workers are never stopped when idle; dynamic `import()`; synchronous XHR;
-  `blob:` in `fetch()`; shader execution in WebGL; no `crypto`,
-  `WebSocket`, `customElements`, `indexedDB`; shadow DOM.
+  workers are never stopped when idle; ~~dynamic `import()`; synchronous
+  XHR; `blob:` in `fetch()`~~ and ~~`crypto`, `WebSocket`~~: done in "Web
+  platform APIs" below (ADR 0025); shader execution in WebGL; no
+  `customElements`, `indexedDB`; shadow DOM.
 - Frames: per-node state outside listeners, handlers, form values and
   selections is not carried over on adoption; a navigating frame's
   WindowProxy is not modelled (ADR 0017).

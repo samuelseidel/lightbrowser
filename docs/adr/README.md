@@ -30,6 +30,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0022](0022-service-workers.md) | Service workers and the Cache API, in memory per context: registry and jobs in the page layer, versions as workers, fetch interception, clients | Accepted (2026-11-04) |
 | [0023](0023-spare-realms-and-realm-cost.md) | Cheaper window realms (per-interface plans, engine extras deleted by name) and spare realms made while the worker waits; one matching context per element with a selector pre-check | Accepted (2026-11-04) |
 | [0024](0024-image-reuse-within-a-document.md) | Images reused within a document as Blink does: one request per URL in flight, the list of available images, current image kept while a new source loads | Accepted (2026-11-04) |
+| [0025](0025-web-crypto-websocket-dynamic-import-sync-xhr.md) | Web Crypto on BoringSSL (Blink's normalization, Chromium's status texts, OS randomness), WebSocket through lb-net's own client (Chrome's handshake, http/1.1-only ClientHello), dynamic `import()` sharing the module map, `blob:`/`data:` in `fetch()`/XHR, synchronous XHR |
 
 ## Adding an ADR
 
