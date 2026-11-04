@@ -76,7 +76,9 @@ checks, HTML element constructors, upgrades, reactions per element from
 mutation records, the parser pausing at possible custom elements via
 `ParseStep::CustomElement`, customized built-ins), `ElementInternals` and
 `FormData` (`rt/internals.rs`); CDP `DOM.Node.shadowRoots` with `pierce`;
-9 Chrome-recorded cases in `lb-page` `tests/shadow/`, 160 WPT files. Web platform APIs (ADR 0025, ROADMAP "Web platform APIs"):
+9 Chrome-recorded cases in `lb-page` `tests/shadow/`, 160 WPT files;
+binary 41.69 MB; bench 6 of 6 in one 5 x 50 run, 5 of 6 in another
+(`fetch` peak RSS 23.28 vs Lightpanda 23.23 MB). Web platform APIs (ADR 0025, ROADMAP "Web platform APIs"):
 Web Crypto (`crypto.getRandomValues`/`randomUUID` from BoringSSL's OS
 randomness, `SubtleCrypto` with Blink's normalization and Chromium's
 texts on BoringSSL: digests, HMAC, AES-GCM/CBC/CTR/KW, ECDSA/ECDH, RSA,

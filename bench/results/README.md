@@ -2,7 +2,7 @@
 
 Written by `bench/run.py`. Each cell is the median over runs, with min-max in brackets. Loopback corpus, sequential crawl, see `bench/README.md` for definitions.
 
-Latest: `2026-11-04-a57aee9.json` -- 2026-11-04, LightBrowser `a57aee9` (dirty tree), binary sha256 `72ad8b39051f59f4`, 5 runs x 50 pages.
+Latest: `2026-11-04-7d6707e.json` -- 2026-11-04, LightBrowser `7d6707e` (dirty tree), binary sha256 `2c4c40ceda848de8`, 5 runs x 50 pages.
 
 Machine: Intel(R) Xeon(R) Processor, 4 cores, 16091 MB RAM, kernel 6.18.44-fc-v233. Chromium `Google Chrome for Testing 153.0.8010.12`, Playwright (python) 1.52.0, rustc 1.97.0 (2d8144b78 2026-07-07). Lightpanda `1.1.0-nightly.11582+592b76832` (binary sha256 `71ec3bd077e29a13f14b76a97a4a19d1a0fab8153b9af9490d105db4a4ee5118`), run with telemetry disabled.
 
@@ -10,18 +10,18 @@ Machine: Intel(R) Xeon(R) Processor, 4 cores, 16091 MB RAM, kernel 6.18.44-fc-v2
 
 | metric | fetch:lightbrowser | cdp:lightbrowser | cdp:chromium | fetch:lightpanda | cdp:lightpanda |
 |---|---|---|---|---|---|
-| crawl total (s) | 0.91 (0.90-0.95) | 0.66 (0.64-0.75) | 7.22 (7.10-7.25) | 1.06 (1.04-1.08) | 0.75 (0.72-0.82) |
-| page median (ms) | 18.1 (17.7-18.9) | 12.9 (12.6-14.3) | 144.3 (141.9-145.6) | 20.6 (20.3-21.0) | 14.6 (14.2-16.0) |
-| page p90 (ms) | 20.0 (19.8-20.5) | 15.4 (14.2-18.9) | 158.8 (153.8-161.5) | 23.2 (21.6-24.0) | 16.2 (15.7-17.7) |
-| peak RSS (MB) | 23.2 (23.0-23.3) | 28.2 (28.0-28.5) | 2877.5 (2863.6-2976.4) | 24.4 (24.3-24.5) | 31.3 (31.3-31.4) |
-| peak PSS (MB, sampled) | - | 25.4 (25.1-26.1) | 730.0 (693.9-803.7) | - | 29.2 (28.5-29.3) |
-| CPU (s) | 0.81 (0.80-0.84) | 0.56 (0.53-0.60) | 20.3 (20.2-20.4) | 1.06 (1.03-1.08) | 0.77 (0.76-0.80) |
-| idle RSS (MB) | - | 6.34 (6.23-6.43) | 1084.8 (1079.8-1097.7) | - | 12.4 (12.4-12.4) |
-| idle PSS (MB) | - | 4.43 (4.34-4.51) | 378.2 (375.4-386.4) | - | 10.5 (10.5-10.5) |
-| start to listening (ms) | - | 2.58 (2.52-3.10) | 108.4 (103.6-126.8) | - | 15.4 (15.3-18.1) |
-| start to CDP connect (ms) | - | 7.03 (6.54-18.50) | 121.4 (116.1-150.2) | - | 22.8 (22.7-25.8) |
-| first new page (ms) | - | 11.8 (10.5-19.6) | 78.4 (74.2-88.2) | - | 4.01 (3.65-5.48) |
-| new page, median (ms) | - | 3.00 (2.90-4.50) | 73.5 (68.7-74.5) | - | 3.77 (3.62-4.21) |
+| crawl total (s) | 1.06 (0.99-1.32) | 0.76 (0.73-0.99) | 8.25 (8.23-9.34) | 1.31 (1.23-1.50) | 0.83 (0.79-1.68) |
+| page median (ms) | 20.9 (19.6-24.2) | 15.0 (14.3-16.3) | 166.1 (163.2-179.7) | 24.4 (24.0-29.5) | 15.7 (15.3-28.9) |
+| page p90 (ms) | 24.6 (22.0-38.1) | 18.0 (16.8-29.0) | 187.9 (180.9-222.2) | 31.8 (27.9-35.6) | 19.5 (17.6-50.5) |
+| peak RSS (MB) | 23.1 (23.0-23.5) | 28.6 (28.4-29.1) | 2869.8 (2852.5-2985.8) | 24.4 (24.4-24.5) | 31.3 (31.3-31.4) |
+| peak PSS (MB, sampled) | - | 26.2 (25.5-26.2) | 726.5 (704.0-857.9) | - | 29.3 (28.3-29.3) |
+| CPU (s) | 0.93 (0.88-1.17) | 0.62 (0.61-0.82) | 23.3 (22.9-26.2) | 1.24 (1.21-1.45) | 0.83 (0.79-1.53) |
+| idle RSS (MB) | - | 6.41 (6.30-6.45) | 1074.1 (1072.5-1078.3) | - | 12.4 (12.4-12.4) |
+| idle PSS (MB) | - | 4.51 (4.38-4.53) | 371.9 (370.8-372.5) | - | 10.5 (10.5-10.5) |
+| start to listening (ms) | - | 3.03 (2.92-3.33) | 135.0 (111.4-252.0) | - | 16.8 (16.2-27.0) |
+| start to CDP connect (ms) | - | 11.2 (7.8-19.1) | 150.5 (129.1-267.3) | - | 28.2 (24.0-40.0) |
+| first new page (ms) | - | 12.2 (11.7-22.5) | 116.5 (82.2-149.1) | - | 5.26 (4.21-18.64) |
+| new page, median (ms) | - | 3.65 (3.18-5.03) | 91.7 (77.6-104.3) | - | 4.49 (4.05-5.66) |
 | pages verified | 50/50 | 50/50 | 50/50 | 50/50 | 50/50 |
 
 Fetch rows time one process per page, so they include process start. RSS sums over Chromium's processes count shared pages once per process; PSS counts them once. Peak RSS for fetch is the largest single process; for CDP it is the sum of the process tree's own high-water marks (`VmHWM`, read every 50 ms from spawn), which is exact for LightBrowser's single process.
@@ -30,7 +30,7 @@ Fetch rows time one process per page, so they include process start. RSS sums ov
 
 | target | MB |
 |---|---|
-| lightbrowser | 41.5 |
+| lightbrowser | 41.7 |
 | chromium (chrome binary only) | 293.3 |
 | lightpanda | 77.3 |
 
@@ -38,22 +38,22 @@ Fetch rows time one process per page, so they include process start. RSS sums ov
 
 | engine | define | first realm | next realm |
 |---|---|---|---|
-| 2.62 (2.57-2.72) | 7.20 (7.16-7.27) | 1.33 (1.31-1.38) | 0.83 (0.82-0.84) |
+| 2.83 (2.79-3.49) | 7.43 (7.36-10.95) | 1.47 (1.40-1.88) | 0.87 (0.85-1.35) |
 
 ## Budgets (docs/ARCHITECTURE.md)
 
 | budget | target | measured | result |
 |---|---|---|---|
-| idle RSS (serve, no client, 1 s after listen) | < 15 MB | 6.344 | **pass** |
-| binary size (stripped) | < 50 MB | 41.5 | **pass** |
-| realm creation (first / next, snapshot) | < 5 ms | 1.33 / 0.83 | **pass** - lb-webapi example realm_bench |
+| idle RSS (serve, no client, 1 s after listen) | < 15 MB | 6.406 | **pass** |
+| binary size (stripped) | < 50 MB | 41.69 | **pass** |
+| realm creation (first / next, snapshot) | < 5 ms | 1.47 / 0.87 | **pass** - lb-webapi example realm_bench |
 | disk writes (default run) | none | files 0/0, write_bytes 0 | **pass** - files left in cwd/HOME/TMPDIR; /proc/PID/io write_bytes during crawl |
-| crawl wall time vs Lightpanda (fetch) | <= Lightpanda | 0.91 vs 1.062 | **pass** |
-| peak RSS vs Lightpanda (fetch) | <= Lightpanda | 23.199 vs 24.43 | **pass** |
-| CPU time vs Lightpanda (fetch) | <= Lightpanda | 0.81 vs 1.059 | **pass** |
-| crawl wall time vs Lightpanda (cdp) | <= Lightpanda | 0.659 vs 0.747 | **pass** |
-| peak RSS vs Lightpanda (cdp) | <= Lightpanda | 28.18 vs 31.328 | **pass** |
-| CPU time vs Lightpanda (cdp) | <= Lightpanda | 0.56 vs 0.77 | **pass** |
+| crawl wall time vs Lightpanda (fetch) | <= Lightpanda | 1.065 vs 1.309 | **pass** |
+| peak RSS vs Lightpanda (fetch) | <= Lightpanda | 23.062 vs 24.449 | **pass** |
+| CPU time vs Lightpanda (fetch) | <= Lightpanda | 0.927 vs 1.244 | **pass** |
+| crawl wall time vs Lightpanda (cdp) | <= Lightpanda | 0.757 vs 0.831 | **pass** |
+| peak RSS vs Lightpanda (cdp) | <= Lightpanda | 28.609 vs 31.312 | **pass** |
+| CPU time vs Lightpanda (cdp) | <= Lightpanda | 0.62 vs 0.83 | **pass** |
 
 ## History
 
@@ -71,7 +71,10 @@ Fetch rows time one process per page, so they include process start. RSS sums ov
 | 2026-11-04-27e7f1a.json | 27e7f1a | 0.80 (0.80-0.87) | 15.6 (15.2-16.6) | 28.9 (28.5-29.4) | 6.08 (5.93-6.17) | 41.2 |
 | 2026-11-04-5490a8e.json | 5490a8e | 0.82 (0.81-0.91) | 15.8 (15.6-18.1) | 28.0 (27.4-28.4) | 6.12 (6.09-6.37) | 40.8 |
 | 2026-11-04-67c904b.json | 67c904b | 0.84 (0.80-0.91) | 15.9 (15.3-17.8) | 28.8 (28.7-28.9) | 6.05 (6.02-6.11) | 41.0 |
+| 2026-11-04-7d6707e.json | 7d6707e | 0.71 (0.67-0.75) | 13.6 (13.2-14.5) | 28.5 (28.4-28.8) | 6.25 (6.23-6.34) | 41.7 |
+| 2026-11-04-7d6707e.json | 7d6707e | 0.76 (0.73-0.99) | 15.0 (14.3-16.3) | 28.6 (28.4-29.1) | 6.41 (6.30-6.45) | 41.7 |
 | 2026-11-04-a4fc4ca.json | a4fc4ca | 0.84 (0.81-0.90) | 16.1 (15.4-16.9) | 28.6 (28.6-29.0) | 5.92 (5.90-6.01) | 41.2 |
+| 2026-11-04-a57aee9.json | a57aee9 | 0.64 (0.64-0.72) | 12.6 (12.3-14.1) | 28.4 (28.2-28.7) | 6.36 (6.21-6.40) | 41.5 |
 | 2026-11-04-a57aee9.json | a57aee9 | 0.66 (0.64-0.75) | 12.9 (12.6-14.3) | 28.2 (28.0-28.5) | 6.34 (6.23-6.43) | 41.5 |
 | 2026-11-04-cb0a5b0.json | cb0a5b0 | 0.82 (0.80-0.86) | 15.7 (15.3-16.6) | 27.3 (26.9-27.8) | 6.29 (6.18-6.55) | 40.5 |
 | 2026-11-04-cce236a.json | cce236a | 0.85 (0.82-0.90) | 16.2 (15.8-17.0) | 28.6 (28.1-28.8) | 6.45 (6.26-6.52) | 40.8 |
