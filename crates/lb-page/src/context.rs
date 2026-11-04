@@ -70,6 +70,10 @@ struct Shared {
     /// (`Target.createBrowserContext` `proxyServer`, `--proxy`). It caches
     /// the credentials that answered its challenges.
     proxy: std::sync::OnceLock<Arc<lb_net::Proxy>>,
+    /// IndexedDB databases of every origin, in memory (ADR 0028), chrome
+    /// build.
+    #[cfg(feature = "chrome")]
+    idb: lb_webapi::rt::idb::backend::IdbBackend,
     /// Running shared workers by (script URL, name), chrome build
     /// (ADR 0021); terminated with the context.
     #[cfg(feature = "chrome")]
@@ -178,6 +182,8 @@ impl BrowserContext {
             connections: ConnectionPool::new(),
             proxy: std::sync::OnceLock::new(),
             #[cfg(feature = "chrome")]
+            idb: Default::default(),
+            #[cfg(feature = "chrome")]
             shared_workers: Mutex::new(std::collections::HashMap::new()),
             #[cfg(feature = "chrome")]
             service_workers: Arc::default(),
@@ -231,6 +237,12 @@ impl BrowserContext {
     /// first call counts; call it before the first request.
     pub fn set_proxy(&self, proxy: Arc<lb_net::Proxy>) {
         let _ = self.0.proxy.set(proxy);
+    }
+
+    /// The context's IndexedDB backend (ADR 0028).
+    #[cfg(feature = "chrome")]
+    pub fn idb(&self) -> &lb_webapi::rt::idb::backend::IdbBackend {
+        &self.0.idb
     }
 
     /// The context's proxy, if any.

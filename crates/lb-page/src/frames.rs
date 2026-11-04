@@ -200,6 +200,7 @@ async fn navigate_frame(
     let w = Window::new(&rt, init);
     w.set_worker_host(parent.worker_host());
     w.set_sw_host(parent.sw_host());
+    w.set_idb_backend(parent.idb_backend());
     let controller = sw.map(|(v, _)| v);
     w.init_sw_client(Some(reserved), true, controller.clone());
     if let (Some(v), Some(h)) = (&controller, w.sw_host()) {

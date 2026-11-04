@@ -257,6 +257,7 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
     });
     w.set_worker_host(Some(Workers::host(&ctx)));
     w.set_sw_host(Some(crate::sw::host(&ctx)));
+    w.set_idb_backend(Some(ctx.idb().clone()));
     let evaluated = service.map(|s| {
         w.init_sw_scope(s.version, s.registration);
         s.evaluated

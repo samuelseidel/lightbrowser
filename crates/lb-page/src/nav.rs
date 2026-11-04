@@ -235,6 +235,7 @@ pub(crate) async fn navigate_committed(
     w.set_console_sink(Some(page.console_sink()));
     w.set_worker_host(Some(crate::worker::Workers::host(&page.ctx)));
     w.set_sw_host(Some(crate::sw::host(&page.ctx)));
+    w.set_idb_backend(Some(page.ctx.idb().clone()));
     let controller = sw.map(|(v, _)| v);
     w.init_sw_client(Some(reserved), false, controller.clone());
     if let (Some(v), Some(h)) = (&controller, w.sw_host()) {

@@ -4,6 +4,7 @@
 mod apis;
 mod common;
 mod frames;
+mod idb;
 mod images;
 mod report;
 mod service_workers;

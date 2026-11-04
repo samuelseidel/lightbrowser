@@ -450,6 +450,7 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
     let child = Window::new(&parent.rt, child_window_init(parent, blank));
     child.set_worker_host(parent.worker_host());
     child.set_sw_host(parent.sw_host());
+    child.set_idb_backend(parent.idb_backend());
     link(&child, parent, el, id, Some(effective_url(parent)));
     child.set_console_sink(parent.console_sink.borrow().clone());
     let name = parent.with_doc(|d| d.get_attribute(el, "name").map(str::to_owned));

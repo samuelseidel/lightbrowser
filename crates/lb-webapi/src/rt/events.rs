@@ -68,6 +68,11 @@ pub enum EventExtra {
     Ui {
         detail: i32,
     },
+    /// `IDBVersionChangeEvent` (`new` is null for deletes).
+    VersionChange {
+        old: u64,
+        new: Option<u64>,
+    },
     /// `CloseEvent` (WebSocket).
     Close {
         code: u16,
@@ -300,6 +305,9 @@ fn get_parent(
     type_: &str,
     composed: bool,
 ) -> Option<HostRef> {
+    if item.kind == super::K_OBJ {
+        return super::idb::event_parent(w, item);
+    }
     let (s, n) = w.decode_node(item)?;
     let r = w.doc_slot(s, |d| {
         if !d.shadow_roots().is_empty() {
@@ -371,6 +379,7 @@ fn event_path(
         }
         let rel = retarget(w, related, p);
         let in_target_tree = p.kind == K_WINDOW
+            || p.kind == K_OBJ
             || match (tgt_root, w.decode_node(p)) {
                 (Some((s, r)), Some((ps, pn))) if s == ps => {
                     w.doc_slot(s, |d| d.shadow_including_contains(r, pn))
@@ -624,6 +633,7 @@ fn call_listener(js: &mut dyn Js, w: &Rc<Window>, t: HostRef, ev: u32, l: &Liste
         }
     };
     if let Err(e) = result {
+        w.uncaught.set(w.uncaught.get().wrapping_add(1));
         report_exception(js, w, &e);
     }
 }
@@ -1420,6 +1430,21 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         EventExtra::Message { data: Some(h), .. } => Arg::Handle(h),
         _ => Arg::Null,
     }));
+    extra_get!("IDBVersionChangeEvent", "oldVersion", |cx, x| cx.ret(
+        match x {
+            EventExtra::VersionChange { old, .. } => old as f64,
+            _ => 0.0,
+        }
+    ));
+    extra_get!("IDBVersionChangeEvent", "newVersion", |cx, x| cx.ret(
+        match x {
+            EventExtra::VersionChange { new: Some(n), .. } => Arg::Number(n as f64),
+            _ => Arg::Null,
+        }
+    ));
+    extra_get!("IDBVersionChangeEvent", "dataLoss", |cx, _x| cx.ret("none"));
+    extra_get!("IDBVersionChangeEvent", "dataLossMessage", |cx, _x| cx
+        .ret(""));
     extra_get!("CloseEvent", "code", |cx, x| cx.ret(match x {
         EventExtra::Close { code, .. } => u32::from(code),
         _ => 0,

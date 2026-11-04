@@ -207,6 +207,11 @@ pub enum Arg {
     /// A new `Uint32Array` (WebGL parameters such as
     /// `COMPRESSED_TEXTURE_FORMATS`).
     Uint32Array(Vec<u32>),
+    /// A new `Date` with this time value (IndexedDB date keys).
+    Date(f64),
+    /// A string from UTF-16 code units, lone surrogates kept (IndexedDB
+    /// string keys).
+    Utf16(Vec<u16>),
 }
 
 impl From<JsValue> for Arg {
@@ -3217,6 +3222,44 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         Some(store_handle(self.scope, &self.state, self.realm, v))
     }
 
+    /// The time value of a held `Date`, `None` for anything else.
+    pub fn handle_date(&mut self, h: Handle) -> Option<f64> {
+        let v = load_handle(self.scope, &self.state, h).ok()?;
+        v8::Local::<v8::Date>::try_from(v)
+            .ok()
+            .map(|d| d.value_of())
+    }
+
+    /// Whether a held value is an `Array` (`Array.isArray`, proxies aside).
+    pub fn handle_is_array(&mut self, h: Handle) -> bool {
+        load_handle(self.scope, &self.state, h).is_ok_and(|v| v.is_array())
+    }
+
+    /// The UTF-16 code units of a held string (lone surrogates kept);
+    /// `None` for anything else.
+    pub fn handle_utf16(&mut self, h: Handle) -> Option<Vec<u16>> {
+        let v = load_handle(self.scope, &self.state, h).ok()?;
+        let s = v8::Local::<v8::String>::try_from(v).ok()?;
+        let mut buf = vec![0u16; s.length()];
+        s.write_v2(self.scope, 0, &mut buf, v8::WriteFlags::empty());
+        Some(buf)
+    }
+
+    /// `HasOwnProperty(obj, key)` on a held object (`false` for other
+    /// values; `Err` when a proxy trap threw).
+    pub fn has_own_property(&mut self, obj: Handle, key: &str) -> Result<bool, HostError> {
+        let v =
+            load_handle(self.scope, &self.state, obj).map_err(|e| HostError::Error(e.message))?;
+        match v8::Local::<v8::Object>::try_from(v) {
+            Ok(o) => {
+                let k = v8_str(self.scope, key);
+                o.has_own_property(self.scope, k.into())
+                    .ok_or(HostError::Thrown)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
     /// Whether a held value is an `ArrayBuffer` (not shared).
     pub fn is_array_buffer(&mut self, h: Handle) -> bool {
         load_handle(self.scope, &self.state, h).is_ok_and(|v| v.is_array_buffer())
@@ -4222,6 +4265,10 @@ fn arg_to_v8<'s>(
             v8::Array::new_with_elements(scope, &elems).into()
         }
         Arg::ArrayBuffer(bytes) => new_array_buffer(scope, bytes).into(),
+        Arg::Date(t) => v8::Date::new(scope, *t).ok_or(HostError::Thrown)?.into(),
+        Arg::Utf16(units) => v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal)
+            .ok_or(HostError::Thrown)?
+            .into(),
         Arg::Uint8Array(bytes) => {
             let len = bytes.len();
             let ab = new_array_buffer(scope, bytes);

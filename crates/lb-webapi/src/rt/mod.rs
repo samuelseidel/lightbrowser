@@ -58,6 +58,7 @@ mod events;
 mod fonts;
 pub mod frames;
 mod gpu;
+pub mod idb;
 mod image;
 pub mod input;
 mod internals;
@@ -167,6 +168,8 @@ pub trait Js {
     fn eval_handle(&mut self, src: &str, origin: ScriptOrigin<'_>) -> Result<Handle, JsError>;
     /// `obj[key]`, `None` if that threw.
     fn get(&mut self, obj: Handle, key: &str) -> Option<Handle>;
+    /// `obj[key] = v`; false if that threw.
+    fn set(&mut self, obj: Handle, key: &str, v: Arg) -> bool;
     fn kind(&mut self, h: Handle) -> ValueKind;
     fn value(&mut self, h: Handle) -> JsValue;
     fn release(&mut self, h: Handle);
@@ -215,6 +218,9 @@ impl Js for CallCtx<'_, '_, '_> {
     }
     fn get(&mut self, obj: Handle, key: &str) -> Option<Handle> {
         self.get_property(obj, key).ok()
+    }
+    fn set(&mut self, obj: Handle, key: &str, v: Arg) -> bool {
+        self.set_property(obj, key, v).is_ok()
     }
     fn kind(&mut self, h: Handle) -> ValueKind {
         self.handle_kind(h)
@@ -288,6 +294,9 @@ impl Js for EngineJs<'_> {
     }
     fn get(&mut self, obj: Handle, key: &str) -> Option<Handle> {
         self.engine.get_property(self.realm, obj, key).ok()
+    }
+    fn set(&mut self, obj: Handle, key: &str, v: Arg) -> bool {
+        self.engine.set_property(self.realm, obj, key, v).is_ok()
     }
     fn kind(&mut self, h: Handle) -> ValueKind {
         self.engine
@@ -479,6 +488,7 @@ impl Runtime {
         sw::register(reg, &rt);
         crypto::register(reg, &rt);
         websocket::register(reg, &rt);
+        idb::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -866,6 +876,11 @@ pub struct Window {
     pub(crate) wk: worker::WorkerSide,
     /// Service worker client or scope state, objects (ADR 0022).
     pub(crate) sw: sw::SwSide,
+    /// IndexedDB backend, transactions and connections (ADR 0028).
+    pub(crate) idb: idb::IdbSide,
+    /// Exceptions listeners threw (IndexedDB aborts a transaction whose
+    /// request event handler threw).
+    pub(crate) uncaught: Cell<u32>,
 }
 
 impl std::fmt::Debug for Window {
@@ -960,6 +975,8 @@ impl Window {
             hidden: Cell::new(false),
             wk: worker::WorkerSide::default(),
             sw: sw::SwSide::default(),
+            idb: idb::IdbSide::default(),
+            uncaught: Cell::new(0),
         });
         rt.register_doc(key, &w, 0, &doc);
         w
@@ -1362,6 +1379,8 @@ impl Window {
 
     /// The next task by source priority.
     pub fn take_task(&self) -> Option<TaskFn> {
+        // IndexedDB: transactions of the previous task become inactive.
+        idb::task_boundary(self);
         let mut q = self.tasks.borrow_mut();
         q.iter_mut().find_map(|q| q.pop_front())
     }
@@ -1791,6 +1810,8 @@ pub(crate) enum Obj {
     Crypto(Box<crypto::CryptoObj>),
     /// `WebSocket`.
     WebSocket(Box<websocket::WsState>),
+    /// IndexedDB objects and `DOMStringList` (ADR 0028).
+    Idb(Box<idb::IdbObj>),
     /// `CSSStyleRule.style`: the declarations of a rule.
     RuleStyle {
         sheet: u32,
@@ -1851,6 +1872,7 @@ impl Obj {
             Obj::Css(c) => c.iface_name(),
             Obj::Crypto(c) => c.iface_name(),
             Obj::WebSocket(_) => "WebSocket",
+            Obj::Idb(x) => x.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
         }
     }
