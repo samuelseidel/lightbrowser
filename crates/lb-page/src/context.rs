@@ -394,49 +394,9 @@ pub(crate) fn fetch_site(initiator: Option<&Url>, target: &Url) -> &'static str 
     lb_net::header_profile::Site::between(initiator, target).as_str()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sites() {
-        let a = Url::parse("https://a.example.test/x").unwrap();
-        assert_eq!(fetch_site(None, &a), "none");
-        assert_eq!(
-            fetch_site(Some(&a), &Url::parse("https://a.example.test/y").unwrap()),
-            "same-origin"
-        );
-        assert_eq!(
-            fetch_site(Some(&a), &Url::parse("https://b.example.test/").unwrap()),
-            "same-site"
-        );
-        assert_eq!(
-            fetch_site(Some(&a), &Url::parse("https://other.test/").unwrap()),
-            "cross-site"
-        );
-    }
-
-    #[test]
-    fn meta_follows_destination_and_mode() {
-        let init = Url::parse("http://127.0.0.1:1/page").unwrap();
-        let u = |p: &str| Url::parse(&format!("http://127.0.0.1:1/{p}")).unwrap();
-        let mut req = NetRequest::get(u("a.js"), Destination::Script, Some(init.clone()));
-        assert_eq!(request_meta(&req, None).kind, RequestKind::Script);
-        req.mode = "cors";
-        assert_eq!(request_meta(&req, None).kind, RequestKind::ModuleScript);
-        let req = NetRequest::get(u("x"), Destination::Empty, Some(init.clone()));
-        let m = request_meta(&req, None);
-        assert_eq!((m.kind, m.mode.as_str()), (RequestKind::Fetch, "cors"));
-        let nav = NetRequest::get(u("p"), Destination::Document, None);
-        let m = request_meta(&nav, None);
-        assert!(m.user_activated && m.initiator.is_none());
-        let scripted = NetRequest::get(u("p"), Destination::Document, Some(init));
-        assert!(!request_meta(&scripted, None).user_activated);
-    }
-}
-
 /// Open a WebSocket in `ctx` (lb-net's client on the network thread) and
 /// bridge its channels to the page's types (ADR 0025).
+#[cfg(feature = "chrome")]
 pub(crate) fn open_websocket(
     ctx: &BrowserContext,
     open: lb_webapi::host::WsOpen,
@@ -499,4 +459,45 @@ pub(crate) fn open_websocket(
         commands: ptx,
         events: erx,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sites() {
+        let a = Url::parse("https://a.example.test/x").unwrap();
+        assert_eq!(fetch_site(None, &a), "none");
+        assert_eq!(
+            fetch_site(Some(&a), &Url::parse("https://a.example.test/y").unwrap()),
+            "same-origin"
+        );
+        assert_eq!(
+            fetch_site(Some(&a), &Url::parse("https://b.example.test/").unwrap()),
+            "same-site"
+        );
+        assert_eq!(
+            fetch_site(Some(&a), &Url::parse("https://other.test/").unwrap()),
+            "cross-site"
+        );
+    }
+
+    #[test]
+    fn meta_follows_destination_and_mode() {
+        let init = Url::parse("http://127.0.0.1:1/page").unwrap();
+        let u = |p: &str| Url::parse(&format!("http://127.0.0.1:1/{p}")).unwrap();
+        let mut req = NetRequest::get(u("a.js"), Destination::Script, Some(init.clone()));
+        assert_eq!(request_meta(&req, None).kind, RequestKind::Script);
+        req.mode = "cors";
+        assert_eq!(request_meta(&req, None).kind, RequestKind::ModuleScript);
+        let req = NetRequest::get(u("x"), Destination::Empty, Some(init.clone()));
+        let m = request_meta(&req, None);
+        assert_eq!((m.kind, m.mode.as_str()), (RequestKind::Fetch, "cors"));
+        let nav = NetRequest::get(u("p"), Destination::Document, None);
+        let m = request_meta(&nav, None);
+        assert!(m.user_activated && m.initiator.is_none());
+        let scripted = NetRequest::get(u("p"), Destination::Document, Some(init));
+        assert!(!request_meta(&scripted, None).user_activated);
+    }
 }

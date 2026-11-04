@@ -20,13 +20,16 @@ use url::Url;
 use super::{RtInner, Runtime, TaskSource, Window};
 use crate::host::{ConsoleMessage, Destination, NetRequest, NetResponse};
 
-/// HTML's "resolve a module specifier" without import maps: `Err` for a
-/// bare or invalid specifier.
-pub fn resolve_specifier(spec: &str, base: &Url) -> Result<Url, ()> {
+/// A module specifier that does not resolve (bare or invalid).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BadSpecifier;
+
+/// HTML's "resolve a module specifier" without import maps.
+pub fn resolve_specifier(spec: &str, base: &Url) -> Result<Url, BadSpecifier> {
     if spec.starts_with('/') || spec.starts_with("./") || spec.starts_with("../") {
-        return base.join(spec).map_err(|_| ());
+        return base.join(spec).map_err(|_| BadSpecifier);
     }
-    Url::parse(spec).map_err(|_| ())
+    Url::parse(spec).map_err(|_| BadSpecifier)
 }
 
 /// The loader's message for a specifier it cannot resolve (static
@@ -169,7 +172,7 @@ async fn load_graph(w: &Weak<Window>, top: &Url) -> Result<Vec<(String, String)>
         }
         let src = super::script::script_source(&resp.body, Some(&ct));
         for spec in super::script::import_specifiers(&src) {
-            queue.push(resolve_specifier(&spec, &u)?);
+            queue.push(resolve_specifier(&spec, &u).map_err(|_| ())?);
         }
         order.push(key.clone());
         got.insert(key, src);

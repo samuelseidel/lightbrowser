@@ -193,7 +193,7 @@ pub(crate) fn decrypt(p: &Params, key: &CryptoKey, data: &[u8]) -> Result<Vec<u8
 
 pub(crate) fn wrap(p: &Params, key: &CryptoKey, data: &[u8]) -> Result<Vec<u8>, Fail> {
     if p.alg == Alg::AesKw {
-        if data.len() < 16 || data.len() % 8 != 0 {
+        if data.len() < 16 || !data.len().is_multiple_of(8) {
             return Err(Fail::data(
                 "The AES-KW input data length is invalid: not a multiple of 8 bytes",
             ));
@@ -208,7 +208,7 @@ pub(crate) fn wrap(p: &Params, key: &CryptoKey, data: &[u8]) -> Result<Vec<u8>, 
 
 pub(crate) fn unwrap(p: &Params, key: &CryptoKey, data: &[u8]) -> Result<Vec<u8>, Fail> {
     if p.alg == Alg::AesKw {
-        if data.len() < 24 || data.len() % 8 != 0 {
+        if data.len() < 24 || !data.len().is_multiple_of(8) {
             return Err(Fail::data(
                 "The AES-KW input data length is invalid: not a multiple of 8 bytes",
             ));
@@ -663,7 +663,7 @@ pub(crate) fn generate(p: &Params, extractable: bool, usages: u8) -> Result<Gene
         }
         Alg::RsaPkcs1 | Alg::RsaPss | Alg::RsaOaep => {
             let bits = p.modulus_length;
-            if bits % 8 != 0 || !(256..=16384).contains(&bits) {
+            if !bits.is_multiple_of(8) || !(256..=16384).contains(&bits) {
                 return Err(Fail::op(
                     "The modulus length must be a multiple of 8 bits and >= 256 and <= 16384",
                 ));
@@ -1219,7 +1219,7 @@ fn rsa_oaep(p: &Params, key: &CryptoKey, data: &[u8], enc: bool) -> Result<Vec<u
                 ffi::EVP_PKEY_decrypt_init(ctx)
             };
             if init != 1
-                || ffi::EVP_PKEY_CTX_set_rsa_padding(ctx, ffi::RSA_PKCS1_OAEP_PADDING as i32) != 1
+                || ffi::EVP_PKEY_CTX_set_rsa_padding(ctx, ffi::RSA_PKCS1_OAEP_PADDING) != 1
                 || ffi::EVP_PKEY_CTX_set_rsa_oaep_md(ctx, h.as_ptr()) != 1
                 || ffi::EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, h.as_ptr()) != 1
             {

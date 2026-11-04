@@ -346,7 +346,7 @@ async fn handshake(
         );
     }
     let protocol = get("sec-websocket-protocol").unwrap_or("").to_owned();
-    if !protocol.is_empty() && !req.protocols.iter().any(|p| *p == protocol) {
+    if !protocol.is_empty() && !req.protocols.contains(&protocol) {
         return Err(if req.protocols.is_empty() {
             format!(
                 "Error during WebSocket handshake: Response must not include 'Sec-WebSocket-Protocol' header if not present in request: {protocol}"
@@ -632,7 +632,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 let _ = ctl.send(Ctl::Pong(payload));
             }
             0xA => {}
-            0x0 | 0x1 | 0x2 => {
+            0x0..=0x2 => {
                 if op != 0 {
                     msg_op = op;
                     msg_compressed = rsv1;

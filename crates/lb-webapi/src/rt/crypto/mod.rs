@@ -711,7 +711,7 @@ fn run(
             check_key(&unwrapping, p.alg, UNWRAP)?;
             let bytes = ops::unwrap(&p, &unwrapping, &wrapped)?;
             let data = if format == Format::Jwk {
-                KeyData::Jwk(jwk::parse_json(&bytes)?)
+                KeyData::Jwk(Box::new(jwk::parse_json(&bytes)?))
             } else {
                 KeyData::Bytes(bytes)
             };
@@ -801,7 +801,7 @@ fn optional_length(cx: &mut CallCtx<'_, '_, '_>, i: usize) -> Option<u32> {
 /// Key data of `importKey`: a `BufferSource` or (for JWK) a dictionary.
 pub(crate) enum KeyData {
     Bytes(Vec<u8>),
-    Jwk(jwk::Jwk),
+    Jwk(Box<jwk::Jwk>),
 }
 
 fn key_data_arg(
@@ -827,7 +827,7 @@ fn key_data_arg(
                 let v = v8::Local::new(s, &g);
                 jwk::read_dict(s, v)
             })?;
-            Ok(KeyData::Jwk(j))
+            Ok(KeyData::Jwk(Box::new(j)))
         }
         (_, Some(b)) => Ok(KeyData::Bytes(b)),
         (_, None) => Err(Fail::Type(format!(

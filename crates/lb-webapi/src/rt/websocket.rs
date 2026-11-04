@@ -315,7 +315,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "WebSocket", "close", |cx, w| {
         let id = this_ws(cx, w)?;
-        let code = if cx.len() > 0 && cx.arg_kind(0) != ValueKind::Undefined {
+        let code = if !cx.is_empty() && cx.arg_kind(0) != ValueKind::Undefined {
             // `[Clamp] unsigned short`.
             let n = cx.arg_f64(0)?;
             let c = if n.is_nan() {
