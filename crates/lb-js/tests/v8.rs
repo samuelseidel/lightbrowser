@@ -1336,18 +1336,21 @@ fn lazy_interface_objects() {
         JsValue::Bool(true)
     );
 
-    // A dropped realm whose global a script still holds keeps its fixups.
+    // A dropped realm whose global a script still holds: interface objects
+    // made before keep their fixups; ones never made read `undefined`
+    // (ADR 0017, as a removed frame's window in Chrome).
     let r4 = realm(&mut e);
     let g4 = e.global(r4).unwrap();
     e.set_property(r1, g1, "gone", Arg::Handle(g4)).unwrap();
+    e.evaluate(r4, "Node", origin()).unwrap();
     e.drop_realm(r4);
     assert_eq!(
         eval(
             &mut e,
             r1,
-            "Object.getOwnPropertyNames(gone.Node.prototype).join()"
+            "Object.getOwnPropertyNames(gone.Node.prototype).join() + ' ' + typeof gone.Element"
         ),
-        JsValue::String("a,constructor,late".into())
+        JsValue::String("a,constructor,late undefined".into())
     );
 }
 
