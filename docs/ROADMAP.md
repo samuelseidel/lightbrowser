@@ -18,7 +18,7 @@ Each milestone ends with something we can run and measure.
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022); shadow DOM (slots, retargeting, scoped style, flat tree, declarative roots) and custom elements (reactions, parser construction, built-ins, `ElementInternals`) (2026-11-04, ADR 0026); proxies per context (ADR 0027) and IndexedDB in memory (ADR 0028) (2026-11-04) | M2/M3/M4 leftovers in their status sections; idle service workers are not stopped (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022); shadow DOM (slots, retargeting, scoped style, flat tree, declarative roots) and custom elements (reactions, parser construction, built-ins, `ElementInternals`) (2026-11-04, ADR 0026); proxies per context (ADR 0027) and IndexedDB in memory (ADR 0028) (2026-11-04); workers (dedicated, shared, service) as CDP targets for Playwright, idle service workers stopped after 30 s as in Chrome, `fromServiceWorker` (2026-11-04, ADR 0029) | M2/M3/M4 leftovers in their status sections (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
@@ -2380,8 +2380,8 @@ recorded it, so most of the rise is the machine, not the code. No worker
 runs on the corpus pages.
 
 Open:
-- Service workers (done since, see "Service workers"); workers are not CDP targets (no `Target.attachedToTarget`
-  for them; Playwright's `page.workers()` stays empty).
+- Service workers (done since, see "Service workers"); ~~workers are not CDP targets (no `Target.attachedToTarget`
+  for them; Playwright's `page.workers()` stays empty)~~: done in "Workers as CDP targets" (ADR 0029).
 - Dynamic `import()` (pages and workers); `OffscreenCanvas` transfer;
   synchronous XHR; `Atomics.wait` across workers (no `SharedArrayBuffer`).
 - Worker script requests are sent as script requests (Chrome:
@@ -2503,12 +2503,14 @@ previous step's release binary (3x50 `fetch`, two pairs, same machine):
 memory. No corpus page registers a service worker.
 
 Open:
-- Idle versions are not stopped (Chrome stops a version after 30 s idle
-  and restarts it on the next event, which resets its globals).
+- ~~Idle versions are not stopped (Chrome stops a version after 30 s idle
+  and restarts it on the next event, which resets its globals)~~: done in
+  "Workers as CDP targets" (ADR 0029).
 - Dedicated and shared workers are not service worker clients (not
   controlled, not in `matchAll({type: 'worker'})`).
-- Service workers are not CDP targets, and requests a worker answers are
-  not reported to CDP (Chrome reports them with `fromServiceWorker`).
+- ~~Service workers are not CDP targets, and requests a worker answers are
+  not reported to CDP (Chrome reports them with `fromServiceWorker`)~~:
+  done in "Workers as CDP targets" (ADR 0029).
 - Not modelled: navigation preload (the manager is always off), Push,
   Background Sync, Notifications, `importScripts` limits after install,
   update checks of imported scripts, `Location.reload()` as a reload, the
@@ -2560,8 +2562,9 @@ Notes on the verification itself:
 - Firefox (M4b): no SpiderMonkey backend, TLS gaps (ADR 0003).
 - ~~M1 proxies~~: done in "Proxies and IndexedDB" below (ADR 0027).
   Windows and macOS values are from a reference, not a capture.
-- Workers are not CDP targets (Playwright `page.workers()` is empty); service
-  workers are never stopped when idle; ~~dynamic `import()`; synchronous
+- ~~Workers are not CDP targets (Playwright `page.workers()` is empty); service
+  workers are never stopped when idle~~: done in "Workers as CDP targets"
+  below (ADR 0029); ~~dynamic `import()`; synchronous
   XHR; `blob:` in `fetch()`~~ and ~~`crypto`, `WebSocket`~~: done in "Web
   platform APIs" below (ADR 0025); shader execution in WebGL;
   ~~no `indexedDB`~~: done in "Proxies and IndexedDB" below (ADR 0028); ~~`customElements`; shadow DOM~~: done in "Shadow DOM and
@@ -2852,6 +2855,91 @@ Open: HTTPS and SOCKS4 proxies, PAC, `Digest`/NTLM proxy auth, server
 effects, blob values read back with `FileReader` (not implemented),
 transaction deactivation between callbacks of one task, lone surrogates
 in store and index names.
+
+## Workers as CDP targets and idle service workers (2026-11-04)
+
+Closes "workers are not CDP targets" and "service workers are never
+stopped when idle" of "What is still open after this run" (ADR 0029).
+Recorded on loopback with local Chrome for Testing 153.0.8010.12 and stock
+Playwright 1.63 (`tests/playwright/workers/`): `record.mjs` runs one
+scenario (`scenario.mjs`) through `connectOverCDP` against either browser
+and logs every worker-session message and target event from Playwright's
+protocol log (`chrome.json`, `lightbrowser.json`); `record_idle.mjs`
+drives a service worker over raw CDP with and without a session on it
+(`idle_chrome.json`, `idle_lightbrowser.json`).
+
+**Targets** (`lb-page` `cdp/workers.rs`, `lb-cdp` `browser.rs`). A worker
+thread of an inspected context announces a target before its script runs:
+type `worker` (title = name, `parentId`/`parentFrameId`), `shared_worker`
+(title = name) or `service_worker` (title `Service Worker <url>`), one
+execution context (id 1, origin = script URL, name, no `auxData`). The
+server attaches dedicated workers to sessions of their parent page or
+worker with auto-attach on, shared and service workers to browser
+sessions, and a starting service worker also to in-scope page sessions.
+With `waitForDebuggerOnStart` the script runs once each waiting session
+sent `Runtime.runIfWaitingForDebugger` or detached. Worker sessions answer
+Runtime, Network, Fetch, Target, Log, Security and
+`Emulation.setUserAgentOverride`; Page/DOM/Input are "not found", as in
+Chrome. Events: console calls and uncaught errors, the script's
+`responseReceived`/`dataReceived`/`loadingFinished` (service workers also
+`requestWillBeSent`), `Inspector.workerScriptLoaded`, and Network events
+of the worker's own requests. The page logs a dedicated worker's console
+calls and uncaught errors as `Log.entryAdded` (source `worker`), which
+Playwright skips, so `pageerror` fires once. Page close detaches its
+workers first. Nothing is added to the worker's global scope (a
+Playwright test lists its own properties after `evaluate`).
+
+**fromServiceWorker.** Page requests and navigations the controlling
+service worker answers (`respondWith`, or a network error from it) are
+reported with `fromServiceWorker: true`; its own requests appear on its
+target (Playwright: `context.on('request')` with `serviceWorker()`).
+
+**Idle service workers** (`lb-page` `sw.rs`). Chrome stopped a version
+exactly 30 s after its last event (target destroyed), and the next
+message or fetch started it again with fresh globals and a new target,
+without fetching the script again; with a CDP session attached it never
+stopped. LightBrowser now does the same: events in flight (fetch,
+lifecycle) and messages move the deadline, a stopped version restarts from
+its stored script without install or activate, and a version with an
+attached session is kept. `record_idle.mjs` gives the same answers and
+target events in both browsers (counter 1, 2, 3, then 1 after 42 s idle,
+2 for a fetch, 1 after 45 s idle; one script request; 1-6 with a session
+attached). `lb-page` test `service_workers::idle_version_stops_and_restarts`
+checks it with a shortened timeout.
+
+**Playwright** (`tests/playwright/workers.spec.mjs`, 2 new tests, 24 in
+all): `page.workers()`, the `worker` event, `worker.url()`,
+`worker.evaluate`/`evaluateHandle`/`jsonValue`/`getProperty`, evaluate
+errors and promises, the worker's `navigator.userAgent` equal to the
+page's, worker console and `pageerror`, worker requests and responses,
+`close` on `terminate()` and on navigation, nested workers and a frame's
+worker (3 in `page.workers()`), a shared worker (not a page worker; listed
+in `Target.getTargets` with its name), `serviceworker` event and
+`evaluate` in it, `fromServiceWorker()` of three requests, the service
+worker's own requests. Every value equals Chrome's except console
+object formatting (below).
+
+**Message sequence** (`record.mjs compare chrome.json lightbrowser.json`,
+Chrome's own `browser_ui`/`other` targets left out): the same messages in
+the same order per worker session apart from reply/event interleaving;
+TBD_COUNTS
+
+Not done / different from Chrome:
+- Console arguments go out as one formatted string (pages had this
+  already): Playwright prints `warned {"a":1}` where Chrome gives
+  `warned {a: 1}`; the page's favicon 404 console message is missing.
+- `Fetch` on worker sessions is accepted but does not pause worker
+  requests (no `page.route` for worker fetches); no
+  `Network.*ExtraInfo` events.
+- Chrome attaches a service worker to the page a second time (waiting
+  false) once the page is controlled; a nested worker's script request
+  shows on its parent worker's session in Chrome.
+- `Inspector.targetCrashed`/`targetReloadedAfterCrash` are never sent: a
+  stopped version ends its target (Chrome does that without a session;
+  with one it does not stop).
+- Dedicated and shared workers are still not service worker clients.
+
+Checks: TBD_CHECKS
 
 ## Risks
 

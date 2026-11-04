@@ -1,6 +1,6 @@
 # ADR 0021: Dedicated and shared workers on their own threads and isolates
 
-Status: Accepted (2026-11-04). Closes the M2/M4 open items "no workers"
+Status: Accepted (2026-11-04). Workers became CDP targets in ADR 0029. Closes the M2/M4 open items "no workers"
 (`worker_mismatch` saw `Illegal constructor`) and "structured clone through
 JSON".
 

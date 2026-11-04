@@ -1,6 +1,6 @@
 # ADR 0022: Service workers and the Cache API, in memory per context
 
-Status: Accepted (2026-11-04). Closes the M6 open item "service workers".
+Status: Accepted (2026-11-04). Amended by ADR 0029: idle versions stop after 30 s, versions are CDP targets, answered requests carry `fromServiceWorker`. Closes the M6 open item "service workers".
 
 ## Context
 
