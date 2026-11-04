@@ -10,7 +10,7 @@
 //! the M6 startup snapshot.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::num::NonZeroI32;
 use std::rc::Rc;
@@ -914,6 +914,24 @@ fn template_split(members: &[Member]) -> usize {
     }
 }
 
+/// What the host does with an `import()` ([`DynamicImportHook`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DynamicImport {
+    /// The module graph at this URL is in the realm's module map: link and
+    /// evaluate it in a microtask.
+    Ready(String),
+    /// Reject in a microtask with a `TypeError` with this message.
+    Failed(String),
+    /// The host loads the graph and calls
+    /// [`RealmOps::finish_dynamic_import`] later.
+    Pending,
+}
+
+/// Called for each `import(specifier)`: `(realm, resolver of the returned
+/// promise, specifier, referrer URL)`. Runs inside V8: it may queue work
+/// but must not call into the engine.
+pub type DynamicImportHook = Rc<dyn Fn(RealmId, Resolver, &str, &str) -> DynamicImport>;
+
 struct ModuleEntry {
     url: String,
     hash: NonZeroI32,
@@ -1000,6 +1018,11 @@ struct State {
     /// The value of the last exception turned into a [`JsError`], for
     /// `ErrorEvent.error` ([`Engine::take_exception`]).
     last_exception: Option<v8::Global<v8::Value>>,
+    /// The host's `import()` handler (see [`Engine::set_dynamic_import_hook`]).
+    dyn_hook: Option<DynamicImportHook>,
+    /// `import()`s settled in the next microtask: (realm, resolver, module
+    /// URL or `TypeError` message).
+    ready_imports: VecDeque<(RealmId, Resolver, Result<String, String>)>,
 }
 
 type SharedState = Rc<RefCell<State>>;
@@ -1244,12 +1267,15 @@ impl Engine {
             creating: None,
             code_cache: Vec::new(),
             last_exception: None,
+            dyn_hook: None,
+            ready_imports: VecDeque::new(),
         }));
         {
             let mut iso = Entered::new(&mut isolate);
             iso.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
             iso.set_slot(state.clone());
             iso.set_host_initialize_import_meta_object_callback(import_meta);
+            iso.set_host_import_module_dynamically_callback(dynamic_import);
             // As Blink: errors keep a detailed stack trace, whose top frame
             // is where error events say the error happened.
             iso.set_capture_stack_trace_for_uncaught_exceptions(true, 10);
@@ -1406,6 +1432,12 @@ impl Engine {
                 None => Err(caught(tc, state)),
             }
         })
+    }
+
+    /// Handle `import()` with `hook` (all realms of this engine). Without
+    /// a hook, `import()` rejects.
+    pub fn set_dynamic_import_hook(&mut self, hook: Option<DynamicImportHook>) {
+        self.state.borrow_mut().dyn_hook = hook;
     }
 
     /// Compile, link and evaluate an ES module graph. Imports are loaded
@@ -4589,6 +4621,224 @@ extern "C" fn import_meta(
         let k = v8_str(scope, "url");
         let v = v8_str(scope, &url);
         meta.create_data_property(scope, k.into(), v.into());
+        // `import.meta.resolve(specifier)`, bound to this module's URL.
+        let k = v8_str(scope, "resolve");
+        if let Some(f) = v8::Function::builder(meta_resolve)
+            .data(v.into())
+            .length(1)
+            .build(scope)
+        {
+            f.set_name(k);
+            meta.create_data_property(scope, k.into(), f.into());
+        }
+    }
+}
+
+/// `import.meta.resolve`: HTML's module specifier resolution (no import
+/// maps) against the module's URL (the function's data).
+fn meta_resolve<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    let base = args.data().to_rust_string_lossy(scope);
+    let Some(spec) = args.get(0).to_string(scope) else {
+        return;
+    };
+    let spec = spec.to_rust_string_lossy(scope);
+    let resolved = if spec.starts_with('/') || spec.starts_with("./") || spec.starts_with("../") {
+        url::Url::parse(&base).and_then(|b| b.join(&spec)).ok()
+    } else {
+        url::Url::parse(&spec).ok()
+    };
+    match resolved {
+        Some(u) => {
+            let v = v8_str(scope, u.as_str());
+            rv.set(v.into());
+        }
+        None => {
+            let m = v8_str(
+                scope,
+                &format!(
+                    "Failed to resolve module specifier {spec}: Relative references must start with either \"/\", \"./\", or \"../\"."
+                ),
+            );
+            let e = v8::Exception::type_error(scope, m);
+            scope.throw_exception(e);
+        }
+    }
+}
+
+/// `import(specifier)`: a promise the host settles (see
+/// [`DynamicImportHook`]).
+fn dynamic_import<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    _options: v8::Local<'s, v8::Data>,
+    resource: v8::Local<'s, v8::Value>,
+    specifier: v8::Local<'s, v8::String>,
+    _attributes: v8::Local<'s, v8::FixedArray>,
+) -> Option<v8::Local<'s, v8::Promise>> {
+    let state = shared_state(scope);
+    let realm = current_realm(scope);
+    let (promise, resolver) = new_promise(scope, &state, realm)?;
+    let spec = specifier.to_rust_string_lossy(scope);
+    let referrer = if resource.is_string() {
+        resource.to_rust_string_lossy(scope)
+    } else {
+        String::new()
+    };
+    let hook = state.borrow().dyn_hook.clone();
+    let action = match hook {
+        Some(h) => h(realm, resolver, &spec, &referrer),
+        None => DynamicImport::Failed(format!("Failed to resolve module specifier '{spec}'")),
+    };
+    let ready = match action {
+        DynamicImport::Ready(url) => Ok(url),
+        DynamicImport::Failed(m) => Err(m),
+        DynamicImport::Pending => return Some(promise),
+    };
+    state
+        .borrow_mut()
+        .ready_imports
+        .push_back((realm, resolver, ready));
+    let f = v8::Function::new(scope, finish_ready_import)?;
+    scope.enqueue_microtask(f);
+    Some(promise)
+}
+
+/// Microtask: settle the oldest ready `import()`.
+fn finish_ready_import<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    _args: v8::FunctionCallbackArguments<'s>,
+    _rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    let state = shared_state(scope);
+    let next = state.borrow_mut().ready_imports.pop_front();
+    if let Some((realm, resolver, r)) = next {
+        finish_import(scope, &state, realm, resolver, r);
+    }
+}
+
+/// Returns its function's data (the namespace an `import()` resolves to).
+fn return_data<'s>(
+    _scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<'s, v8::Value>,
+) {
+    rv.set(args.data());
+}
+
+/// Settle an `import()`: link and evaluate the module at `url` (compiled
+/// from the realm's loader unless the realm has it) and resolve with its
+/// namespace once evaluated (top-level await included), or reject.
+fn finish_import(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    resolver: Resolver,
+    r: Result<String, String>,
+) {
+    let url = match r {
+        Ok(u) => u,
+        Err(m) => {
+            let _ = settle_promise(scope, state, realm, resolver, Err(HostError::TypeError(m)));
+            return;
+        }
+    };
+    let Some(global) = state
+        .borrow_mut()
+        .resolvers
+        .remove(resolver.idx, resolver.generation)
+        .map(|(_, g)| g)
+    else {
+        return;
+    };
+    let resolver = v8::Local::new(scope, &global);
+    v8::tc_scope!(let tc, scope);
+    let cached = {
+        let st = state.borrow();
+        st.realms.get(&realm).and_then(|r| {
+            r.modules
+                .iter()
+                .find(|m| m.url == url)
+                .map(|m| v8::Global::clone(&m.module))
+        })
+    };
+    let module = match cached {
+        Some(m) => v8::Local::new(tc, &m),
+        None => {
+            let loader = state
+                .borrow()
+                .realms
+                .get(&realm)
+                .and_then(|r| r.loader.clone());
+            let loaded = match loader {
+                Some(l) => l(&url, &url),
+                None => Err(format!(
+                    "Failed to fetch dynamically imported module: {url}"
+                )),
+            };
+            let loaded = match loaded {
+                Ok(l) => l,
+                Err(m) => {
+                    let m = v8_str(tc, &m);
+                    let e = v8::Exception::type_error(tc, m);
+                    resolver.reject(tc, e);
+                    return;
+                }
+            };
+            match compile_module(
+                tc,
+                state,
+                realm,
+                &loaded.source,
+                ScriptOrigin::new(&loaded.url),
+            ) {
+                Some(m) => m,
+                None => {
+                    let exc = tc.exception().unwrap_or_else(|| v8::undefined(tc).into());
+                    tc.reset();
+                    resolver.reject(tc, exc);
+                    return;
+                }
+            }
+        }
+    };
+    let ok = module.get_status() != v8::ModuleStatus::Uninstantiated
+        || module.instantiate_module(tc, resolve_module).is_some();
+    let result = if !ok {
+        None
+    } else if module.get_status() == v8::ModuleStatus::Errored {
+        let exc = module.get_exception();
+        resolver.reject(tc, exc);
+        return;
+    } else {
+        module.evaluate(tc)
+    };
+    let Some(result) = result else {
+        let exc = tc.exception().unwrap_or_else(|| v8::undefined(tc).into());
+        tc.reset();
+        resolver.reject(tc, exc);
+        return;
+    };
+    let ns = module.get_module_namespace();
+    let Ok(p) = v8::Local::<v8::Promise>::try_from(result) else {
+        resolver.resolve(tc, ns);
+        return;
+    };
+    let chained = v8::Function::builder(return_data)
+        .data(ns)
+        .build(tc)
+        .and_then(|f| p.then(tc, f));
+    match chained {
+        Some(c) => {
+            resolver.resolve(tc, c.into());
+        }
+        None => {
+            let exc = tc.exception().unwrap_or_else(|| v8::undefined(tc).into());
+            tc.reset();
+            resolver.reject(tc, exc);
+        }
     }
 }
 

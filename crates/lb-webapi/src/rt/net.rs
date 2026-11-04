@@ -528,6 +528,11 @@ fn byte_range(v: &str, len: usize) -> Option<(usize, usize)> {
     (a <= b && a < len).then_some((a, b))
 }
 
+/// [`cors_ok`] for other modules (module graphs).
+pub(crate) fn cors_allows(origin: &url::Origin, resp: &NetResponse) -> bool {
+    cors_ok(origin, resp)
+}
+
 /// CORS check for a cross-origin response.
 fn cors_ok(origin: &url::Origin, resp: &NetResponse) -> bool {
     if !is_cross_origin(origin, resp) {

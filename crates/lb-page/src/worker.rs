@@ -221,6 +221,7 @@ async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
     let bindings =
         Bindings::define_worker(&mut engine, &reg, kind.global()).map_err(|e| e.to_string())?;
     rt.set_bindings(bindings.clone());
+    rt.install_dynamic_import(&mut engine);
     let notify = Rc::new(Notify::new());
     let wake: Rc<dyn Fn()> = {
         let n = notify.clone();
@@ -315,8 +316,10 @@ async fn prefetch_modules(ctx: &BrowserContext, w: &Rc<Window>, url: &Url, sourc
     let mut queue: Vec<(Url, String)> = vec![(url.clone(), source.to_owned())];
     let mut fetched = 0;
     while let Some((base, src)) = queue.pop() {
-        for spec in crate::nav::import_specifiers(&src) {
-            let Ok(dep) = base.join(&spec) else { continue };
+        for spec in lb_webapi::rt::script::import_specifiers(&src) {
+            let Ok(dep) = lb_webapi::rt::modules::resolve_specifier(&spec, &base) else {
+                continue;
+            };
             if w.module_map.borrow().contains_key(dep.as_str()) || fetched > 256 {
                 continue;
             }

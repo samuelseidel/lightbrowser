@@ -62,6 +62,7 @@ pub mod input;
 mod matrix;
 mod media;
 mod misc;
+pub mod modules;
 mod navigator;
 mod net;
 mod rtc;
@@ -474,6 +475,12 @@ impl Runtime {
 
     pub fn bindings(&self) -> Option<Bindings> {
         self.0.bindings.borrow().clone()
+    }
+
+    /// Let `import()` load modules for this runtime's windows (engine-wide;
+    /// call once after the bindings are defined).
+    pub fn install_dynamic_import(&self, engine: &mut lb_js::Engine) {
+        engine.set_dynamic_import_hook(Some(modules::hook(Rc::downgrade(&self.0))));
     }
 
     /// Make `w` the window of `realm` (main world or isolated world).
@@ -939,9 +946,8 @@ impl Window {
         let base = self.url();
         let loader: lb_js::ModuleLoader = Rc::new(move |spec: &str, referrer: &str| {
             let from = Url::parse(referrer).unwrap_or_else(|_| base.clone());
-            let url = from
-                .join(spec)
-                .map_err(|_| format!("Failed to resolve module specifier \"{spec}\""))?;
+            let url =
+                modules::resolve_specifier(spec, &from).map_err(|_| modules::bare_message(spec))?;
             match map.borrow().get(url.as_str()) {
                 Some(src) => Ok(lb_js::ModuleSource {
                     url: url.to_string(),

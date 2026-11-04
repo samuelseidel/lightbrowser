@@ -75,7 +75,10 @@ async fn run(case: &str) {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
-    assert_eq!(got, chrome(case), "{case}:\n{got}");
+    // Logs may name the server's port (Chrome's was recorded on 18961).
+    let got = got.replace(&format!("127.0.0.1:{}", srv.port), "127.0.0.1:PORT");
+    let want = chrome(case).replace("127.0.0.1:18961", "127.0.0.1:PORT");
+    assert_eq!(got, want, "{case}:\n{got}");
 }
 
 macro_rules! cases {
@@ -99,6 +102,8 @@ cases!(
     crypto_order,
     crypto_random,
     crypto_rsa,
+    import_page,
+    import_worker,
     xhr_blob,
     xhr_sync,
 );

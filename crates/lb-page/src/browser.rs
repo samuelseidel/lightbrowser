@@ -99,6 +99,7 @@ impl WorkerState {
         let bindings =
             Bindings::define(&mut engine, &reg).map_err(|e| PageError::Setup(e.to_string()))?;
         rt.set_bindings(bindings.clone());
+        rt.install_dynamic_import(&mut engine);
         if snapshot.is_some() {
             tracing::debug!("engine snapshot: {:?}", engine.snapshot_status());
         }

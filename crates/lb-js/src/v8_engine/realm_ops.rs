@@ -107,6 +107,16 @@ pub trait RealmOps {
     /// Replace the realm's module loader (`import()`, module scripts), for
     /// a realm made before its document was known.
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>);
+    /// Settle an `import()` the host loaded itself ([`DynamicImport::Pending`]):
+    /// `Ok(url)` links and evaluates the module at `url` (from the realm's
+    /// loader) and resolves with its namespace; `Err(message)` rejects
+    /// with a `TypeError`.
+    fn finish_dynamic_import(
+        &mut self,
+        realm: RealmId,
+        resolver: Resolver,
+        r: Result<String, String>,
+    );
     /// Delete the configurable own string-keyed properties of the realm's
     /// global whose names `keep` rejects (engine built-ins a browser does
     /// not expose), as a script doing `delete globalThis[name]` would.
@@ -318,6 +328,17 @@ impl RealmOps for Engine {
     }
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
         set_loader(&self.state, realm, loader);
+    }
+    fn finish_dynamic_import(
+        &mut self,
+        realm: RealmId,
+        resolver: Resolver,
+        r: Result<String, String>,
+    ) {
+        let _ = self.run(realm, |scope, state| {
+            finish_import(scope, state, realm, resolver, r);
+            Ok(())
+        });
     }
     fn delete_globals_except(
         &mut self,
@@ -581,6 +602,17 @@ impl RealmOps for CallCtx<'_, '_, '_> {
     }
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
         set_loader(&self.state, realm, loader);
+    }
+    fn finish_dynamic_import(
+        &mut self,
+        realm: RealmId,
+        resolver: Resolver,
+        r: Result<String, String>,
+    ) {
+        let _ = self.run_in(realm, |scope, state| {
+            finish_import(scope, state, realm, resolver, r);
+            Ok(())
+        });
     }
     fn delete_globals_except(
         &mut self,

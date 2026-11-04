@@ -1,0 +1,47 @@
+<!doctype html><!--LOG--><script>
+addEventListener('error', e => log('window error ' + e.message));
+addEventListener('unhandledrejection', e => log('unhandled ' + e.reason));
+function ns(m) { return Object.keys(m).join(',') + ' ' + Object.prototype.toString.call(m); }
+</script>
+<script type="module">
+import { count, bump } from './counter.js';
+log('static count ' + count);
+bump();
+window.staticBump = bump;
+</script>
+<script>
+(async () => {
+  await new Promise(r => setTimeout(r, 100));
+  await a('basic', async () => { var m = await import('./a.js'); return ns(m) + ' ' + m.default + ' ' + m.x + ' ' + m.meta; });
+  await a('same instance', async () => { var m1 = await import('./a.js'), m2 = await import('./a.js?'); var m3 = await import('./a.js'); return (m1 === m3) + ' ' + (m1 === m2); });
+  await a('shared with static', async () => { var c = await import('./counter.js'); c.bump(); return c.count; });
+  await a('graph', async () => { var m = await import('./b.js'); return m.y + ' ' + m.fromA; });
+  await a('404', () => import('./missing.js'));
+  await a('dep 404', () => import('./dep404.js'));
+  await a('bare', () => import('foo'));
+  await a('bad url', () => import('http://['));
+  await a('syntax', () => import('./syntax.js'));
+  await a('throws', () => import('./throws.js'));
+  await a('throws again', async () => { try { await import('./throws.js'); } catch (e1) { try { await import('./throws.js'); } catch (e2) { return 'same ' + (e1 === e2) + ' ' + e2.message; } } });
+  await a('no export', () => import('./noexport.js'));
+  await a('mime', () => import('./text.txt'));
+  await a('tla', async () => { var m = await import('./tla.js'); return m.v; });
+  await a('data', async () => { var m = await import('data:text/javascript,export default 42; export const u = import.meta.url'); return m.default + ' ' + m.u; });
+  await a('blob', async () => { var u = URL.createObjectURL(new Blob(['export default "from blob"; export const u = import.meta.url.slice(0,5)'], { type: 'text/javascript' })); var m = await import(u); return m.default + ' ' + m.u; });
+  await a('non-string', async () => { try { await import({ toString() { return './a.js'; } }); return 'ok'; } catch (e) { return err(e); } });
+  await a('meta', async () => { var m = await import('./meta.js'); return m.keys + ' | ' + m.r1 + ' | ' + m.r2 + ' | ' + m.r3; });
+  await a('from module', async () => { var m = await import('./dyn.js'); return await m.load(); });
+  var o = [];
+  import('./a.js').then(() => o.push('import'));
+  Promise.resolve().then(() => o.push('micro'));
+  setTimeout(() => o.push('timeout'), 0);
+  await new Promise(r => setTimeout(r, 50));
+  log('order cached ' + o.join(','));
+  var o2 = [];
+  import('./fresh.js').then(() => o2.push('import'));
+  setTimeout(() => o2.push('timeout'), 0);
+  await new Promise(r => setTimeout(r, 200));
+  log('order fresh ' + o2.join(','));
+  end();
+})();
+</script>

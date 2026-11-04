@@ -272,3 +272,45 @@ fn run_script_parser(js: &mut dyn Js, w: &Rc<Window>, to_end: bool) {
         }
     }
 }
+
+/// Static import specifiers of a module (`import ... from "x"`,
+/// `import "x"`, `export ... from "x"`). A scan, not a parser.
+pub fn import_specifiers(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let b = src.as_bytes();
+    let mut i = 0;
+    let quoted_after = |mut j: usize| -> Option<(String, usize)> {
+        while j < b.len() && (b[j] as char).is_whitespace() {
+            j += 1;
+        }
+        let q = *b.get(j)?;
+        if q != b'"' && q != b'\'' {
+            return None;
+        }
+        let end = src[j + 1..].find(q as char)? + j + 1;
+        Some((src[j + 1..end].to_owned(), end + 1))
+    };
+    while i < b.len() {
+        let rest = &src[i..];
+        let word_start =
+            i == 0 || !(b[i - 1] as char).is_alphanumeric() && b[i - 1] != b'_' && b[i - 1] != b'.';
+        let kw = if !word_start {
+            0
+        } else if rest.starts_with("from") {
+            4
+        } else if rest.starts_with("import") {
+            6
+        } else {
+            0
+        };
+        if kw > 0
+            && let Some((s, end)) = quoted_after(i + kw)
+        {
+            out.push(s);
+            i = end;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}

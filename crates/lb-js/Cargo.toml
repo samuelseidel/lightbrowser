@@ -20,6 +20,8 @@ v8 = { version = "=152.2.0", optional = true }
 zstd = { version = "0.13", optional = true, default-features = false }
 # `madvise` to drop the compressed ICU pages once they are decompressed.
 libc = { version = "0.2", optional = true }
+# `import.meta.resolve` (module specifier resolution).
+url = "2"
 
 # Rewrites `icu/icudt78.dat.zst` from the prebuilt V8 archive (ADR 0013).
 [[example]]

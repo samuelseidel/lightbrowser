@@ -1,0 +1,7 @@
+<!doctype html><!--LOG--><script>
+var w = new Worker('w.js');
+w.onmessage = e => { log('classic ' + e.data);
+  var m = new Worker('m.js', { type: 'module' });
+  m.onmessage = e => { log('module ' + e.data); end(); };
+};
+</script>

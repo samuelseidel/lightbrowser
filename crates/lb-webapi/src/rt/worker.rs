@@ -757,9 +757,8 @@ impl Window {
         let base = self.url();
         let loader: lb_js::ModuleLoader = Rc::new(move |spec: &str, referrer: &str| {
             let from = Url::parse(referrer).unwrap_or_else(|_| base.clone());
-            let url = from
-                .join(spec)
-                .map_err(|_| format!("Failed to resolve module specifier \"{spec}\""))?;
+            let url = super::modules::resolve_specifier(spec, &from)
+                .map_err(|_| super::modules::bare_message(spec))?;
             if let Some(src) = map.borrow().get(url.as_str()) {
                 return Ok(lb_js::ModuleSource {
                     url: url.to_string(),
