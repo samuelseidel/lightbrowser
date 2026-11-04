@@ -167,8 +167,26 @@ fn every_fixture_interface_reproduced() {
     let t = table();
     let fx = fixture();
     let mut checked = 0;
+    // Worker-only interfaces come from the worker fixture's globals.
+    let workers: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/chromium_153_worker_surface.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     for i in t.interfaces.iter().filter(|i| i.from_fixture) {
-        let f = &fx["interfaces"][i.name.as_str()];
+        let name = i.name.as_str();
+        let f = if fx["interfaces"][name].is_object() {
+            &fx["interfaces"][name]
+        } else {
+            ["dedicated", "shared", "service"]
+                .iter()
+                .map(|k| &workers[k]["interfaces"][name])
+                .find(|v| v.is_object())
+                .unwrap_or_else(|| panic!("{name} in no fixture"))
+        };
         assert_eq!(
             proto_names(&i.name),
             fixture_names(&f["proto"]),
