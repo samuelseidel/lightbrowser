@@ -1440,10 +1440,16 @@ fn dom_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError>
     match c.method {
         "DOM.enable" => c.enable("DOM", true),
         "DOM.disable" => c.enable("DOM", false),
-        "DOM.getDocument" => Ok(json!({ "root": host.get_document(&t, depth).map_err(host_err)? })),
+        "DOM.getDocument" => {
+            let pierce = c.p.get("pierce").and_then(Value::as_bool).unwrap_or(false);
+            Ok(json!({ "root": host.get_document(&t, depth, pierce).map_err(host_err)? }))
+        }
         "DOM.describeNode" => {
             let depth = c.p.get("depth").and_then(Value::as_i64).unwrap_or(0) as i32;
-            Ok(json!({ "node": host.describe_node(&t, &c.node_ref()?, depth).map_err(host_err)? }))
+            let pierce = c.p.get("pierce").and_then(Value::as_bool).unwrap_or(false);
+            Ok(
+                json!({ "node": host.describe_node(&t, &c.node_ref()?, depth, pierce).map_err(host_err)? }),
+            )
         }
         "DOM.resolveNode" => {
             let node = match c.node_ref()? {

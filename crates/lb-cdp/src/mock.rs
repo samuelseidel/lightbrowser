@@ -1017,11 +1017,12 @@ impl PageHost for MockHost {
         })
     }
 
-    fn get_document(&self, target_id: &str, depth: i32) -> HostResult<DomNode> {
+    fn get_document(&self, target_id: &str, depth: i32, pierce: bool) -> HostResult<DomNode> {
         self.with_page(target_id, |p| {
             let info = DocInfo {
                 url: &p.url,
                 frame_id: target_id,
+                pierce,
             };
             Ok(convert::dom_node(
                 &p.doc,
@@ -1033,12 +1034,19 @@ impl PageHost for MockHost {
         })
     }
 
-    fn describe_node(&self, target_id: &str, node: &NodeRef, depth: i32) -> HostResult<DomNode> {
+    fn describe_node(
+        &self,
+        target_id: &str,
+        node: &NodeRef,
+        depth: i32,
+        pierce: bool,
+    ) -> HostResult<DomNode> {
         self.with_page(target_id, |p| {
             let n = self.page_node(p, node)?;
             let info = DocInfo {
                 url: &p.url,
                 frame_id: target_id,
+                pierce,
             };
             Ok(convert::dom_node(&p.doc, n, depth, &backend, &info))
         })

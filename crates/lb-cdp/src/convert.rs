@@ -13,6 +13,8 @@ use crate::types::{AxNode, AxProperty, AxValue, BackendNodeId, BoxModel, DomNode
 pub struct DocInfo<'a> {
     pub url: &'a str,
     pub frame_id: &'a str,
+    /// `pierce`: describe shadow roots' children too.
+    pub pierce: bool,
 }
 
 /// Chrome's DOM agent hides text nodes that are only whitespace.
@@ -92,10 +94,50 @@ pub fn dom_node(
                 n.system_id = Some(d.system_id.to_string());
             }
         }
-        NodeType::DocumentFragment => n.child_node_count = Some(kids.len() as u32),
+        NodeType::DocumentFragment => {
+            n.child_node_count = Some(kids.len() as u32);
+            if let Some(sr) = doc.shadow_root_data(id) {
+                n.parent_id = None;
+                n.shadow_root_type = Some(
+                    match sr.mode {
+                        lb_dom::ShadowRootMode::Open => "open",
+                        lb_dom::ShadowRootMode::Closed => "closed",
+                    }
+                    .into(),
+                );
+            }
+        }
         _ => {}
     }
-    if depth != 0 && !kids.is_empty() {
+    let backend_node = |x: NodeId| crate::types::BackendNode {
+        node_type: doc.node_type(x) as u32,
+        node_name: doc.node_name(x),
+        backend_node_id: ids(x),
+    };
+    // Chrome lists a host's shadow roots at every depth; their children
+    // only when piercing.
+    let in_shadow_root = doc.is_shadow_root(id);
+    let describe_kids = depth != 0 && (!in_shadow_root || info.pierce);
+    if let Some(sr) = doc.shadow_root(id) {
+        let d = if describe_kids && info.pierce {
+            depth - 1
+        } else {
+            0
+        };
+        n.shadow_roots = Some(vec![dom_node(doc, sr, d, ids, info)]);
+    }
+    if ty == NodeType::Element || ty == NodeType::Text {
+        if let Some(slot) = doc.find_slot(id, false) {
+            n.assigned_slot = Some(backend_node(slot));
+        }
+        if doc.is_slot(id) && doc.is_shadow_root(doc.root(id)) && (info.pierce || depth != 0) {
+            let nodes = doc.assigned_nodes(id);
+            if !nodes.is_empty() {
+                n.distributed_nodes = Some(nodes.into_iter().map(backend_node).collect());
+            }
+        }
+    }
+    if describe_kids && !kids.is_empty() {
         n.children = Some(
             kids.into_iter()
                 .map(|c| dom_node(doc, c, depth - 1, ids, info))
@@ -290,6 +332,7 @@ mod tests {
         let info = DocInfo {
             url: "http://127.0.0.1/",
             frame_id: "F",
+            pierce: false,
         };
         let root = dom_node(&doc, Document::DOCUMENT, 1, &ids, &info);
         assert_eq!(root.node_type, 9);

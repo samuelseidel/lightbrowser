@@ -1277,12 +1277,13 @@ fn undefined_remote() -> RemoteObject {
 }
 
 /// The document of a window as a `DOM.Node` tree.
-pub(crate) fn dom_node(agent: &Agent, w: &Window, n: NodeId, depth: i32) -> DomNode {
+pub(crate) fn dom_node(agent: &Agent, w: &Window, n: NodeId, depth: i32, pierce: bool) -> DomNode {
     let ids = agent.ids();
     let url = w.url().to_string();
     let info = lb_cdp::convert::DocInfo {
         url: &url,
         frame_id: &agent.target,
+        pierce,
     };
     let mut node = w.with_doc(|d| lb_cdp::convert::dom_node(d, n, depth, &ids, &info));
     mark_frame_owners(agent, w, &mut node);
@@ -1296,6 +1297,11 @@ fn mark_frame_owners(agent: &Agent, w: &Window, node: &mut DomNode) {
         && let Some(c) = frames::child_for(w, n)
     {
         node.frame_id = Some(agent.frame_str(c.id));
+    }
+    if let Some(kids) = node.shadow_roots.as_mut() {
+        for k in kids {
+            mark_frame_owners(agent, w, k);
+        }
     }
     if let Some(kids) = node.children.as_mut() {
         for k in kids {

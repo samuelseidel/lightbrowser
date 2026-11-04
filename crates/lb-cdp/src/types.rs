@@ -370,6 +370,28 @@ pub struct DomNode {
     /// Set on the document node and on `<iframe>` owners.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame_id: Option<FrameId>,
+    /// Shadow roots of a host (open and closed); their children only with
+    /// `pierce`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_roots: Option<Vec<DomNode>>,
+    /// `open` / `closed` on a shadow root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_root_type: Option<String>,
+    /// The slot a light-tree child is assigned to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned_slot: Option<BackendNode>,
+    /// A slot's assigned nodes (described with `pierce`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distributed_nodes: Option<Vec<BackendNode>>,
+}
+
+/// `DOM.BackendNode`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendNode {
+    pub node_type: u32,
+    pub node_name: String,
+    pub backend_node_id: BackendNodeId,
 }
 
 /// How a DOM command names its node.

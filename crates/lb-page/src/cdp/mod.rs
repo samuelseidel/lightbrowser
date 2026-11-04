@@ -660,17 +660,23 @@ impl PageHost for CdpHost {
 
     // ---- DOM ----
 
-    fn get_document(&self, target_id: &str, depth: i32) -> HostResult<DomNode> {
+    fn get_document(&self, target_id: &str, depth: i32, pierce: bool) -> HostResult<DomNode> {
         self.blocking(target_id, move |_, a, w| {
-            Ok(agent::dom_node(a, w, agent::DOCUMENT, depth))
+            Ok(agent::dom_node(a, w, agent::DOCUMENT, depth, pierce))
         })
     }
 
-    fn describe_node(&self, target_id: &str, node: &NodeRef, depth: i32) -> HostResult<DomNode> {
+    fn describe_node(
+        &self,
+        target_id: &str,
+        node: &NodeRef,
+        depth: i32,
+        pierce: bool,
+    ) -> HostResult<DomNode> {
         let node = node.clone();
         self.blocking(target_id, move |ws, a, w| {
             let n = a.node(ws, w, &node)?;
-            Ok(agent::dom_node(a, w, n, depth))
+            Ok(agent::dom_node(a, w, n, depth, pierce))
         })
     }
 

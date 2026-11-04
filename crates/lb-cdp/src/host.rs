@@ -468,11 +468,17 @@ pub trait PageHost {
     // ---- DOM ----
 
     /// The document node with `depth` levels of children (`-1` = all).
-    fn get_document(&self, _target_id: &str, _depth: i32) -> HostResult<DomNode> {
+    fn get_document(&self, _target_id: &str, _depth: i32, _pierce: bool) -> HostResult<DomNode> {
         Err(HostError::unsupported("DOM.getDocument"))
     }
 
-    fn describe_node(&self, _target_id: &str, _node: &NodeRef, _depth: i32) -> HostResult<DomNode> {
+    fn describe_node(
+        &self,
+        _target_id: &str,
+        _node: &NodeRef,
+        _depth: i32,
+        _pierce: bool,
+    ) -> HostResult<DomNode> {
         Err(HostError::unsupported("DOM.describeNode"))
     }
 
