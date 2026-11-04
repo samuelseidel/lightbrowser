@@ -74,6 +74,9 @@ pub(crate) struct AgentState {
     pub objects: HashMap<String, ObjEntry>,
     pub next_obj: u64,
     pub intercept: Option<Vec<RequestPattern>>,
+    /// `Fetch.enable` with `handleAuthRequests`: proxy challenges become
+    /// `Fetch.authRequired` (ADR 0027).
+    pub handle_auth: bool,
     pub extra_headers: Vec<(String, String)>,
     /// Bodies of recent responses for `Network.getResponseBody`.
     pub bodies: VecDeque<(String, bytes::Bytes)>,

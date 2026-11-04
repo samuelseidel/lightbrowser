@@ -120,6 +120,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "continueRequest",
             "fulfillRequest",
             "failRequest",
+            "continueWithAuth",
         ],
     ),
     (
@@ -207,7 +208,7 @@ pub const EVENTS: &[(&str, &[&str])] = &[
             "loadingFailed",
         ],
     ),
-    ("Fetch", &["requestPaused"]),
+    ("Fetch", &["requestPaused", "authRequired"]),
 ];
 
 /// Whether `method` (`Domain.name`) is a command we answer.

@@ -17,6 +17,7 @@ USAGE:
   lightbrowser --version
   lightbrowser serve [--port 9222] [--persona FILE] [--remote-allow-origins O]
                     [--profiles-dir DIR] [--insecure] [--workers N]
+                    [--proxy URL] [--proxy-bypass-list LIST]
                                             CDP server on 127.0.0.1 for Playwright
                                             connectOverCDP
   lightbrowser fetch <url> [OPTIONS]
@@ -42,6 +43,13 @@ FETCH OPTIONS:
   --profiles-dir DIR     TLS profiles (default: nearest profiles/tls above
                          the current directory or the executable)
   --insecure             accept invalid certificates (local test servers only)
+  --proxy URL            proxy for every request: http://[user:pass@]host:port
+                         (CONNECT for https/wss, forward for http) or
+                         socks5://[user:pass@]host:port (remote DNS); as
+                         Chrome's --proxy-server, also for `serve` (contexts
+                         with their own proxyServer use theirs)
+  --proxy-bypass-list L  Chrome's bypass rules (`*.a.com,10.0.0.0/8,<local>`);
+                         loopback is never proxied unless L has <-loopback>
   -v, --verbose          print the status line and headers to stderr
 
 Exit code: 0 on 2xx/3xx, 1 on other statuses or errors, 2 on bad usage.
@@ -64,6 +72,8 @@ struct FetchArgs {
     profiles_dir: Option<PathBuf>,
     insecure: bool,
     verbose: bool,
+    proxy: Option<String>,
+    proxy_bypass: Option<String>,
 }
 
 fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
@@ -77,6 +87,8 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
         profiles_dir: None,
         insecure: false,
         verbose: false,
+        proxy: None,
+        proxy_bypass: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -120,6 +132,8 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
             }
             "--profiles-dir" => out.profiles_dir = Some(PathBuf::from(value("--profiles-dir")?)),
             "--insecure" => out.insecure = true,
+            "--proxy" => out.proxy = Some(value("--proxy")?),
+            "--proxy-bypass-list" => out.proxy_bypass = Some(value("--proxy-bypass-list")?),
             "-v" | "--verbose" => out.verbose = true,
             f if f.starts_with('-') => return Err(format!("unknown option: {f}")),
             _ => {
@@ -272,6 +286,12 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
         virtual_time: false,
     })
     .map_err(|e| e.to_string())?;
+    if let Some(p) = &args.proxy
+        && let Some(p) = lb_net::Proxy::parse(p, args.proxy_bypass.as_deref())
+            .map_err(|e| format!("--proxy: {e}"))?
+    {
+        ctx.set_proxy(Arc::new(p));
+    }
 
     // The page and its network run on the browser's worker thread; this
     // runtime only waits for it. One page on one worker: its connections
@@ -523,6 +543,8 @@ struct ServeArgs {
     profiles_dir: Option<PathBuf>,
     insecure: bool,
     workers: Option<usize>,
+    proxy: Option<String>,
+    proxy_bypass: Option<String>,
 }
 
 fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
@@ -534,6 +556,8 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
         profiles_dir: None,
         insecure: false,
         workers: None,
+        proxy: None,
+        proxy_bypass: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -560,6 +584,8 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
             }
             "--profiles-dir" => out.profiles_dir = Some(PathBuf::from(value("--profiles-dir")?)),
             "--insecure" => out.insecure = true,
+            "--proxy" => out.proxy = Some(value("--proxy")?),
+            "--proxy-bypass-list" => out.proxy_bypass = Some(value("--proxy-bypass-list")?),
             "--workers" => {
                 out.workers = Some(
                     value("--workers")?
@@ -647,6 +673,13 @@ fn serve_with(
     let label = persona.profile_id.clone();
     let mut opts = lb_page::CdpHostOptions::new(Arc::new(persona), tls_dir);
     opts.accept_invalid_certs = args.insecure;
+    if let Some(p) = &args.proxy {
+        // Fail at start, not on the first page.
+        lb_net::Proxy::parse(p, args.proxy_bypass.as_deref())
+            .map_err(|e| format!("--proxy: {e}"))?;
+        opts.proxy_server = Some(p.clone());
+        opts.proxy_bypass_list = args.proxy_bypass.clone();
+    }
     if let Some(n) = args.workers {
         opts.workers = n.max(1);
     }

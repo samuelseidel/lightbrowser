@@ -674,6 +674,7 @@ fn translate(target: &str, ev: &PageEvent) -> Vec<(Gate, String, Value)> {
         PageEvent::LoadingFinished(e) => one("Network", "Network.loadingFinished", to_value(e)),
         PageEvent::LoadingFailed(e) => one("Network", "Network.loadingFailed", to_value(e)),
         PageEvent::RequestPaused(e) => one("Fetch", "Fetch.requestPaused", to_value(e)),
+        PageEvent::AuthRequired(e) => one("Fetch", "Fetch.authRequired", to_value(e)),
         PageEvent::Custom { method, params } => {
             let domain = method.split('.').next().unwrap_or("");
             // Only domains we track; others would never be enabled.
@@ -1660,11 +1661,27 @@ fn fetch_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpErro
             };
             host.set_request_interception(&t, Some(patterns))
                 .map_err(host_err)?;
+            let auth =
+                c.p.get("handleAuthRequests")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+            host.set_auth_handling(&t, auth).map_err(host_err)?;
             c.enable("Fetch", true)
         }
         "Fetch.disable" => {
             host.set_request_interception(&t, None).map_err(host_err)?;
+            host.set_auth_handling(&t, false).map_err(host_err)?;
             c.enable("Fetch", false)
+        }
+        "Fetch.continueWithAuth" => {
+            let resp: AuthChallengeResponse =
+                serde_json::from_value(c.p.get("authChallengeResponse").cloned().ok_or_else(
+                    || CdpError::invalid_params("authChallengeResponse: object expected"),
+                )?)
+                .map_err(|e| CdpError::invalid_params(e.to_string()))?;
+            host.continue_with_auth(&t, str_param(c.p, "requestId")?, resp)
+                .map_err(host_err)?;
+            Ok(json!({}))
         }
         "Fetch.continueRequest" => {
             host.continue_request(&t, params(c.p)?).map_err(host_err)?;

@@ -257,6 +257,8 @@ pub enum PageEvent {
     /// A request matched the interception patterns and waits for
     /// `continue_request`, `fulfill_request` or `fail_request`.
     RequestPaused(Box<RequestPaused>),
+    /// `Fetch.authRequired` (only with `handleAuthRequests`).
+    AuthRequired(Box<AuthRequired>),
     /// Any other event, sent as-is to sessions of the page that enabled
     /// `method`'s domain.
     Custom {
@@ -609,6 +611,23 @@ pub trait PageHost {
     }
 
     fn continue_request(&self, _target_id: &str, _req: ContinueRequest) -> HostResult<()> {
+        Err(HostError::new("Invalid InterceptionId."))
+    }
+
+    /// `Fetch.enable`'s `handleAuthRequests`: auth challenges (a proxy's
+    /// `407`) are reported as `Fetch.authRequired` and wait for
+    /// `Fetch.continueWithAuth`.
+    fn set_auth_handling(&self, _target_id: &str, _on: bool) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `Fetch.continueWithAuth`.
+    fn continue_with_auth(
+        &self,
+        _target_id: &str,
+        _request_id: &str,
+        _response: AuthChallengeResponse,
+    ) -> HostResult<()> {
         Err(HostError::new("Invalid InterceptionId."))
     }
 

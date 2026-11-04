@@ -671,6 +671,43 @@ pub struct RequestPaused {
     pub response_status_code: Option<i64>,
 }
 
+/// `Fetch.AuthChallenge`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthChallenge {
+    /// `Server` or `Proxy`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Origin of the challenger (`http://host:port`).
+    pub origin: String,
+    /// `basic`, `digest`, ...
+    pub scheme: String,
+    pub realm: String,
+}
+
+/// `Fetch.authRequired` params.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthRequired {
+    pub request_id: String,
+    pub request: NetRequest,
+    pub frame_id: FrameId,
+    pub resource_type: String,
+    pub auth_challenge: AuthChallenge,
+}
+
+/// `Fetch.AuthChallengeResponse`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthChallengeResponse {
+    /// `Default`, `CancelAuth` or `ProvideCredentials`.
+    pub response: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
 /// `Fetch.RequestPattern`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

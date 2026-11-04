@@ -410,3 +410,50 @@ async fn bypass_and_failures() {
         .unwrap_err();
     assert_eq!(e.to_string(), "net::ERR_PROXY_CONNECTION_FAILED");
 }
+
+/// `wss:` through a `CONNECT` tunnel: the same ClientHello as direct
+/// (Chrome 153's WebSocket JA4, `tests/websocket.rs`) and the handshake
+/// inside the tunnel.
+#[tokio::test]
+async fn websocket_through_connect_tunnel() {
+    use lb_net::websocket::{WsConnect, WsEvent};
+    let p = ProxyProc::start(None);
+    let (server, mut rx) = CaptureServer::bind(
+        "127.0.0.1:0",
+        ServerConfig {
+            alpn: vec![b"http/1.1".to_vec()],
+            ..ServerConfig::default()
+        },
+    )
+    .await
+    .unwrap();
+    let port = server.local_addr().port();
+    let mut c = ctx(Some(
+        Proxy::parse(&format!("127.0.0.1:{}", p.http), None)
+            .unwrap()
+            .unwrap(),
+    ));
+    c.pool = None;
+    let (_tx, mut events) = c.websocket(WsConnect {
+        url: format!("wss://proxied.test:{port}/ws").parse().unwrap(),
+        protocols: vec![],
+        origin: "https://proxied.test".into(),
+    });
+    let cap = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+        .await
+        .expect("capture in time")
+        .expect("capture");
+    assert_eq!(
+        fingerprint::ja4(cap.client_hello.as_ref().unwrap()),
+        "t13d1515h1_8daaf6152771_cab8d0f75fe8"
+    );
+    assert_eq!(cap.h1.unwrap().request_line, "GET /ws HTTP/1.1");
+    // The capture server answers 200: the handshake fails as without a proxy.
+    let ev = events.recv().await.unwrap();
+    assert!(matches!(ev, WsEvent::Failed(_)), "{ev:?}");
+    let log = p.entries();
+    assert_eq!(
+        log[0]["line"],
+        format!("CONNECT proxied.test:{port} HTTP/1.1")
+    );
+}

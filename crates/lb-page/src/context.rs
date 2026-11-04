@@ -66,6 +66,10 @@ struct Shared {
     /// most 6 sockets per group, one HTTP/2 session per group, TLS session
     /// resumption. Never shared with another context.
     connections: ConnectionPool,
+    /// The context's proxy (ADR 0027): set once, before the first request
+    /// (`Target.createBrowserContext` `proxyServer`, `--proxy`). It caches
+    /// the credentials that answered its challenges.
+    proxy: std::sync::OnceLock<Arc<lb_net::Proxy>>,
     /// Running shared workers by (script URL, name), chrome build
     /// (ADR 0021); terminated with the context.
     #[cfg(feature = "chrome")]
@@ -172,6 +176,7 @@ impl BrowserContext {
             header_profile: std::sync::OnceLock::new(),
             favicons: Mutex::new(HashSet::new()),
             connections: ConnectionPool::new(),
+            proxy: std::sync::OnceLock::new(),
             #[cfg(feature = "chrome")]
             shared_workers: Mutex::new(std::collections::HashMap::new()),
             #[cfg(feature = "chrome")]
@@ -222,6 +227,17 @@ impl BrowserContext {
         WeakContext(Arc::downgrade(&self.0))
     }
 
+    /// Route this context's requests through `proxy` (ADR 0027). Only the
+    /// first call counts; call it before the first request.
+    pub fn set_proxy(&self, proxy: Arc<lb_net::Proxy>) {
+        let _ = self.0.proxy.set(proxy);
+    }
+
+    /// The context's proxy, if any.
+    pub fn proxy(&self) -> Option<&Arc<lb_net::Proxy>> {
+        self.0.proxy.get()
+    }
+
     /// The context's connection pool.
     pub fn connections(&self) -> &ConnectionPool {
         &self.0.connections
@@ -253,6 +269,7 @@ impl BrowserContext {
         net.client_hints = self.0.client_hints.clone();
         net.danger_accept_invalid_certs = self.0.opts.accept_invalid_certs;
         net.pool = Some(self.0.connections.clone());
+        net.proxy = self.0.proxy.get().cloned();
         Ok(net)
     }
 
@@ -290,17 +307,50 @@ impl BrowserContext {
         self.fetch_as(req, None, None).await
     }
 
+    /// [`fetch_in_page`](Self::fetch_in_page) that returns a proxy's
+    /// unanswered `407` as its challenge (`Err(Ok(..))`), for CDP
+    /// `Fetch.authRequired`; other failures are `Err(Err(text))`.
+    pub async fn fetch_in_page_auth(
+        &self,
+        req: NetRequest,
+        top_frame: Option<Url>,
+    ) -> Result<NetResponse, Result<lb_net::ProxyChallenge, String>> {
+        self.fetch_raw(req, None, top_frame)
+            .await
+            .map(|(r, _)| r)
+            .map_err(|e| match e {
+                Ok(lb_net::NetError::ProxyAuth(ch)) => Ok(ch),
+                Ok(e) => Err(e.to_string()),
+                Err(e) => Err(e),
+            })
+    }
+
     async fn fetch_as(
         &self,
         req: NetRequest,
         kind: Option<RequestKind>,
         top_frame: Option<Url>,
     ) -> Result<(NetResponse, FetchTrace), String> {
+        self.fetch_raw(req, kind, top_frame)
+            .await
+            .map_err(|e| match e {
+                Ok(e) => e.to_string(),
+                Err(e) => e,
+            })
+    }
+
+    async fn fetch_raw(
+        &self,
+        req: NetRequest,
+        kind: Option<RequestKind>,
+        top_frame: Option<Url>,
+    ) -> Result<(NetResponse, FetchTrace), Result<lb_net::NetError, String>> {
         // The pool limits sockets per group (6, as Chrome) and reuses them.
-        let mut net = self.take_net().map_err(|e| e.to_string())?;
+        let mut net = self.take_net().map_err(|e| Err(e.to_string()))?;
         let url = req.url.clone();
         let wire = Request {
-            method: http::Method::from_bytes(req.method.as_bytes()).map_err(|e| e.to_string())?,
+            method: http::Method::from_bytes(req.method.as_bytes())
+                .map_err(|e| Err(e.to_string()))?,
             url: url.clone(),
             headers: req.headers.clone(),
             body: bytes::Bytes::from(req.body.clone()),
@@ -312,7 +362,7 @@ impl BrowserContext {
         };
         let r = lb_net::fetch(&mut net, wire).await;
         self.put_back(net);
-        let resp = r.map_err(|e| e.to_string())?;
+        let resp = r.map_err(Ok)?;
         let trace = FetchTrace {
             redirects: resp.redirects,
             method: resp.method.to_string(),

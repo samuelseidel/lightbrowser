@@ -23,6 +23,8 @@ pub(crate) enum Decision {
     Fulfill(FulfillRequest),
     /// `Fetch.failRequest` error reason (`Failed`, `Aborted`, ...).
     Fail(String),
+    /// `Fetch.continueWithAuth` (after `Fetch.authRequired`).
+    Auth(types::AuthChallengeResponse),
 }
 
 /// CDP `resourceType` of a request.
@@ -315,11 +317,13 @@ pub(crate) async fn page_fetch(
         })
     });
     let mut fulfilled: Option<NetResponse> = None;
+    let mut interception: Option<String> = None;
     if paused {
         let iid = format!(
             "interception-job-{}.0",
             agent.shared.next_intercept.fetch_add(1, Ordering::Relaxed)
         );
+        interception = Some(iid.clone());
         let (tx, rx) = oneshot::channel();
         agent
             .shared
@@ -337,6 +341,7 @@ pub(crate) async fn page_fetch(
         })));
         match rx.await {
             Err(_) => return Err("net::ERR_ABORTED".into()),
+            Ok(Decision::Auth(_)) => {}
             Ok(Decision::Fail(reason)) => {
                 let text = fail_text(&reason);
                 agent.emit(PageEvent::LoadingFailed(LoadingFailed {
@@ -394,7 +399,7 @@ pub(crate) async fn page_fetch(
     }
     let r = match fulfilled {
         Some(r) => Ok(r),
-        None => page.ctx.fetch_in_page(req, top_frame).await,
+        None => fetch_answering_auth(&agent, page, req, top_frame, rtype, interception).await,
     };
     match &r {
         Ok(resp) => {
@@ -428,6 +433,76 @@ pub(crate) async fn page_fetch(
         }
     }
     r.map_err(|e| net_error_text(&e))
+}
+
+/// The request through the context; a proxy's `407` the network stack
+/// could not answer goes to the client as `Fetch.authRequired` when it
+/// asked for auth requests (`Fetch.enable` `handleAuthRequests`), and the
+/// request is sent again with the credentials of `Fetch.continueWithAuth`
+/// (ADR 0027). Without a handler, or on `Default`/`CancelAuth`, it fails as
+/// Chrome's headless navigation does (`net::ERR_INVALID_AUTH_CREDENTIALS`).
+async fn fetch_answering_auth(
+    agent: &Rc<Agent>,
+    page: &Rc<PageState>,
+    req: NetRequest,
+    top_frame: Option<url::Url>,
+    rtype: &str,
+    interception: Option<String>,
+) -> Result<NetResponse, String> {
+    const DENIED: &str = "net::ERR_INVALID_AUTH_CREDENTIALS";
+    let iid = interception.unwrap_or_else(|| {
+        format!(
+            "interception-job-{}.0",
+            agent.shared.next_intercept.fetch_add(1, Ordering::Relaxed)
+        )
+    });
+    for _ in 0..3 {
+        let ch = match page
+            .ctx
+            .fetch_in_page_auth(req.clone(), top_frame.clone())
+            .await
+        {
+            Ok(r) => return Ok(r),
+            Err(Err(e)) => return Err(e),
+            Err(Ok(ch)) => ch,
+        };
+        let Some(proxy) = page.ctx.proxy().cloned() else {
+            return Err(DENIED.into());
+        };
+        if !agent.st.borrow().handle_auth {
+            return Err(DENIED.into());
+        }
+        let (tx, rx) = oneshot::channel();
+        agent
+            .shared
+            .paused
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(iid.clone(), (agent.target.clone(), tx));
+        agent.emit(PageEvent::AuthRequired(Box::new(types::AuthRequired {
+            request_id: iid.clone(),
+            request: cdp_request(agent, page, &req),
+            frame_id: agent.target.clone(),
+            resource_type: rtype.into(),
+            auth_challenge: types::AuthChallenge {
+                source: Some("Proxy".into()),
+                origin: format!("http://{}", ch.origin),
+                scheme: ch.scheme.clone(),
+                realm: ch.realm.clone(),
+            },
+        })));
+        match rx.await {
+            Ok(Decision::Auth(a)) if a.response == "ProvideCredentials" => {
+                proxy.provide_credentials(lb_net::Credentials {
+                    username: a.username.unwrap_or_default(),
+                    password: a.password.unwrap_or_default(),
+                });
+            }
+            Err(_) => return Err("net::ERR_ABORTED".into()),
+            _ => return Err(DENIED.into()),
+        }
+    }
+    Err(DENIED.into())
 }
 
 fn wall_secs() -> f64 {

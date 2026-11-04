@@ -96,6 +96,11 @@ pub struct CdpHostOptions {
     pub virtual_time: bool,
     /// Worker threads (default: available cores).
     pub workers: usize,
+    /// Browser-wide proxy (`--proxy`, Chrome's `--proxy-server`) and bypass
+    /// list: the default context and new contexts without `proxyServer`
+    /// use it (ADR 0027).
+    pub proxy_server: Option<String>,
+    pub proxy_bypass_list: Option<String>,
 }
 
 impl CdpHostOptions {
@@ -106,6 +111,8 @@ impl CdpHostOptions {
             accept_invalid_certs: false,
             virtual_time: false,
             workers: BrowserOptions::default().workers,
+            proxy_server: None,
+            proxy_bypass_list: None,
         }
     }
 }
@@ -231,6 +238,20 @@ impl CdpHost {
     }
 
     fn build_context(&self, profile: &Arc<PersonaProfile>) -> HostResult<BrowserContext> {
+        let proxy = match &self.opts.proxy_server {
+            Some(s) => lb_net::Proxy::parse(s, self.opts.proxy_bypass_list.as_deref())
+                .map_err(|e| HostError::new(e.to_string()))?
+                .map(Arc::new),
+            None => None,
+        };
+        self.build_context_with(profile, proxy)
+    }
+
+    fn build_context_with(
+        &self,
+        profile: &Arc<PersonaProfile>,
+        proxy: Option<Arc<lb_net::Proxy>>,
+    ) -> HostResult<BrowserContext> {
         let opts = context_options_for(
             profile,
             &self.opts.tls_dir,
@@ -238,7 +259,11 @@ impl CdpHost {
             self.opts.virtual_time,
         )
         .map_err(HostError::new)?;
-        BrowserContext::new(opts).map_err(page_err)
+        let ctx = BrowserContext::new(opts).map_err(page_err)?;
+        if let Some(p) = proxy {
+            ctx.set_proxy(p);
+        }
+        Ok(ctx)
     }
 
     /// Run `f` with the page's agent and current window on its worker,
@@ -334,7 +359,16 @@ impl PageHost for CdpHost {
     }
 
     fn set_persona(&self, context: &str, persona: Arc<PersonaProfile>) -> HostResult<()> {
-        let ctx = self.build_context(&persona)?;
+        // The context keeps its proxy.
+        let proxy = self
+            .contexts
+            .borrow()
+            .get(context)
+            .and_then(|c| c.ctx.proxy().cloned());
+        let ctx = match proxy {
+            Some(p) => self.build_context_with(&persona, Some(p))?,
+            None => self.build_context(&persona)?,
+        };
         self.contexts.borrow_mut().insert(
             context.to_string(),
             CtxEntry {
@@ -345,9 +379,17 @@ impl PageHost for CdpHost {
         Ok(())
     }
 
-    fn create_context(&self, id: &str, _opts: CdpContextOptions) -> HostResult<()> {
+    fn create_context(&self, id: &str, opts: CdpContextOptions) -> HostResult<()> {
         let profile = self.opts.profile.clone();
-        let ctx = self.build_context(&profile)?;
+        // `proxyServer` replaces the browser-wide proxy for this context.
+        let ctx = match opts.proxy_server.as_deref().filter(|s| !s.is_empty()) {
+            Some(server) => {
+                let proxy = lb_net::Proxy::parse(server, opts.proxy_bypass_list.as_deref())
+                    .map_err(|e| HostError::new(e.to_string()))?;
+                self.build_context_with(&profile, proxy.map(Arc::new))?
+            }
+            None => self.build_context(&profile)?,
+        };
         self.contexts
             .borrow_mut()
             .insert(id.to_string(), CtxEntry { ctx, profile });
@@ -988,6 +1030,21 @@ impl PageHost for CdpHost {
     fn fail_request(&self, target_id: &str, request_id: &str, reason: &str) -> HostResult<()> {
         let tx = self.take_paused(target_id, request_id)?;
         let _ = tx.send(Decision::Fail(reason.to_string()));
+        Ok(())
+    }
+
+    fn set_auth_handling(&self, target_id: &str, on: bool) -> HostResult<()> {
+        self.post(target_id, move |_, _, a| a.st.borrow_mut().handle_auth = on)
+    }
+
+    fn continue_with_auth(
+        &self,
+        target_id: &str,
+        request_id: &str,
+        response: lb_cdp::types::AuthChallengeResponse,
+    ) -> HostResult<()> {
+        let tx = self.take_paused(target_id, request_id)?;
+        let _ = tx.send(Decision::Auth(response));
         Ok(())
     }
 

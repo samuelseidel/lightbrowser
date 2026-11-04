@@ -222,7 +222,7 @@ async fn handshake(
         .map_err(|e| match e {
             NetError::Proxy(m) => format!("Error in connection establishment: {m}"),
             NetError::ProxyAuth(_) => {
-                "Error in connection establishment: net::ERR_PROXY_AUTH_REQUESTED".to_owned()
+                "Error in connection establishment: net::ERR_INVALID_AUTH_CREDENTIALS".to_owned()
             }
             _ => "Error in connection establishment: net::ERR_CONNECTION_REFUSED".to_owned(),
         })?;
