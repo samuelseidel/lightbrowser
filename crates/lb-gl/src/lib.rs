@@ -5,5 +5,9 @@
 
 pub mod exec;
 pub mod glsl;
+pub mod image;
 pub mod ir;
 pub mod math;
+pub mod program;
+pub mod raster;
+pub mod texture;
