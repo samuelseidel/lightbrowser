@@ -1,0 +1,10 @@
+<script>var L=[];function log(s){L.push(String(s))}function end(){log('end')}
+function err(e){return e&&e.name!==undefined?(Object.prototype.toString.call(e)+' '+e.name+': '+e.message+(e.code!==undefined?' code='+e.code:'')):'value '+String(e)}
+function t(n,f){try{log(n+': '+f())}catch(e){log(n+' threw '+err(e))}}
+async function a(n,f){try{log(n+': '+await f())}catch(e){log(n+' rejected '+err(e))}}
+function req(r){return new Promise(function(res,rej){r.addEventListener('success',function(){res(r.result)});r.addEventListener('error',function(e){e.preventDefault();rej(r.error)})})}
+function done(tx){return new Promise(function(res,rej){tx.addEventListener('complete',function(){res('complete')});tx.addEventListener('abort',function(){rej(tx.error||'abort')})})}
+function show(v){if(v===undefined)return'undefined';if(v instanceof Date)return'Date('+v.getTime()+')';if(v instanceof ArrayBuffer)return'AB['+new Uint8Array(v)+']';if(ArrayBuffer.isView(v))return v.constructor.name+'['+Array.from(v)+']';if(Array.isArray(v))return'['+v.map(show).join(',')+']';if(v&&typeof v==='object'){var c=v.constructor&&v.constructor.name;if(c&&c!=='Object')return c+':'+JSON.stringify(v);return JSON.stringify(v)}if(typeof v==='number'&&Object.is(v,-0))return'-0';return typeof v==='string'?JSON.stringify(v):String(v)}
+function ev(e){return e.type+'@'+(e.target&&e.target.constructor.name)+(e.currentTarget&&e.currentTarget!==e.target?'>'+e.currentTarget.constructor.name:'')+' phase='+e.eventPhase+' b='+e.bubbles+' c='+e.cancelable+(e.oldVersion!==undefined?' old='+e.oldVersion+' new='+e.newVersion:'')}
+async function fresh(name){await req(indexedDB.deleteDatabase(name))}
+</script>

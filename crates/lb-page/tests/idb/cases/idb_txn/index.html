@@ -1,0 +1,106 @@
+<!doctype html><!--LOG--><script>
+(async function(){
+  await fresh('tx');
+  var r = indexedDB.open('tx', 1);
+  r.onupgradeneeded = function(){ var db=r.result; db.createObjectStore('a'); db.createObjectStore('b'); db.createObjectStore('c', {keyPath:'k'}).createIndex('u','u',{unique:true}); };
+  var db = await req(r);
+  // 1. Empty transaction completes; events
+  var tx = db.transaction('a');
+  tx.oncomplete = function(e){log('empty complete '+ev(e))};
+  await done(tx);
+  // 2. Inactive after the task
+  var tx2 = db.transaction('a', 'readwrite');
+  await new Promise(function(res){ setTimeout(function(){ t('after timeout', function(){return tx2.objectStore('a').put(1, 1)}); res(); }, 0); });
+  // 3. Active in microtasks of the creating task
+  var tx3 = db.transaction('a', 'readwrite');
+  var p = Promise.resolve().then(function(){ return tx3.objectStore('a').put('m', 'micro'); });
+  var q3 = await p.then(function(q){ return 'ok '+q.readyState; }, function(e){ return err(e); });
+  log('microtask put '+q3);
+  await done(tx3);
+  // 4. Event order: success handlers vs complete, nested requests from handlers
+  var tx4 = db.transaction(['a','b'], 'readwrite');
+  var o = [];
+  var s = tx4.objectStore('a');
+  s.put(1, 'x').onsuccess = function(){ o.push('put1'); s.put(2, 'y').onsuccess = function(){ o.push('nested'); Promise.resolve().then(function(){ o.push('micro in handler'); s.get('y').onsuccess=function(){o.push('from micro')}; }); }; };
+  tx4.objectStore('b').put(3, 'z').onsuccess = function(){ o.push('put b'); };
+  tx4.oncomplete = function(){ o.push('complete'); };
+  tx4.addEventListener('complete', function(e){ o.push('listener '+e.eventPhase); });
+  await done(tx4); log(o.join(' '));
+  // 5. abort(): pending requests get AbortError, tx abort event, error null
+  var tx5 = db.transaction('a', 'readwrite');
+  var o5 = [];
+  var a1 = tx5.objectStore('a').put('v', 'k5');
+  a1.onsuccess = function(){o5.push('a1 success')};
+  a1.onerror = function(e){o5.push('a1 '+ev(e)+' '+a1.error.name+' '+a1.readyState+' result='+(function(){try{return a1.result}catch(x){return err(x)}})())};
+  tx5.onerror = function(e){o5.push('tx error event '+ev(e))};
+  tx5.onabort = function(e){o5.push('tx abort '+ev(e)+' error='+tx5.error)};
+  db.onabort = function(e){o5.push('db abort '+ev(e))};
+  db.onerror = function(e){o5.push('db error '+ev(e))};
+  tx5.abort();
+  t('abort twice', function(){tx5.abort()});
+  t('request after abort', function(){return tx5.objectStore('a').get(1)});
+  await new Promise(function(res){setTimeout(res, 50)}); log(o5.join(' | '));
+  t('commit after abort', function(){tx5.commit()});
+  var check = db.transaction('a');
+  log('k5 after abort: '+show(await req(check.objectStore('a').get('k5'))));
+  // 6. constraint error not prevented aborts the transaction
+  var tx6 = db.transaction('c', 'readwrite');
+  var o6 = [];
+  tx6.objectStore('c').put({k:1, u:'same'});
+  var bad = tx6.objectStore('c').put({k:2, u:'same'});
+  bad.onerror = function(e){o6.push('bad '+ev(e)+' '+bad.error.name+': '+bad.error.message)};
+  tx6.onerror = function(e){o6.push('tx6 error '+ev(e)+' target='+e.target.constructor.name)};
+  tx6.onabort = function(e){o6.push('tx6 abort error='+err(tx6.error)+' same='+(tx6.error===bad.error))};
+  db.onerror = function(e){o6.push('db error '+ev(e))};
+  db.onabort = function(e){o6.push('db abort '+ev(e))};
+  await new Promise(function(res){tx6.addEventListener('abort',res); tx6.addEventListener('complete',res)}); log(o6.join(' | '));
+  db.onerror = db.onabort = null;
+  // 7. prevented error keeps the transaction
+  var tx7 = db.transaction('c', 'readwrite');
+  tx7.objectStore('c').put({k:3, u:'x'});
+  var bad7 = tx7.objectStore('c').add({k:3, u:'y'});
+  bad7.onerror = function(e){ e.preventDefault(); log('bad7 '+bad7.error.name+': '+bad7.error.message); };
+  await done(tx7).then(log, function(x){log('aborted '+err(x))});
+  // 8. exception in success handler aborts
+  var tx8 = db.transaction('a', 'readwrite');
+  var q8 = tx8.objectStore('a').put(1, 'k8');
+  self.onerror = function(m){ log('window.onerror '+m); return true; };
+  q8.onsuccess = function(){ throw new Error('boom'); };
+  tx8.onabort = function(){ log('tx8 abort '+err(tx8.error)); };
+  tx8.oncomplete = function(){ log('tx8 complete'); };
+  await new Promise(function(res){tx8.addEventListener('abort',res); tx8.addEventListener('complete',res)});
+  self.onerror = null;
+  // 9. commit()
+  var tx9 = db.transaction('a', 'readwrite');
+  var o9 = [];
+  tx9.objectStore('a').put(9, 'k9').onsuccess = function(){ o9.push('put success'); };
+  tx9.commit();
+  t('request after commit', function(){return tx9.objectStore('a').put(1,1)});
+  t('commit twice', function(){tx9.commit()});
+  tx9.oncomplete = function(){ o9.push('complete'); };
+  await done(tx9); log(o9.join(' '));
+  // 10. scheduling: overlapping readwrite waits, readonly runs
+  var o10 = [];
+  var w1 = db.transaction('a', 'readwrite'), w2 = db.transaction('a', 'readwrite'), ro = db.transaction('b', 'readonly');
+  w1.objectStore('a').put('w1', 'k10').onsuccess = function(){ o10.push('w1 put'); };
+  w2.objectStore('a').get('k10').onsuccess = function(e){ o10.push('w2 sees '+e.target.result); };
+  ro.objectStore('b').count().onsuccess = function(){ o10.push('ro count'); };
+  w1.oncomplete = function(){ o10.push('w1 complete'); };
+  w2.oncomplete = function(){ o10.push('w2 complete'); };
+  ro.oncomplete = function(){ o10.push('ro complete'); };
+  await Promise.all([done(w1), done(w2), done(ro)]); log(o10.join(' '));
+  // 11. errors
+  t('no stores', function(){return db.transaction([])});
+  t('missing store', function(){return db.transaction('nope')});
+  t('bad mode', function(){return db.transaction('a', 'versionchange')});
+  t('bad mode2', function(){return db.transaction('a', 'x')});
+  t('dup stores', function(){return Array.from(db.transaction(['b','a','b']).objectStoreNames).join()});
+  t('durability', function(){return db.transaction('a', 'readonly', {durability:'strict'}).durability});
+  t('wrong store', function(){return db.transaction('a').objectStore('b')});
+  t('createObjectStore outside upgrade', function(){return db.createObjectStore('z')});
+  t('no args', function(){return db.transaction()});
+  db.close();
+  t('after close', function(){return db.transaction('a')});
+  end();
+})();
+</script>

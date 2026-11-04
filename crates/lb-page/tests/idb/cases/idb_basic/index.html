@@ -1,0 +1,63 @@
+<!doctype html><!--LOG--><script>
+(async function(){
+  t('types', function(){return [typeof indexedDB, String(indexedDB), indexedDB===self.indexedDB, Object.prototype.toString.call(indexedDB)].join(' ')});
+  await fresh('basic');
+  var r = indexedDB.open('basic', 3);
+  t('open', function(){return [String(r), r.readyState, r.source, r.transaction, r.error===undefined].join(' ')});
+  t('pending result', function(){return r.result});
+  t('pending error', function(){return r.error});
+  r.onupgradeneeded = function(e){
+    log('upgrade '+ev(e)+' ready='+r.readyState+' tx='+r.transaction.mode+' '+r.transaction.objectStoreNames.length);
+    var db = r.result;
+    log('db '+db.name+' '+db.version+' '+String(db)+' '+db.objectStoreNames.length+' '+String(db.objectStoreNames));
+    var s = db.createObjectStore('s', {keyPath:'id'});
+    var s2 = db.createObjectStore('plain');
+    log('stores '+Array.from(db.objectStoreNames).join(',')+' '+db.objectStoreNames.contains('s')+' '+db.objectStoreNames.item(1)+' '+db.objectStoreNames.item(5));
+    log('store '+s.name+' '+s.keyPath+' '+s.autoIncrement+' '+String(s.indexNames)+' '+(s.transaction===r.transaction)+' '+(s2.keyPath));
+    var p = s.put({id:1, v:'a'});
+    log('put '+String(p)+' '+p.readyState+' src='+(p.source===s)+' tx='+(p.transaction===r.transaction));
+    p.onsuccess = function(e){log('put success '+ev(e)+' result='+show(p.result)+' '+p.readyState)};
+    s2.add('x', 'k1').onsuccess = function(e){log('add plain '+show(e.target.result))};
+    s2.put('y', 'k1').onsuccess = function(e){log('put plain '+show(e.target.result))};
+    r.transaction.oncomplete = function(e){log('upgrade tx '+ev(e))};
+  };
+  r.onsuccess = async function(e){
+    log('open success '+ev(e)+' tx='+r.transaction);
+    var db = r.result;
+    log('db version '+db.version);
+    var tx = db.transaction(['s','plain'], 'readwrite');
+    log('tx '+String(tx)+' '+tx.mode+' '+tx.durability+' '+Array.from(tx.objectStoreNames)+' '+(tx.db===db)+' '+tx.error);
+    var s = tx.objectStore('s');
+    log('same store '+(s===tx.objectStore('s')));
+    var order = [];
+    s.add({id:2, v:'b'}).onsuccess = function(){order.push('add2')};
+    s.put({id:3, v:'c'}).onsuccess = function(){order.push('put3')};
+    s.get(2).onsuccess = function(e){order.push('get2 '+show(e.target.result))};
+    s.getKey(3).onsuccess = function(e){order.push('getKey3 '+show(e.target.result))};
+    s.get(99).onsuccess = function(e){order.push('get99 '+show(e.target.result))};
+    s.count().onsuccess = function(e){order.push('count '+e.target.result)};
+    s.delete(1).onsuccess = function(e){order.push('delete '+show(e.target.result))};
+    s.count().onsuccess = function(e){order.push('count '+e.target.result)};
+    tx.objectStore('plain').get('k1').onsuccess = function(e){order.push('plain '+show(e.target.result))};
+    s.getAll().onsuccess = function(e){order.push('all '+show(e.target.result))};
+    s.getAllKeys().onsuccess = function(e){order.push('keys '+show(e.target.result))};
+    tx.oncomplete = function(e){order.push('complete '+ev(e)); log(order.join(' | '))};
+    await done(tx).catch(function(x){log('tx failed '+err(x))});
+    var tx2 = db.transaction('s');
+    log('tx2 '+tx2.mode+' '+Array.from(tx2.objectStoreNames));
+    var cl = tx2.objectStore('s').clear;
+    t('readonly put', function(){return tx2.objectStore('s').put({id:9})});
+    t('readonly clear', function(){return cl.call(tx2.objectStore('s'))});
+    await a('get after', function(){return req(tx2.objectStore('s').get(3)).then(show)});
+    db.close();
+    var r2 = indexedDB.open('basic');
+    r2.onupgradeneeded = function(){log('unexpected upgrade')};
+    await a('reopen', function(){return req(r2).then(function(db){var o=db.version+' '+Array.from(db.objectStoreNames);db.close();return o})});
+    await a('databases', function(){return indexedDB.databases().then(function(l){return l.filter(function(d){return d.name==='basic'}).map(function(d){return JSON.stringify(d)}).join()})});
+    var del = indexedDB.deleteDatabase('basic');
+    del.onsuccess = function(e){log('delete '+ev(e)+' result='+del.result+' ready='+del.readyState)};
+    await req(del);
+    end();
+  };
+})();
+</script>
