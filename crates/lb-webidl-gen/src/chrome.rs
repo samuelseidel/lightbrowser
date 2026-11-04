@@ -189,6 +189,7 @@ fn load_worker_fixture(v: &Value) -> Result<Vec<WorkerFix>, String> {
     for (key, bit) in [
         ("dedicated", exposed::DEDICATED_WORKER),
         ("shared", exposed::SHARED_WORKER),
+        ("service", exposed::SERVICE_WORKER),
     ] {
         let w = &v[key];
         let global = w["protoChain"][0]

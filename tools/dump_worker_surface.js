@@ -1,10 +1,10 @@
-// Dump the JS surface of a dedicated worker and a shared worker of the
+// Dump the JS surface of a dedicated, a shared and a service worker of the
 // local Chromium (Chrome for Testing), on a secure loopback origin: own
 // keys of the global in order with descriptor kinds, the global's
 // prototype chain, every interface object (same entry format as
 // tools/dump_surface.js), namespaces, WorkerNavigator and WorkerLocation
 // values. Ground truth for the worker tables of lb-webidl-gen and for the
-// worker realms of lb-webapi (ADR 0021).
+// worker realms of lb-webapi (ADR 0021, 0022).
 //
 //   node tools/dump_worker_surface.js tests/fixtures/chromium_153_worker_surface.json
 //
@@ -99,12 +99,21 @@ async function capture(kind) {
 
 const workerSrc = (kind) => `${dumpScope.toString()}\n${capture.toString()}\n` + (kind === 'dedicated'
   ? `capture('dedicated').then((r) => postMessage(r), (e) => postMessage(String(e)));`
-  : `onconnect = (e) => { const p = e.ports[0]; capture('shared').then((r) => p.postMessage(r), (err) => p.postMessage(String(err))); };`);
+  : kind === 'shared'
+    ? `onconnect = (e) => { const p = e.ports[0]; capture('shared').then((r) => p.postMessage(r), (err) => p.postMessage(String(err))); };`
+    // A listener, not `onmessage`: setting a handler would not change the
+    // own keys (they are accessors) but keeps the capture's footprint to
+    // the two functions filtered out above.
+    : `addEventListener('message', (e) => { e.waitUntil(capture('service').then((r) => e.source.postMessage(r), (err) => e.source.postMessage(String(err)))); });`);
 
 const page = `<!doctype html><title>w</title><script>
 window.run = () => Promise.all([
   new Promise((res) => { const w = new Worker('/dedicated.js'); w.onmessage = (e) => res(e.data); w.onerror = (e) => res('error ' + e.message); }),
   new Promise((res) => { const s = new SharedWorker('/shared.js'); s.port.onmessage = (e) => res(e.data); s.onerror = (e) => res('error'); }),
+  navigator.serviceWorker.register('/service.js').then(() => navigator.serviceWorker.ready).then((reg) => new Promise((res) => {
+    navigator.serviceWorker.onmessage = (e) => res(e.data);
+    reg.active.postMessage('dump');
+  })),
 ]);
 </script>`;
 
@@ -112,7 +121,8 @@ window.run = () => Promise.all([
   const out = process.argv[2];
   if (!out) throw new Error('usage: dump_worker_surface.js OUT.json');
   const server = http.createServer((req, res) => {
-    const body = req.url === '/dedicated.js' ? workerSrc('dedicated') : req.url === '/shared.js' ? workerSrc('shared') : page;
+    const body = req.url === '/dedicated.js' ? workerSrc('dedicated') : req.url === '/shared.js' ? workerSrc('shared')
+      : req.url === '/service.js' ? workerSrc('service') : page;
     res.writeHead(200, { 'Content-Type': req.url.endsWith('.js') ? 'text/javascript' : 'text/html', 'Cache-Control': 'no-store' });
     res.end(body);
   });
@@ -124,20 +134,21 @@ window.run = () => Promise.all([
   });
   const p = await browser.newPage();
   await p.goto(`${base}/`);
-  const [dedicated, shared] = await p.evaluate(() => window.run());
+  const [dedicated, shared, service] = await p.evaluate(() => window.run());
   const version = browser.version();
   await browser.close();
   server.close();
   const data = {
     _meta: {
-      source: `Chrome for Testing ${version}, Linux, headless (new), captured by tools/dump_worker_surface.js over Playwright on a secure loopback origin (http://127.0.0.1:PORT/, worker scripts at /dedicated.js and /shared.js)`,
+      source: `Chrome for Testing ${version}, Linux, headless (new), captured by tools/dump_worker_surface.js over Playwright on a secure loopback origin (http://127.0.0.1:PORT/, worker scripts at /dedicated.js, /shared.js and /service.js)`,
       note: 'UA says HeadlessChrome. Navigator values are the capture machine\'s, not persona ground truth; property order and descriptors are the fixture.',
     },
     dedicated: Object.assign(dedicated, { location: undefined, origin: undefined }),
     shared: Object.assign(shared, { location: undefined, origin: undefined }),
+    service: typeof service === 'string' ? service : Object.assign(service, { location: undefined, origin: undefined }),
   };
   fs.writeFileSync(out, JSON.stringify(data, null, 1));
-  for (const k of ['dedicated', 'shared']) {
+  for (const k of ['dedicated', 'shared', 'service']) {
     const d = data[k];
     console.log(k, typeof d === 'string' ? d : `global props ${d.globalProps.length}, interfaces ${Object.keys(d.interfaces).length}, chain ${d.protoChain.join(' > ')}`);
   }
