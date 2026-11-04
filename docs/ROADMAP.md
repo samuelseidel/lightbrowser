@@ -5,7 +5,7 @@ Each milestone ends with something we can run and measure.
 | Milestone | Scope | Done when |
 |---|---|---|
 | **M0 Foundations** | Architecture docs, ADRs, workspace skeleton, CI, SFC32 port | `cargo build/test/clippy` green for both families ✅ |
-| **M1 Network** | `lb-net`: BoringSSL ClientHello profiles, h1 + forked h2, cookies, decompression, proxy. `lightbrowser fetch <url>` | JA3/JA4 and Akamai H2 hash match real Chrome on our local TLS/H2 echo server ✅ (Chrome). Proxies moved to M2. |
+| **M1 Network** | `lb-net`: BoringSSL ClientHello profiles, h1 + forked h2, cookies, decompression, proxy. `lightbrowser fetch <url>` | JA3/JA4 and Akamai H2 hash match real Chrome on our local TLS/H2 echo server ✅ (Chrome). Proxies done 2026-11-04 (ADR 0027, "Proxies and IndexedDB"): HTTP `CONNECT`/forward and SOCKS5 per browser context with the direct ClientHello and H2 fingerprint. |
 | **M2 DOM + V8** | Arena DOM, html5ever sink, selectors, WebIDL codegen (Chromium set), V8 backend + snapshot, event loop, timers, fetch/XHR | `fetch --dump html` prints the DOM *after* scripts run. A WPT DOM subset passes. ✅ (Chrome; 2540/2788 WPT subtests at M2, 2568/2788 of those files now; 10480/11177 with the shadow-dom and custom-elements files added in "Shadow DOM and custom elements") |
 | **M3 Layout + CDP core** | Lazy cascade, taffy layout, hit-testing, AX tree, CDP server with the domains in ARCHITECTURE.md | Playwright `connectOverCDP`: goto, evaluate, click, fill, getByRole, content all pass ✅ (Chrome; real V8 page host, 16 Playwright tests, see "M3 status") |
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
@@ -18,7 +18,7 @@ Each milestone ends with something we can run and measure.
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022); shadow DOM (slots, retargeting, scoped style, flat tree, declarative roots) and custom elements (reactions, parser construction, built-ins, `ElementInternals`) (2026-11-04, ADR 0026) | M1 proxies; M2/M3/M4 leftovers in their status sections; idle service workers are not stopped (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022); shadow DOM (slots, retargeting, scoped style, flat tree, declarative roots) and custom elements (reactions, parser construction, built-ins, `ElementInternals`) (2026-11-04, ADR 0026); proxies per context (ADR 0027) and IndexedDB in memory (ADR 0028) (2026-11-04) | M2/M3/M4 leftovers in their status sections; idle service workers are not stopped (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
@@ -2558,12 +2558,13 @@ Notes on the verification itself:
   by "CDP crawl speed" below (0.67 vs 0.76-0.77 s, 6 of 6 twice). The
   `fetch` peak RSS margin is 0.6 MB there (see that section).
 - Firefox (M4b): no SpiderMonkey backend, TLS gaps (ADR 0003).
-- M1 proxies; Windows and macOS values are from a reference, not a capture.
+- ~~M1 proxies~~: done in "Proxies and IndexedDB" below (ADR 0027).
+  Windows and macOS values are from a reference, not a capture.
 - Workers are not CDP targets (Playwright `page.workers()` is empty); service
   workers are never stopped when idle; ~~dynamic `import()`; synchronous
   XHR; `blob:` in `fetch()`~~ and ~~`crypto`, `WebSocket`~~: done in "Web
-  platform APIs" below (ADR 0025); shader execution in WebGL; no
-  `indexedDB`; ~~`customElements`; shadow DOM~~: done in "Shadow DOM and
+  platform APIs" below (ADR 0025); shader execution in WebGL;
+  ~~no `indexedDB`~~: done in "Proxies and IndexedDB" below (ADR 0028); ~~`customElements`; shadow DOM~~: done in "Shadow DOM and
   custom elements" below (ADR 0026).
 - Frames: per-node state outside listeners, handlers, form values and
   selections is not carried over on adoption; a navigating frame's

@@ -643,7 +643,7 @@ fn entry<'a>(st: &'a mut State, origin: &str, name: &str) -> &'a mut Entry {
         .or_default()
 }
 
-fn with_db<'a>(st: &'a State, txn: u64) -> Option<&'a Database> {
+fn with_db(st: &State, txn: u64) -> Option<&Database> {
     let t = st.txns.get(&txn)?;
     st.origins.get(&t.origin)?.get(&t.name)?.db.as_ref()
 }

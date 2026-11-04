@@ -617,10 +617,6 @@ fn abort_tx(w: &Rc<Window>, tx: u32, error: Option<Arg>) {
             with_db(w, db, |d| d.meta = old);
         }
     }
-    let error = error.map(|e| {
-        // Kept as an Arg until the task makes it a handle.
-        e
-    });
     let _ = w.inbox().send(Box::new(move |js, w| {
         fire_abort(js, w, tx, error);
     }));
@@ -2001,7 +1997,7 @@ fn get_all_args(
     iface: &str,
 ) -> Result<(Range, Option<u32>, Dir), HostError> {
     // An options dictionary: a plain object that is not a key or range.
-    if cx.len() > 0
+    if !cx.is_empty()
         && cx.arg_kind(0) == ValueKind::Object
         && key_range_of(w, cx.arg_host(0)).is_none()
     {
@@ -2923,28 +2919,29 @@ fn register_cursor(reg: &mut Registry, rt: &Runtime) {
         if !with_cur(w, id, |c| c.got_value).unwrap_or(false) {
             return Err(iterated_err(w, "continue"));
         }
-        let step =
-            if cx.len() > 0 && !matches!(cx.arg_kind(0), ValueKind::Undefined | ValueKind::Null) {
-                let k = key_arg(cx, w, 0, "continue", "IDBCursor")?;
-                let (pos, dir) = with_cur(w, id, |c| (c.pos.clone(), c.dir)).ok_or_else(illegal)?;
-                if let Some((cur_key, _)) = pos {
-                    let bad = match dir {
-                        Dir::Next | Dir::NextUnique => k <= cur_key,
-                        Dir::Prev | Dir::PrevUnique => k >= cur_key,
+        let step = if !cx.is_empty()
+            && !matches!(cx.arg_kind(0), ValueKind::Undefined | ValueKind::Null)
+        {
+            let k = key_arg(cx, w, 0, "continue", "IDBCursor")?;
+            let (pos, dir) = with_cur(w, id, |c| (c.pos.clone(), c.dir)).ok_or_else(illegal)?;
+            if let Some((cur_key, _)) = pos {
+                let bad = match dir {
+                    Dir::Next | Dir::NextUnique => k <= cur_key,
+                    Dir::Prev | Dir::PrevUnique => k >= cur_key,
+                };
+                if bad {
+                    let msg = if matches!(dir, Dir::Next | Dir::NextUnique) {
+                        "The parameter is less than or equal to this cursor's position."
+                    } else {
+                        "The parameter is greater than or equal to this cursor's position."
                     };
-                    if bad {
-                        let msg = if matches!(dir, Dir::Next | Dir::NextUnique) {
-                            "The parameter is less than or equal to this cursor's position."
-                        } else {
-                            "The parameter is greater than or equal to this cursor's position."
-                        };
-                        return Err(exec_err(w, "DataError", "continue", "IDBCursor", msg));
-                    }
+                    return Err(exec_err(w, "DataError", "continue", "IDBCursor", msg));
                 }
-                Step::Key(k)
-            } else {
-                Step::Count(1)
-            };
+            }
+            Step::Key(k)
+        } else {
+            Step::Count(1)
+        };
         step_cursor(w, id, tx, step)?;
         cx.ret(Arg::Undefined)
     });

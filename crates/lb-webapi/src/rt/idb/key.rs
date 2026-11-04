@@ -39,10 +39,6 @@ impl Key {
             Key::Array(a) => Arg::Array(a.iter().map(Key::to_arg).collect()),
         }
     }
-
-    pub fn from_str(s: &str) -> Key {
-        Key::String(s.encode_utf16().collect())
-    }
 }
 
 impl Ord for Key {

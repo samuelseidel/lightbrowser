@@ -6,7 +6,9 @@ A small vendored subset of [web-platform-tests](https://github.com/web-platform-
 `shadow-dom` / `custom-elements` testharness files without iframes,
 testdriver, crash or tentative tests (with their `resources/`,
 `common/gc.js`, `html/resources/common.js`), taken from WPT `master`
-095dcead on 2026-11-04.
+095dcead on 2026-11-04, and the `IndexedDB` `.any.js` testharness files
+(without `idlharness`, `storage-buckets` and `.https` ones; with their
+`resources/` helpers and `common/subset-tests.js`) from the same commit.
 WPT is BSD-3-Clause licensed (`LICENSE.md`).
 
 - `MANIFEST.txt` lists the tests that run. `.any.js` tests get a generated

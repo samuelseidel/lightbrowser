@@ -47,7 +47,7 @@ cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
 
 `tests/playwright/` runs stock Playwright `connectOverCDP` against
 `lightbrowser serve` (the real V8 page host) with `viewport: null` in every
-context (ADR 0009). 21 tests (one for shadow DOM), all passing (debug and release binaries);
+context (ADR 0009). 22 tests (one for shadow DOM, one for proxies per context with `Fetch.authRequired`), all passing (debug and release binaries);
 `harness.mjs` starts `serve` and a local site.
 
 | Spec | Covers |

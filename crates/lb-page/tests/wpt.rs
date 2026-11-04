@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use common::{Resource, browser, context, serve_fn};
 
 /// Passing subtests at the time of writing; the run fails below this.
-const BASELINE_PASSES: usize = 10400;
+const BASELINE_PASSES: usize = 11700;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/wpt")
