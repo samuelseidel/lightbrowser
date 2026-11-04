@@ -426,11 +426,10 @@ impl<'a> Exec<'a> {
             Op::LoadDyn { d, base, off } => {
                 let o = self.r(*off);
                 let len = self.regs.len();
-                let mut out = [0u32; W];
-                for l in 0..W {
+                let out: [u32; W] = std::array::from_fn(|l| {
                     let r = (*base as usize + o[l] as usize).min(len - 1);
-                    out[l] = self.regs[r][l];
-                }
+                    self.regs[r][l]
+                });
                 self.regs[*d as usize] = out;
             }
             Op::StoreDyn { base, off, s } => {

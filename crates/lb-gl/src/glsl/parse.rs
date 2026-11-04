@@ -576,10 +576,7 @@ impl<'a> Parser<'a> {
 
     fn qualifiers(&mut self) -> R<Quals> {
         let mut q = Quals::default();
-        loop {
-            let Some(Tok::Ident(s)) = self.peek().cloned() else {
-                break;
-            };
+        while let Some(Tok::Ident(s)) = self.peek().cloned() {
             let line = self.line();
             match s.as_str() {
                 "const" => q.storage = Some("const"),
@@ -1048,13 +1045,13 @@ impl<'a> Parser<'a> {
             }
             _ => {}
         }
-        if storage == Storage::Input && self.stage == Stage::Vertex {
-            if ty.is_struct()
+        if storage == Storage::Input
+            && self.stage == Stage::Vertex
+            && (ty.is_struct()
                 || ty.base == Base::S(Scalar::Bool)
-                || (self.version < 300 && ty.is_array())
-            {
-                self.err(line, name, "cannot be bool, struct or array");
-            }
+                || (self.version < 300 && ty.is_array()))
+        {
+            self.err(line, name, "cannot be bool, struct or array");
         }
         if ty.is_sampler()
             && !matches!(
@@ -1810,7 +1807,7 @@ impl<'a> Parser<'a> {
     // Expressions
     // ---------------------------------------------------------------
 
-    pub fn expr(&mut self) -> R<Expr> {
+    fn expr(&mut self) -> R<Expr> {
         let mut e = self.assign_expr()?;
         while self.eat_punct(",") {
             let r = self.assign_expr()?;

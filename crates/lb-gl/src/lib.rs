@@ -3,6 +3,13 @@
 //! rasterization pipeline (clipping, triangles, lines, points, depth,
 //! stencil, blending, multisampling), textures and framebuffers.
 
+// Numeric kernels index several parallel arrays by lane or component.
+#![allow(
+    clippy::needless_range_loop,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+
 pub mod exec;
 pub mod glsl;
 pub mod image;

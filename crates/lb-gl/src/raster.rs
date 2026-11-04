@@ -209,11 +209,7 @@ fn fetch(src: &AttribSrc<'_>, vertex: u32, instance: u32, shader_int: bool) -> [
     match src {
         AttribSrc::Value(v) => *v,
         AttribSrc::Array(a) => {
-            let elem = if a.divisor == 0 {
-                vertex
-            } else {
-                instance / a.divisor
-            };
+            let elem = instance.checked_div(a.divisor).unwrap_or(vertex);
             let packed = matches!(a.ty, 0x8D9F | 0x8368);
             let esize = if packed {
                 4
@@ -738,16 +734,7 @@ impl Raster<'_, '_, '_, '_> {
                 }
                 if any {
                     self.shade_tile(
-                        tx,
-                        ty,
-                        &cov,
-                        |px, py| bary(px, py),
-                        w,
-                        provoking,
-                        &interps,
-                        front,
-                        zoff,
-                        None,
+                        tx, ty, &cov, bary, w, provoking, &interps, front, zoff, None,
                     );
                     if self.fe.aborted {
                         return;

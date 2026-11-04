@@ -2,6 +2,9 @@
 //! linking, uniforms, vertex arrays, textures, renderbuffers,
 //! framebuffers, draws, clears, blits and `readPixels`.
 
+// Pixel conversions index several parallel arrays by channel.
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
+
 use lb_gl::image::{self as gimg, Data, Format, Image, Kind};
 use lb_gl::program::{LinkOptions, Program};
 use lb_gl::raster::{self, AttribSrc, Blend, Fixed, Indices, StencilFace, Target, VertexArray};
@@ -2091,7 +2094,7 @@ fn register_uniforms(reg: &mut Registry, rt: &Runtime) {
                 g.set_error(INVALID_OPERATION);
                 return Ok(());
             }
-            if vals.is_empty() || vals.len() % comps as usize != 0 {
+            if vals.is_empty() || !vals.len().is_multiple_of(comps as usize) {
                 g.set_error(INVALID_VALUE);
                 return Ok(());
             }
@@ -2191,7 +2194,7 @@ fn register_attribs(reg: &mut Registry, rt: &Runtime) {
                 _ => 4,
             };
             let off = offset as u32;
-            if off % tsz != 0 || stride as u32 % tsz != 0 {
+            if !off.is_multiple_of(tsz) || !(stride as u32).is_multiple_of(tsz) {
                 g.set_error(INVALID_OPERATION);
                 return Ok(());
             }
@@ -3391,7 +3394,7 @@ fn register_framebuffers(reg: &mut Registry, rt: &Runtime) {
                 g.set_error(INVALID_ENUM);
                 return Ok(());
             };
-            if wd < 0 || ht < 0 || wd > 16384 || ht > 16384 || samples < 0 || samples > 4 {
+            if wd < 0 || ht < 0 || wd > 16384 || ht > 16384 || !(0..=4).contains(&samples) {
                 g.set_error(INVALID_VALUE);
                 return Ok(());
             }
@@ -3481,7 +3484,7 @@ fn register_framebuffers(reg: &mut Registry, rt: &Runtime) {
             DEPTH_ATTACHMENT => fb.depth,
             STENCIL_ATTACHMENT => fb.stencil,
             DEPTH_STENCIL_ATTACHMENT => fb.depth,
-            _ if point >= COLOR_ATTACHMENT0 && point < COLOR_ATTACHMENT0 + 8 => {
+            _ if (COLOR_ATTACHMENT0..COLOR_ATTACHMENT0 + 8).contains(&point) => {
                 fb.color[(point - COLOR_ATTACHMENT0) as usize]
             }
             _ => None,
@@ -3564,8 +3567,8 @@ fn register_framebuffers(reg: &mut Registry, rt: &Runtime) {
         drop(g);
         cx.ret(v)
     });
-    for name in ["drawBuffers"] {
-        gl_op(reg, rt, name, |cx, _w, gl| {
+    {
+        gl_op(reg, rt, "drawBuffers", |cx, _w, gl| {
             let list: Vec<u32> = arg_numbers(cx, 0)
                 .unwrap_or_default()
                 .into_iter()
@@ -3995,7 +3998,7 @@ fn draw_elements(gl: &Rc<RefCell<Gl>>, mode: u32, count: i32, ty: u32, off: f64,
         }
     };
     let off = off as usize;
-    if off % size != 0 {
+    if !off.is_multiple_of(size) {
         g.set_error(INVALID_OPERATION);
         return;
     }

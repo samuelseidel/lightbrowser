@@ -126,12 +126,10 @@ fn tokenize_line(line: &str) -> Vec<PpTok> {
         {
             while i < b.len() {
                 let d = b[i];
-                if d.is_ascii_alphanumeric() || d == '_' || d == '.' {
-                    i += 1;
-                } else if (d == '+' || d == '-')
+                let sign = (d == '+' || d == '-')
                     && matches!(b[i - 1], 'e' | 'E')
-                    && !b[start..i].iter().any(|c| *c == 'x' || *c == 'X')
-                {
+                    && !b[start..i].iter().any(|c| *c == 'x' || *c == 'X');
+                if d.is_ascii_alphanumeric() || d == '_' || d == '.' || sign {
                     i += 1;
                 } else {
                     break;

@@ -137,7 +137,7 @@ pub fn resolve(name: &str, a: &[Type], c: Ctx) -> Option<(Bi, Type)> {
     let fl = Type::FLOAT;
     let un_f = |bi: Bi| (n == 1 && is_f(&a0)).then_some((bi, a0));
     let un_f3 = |bi: Bi| (es3 && n == 1 && is_f(&a0)).then_some((bi, a0));
-    let r = match name {
+    match name {
         "radians" => un_f(Bi::Radians),
         "degrees" => un_f(Bi::Degrees),
         "sin" => un_f(Bi::Sin),
@@ -311,8 +311,7 @@ pub fn resolve(name: &str, a: &[Type], c: Ctx) -> Option<(Bi, Type)> {
             un_f(bi)
         }
         _ => texture(name, a, c),
-    };
-    r
+    }
 }
 
 fn coord_dims(dim: Dim) -> u8 {
