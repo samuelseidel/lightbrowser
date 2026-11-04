@@ -58,6 +58,7 @@ Details:
 | 0015 | OS personas: one OS axis (`OsKind`, display server, distro) in `lb-persona`; layers read OS-dependent values through `PersonaProfile` accessors with per-OS defaults; rules R17-R26; catalog and generator |
 | 0016 | Interfaces defined on demand and interface objects as lazy data properties (as Blink), fixed up natively as each is made; no startup snapshot by default; `fetch` skips the initial about:blank realm and teardown; hot functions first in `.text` (order list from a training workload) |
 | 0017 | Node refs carry a runtime-wide document key; host functions run with their receiver's window; one node wrapper per world; adoption across documents keeps identity; a removed frame's window stays usable (detached, as in Chrome) until navigation |
+| 0018 | Connection reuse as Chrome does it: one pool per browser context, groups by scheme/host/port and top-level site, 6 sockets per group with keep-alive (300 s idle), one HTTP/2 session per group with Chrome's stream dependencies, TLS sessions resumed (2 per key, single use), pooled requests on one network thread |
 
 ## Layers
 
@@ -84,7 +85,8 @@ Details:
 │              page screenshots)                                 │
 ├───────────────────────────────────────────────────────────────┤
 │ Network      lb-net: BoringSSL, own h1 writer, forked h2,      │
-│              cookies, per-destination headers                  │
+│              cookies, per-destination headers, connection      │
+│              pool (keep-alive, h2 sessions, TLS resumption)    │
 │              (cache and proxies: not yet)                      │
 ├───────────────────────────────────────────────────────────────┤
 │ Persona      lb-persona: schema, consistency rules, SFC32,     │
@@ -105,7 +107,7 @@ browser context. Nothing reads a global.
 | Bindings | Own WebIDL → Rust codegen with its own tolerant IDL parser (Blink's extended attributes parse as-is), using the Chromium IDL set for Chrome and the Gecko IDL set for Firefox. Members are filtered and ordered by a surface fixture captured from the local Chromium. | Interface list, prototype chains, property order and descriptors all match the claimed browser. This is a large fingerprint surface. |
 | TLS | BoringSSL (`boring`, `tokio-boring`, `boring-sys` FFI for unwrapped knobs) | Chrome uses BoringSSL, so the ClientHello matches exactly: GREASE, extension permutation, ALPS, brotli cert compression, ML-KEM, ML-DSA, trust_anchors, server_padding. Firefox's ciphers, sigalgs, groups and ALPN match by configuration. delegated_credentials, record_size_limit, ffdhe and Firefox's extension order need small BoringSSL patches (M4b, ADR 0003). rustls can do neither. |
 | HTTP | Own HTTP/1.1 writer (exact header-name case and order, `httparse` for responses; ADR 0011). A fork of `h2` (`vendor/h2`) exposes SETTINGS order/values, the initial WINDOW_UPDATE, pseudo-header order and the HEADERS priority block, and writes the preface before reading. h3 via quiche later. | Akamai H2 fingerprint. Pseudo-header order: Chrome `m,a,s,p`, Firefox `m,p,a,s`. |
-| Net misc | hickory-resolver, per-context cookie jar, gzip/br/zstd, at most 6 simultaneous connections per origin like Chrome (`lb_page::BrowserContext`). Planned, not built: in-memory LRU cache, HTTP and SOCKS5 proxies, connection reuse. | No disk use. |
+| Net misc | hickory-resolver, per-context cookie jar, gzip/br/zstd. Connections (`lb_net::pool`, ADR 0018): one pool per browser context; groups by scheme, host, port and top-level site (+ cross-site bit) as Chrome's socket pool groups; at most 6 sockets per group, HTTP/1.1 keep-alive (most recently used idle socket first, 300 s idle timeout), one HTTP/2 session per group with Chrome's per-stream priority blocks, the unknown-server h2 race, retry on a stale reused socket, TLS session resumption (2 sessions per key, TLS 1.3 single use). Planned, not built: in-memory LRU cache, HTTP and SOCKS5 proxies, HTTP/2 coalescing. | No disk use. Connection counts, reuse and resumed ClientHellos match Chrome on loopback (`lb-fptest site`). |
 | Request headers | `profiles/headers/chrome_153.json`: per request kind (document, iframe, script, module script, style, image, favicon, font, fetch/XHR, preflight) the header slots in h2 order, the h1 rules and Blink's observed subresource orders, captured from local Chrome for Testing 153 (69 requests kept in `profiles/headers/captures/`, plus 88 with `Accept-CH` / `Critical-CH`). `lb_net::header_profile` builds the list per hop, including the high-entropy `Sec-CH-UA-*` slots, the `Critical-CH` retry list and the subresource orders with hints; UA, client hints and language come from the persona; `Sec-Fetch-Site`, `Referer` and `Origin` are derived along redirect chains. Firefox keeps the navigation set plus a generic per-kind overlay (M4b). | Header names, case and order match Chrome per destination (ADR 0011), with and without client hints (golden test against the capture). |
 | HTML | `html5ever` tokenizer/tree builder → our own tree sink | Parses exactly like a browser. |
 | DOM | Arena of compact nodes (u32 ids), interned atoms (`string_cache`). Each document is one arena, freed in one step on navigation. | Low RAM, cache-friendly, cheap teardown. |
@@ -187,8 +189,12 @@ personas (ROADMAP, Risks).
 
 ## Process and threading model
 
-- **One process.** It has N worker threads (default: number of cores) plus one
-  network/CDP I/O thread.
+- **One process.** It has N worker threads (default: number of cores), the
+  CDP I/O thread and, started on first use, one network thread
+  (`lb_net::pool::net_runtime`) that drives every pooled connection, as
+  Chrome's network service does, so pages of one context on different
+  workers share connections (ADR 0018). `lightbrowser fetch` (one page)
+  keeps its connections on the page's worker instead.
 - **One CDP connection per client.** A Playwright `BrowserContext` maps to a
   LightBrowser context, which holds a persona, cookie jar, storage and cache
   partition. Many contexts with different personas run in one process.

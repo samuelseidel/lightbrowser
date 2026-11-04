@@ -23,6 +23,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0015](0015-os-personas.md) | OS personas: one OS axis, read through accessors | Accepted (2026-11-03) |
 | [0016](0016-lazy-interface-objects.md) | Lazy interfaces and interface objects; hot code packed at link time | Accepted (2026-11-03) |
 | [0017](0017-cross-document-nodes-and-detached-frames.md) | Nodes carry their document; one node wrapper per world; removed frames stay usable | Accepted (2026-11-03) |
+| [0018](0018-connection-reuse.md) | Connection reuse as Chrome does it: per-context pool, HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS resumption, network thread | Accepted (2026-11-04) |
 
 ## Adding an ADR
 

@@ -18,21 +18,21 @@ Each milestone ends with something we can run and measure.
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done | M1 proxies and connection reuse; M2/M3/M4 leftovers in their status sections |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018) | M1 proxies; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
-| M6 Performance | Snapshot, memory, binary size (40.39 MB, < 50 MB met), `bench/` runner, screenshots, lazy interfaces (ADR 0016), Lightpanda comparison (6 of 6 checks pass: wall time, peak RSS and CPU in `fetch` and CDP) done | Service workers; the `fetch` peak RSS margin over Lightpanda is small outside the recorded run (see "M6 status: Lightpanda comparison") |
+| M6 Performance | Snapshot, memory, binary size (40.51 MB, < 50 MB met), `bench/` runner, screenshots, lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018) | Service workers; CDP crawl wall time 0.82 vs Lightpanda 0.78 s since the corpus server stopped stalling reused connections (5 of 6 checks pass, see "Connection reuse") |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
+| Idle RSS < 15 MB | Met: 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
+| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
 | Realm creation < 5 ms | Met: 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | Met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
+| Wall time, peak RSS and CPU <= Lightpanda | 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -62,8 +62,9 @@ Not done, moved:
 - Firefox TLS gaps and a Firefox 128 re-capture → M4b.
 - Exact HTTP/1.1 header-name case (hyper title-cases `sec-ch-ua`) → done in
   M4 with our own h1 writer (ADR 0011).
-- Connection reuse and a TLS session cache → M2. Today every fetch is a new
-  connection, so there is no `pre_shared_key`.
+- Connection reuse and a TLS session cache → M2. Done 2026-11-04 (ADR 0018,
+  "Connection reuse" below): pooled contexts resume sessions as Chrome
+  does.
 
 ## M2 status (2026-11-03)
 
@@ -1115,7 +1116,7 @@ flight; medians of the two runs):
 Still open: stylesheets are fetched only after DOMContentLoaded, so a
 deferred script that measures layout sees unstyled boxes (Chrome blocks
 scripts on pending stylesheets); no HTTP keep-alive reuse yet (Chrome
-reuses its 6 connections).
+reuses its 6 connections; done 2026-11-04, ADR 0018).
 
 Refreshed run (`python3 bench/run.py`, 5 runs x 50 pages, release binary
 44.37 MB, sha256 `6aa2ebe44ac8b5a2`, tree at `ebe5f36` plus the
@@ -2075,6 +2076,89 @@ gate); T-010 fp 0 and `--input human` beh 0 (Windows 10 persona, fresh
 `serve` per run); fmt, clippy (chrome workspace and the firefox checks)
 clean; tests of `lb-dom`, `lb-js`, `lb-webapi`, `lb-page` (every target),
 `lb-cdp`, `lightbrowser` and the firefox family pass.
+
+## Connection reuse: keep-alive, HTTP/2 sessions, TLS resumption (2026-11-04)
+
+Closes the M1 leftover "connection reuse and a TLS session cache" and the
+"no HTTP keep-alive" item (ADR 0018). Every request used to open and close
+its own connection (at most 6 at a time per origin). Chrome's behaviour
+was measured first with a new page server, `lb-fptest site` (plain
+HTTP/1.1 or TLS with h2/http1.1 by ALPN; records per connection the
+ClientHello, the requests and the client's HTTP/2 frames), driving local
+Chrome for Testing 153.0.8010.12 through Playwright on loopback, after its
+start-up traffic (a fresh Chrome flushes its socket pools once, netlog
+"Cert verifier changed", which made the first `--dump-dom` runs look like
+13 connections):
+
+| Page (loopback) | Chrome 153 | LightBrowser before | LightBrowser now |
+|---|---|---|---|
+| HTTP/1.1, page + 2 CSS + 2 JS + 20 images + favicon | 6 connections, 4-5 requests each, the page's connection reused | 26 connections | 6 connections, 4-6 requests each |
+| same over TLS (http/1.1) | 6; connections 2 and 3 resume (JA4 `t13d1518h2_8daaf6152771_a12c4694fc1a`, `pre_shared_key` last), 4 full | 26 full handshakes | 6; 2 resumed with the same JA4, 4 full |
+| same over HTTP/2 | 1 connection, 26 streams | 26 connections | 1 connection |
+| 12 images at once from an HTTPS server not seen before | 6 TLS+h2 handshakes, 1 carries all 12 requests, 5 closed without a frame | 12 connections (6 at a time) | same as Chrome |
+| frame of a cross-site page, then that URL as a page | separate connections (group key has the top-level site) | separate connections | separate connections |
+| second navigation after 12 s / 290 s / 315 s idle | reused / reused / new connection | new connection | reused (300 s timeout) |
+
+HTTP/2 priority blocks per stream follow Chrome's `Http2PriorityDependencies`
+(checked against Chrome's frames: `/` 0:256, CSS `u=0` 0:256 then on stream
+3, scripts `u=2` weight 183 on the newest open more-urgent stream, images
+147, favicon `u=1, i` 0:220); the h2 fork takes a per-request urgency
+(`vendor/h2/LIGHTBROWSER.md`). The first HEADERS of a navigation is
+unchanged, so the Akamai text and `cargo test -p lb-net --test fingerprint`
+(a `NetContext` without a pool, never resuming) are unchanged and pass.
+Retries: a request that dies on a reused socket before any response byte,
+or is refused by `GOAWAY`, is sent once more on a new connection.
+
+Tests: `lb-net` `tests/pool.rs` (8: the table above with Chrome's numbers,
+contexts never share, stale reuse retried, `Connection: close`), `lb-page`
+`tests/connections.rs` (page loads: 6 connections over HTTP/1.1, 1 over
+h2). Pooled requests run on one network thread (`lb_net::pool::net_runtime`,
+started on first use); `lightbrowser fetch` keeps them on its page thread.
+
+**Bench.** The corpus server (`bench/serve_corpus.py`, Python
+`http.server`) wrote each response head and body in two sends with Nagle
+on, so on a kept-alive connection every response after the first waited
+for the client's 40 ms delayed ACK (curl: 3 ms, then 42 and 44 ms). With
+keep-alive LightBrowser went from 1.0 to 6.9 s per `fetch` crawl on it.
+Lightpanda, which reuses connections, had paid the same: its earlier
+3.34 s (`fetch`) and 5.08 s (CDP) were mostly these waits. The server now
+sets `TCP_NODELAY`, as nginx, Go and most servers do. Numbers on the
+fixed server (median of runs, loopback, Lightpanda 1.1.0-nightly.11582):
+
+| | old build `cf3ac89` (3 runs) | this build (5 runs, `bench/results/2026-11-04-cb0a5b0.json`) | Lightpanda |
+|---|---|---|---|
+| `fetch` wall | 1.06 s | 0.93 s | 1.09 s |
+| `fetch` peak RSS | 22.8 MB | 22.4 MB | 24.4 MB |
+| `fetch` CPU | 0.86 s | 0.82 s | 1.07 s |
+| CDP wall | 0.91 s | 0.82 s | 0.78 s |
+| CDP peak RSS | 27.3 MB | 27.3 MB | 31.4 MB |
+| CDP CPU | 0.62 s | 0.62 s | 0.80 s |
+
+Keep-alive makes LightBrowser's crawls 10-12 % faster at the same CPU.
+**5 of 6 Lightpanda checks pass**: CDP wall time fails, 0.82 vs 0.78 s
+(page median 15.7 vs 15.0 ms; `goto` 12.9 vs 11.6 ms). The old build fails
+it too on the fixed server (0.91 vs 0.78 s), so the earlier 6 of 6 rested
+on the server's delayed-ACK waits. Running the pool on the page thread
+in `serve` as well did not close the gap (0.80 s); the remaining time is
+in page loading (stylesheets fetched after `DOMContentLoaded`, no preload
+scanner), an open item of its own. Chromium's CDP crawl went from 10.5 to
+7.2 s on the fixed server.
+
+Other checks on this build: release binary 40,505,208 bytes (40.51 MB,
++0.09 MB); hot-symbol order regenerated (`tools/hot_symbols`); idle RSS
+6.29 MB; realm 1.31 / 1.09 ms; no files, `write_bytes` 0;
+`tools/surface_diff` old vs new: identical for 3 personas, `fetch` and
+CDP; WPT subset 2556/2788; Playwright 20/20; `pages` (fingerprint-report,
+8 personas) 0 mismatch; T-010 fp 0 and `--input human` beh 0 (Windows 10
+persona, fresh `serve`).
+
+Not done (ADR 0018): HTTP/2 coalescing across host names, privacy-mode
+groups (the credentials mode does not reach `lb-net`), preconnects,
+PRIORITY frames when Chrome raises visible images. Chrome asked
+`/favicon.ico` again on every navigation in these runs; LightBrowser asks
+once per context (unchanged). Image and script `priority` values come from
+the header profile (`u=2, i` / `u=1`), where Chrome sent `i` / `u=2` on
+this page (it depends on position and viewport).
 
 ## Risks
 

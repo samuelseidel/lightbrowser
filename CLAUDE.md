@@ -26,14 +26,20 @@ signals are always the host's. M6: lazy interface
 objects (ADR 0016: lazy data properties of the global as in Blink,
 templates on demand, no startup snapshot by default; realm 1.4 ms), idle
 RSS 6.2 MB, `bench/` runner (every corpus page faster than headless
-Chromium's median), release binary 40.39 MB against < 50 MB (the user
+Chromium's median), release binary 40.51 MB against < 50 MB (the user
 raised the budget from < 40 MB, ADR 0013 revision 4; ICU data in 4 KiB
 zstd chunks paged in on first touch, no unwind tables, V8 code only
 off-by-default flags reach not linked, root crate and bindings at
 `opt-level = "s"`, hot code first in `.text` from
 `bin/lightbrowser/hot-symbols.txt`). Lightpanda comparison (user-approved
-1.1.0 nightly, loopback only, telemetry off; "M6 status: Lightpanda
-comparison", `bench/results/2026-11-03-af2c264.json`): 6 of 6 checks
+1.1.0 nightly, loopback only, telemetry off): since 2026-11-04 the corpus
+server sets `TCP_NODELAY` (it stalled every reused connection 40 ms,
+which had slowed Lightpanda) and **5 of 6 checks pass**
+(`bench/results/2026-11-04-cb0a5b0.json`: `fetch` wall 0.93 vs 1.09 s,
+peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall 0.82 vs 0.78 s
+fails, 27.3 vs 31.4 MB, 0.62 vs 0.80 s; see "Connection reuse" in
+ROADMAP). Before that fix ("M6 status: Lightpanda comparison",
+`bench/results/2026-11-03-af2c264.json`): 6 of 6 checks
 pass (`fetch` wall 1.08 vs 3.37 s, peak RSS 22.1 vs 24.5 MB, CPU 0.88 vs
 1.23 s; CDP 0.99 vs 5.04 s, 27.0 vs 31.4 MB, 0.68 vs 0.95 s); the
 `fetch` peak RSS margin is small and moves with the code layout and the
@@ -45,8 +51,14 @@ regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), workers and service workers, shader execution in
-WebGL, HTTP keep-alive, stylesheets blocking scripts, CSS background
-images in screenshots. Frames (ADR 0017): node refs carry a runtime-wide
+WebGL, stylesheets blocking scripts, CSS background images in
+screenshots, CDP crawl wall time vs Lightpanda. Connections (ADR 0018):
+one pool per browser context as Chrome's socket pools (6 per group,
+HTTP/1.1 keep-alive with 300 s idle timeout, one HTTP/2 session per group
+with Chrome's per-stream priority blocks, groups partitioned by top-level
+site, TLS session resumption), driven by one network thread; connection
+counts, reuse and resumed ClientHellos match local Chrome on loopback
+(`lb-fptest site`, `lb-net` `tests/pool.rs`). Frames (ADR 0017): node refs carry a runtime-wide
 document key, so one frame's DOM methods act on another frame's nodes,
 nodes keep one wrapper per world and adoption keeps identity; a removed
 frame's window stays usable, detached, as in Chrome; `Image`/`Audio`/
@@ -64,8 +76,8 @@ and the status sections in `docs/ROADMAP.md`.
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R26, sfc32 done; OS axis and per-OS accessors (M7), `profiles/catalog/` + `gen_personas` example; optional `preferences`, media devices, battery |
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
-| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints | Done for Chrome; cookies shared across clones; Firefox headers generic; cache, proxies, connection reuse open (`lb-page` caps 6 connections per origin) |
-| `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder | M1 done |
+| `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints, connection pool (`pool.rs`, ADR 0018) | Done for Chrome; cookies shared across clones; Firefox headers generic; keep-alive, HTTP/2 sessions and TLS resumption per context (a `NetContext` without a pool still uses one connection per request); cache, proxies, HTTP/2 coalescing open |
+| `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use | M1 done; `site` (ADR 0018) |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done (one arena per document; `import_node_mapped` for adoption across documents); no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
 | `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`) and the OS-gated surface (share, bluetooth, codecs, keyboard, gpu). WebGL runs no shaders; no workers, crypto or WebSocket |
@@ -100,6 +112,12 @@ cargo test -p lb-page --test os_apis
 cargo test -p lb-net --test accept_ch
 # Network fingerprint check vs profiles/tls (loopback only, prints JA3/JA4/H2)
 cargo test -p lb-net --test fingerprint -- --nocapture
+# Connection reuse vs Chrome's numbers (keep-alive, h2, resumption; loopback)
+cargo test -p lb-net --test pool
+cargo test -p lb-page --test connections
+# Page server that records connections, for comparing with local Chrome
+# (add --disable-background-networking when driving Chrome by hand)
+./target/debug/lb-fptest site --listen 127.0.0.1:8443 --images 20 --delay-ms 50 --seconds 20
 # Fetch from a local test server (self-signed cert)
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
 # WPT subset (loopback) and the Playwright CDP smoke test

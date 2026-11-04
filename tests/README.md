@@ -292,3 +292,17 @@ What the tool does with the captures:
 line per connection (JA3, JA4, extension order, Akamai H2, and with
 `--alpn http/1.1` the clear-text request headers). Use it for checking our own
 client or for reading Chrome's `sec-ch-ua` and header order.
+
+## Connection reuse vs local Chrome (ADR 0018)
+
+`lb-fptest site` serves a page with subresources (plain HTTP/1.1, or TLS
+with h2/http1.1 by ALPN), keeps connections open and prints, per
+connection, the ClientHello (JA4, resumed or not), the ALPN and the
+requests with their HTTP/2 stream and priority. Drive local Chrome at it
+through Playwright (its default flags keep background networking off), go
+to `about:blank` first and wait 3 s: a fresh Chrome flushes its socket
+pools once at start-up ("Cert verifier changed" in a netlog), which
+otherwise shows up as extra connections. By hand, pass
+`--disable-background-networking --disable-component-update` as above.
+The numbers Chrome 153 gave are the expectations in
+`crates/lb-net/tests/pool.rs`.
