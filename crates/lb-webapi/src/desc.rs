@@ -178,6 +178,18 @@ impl Pooled for S {
     }
 }
 
+impl Pooled for GlobalProp {
+    fn pool() -> &'static [Self] {
+        &crate::generated::chromium::WORKER_PROPS
+    }
+}
+
+impl Pooled for IfaceOrder {
+    fn pool() -> &'static [Self] {
+        &crate::generated::chromium::IFACE_ORDERS
+    }
+}
+
 impl Pooled for (S, ConstValue) {
     fn pool() -> &'static [Self] {
         &crate::generated::chromium::CONSTS
@@ -538,6 +550,44 @@ pub struct Table {
     /// Members Chrome has on some OSes only (`navigator.share`, Web
     /// Bluetooth). Realm setup deletes the gates the persona turns off.
     pub os_gated: &'static [OsGated],
+    /// Worker global scopes: dedicated, then shared (ADR 0021).
+    pub workers: &'static [WorkerScopeDesc],
+}
+
+/// One worker global scope (`DedicatedWorkerGlobalScope`,
+/// `SharedWorkerGlobalScope`), from the captured worker surface.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorkerScopeDesc {
+    /// The global interface.
+    pub global: S,
+    /// `Exposed::DEDICATED_WORKER` or `Exposed::SHARED_WORKER`.
+    pub exposed: Exposed,
+    /// Own properties of the global, in Chrome's order.
+    pub props: L<GlobalProp>,
+    /// Index into `props` from which properties come after the engine's
+    /// late built-ins.
+    pub late_start: usize,
+    /// Interfaces whose members or order differ from their table entry in
+    /// this scope (`Performance` without `timing`, ...).
+    pub overrides: L<IfaceOrder>,
+}
+
+impl WorkerScopeDesc {
+    /// The order override of `iface` in this scope, if any.
+    pub fn order(&self, iface: &str) -> Option<&'static IfaceOrder> {
+        self.overrides.get().iter().find(|o| o.iface == iface)
+    }
+}
+
+/// An interface's prototype and static members in one worker scope (slots
+/// of the interface's own member lists).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IfaceOrder {
+    pub iface: S,
+    pub proto_order: L<Slot>,
+    /// Prototype members from this index on come after `constructor`.
+    pub ctor_at: usize,
+    pub static_order: L<Slot>,
 }
 
 /// One OS-gated member: `owner` is an interface (prototype or static
@@ -556,5 +606,9 @@ impl Table {
     }
     pub fn namespace(&self, name: &str) -> Option<&'static NamespaceDesc> {
         self.namespaces.iter().find(|n| n.name.get() == name)
+    }
+    /// The worker scope whose global is `global`.
+    pub fn worker(&self, global: &str) -> Option<&'static WorkerScopeDesc> {
+        self.workers.iter().find(|w| w.global.get() == global)
     }
 }

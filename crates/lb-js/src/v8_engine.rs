@@ -20,6 +20,7 @@ use lb_persona::{BrowserFamily, Persona};
 
 pub use v8;
 
+mod clone;
 #[doc(hidden)]
 pub mod icu_data;
 mod inspect;
@@ -27,6 +28,7 @@ mod realm_ops;
 mod snapshot;
 #[doc(hidden)]
 pub mod unused_v8;
+pub use clone::{HostWriter, Serialized};
 pub use inspect::{Caught, Inspected, InspectedObject, PromiseOutcome, PropertyEntry};
 pub use realm_ops::RealmOps;
 pub use snapshot::SnapshotStatus;
@@ -1578,6 +1580,36 @@ impl Engine {
         })
     }
 
+    /// Structured-clone a held value of `realm` (see [`Serialized`]);
+    /// `transfer` are held `ArrayBuffer`s. `Err` is a `DataCloneError`
+    /// message.
+    pub fn serialize(
+        &mut self,
+        realm: RealmId,
+        value: Handle,
+        transfer: &[Handle],
+        host: HostWriter<'_>,
+    ) -> Result<Serialized, JsError> {
+        self.run(realm, |scope, state| {
+            clone::serialize_handle(scope, state, value, transfer, host)
+                .map_err(|m| JsError::new(JsErrorKind::Exception, m))
+        })
+    }
+
+    /// Rebuild a structured clone in `realm`; host objects of the stream
+    /// are wrapped from `hosts` (by index).
+    pub fn deserialize(
+        &mut self,
+        realm: RealmId,
+        s: &Serialized,
+        hosts: &[(InterfaceId, HostRef)],
+    ) -> Result<Handle, JsError> {
+        self.run(realm, |scope, state| {
+            clone::deserialize_handle(scope, state, realm, s, hosts)
+                .map_err(|m| JsError::new(JsErrorKind::Exception, m))
+        })
+    }
+
     /// The realm's global object as a handle.
     pub fn global(&mut self, realm: RealmId) -> Result<Handle, JsError> {
         self.run(realm, |scope, state| {
@@ -2975,6 +3007,34 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
     /// Forget a handle (e.g. a cleared timer's callback).
     pub fn release(&mut self, h: Handle) {
         self.state.borrow_mut().handles.remove(h.idx, h.generation);
+    }
+
+    /// Whether a held value is an `ArrayBuffer` (not shared).
+    pub fn is_array_buffer(&mut self, h: Handle) -> bool {
+        load_handle(self.scope, &self.state, h).is_ok_and(|v| v.is_array_buffer())
+    }
+
+    /// Structured-clone a held value (see [`Serialized`]); `transfer` are
+    /// held `ArrayBuffer`s. `Err` is a `DataCloneError` message; a
+    /// getter that threw during serialization leaves its exception
+    /// caught (the caller throws the `DataCloneError` instead).
+    pub fn serialize(
+        &mut self,
+        value: Handle,
+        transfer: &[Handle],
+        host: HostWriter<'_>,
+    ) -> Result<Serialized, String> {
+        clone::serialize_handle(self.scope, &self.state, value, transfer, host)
+    }
+
+    /// Rebuild a structured clone in the call's realm (or its wrap realm).
+    pub fn deserialize(
+        &mut self,
+        s: &Serialized,
+        hosts: &[(InterfaceId, HostRef)],
+    ) -> Result<Handle, String> {
+        let realm = self.wrap_realm.unwrap_or(self.realm);
+        clone::deserialize_handle(self.scope, &self.state, realm, s, hosts)
     }
 
     /// Queue a held function as a microtask (`queueMicrotask`).

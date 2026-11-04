@@ -14,8 +14,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde_json::Value;
 
 use crate::ir::{
-    Attr, AttrTy, ConstV, Coverage, GlobalProp, Interface, Iterable, Namespace, Op, OpKind, Slot,
-    SymIter, Table,
+    Attr, AttrTy, ConstV, Coverage, GlobalProp, IfaceOrder, Interface, Iterable, Namespace, Op,
+    OpKind, Slot, SymIter, Table, WorkerScope,
 };
 use crate::model::{Interface as IdlInterface, MemberInfo, Model};
 use crate::parse::{DefKind, ExtValue, MemberKind, Special, Type, required_args};
@@ -128,12 +128,9 @@ struct Fixture {
     worker: HashSet<String>,
 }
 
-fn load_fixture(v: &Value) -> Result<Fixture, String> {
+fn load_interfaces(v: &Value) -> HashMap<String, FixIface> {
     let mut interfaces = HashMap::new();
-    for (name, f) in v["interfaces"]
-        .as_object()
-        .ok_or("fixture: no interfaces")?
-    {
+    for (name, f) in v.as_object().into_iter().flatten() {
         interfaces.insert(
             name.clone(),
             FixIface {
@@ -152,6 +149,14 @@ fn load_fixture(v: &Value) -> Result<Fixture, String> {
             },
         );
     }
+    interfaces
+}
+
+fn load_fixture(v: &Value) -> Result<Fixture, String> {
+    if v["interfaces"].as_object().is_none() {
+        return Err("fixture: no interfaces".into());
+    }
+    let interfaces = load_interfaces(&v["interfaces"]);
     let window = fix_props(&v["windowProps"]);
     if window.is_empty() {
         return Err("fixture: no windowProps".into());
@@ -167,6 +172,41 @@ fn load_fixture(v: &Value) -> Result<Fixture, String> {
         window,
         worker,
     })
+}
+
+/// One worker global scope of the worker fixture
+/// (`tests/fixtures/chromium_153_worker_surface.json`).
+struct WorkerFix {
+    /// The global interface (first entry of the prototype chain).
+    global: String,
+    exposed: u16,
+    props: Vec<FixProp>,
+    interfaces: HashMap<String, FixIface>,
+}
+
+fn load_worker_fixture(v: &Value) -> Result<Vec<WorkerFix>, String> {
+    let mut out = Vec::new();
+    for (key, bit) in [
+        ("dedicated", exposed::DEDICATED_WORKER),
+        ("shared", exposed::SHARED_WORKER),
+    ] {
+        let w = &v[key];
+        let global = w["protoChain"][0]
+            .as_str()
+            .ok_or_else(|| format!("worker fixture: {key} has no protoChain"))?
+            .to_owned();
+        let props = fix_props(&w["globalProps"]);
+        if props.is_empty() {
+            return Err(format!("worker fixture: {key} has no globalProps"));
+        }
+        out.push(WorkerFix {
+            global,
+            exposed: bit,
+            props,
+            interfaces: load_interfaces(&w["interfaces"]),
+        });
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -885,9 +925,18 @@ fn enabled_features(
 /// arbiter, captured in a secure context). With `insecure`, a capture of a
 /// non-secure page (`about:blank`), everything it lacks is marked secure
 /// only.
-pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result<Table, String> {
+pub fn build(
+    model: &Model,
+    fixture: &Value,
+    insecure: Option<&Value>,
+    workers: Option<&Value>,
+) -> Result<Table, String> {
     let fix = load_fixture(fixture)?;
     let insecure = insecure.map(load_fixture).transpose()?;
+    let workers = workers
+        .map(load_worker_fixture)
+        .transpose()?
+        .unwrap_or_default();
     let mut cov = Coverage {
         warnings: model.warnings.clone(),
         ..Coverage::default()
@@ -921,71 +970,74 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
     let on = enabled_features(model, &fix, &derived, &window_names);
     let enabled = |c: &Cand| c.features.iter().all(|f| on.contains(f));
 
-    // Window props, classified.
+    // Global props of one scope, classified: `props` are the global's own
+    // properties, `ifaces` the scope's captured interfaces, `global` the
+    // global interface's IDL candidates.
+    let classify = |props: &[FixProp], ifaces: &HashMap<String, FixIface>, global: &Derived| {
+        let mut out = Vec::new();
+        for p in props {
+            let n = p.name.clone();
+            let fix_alias = ifaces
+                .get(&n)
+                .and_then(|f| f.ctor_to_string.as_ref())
+                .and_then(|s| {
+                    s.strip_prefix("function ")
+                        .and_then(|s| s.split('(').next())
+                        .map(str::to_owned)
+                });
+            let prop =
+                if let Some(t) = alias_of.get(&n) {
+                    GlobalProp::Alias {
+                        name: n,
+                        target: t.clone(),
+                    }
+                } else if let Some(t) = fix_alias.filter(|t| *t != n && is_interface(t)) {
+                    GlobalProp::Alias { name: n, target: t }
+                } else if is_interface(&n) {
+                    GlobalProp::Interface(n)
+                } else if let Some(t) = factory_of.get(&n) {
+                    GlobalProp::LegacyFactory {
+                        name: n,
+                        iface: t.clone(),
+                    }
+                } else if model
+                    .interfaces
+                    .get(&n)
+                    .is_some_and(|i| i.kind == DefKind::Namespace)
+                {
+                    GlobalProp::Namespace(n)
+                } else if let Some(c) = global.cands.iter().find(|c| {
+                    c.place == Place::Instance && c.name == n && c.kind.code() == p.kind()
+                }) {
+                    match c.kind {
+                        CandKind::Attr(_) => GlobalProp::Attr(n),
+                        _ => GlobalProp::Op(n),
+                    }
+                } else if V8_GLOBALS.contains(&n.as_str()) || ifaces.contains_key(&n) {
+                    GlobalProp::Builtin(n)
+                } else {
+                    GlobalProp::Other(n)
+                };
+            out.push(prop);
+        }
+        out
+    };
     let window_derived = derived.get("Window").ok_or("IDL has no Window")?;
-    let mut window_props = Vec::new();
-    for p in &fix.window {
-        let n = p.name.clone();
-        let fix_alias = fix
-            .interfaces
-            .get(&n)
-            .and_then(|f| f.ctor_to_string.as_ref())
-            .and_then(|s| {
-                s.strip_prefix("function ")
-                    .and_then(|s| s.split('(').next())
-                    .map(str::to_owned)
-            });
-        let prop = if let Some(t) = alias_of.get(&n) {
-            GlobalProp::Alias {
-                name: n,
-                target: t.clone(),
-            }
-        } else if let Some(t) = fix_alias.filter(|t| *t != n && is_interface(t)) {
-            GlobalProp::Alias { name: n, target: t }
-        } else if is_interface(&n) {
-            GlobalProp::Interface(n)
-        } else if let Some(t) = factory_of.get(&n) {
-            GlobalProp::LegacyFactory {
-                name: n,
-                iface: t.clone(),
-            }
-        } else if model
-            .interfaces
-            .get(&n)
-            .is_some_and(|i| i.kind == DefKind::Namespace)
-        {
-            GlobalProp::Namespace(n)
-        } else if let Some(c) = window_derived
-            .cands
-            .iter()
-            .find(|c| c.place == Place::Instance && c.name == n && c.kind.code() == p.kind())
-        {
-            match c.kind {
-                CandKind::Attr(_) => GlobalProp::Attr(n),
-                _ => GlobalProp::Op(n),
-            }
-        } else if V8_GLOBALS.contains(&n.as_str()) || fix.interfaces.contains_key(&n) {
-            GlobalProp::Builtin(n)
-        } else {
-            GlobalProp::Other(n)
-        };
-        window_props.push(prop);
-    }
+    let window_props = classify(&fix.window, &fix.interfaces, window_derived);
     cov.window_props = window_props.len();
     cov.window_props_resolved = window_props
         .iter()
         .filter(|p| !matches!(p, GlobalProp::Other(_)))
         .count();
-    // First engine built-in after the first Blink property.
-    let first_blink = window_props
-        .iter()
-        .position(|p| !matches!(p, GlobalProp::Builtin(_)))
-        .unwrap_or(0);
-    let window_late_start = window_props
-        .iter()
-        .skip(first_blink)
-        .position(|p| matches!(p, GlobalProp::Builtin(_) | GlobalProp::Other(_)))
-        .map_or(window_props.len(), |i| i + first_blink);
+    let window_late_start = late_start(&window_props);
+    // The same for each worker scope.
+    let mut worker_props: Vec<Vec<GlobalProp>> = Vec::new();
+    for w in &workers {
+        let d = derived
+            .get(&w.global)
+            .ok_or_else(|| format!("IDL has no {}", w.global))?;
+        worker_props.push(classify(&w.props, &w.interfaces, d));
+    }
 
     // Interfaces in window order, then worker-only ones.
     let mut names: Vec<String> = Vec::new();
@@ -1002,16 +1054,35 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
         }
     }
     let window_iface_count = names.len();
-    let mut worker_only: Vec<&String> = fix
-        .worker
-        .iter()
-        .filter(|n| is_interface(n) && !seen.contains(*n))
-        .collect();
+    // Worker-only interfaces, in name order; with a worker fixture, every
+    // interface of a worker global that the window lacks, described by
+    // the first scope that has it.
+    let mut worker_only: Vec<String> = if workers.is_empty() {
+        fix.worker
+            .iter()
+            .filter(|n| is_interface(n) && !seen.contains(*n))
+            .cloned()
+            .collect()
+    } else {
+        workers
+            .iter()
+            .zip(&worker_props)
+            .flat_map(|(_, props)| props.iter())
+            .filter_map(|p| match p {
+                GlobalProp::Interface(n) => Some(n.clone()),
+                GlobalProp::Alias { target, .. } => Some(target.clone()),
+                _ => None,
+            })
+            .filter(|n| !seen.contains(n))
+            .collect()
+    };
     worker_only.sort();
+    worker_only.dedup();
     for n in worker_only {
         seen.insert(n.clone());
-        names.push(n.clone());
+        names.push(n);
     }
+    let worker_fixture = |name: &str| workers.iter().find_map(|w| w.interfaces.get(name));
 
     let mut out_ifaces: Vec<Interface> = Vec::new();
     for (pos, name) in names.iter().enumerate() {
@@ -1019,7 +1090,11 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
         let d = &derived[name];
         let mut out = base_interface(iface, d);
         let in_window = pos < window_iface_count;
-        let fixture = fix.interfaces.get(name).filter(|_| in_window);
+        let fixture = if in_window {
+            fix.interfaces.get(name)
+        } else {
+            worker_fixture(name)
+        };
         if in_window {
             cov.fixture_interfaces += 1;
             cov.idl_interfaces += 1;
@@ -1117,10 +1192,20 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
                 out.unscopables = u;
             }
             if out.is_global {
-                // Members of the global come from the window's own props.
+                // Members of the global come from its own props (the
+                // window's, or a worker scope's).
+                let (gprops, classified, late_from): (&[FixProp], &[GlobalProp], usize) =
+                    match workers.iter().position(|w| &w.global == name) {
+                        Some(k) => (
+                            &workers[k].props,
+                            &worker_props[k],
+                            late_start(&worker_props[k]),
+                        ),
+                        None => (&fix.window, &window_props, window_late_start),
+                    };
                 let mut b = Builder { out: &mut out };
                 let mut slots = Vec::new();
-                for (i, (p, gp)) in fix.window.iter().zip(&window_props).enumerate() {
+                for (i, (p, gp)) in gprops.iter().zip(classified).enumerate() {
                     if !matches!(gp, GlobalProp::Attr(_) | GlobalProp::Op(_)) {
                         continue;
                     }
@@ -1128,7 +1213,7 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
                         name,
                         std::slice::from_ref(p),
                         Place::Instance,
-                        if i >= window_late_start { 0 } else { 1 },
+                        if i >= late_from { 0 } else { 1 },
                         &d.cands,
                         &mut b,
                         &mut cov,
@@ -1261,21 +1346,37 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
             }
         }
     }
+    // Worker scopes: their global props and order overrides.
+    let mut worker_scopes = Vec::new();
+    for (w, props) in workers.iter().zip(&worker_props) {
+        let overrides = worker_overrides(w, props, &mut out_ifaces, &derived);
+        worker_scopes.push(WorkerScope {
+            global: w.global.clone(),
+            exposed: w.exposed,
+            props: props.clone(),
+            late_start: late_start(props),
+            overrides,
+        });
+    }
     let ordered = topo_sort(out_ifaces);
 
-    // Namespaces on the window.
-    let mut namespaces = Vec::new();
-    for p in &window_props {
+    // Namespaces on the window, then those only workers have.
+    let mut namespaces: Vec<Namespace> = Vec::new();
+    for p in window_props.iter().chain(worker_props.iter().flatten()) {
         let GlobalProp::Namespace(n) = p else {
             continue;
         };
+        if namespaces.iter().any(|x| &x.name == n) {
+            continue;
+        }
         let iface = &model.interfaces[n];
         let d = &derived[n];
         let mut tmp = empty_interface(n);
         let cands: Vec<&Cand> = d
             .cands
             .iter()
-            .filter(|c| c.place == Place::Static && enabled(c) && c.exposed & exposed::WINDOW != 0)
+            .filter(|c| c.place == Place::Static && enabled(c))
+            .filter(|c| c.exposed & (exposed::WINDOW | exposed::WORKER) != 0)
             .collect();
         let mut b = Builder { out: &mut tmp };
         let mut order = Vec::new();
@@ -1321,6 +1422,7 @@ pub fn build(model: &Model, fixture: &Value, insecure: Option<&Value>) -> Result
         window_late_start,
         window_secure_only,
         os_gated: Vec::new(),
+        workers: worker_scopes,
         coverage: cov,
     })
 }
@@ -1435,6 +1537,147 @@ pub fn overlay_gates(
         }
     }
     Ok(out)
+}
+
+/// First property Chrome installs after the engine's late built-ins: the
+/// first engine global (or unknown property) after the first Blink one.
+fn late_start(props: &[GlobalProp]) -> usize {
+    let first_blink = props
+        .iter()
+        .position(|p| !matches!(p, GlobalProp::Builtin(_)))
+        .unwrap_or(0);
+    props
+        .iter()
+        .skip(first_blink)
+        .position(|p| matches!(p, GlobalProp::Builtin(_) | GlobalProp::Other(_)))
+        .map_or(props.len(), |i| i + first_blink)
+}
+
+/// The slot of `iface`'s member `p` at `place`, reusing the interface's
+/// member of that name and kind when it has one, else adding it (from the
+/// IDL candidate, or from the fixture alone).
+fn worker_slot(iface: &mut Interface, p: &FixProp, place: Place, cands: &[Cand]) -> Slot {
+    let is_static = place == Place::Static;
+    match p.kind() {
+        'v' => {
+            if let Some(i) = iface.constants.iter().position(|(n, _)| *n == p.name) {
+                return Slot::Const(i);
+            }
+        }
+        'g' => {
+            if let Some(i) = iface
+                .attributes
+                .iter()
+                .position(|a| a.name == p.name && a.is_static == is_static && !a.on_instance)
+            {
+                return Slot::Attr(i);
+            }
+        }
+        _ => {
+            if let Some(i) = iface
+                .operations
+                .iter()
+                .position(|o| o.name == p.name && o.is_static == is_static && !o.on_instance)
+            {
+                return Slot::Op(i);
+            }
+        }
+    }
+    let mut cov = Coverage::default();
+    let (mut used, mut exact) = (HashSet::new(), true);
+    let mut b = Builder { out: iface };
+    let name = b.out.name.clone();
+    match_props(
+        &name,
+        std::slice::from_ref(p),
+        place,
+        usize::MAX,
+        cands,
+        &mut b,
+        &mut cov,
+        &mut used,
+        &mut exact,
+    )[0]
+}
+
+/// Interface order overrides of one worker scope: every interface of the
+/// scope whose captured prototype or statics (names, order, or members
+/// after `constructor`) differ from its table entry.
+fn worker_overrides(
+    w: &WorkerFix,
+    props: &[GlobalProp],
+    ifaces: &mut [Interface],
+    derived: &BTreeMap<String, Derived>,
+) -> Vec<IfaceOrder> {
+    let mut names: Vec<String> = Vec::new();
+    for p in props {
+        let n = match p {
+            GlobalProp::Interface(n) => n,
+            GlobalProp::Alias { target, .. } => target,
+            _ => continue,
+        };
+        if !names.contains(n) {
+            names.push(n.clone());
+        }
+    }
+    let mut out = Vec::new();
+    for name in names {
+        let (Some(f), Some(d)) = (w.interfaces.get(&name), derived.get(&name)) else {
+            continue;
+        };
+        let Some(iface) = ifaces.iter_mut().find(|i| i.name == name) else {
+            continue;
+        };
+        let ctor_at = f
+            .proto
+            .iter()
+            .position(|p| p.name == "constructor")
+            .unwrap_or(f.proto.len());
+        let proto: Vec<&FixProp> = f.proto.iter().filter(|p| p.name != "constructor").collect();
+        // The table entry's view: names in order, late members after the
+        // non-late ones (where `constructor` goes).
+        let late = |i: &Interface, s: &Slot| match *s {
+            Slot::Attr(x) => i.attributes[x].late,
+            Slot::Op(x) => i.operations[x].late,
+            Slot::Const(_) => false,
+        };
+        let mut have: Vec<(String, bool)> = iface
+            .proto_order
+            .iter()
+            .map(|s| (iface.slot_name(*s).to_owned(), late(iface, s)))
+            .collect();
+        have.sort_by_key(|(_, l)| *l);
+        let want: Vec<(String, bool)> = proto
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.name.clone(), i >= ctor_at))
+            .collect();
+        let have_static: Vec<&str> = iface
+            .static_order
+            .iter()
+            .map(|s| iface.slot_name(*s))
+            .collect();
+        let want_static: Vec<&str> = f.statics.iter().map(|p| p.name.as_str()).collect();
+        if have == want && have_static == want_static {
+            continue;
+        }
+        let proto_order = proto
+            .iter()
+            .map(|p| worker_slot(iface, p, Place::Proto, &d.cands))
+            .collect();
+        let static_order = f
+            .statics
+            .iter()
+            .map(|p| worker_slot(iface, p, Place::Static, &d.cands))
+            .collect();
+        out.push(IfaceOrder {
+            iface: name,
+            proto_order,
+            ctor_at,
+            static_order,
+        });
+    }
+    out
 }
 
 /// Flag what a non-secure capture lacks.

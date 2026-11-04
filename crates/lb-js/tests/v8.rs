@@ -1350,3 +1350,55 @@ fn lazy_interface_objects() {
         JsValue::String("a,constructor,late".into())
     );
 }
+
+/// Structured clone across two engines (as between a page and a worker):
+/// V8's wire format, `ArrayBuffer` transfer (detached at the sender),
+/// cycles, and V8's own `DataCloneError` texts.
+#[test]
+fn structured_clone_between_engines() {
+    let mut a = engine();
+    let ra = plain_realm(&mut a);
+    let v = a
+        .evaluate_handle(
+            ra,
+            "globalThis.buf = new Uint8Array([1,2,3]).buffer; \
+             const o = {d: new Date(5), m: new Map([[1, 'x']]), s: new Set([2]), r: /a/g, \
+             big: 10n, u8: new Uint8Array(buf), nested: [1, 'two']}; o.self = o; o",
+            origin(),
+        )
+        .unwrap();
+    let buf = a.evaluate_handle(ra, "buf", origin()).unwrap();
+    let mut no_hosts = |_: HostRef, c: &str| Err(format!("{c} object could not be cloned."));
+    let s = a.serialize(ra, v, &[buf], &mut no_hosts).unwrap();
+    assert_eq!(s.buffers, vec![vec![1, 2, 3]]);
+    assert_eq!(eval(&mut a, ra, "buf.byteLength"), JsValue::Number(0.0));
+
+    let mut b = engine();
+    let rb = plain_realm(&mut b);
+    let h = b.deserialize(rb, &s, &[]).unwrap();
+    let g = b.global(rb).unwrap();
+    b.set_property(rb, g, "got", Arg::Handle(h)).unwrap();
+    assert_eq!(
+        eval(
+            &mut b,
+            rb,
+            "[got.self === got, got.d.getTime(), got.m.get(1), got.s.has(2), String(got.r), \
+              typeof got.big, Array.from(got.u8).join(), got.u8.buffer.byteLength, got.nested[1]].join('|')"
+        ),
+        JsValue::String("true|5|x|true|/a/g|bigint|1,2,3|3|two".into())
+    );
+
+    let f = a
+        .evaluate_handle(ra, "({f: function foo() {}})", origin())
+        .unwrap();
+    let err = a.serialize(ra, f, &[], &mut no_hosts).unwrap_err();
+    assert_eq!(err.message, "function foo() {} could not be cloned.");
+    let sym = a.evaluate_handle(ra, "Symbol('q')", origin()).unwrap();
+    let err = a.serialize(ra, sym, &[], &mut no_hosts).unwrap_err();
+    assert_eq!(err.message, "Symbol(q) could not be cloned.");
+    let detached = a.evaluate_handle(ra, "buf", origin()).unwrap();
+    let err = a
+        .serialize(ra, detached, &[detached], &mut no_hosts)
+        .unwrap_err();
+    assert_eq!(err.message, "ArrayBuffer at index 0 is already detached.");
+}

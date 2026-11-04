@@ -9,7 +9,7 @@ use std::fmt::Write;
 
 use crate::ir::{
     Attr, AttrTy, ConstV, GlobalProp, Interface, Iterable, Namespace, Op, OpKind, Slot, SymIter,
-    Table,
+    Table, WorkerScope,
 };
 
 /// The pools the table's strings and lists point into.
@@ -22,6 +22,8 @@ struct Pools {
     slots: Vec<String>,
     names: Vec<String>,
     consts: Vec<String>,
+    globals: Vec<String>,
+    orders: Vec<String>,
 }
 
 impl Pools {
@@ -298,7 +300,7 @@ fn namespace(p: &mut Pools, n: &Namespace) -> String {
     )
 }
 
-fn global(p: &mut Pools, g: &GlobalProp) -> String {
+fn global_prop(p: &mut Pools, g: &GlobalProp) -> String {
     match g {
         GlobalProp::Builtin(n) => format!("G::Builtin({})", p.q(n)),
         GlobalProp::Interface(n) => format!("G::Interface({})", p.q(n)),
@@ -321,6 +323,30 @@ fn global(p: &mut Pools, g: &GlobalProp) -> String {
         GlobalProp::Op(n) => format!("G::Op({})", p.q(n)),
         GlobalProp::Other(n) => format!("G::Other({})", p.q(n)),
     }
+}
+
+fn worker_scope(p: &mut Pools, w: &WorkerScope) -> String {
+    let global = p.q(&w.global);
+    let items: Vec<String> = w.props.iter().map(|g| global_prop(p, g)).collect();
+    let props = Pools::list(&mut p.globals, items);
+    let orders: Vec<String> = w
+        .overrides
+        .iter()
+        .map(|o| {
+            let iface = p.q(&o.iface);
+            let proto = slots(p, &o.proto_order);
+            let statics = slots(p, &o.static_order);
+            format!(
+                "IfaceOrder {{ iface: {iface}, proto_order: {proto}, ctor_at: {}, static_order: {statics} }}",
+                o.ctor_at
+            )
+        })
+        .collect();
+    let overrides = Pools::list(&mut p.orders, orders);
+    format!(
+        "WorkerScopeDesc {{\n        global: {global},\n        exposed: Exposed({}),\n        props: {props},\n        late_start: {},\n        overrides: {overrides},\n    }}",
+        w.exposed, w.late_start
+    )
 }
 
 fn pool(s: &mut String, doc: &str, name: &str, ty: &str, items: &[String]) {
@@ -351,7 +377,12 @@ pub fn emit(table: &Table, header: &str) -> String {
     let props: Vec<String> = table
         .window_props
         .iter()
-        .map(|g| global(&mut p, g))
+        .map(|g| global_prop(&mut p, g))
+        .collect();
+    let workers: Vec<String> = table
+        .workers
+        .iter()
+        .map(|w| worker_scope(&mut p, w))
         .collect();
     let secure: Vec<String> = table.window_secure_only.iter().map(|n| p.q(n)).collect();
     let gated: Vec<String> = table
@@ -375,7 +406,7 @@ pub fn emit(table: &Table, header: &str) -> String {
         "\n#![allow(clippy::all)]\n\nuse crate::desc::GlobalProp as G;\nuse crate::desc::Slot::{Attr as A, Const as C, Op as O};\n#[allow(unused_imports)]\nuse crate::desc::*;\n\n",
     );
     s.push_str(
-        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: &INTERFACES,\n    namespaces: &NAMESPACES,\n    window_props: &WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n    window_secure_only: &WINDOW_SECURE_ONLY,\n    os_gated: &OS_GATED,\n};\n\n",
+        "/// The whole table.\npub static TABLE: Table = Table {\n    interfaces: &INTERFACES,\n    namespaces: &NAMESPACES,\n    window_props: &WINDOW_PROPS,\n    window_late_start: WINDOW_LATE_START,\n    window_secure_only: &WINDOW_SECURE_ONLY,\n    os_gated: &OS_GATED,\n    workers: &WORKER_SCOPES,\n};\n\n",
     );
     let _ = writeln!(
         s,
@@ -416,6 +447,27 @@ pub fn emit(table: &Table, header: &str) -> String {
         "OS_GATED",
         "OsGated",
         &gated,
+    );
+    pool(
+        &mut s,
+        "Worker global scopes (dedicated, shared).",
+        "WORKER_SCOPES",
+        "WorkerScopeDesc",
+        &workers,
+    );
+    pool(
+        &mut s,
+        "Own properties of the worker globals, in Chrome's order.",
+        "WORKER_PROPS",
+        "GlobalProp",
+        &p.globals,
+    );
+    pool(
+        &mut s,
+        "Interface orders that differ in a worker scope.",
+        "IFACE_ORDERS",
+        "IfaceOrder",
+        &p.orders,
     );
     pool(
         &mut s,

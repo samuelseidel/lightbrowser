@@ -47,8 +47,8 @@ use lb_js::{
 use lb_persona::BrowserFamily;
 
 use crate::desc::{
-    ArrayIntrinsic, AttrDesc, AttrType, ConstValue, GlobalProp, InterfaceDesc, NamespaceDesc,
-    OpDesc, OpKind, S, Slot, SymbolIterator, Table,
+    ArrayIntrinsic, AttrDesc, AttrType, ConstValue, GlobalProp, IfaceOrder, InterfaceDesc,
+    NamespaceDesc, OpDesc, OpKind, S, Slot, SymbolIterator, Table, WorkerScopeDesc,
 };
 use crate::dom_exception::{DomExceptions, register_defaults};
 use crate::registry::{ImplKind, Registry, host_fn};
@@ -122,6 +122,8 @@ impl std::fmt::Debug for WindowRealmOptions {
 
 struct Inner {
     table: &'static Table,
+    /// The worker scope these bindings are for; `None` for windows.
+    scope: Option<&'static WorkerScopeDesc>,
     ids: HashMap<&'static str, InterfaceId>,
     window: InterfaceId,
     /// Run in the snapshot context: deletes engine globals Chrome does not
@@ -182,6 +184,36 @@ impl Bindings {
         registry: &Registry,
         table: &'static Table,
     ) -> Result<Bindings, InstallError> {
+        Self::define_scope(engine, registry, table, None)
+    }
+
+    /// Bindings for a worker engine (ADR 0021): the global is the scope's
+    /// (`DedicatedWorkerGlobalScope` or `SharedWorkerGlobalScope`), with
+    /// the scope's own properties, and interfaces take the scope's member
+    /// lists where they differ from the window's. Realms come from
+    /// [`Bindings::new_worker_realm`].
+    pub fn define_worker(
+        engine: &mut Engine,
+        registry: &Registry,
+        global: &str,
+    ) -> Result<Bindings, InstallError> {
+        let family = engine.persona().family;
+        let table = table_for(family).ok_or(InstallError::NoTable(family))?;
+        let scope = table
+            .worker(global)
+            .ok_or(InstallError::Unknown("worker scope"))?;
+        Self::define_scope(engine, registry, table, Some(scope))
+    }
+
+    fn define_scope(
+        engine: &mut Engine,
+        registry: &Registry,
+        table: &'static Table,
+        scope: Option<&'static WorkerScopeDesc>,
+    ) -> Result<Bindings, InstallError> {
+        let props: &'static [GlobalProp] = scope.map_or(table.window_props, |w| w.props.get());
+        let late_start = scope.map_or(table.window_late_start, |w| w.late_start);
+        let global_name = scope.map_or("Window", |w| w.global.get());
         let mut registry = registry.clone();
         // DOM node refs carry their document (`rt::node_key`): one wrapper
         // per node in the main world, whichever frame's realm reaches it.
@@ -199,7 +231,7 @@ impl Bindings {
         let mut global_desc = None;
 
         for desc in table.interfaces {
-            if desc.is_global && desc.name == "Window" {
+            if desc.is_global && desc.name == global_name {
                 // Defined last: its instance holds every interface object.
                 global_desc = Some(desc);
                 continue;
@@ -212,9 +244,10 @@ impl Bindings {
                 return Err(InstallError::Unknown(p));
             }
             let (reg, st, ids) = (registry.clone(), stubs.clone(), shared.clone());
+            let order = scope.and_then(|w| w.order(desc.name.get()));
             let id = engine.define_interface_lazy(Box::new(move || {
                 let ids = ids.borrow();
-                interface_spec(table, desc, &reg, &st, &ids)
+                interface_spec(table, desc, order, &reg, &st, &ids)
                     .unwrap_or_else(|_| InterfaceSpec::new(desc.name.get()))
             }));
             shared.borrow_mut().insert(desc.name.get(), id);
@@ -240,7 +273,7 @@ impl Bindings {
 
         // Legacy factory functions (`Image`, `Option`, `Audio`).
         let mut factories: HashMap<&'static str, InterfaceId> = HashMap::new();
-        for p in table.window_props {
+        for p in props {
             if let GlobalProp::LegacyFactory { name, iface } = *p {
                 let (name, iface) = (name.get(), iface.get());
                 let desc = table.interface(iface).ok_or(InstallError::Unknown(iface))?;
@@ -258,22 +291,28 @@ impl Bindings {
             }
         }
 
-        let window_desc = global_desc.ok_or(InstallError::Unknown("Window"))?;
+        let window_desc = global_desc.ok_or(InstallError::Unknown("global"))?;
         shared
             .borrow_mut()
             .insert(window_desc.name.get(), engine.next_interface_id());
         let mut spec = {
             let ids = shared.borrow();
-            let mut spec = interface_spec(table, window_desc, &registry, &stubs, &ids)?;
-            spec.instance =
-                global_members(table, window_desc, &registry, &stubs, &ids, &factories)?;
+            let mut spec = interface_spec(table, window_desc, None, &registry, &stubs, &ids)?;
+            spec.instance = global_members(
+                table,
+                props,
+                window_desc,
+                &registry,
+                &stubs,
+                &ids,
+                &factories,
+            )?;
             spec
         };
         spec.immutable_proto = true;
         // Members Chrome installs after the engine's late globals, in
         // order (with those globals).
-        spec.reorder_last = table.window_props
-            [table.window_late_start.min(table.window_props.len())..]
+        spec.reorder_last = props[late_start.min(props.len())..]
             .iter()
             .map(|p| lb_js::PropKey::Name(p.name().to_owned()))
             .collect();
@@ -281,21 +320,23 @@ impl Bindings {
         let ids = shared.borrow().clone();
         debug_assert_eq!(ids.get(window_desc.name.get()), Some(&window));
 
-        let base_fixups = base_fixups(table, &ids)?;
-        let globals_fixup = globals_script(table);
+        let base_fixups = base_fixups(table, props, scope, &ids)?;
+        let globals_fixup = globals_script(props);
         let insecure_window = insecure_window_script(table);
         // With a startup snapshot whose interfaces all matched, window
         // realms are deserialized with the global set up already.
-        let base = Rc::new(base_fixups.clone());
-        engine.use_snapshot_context(window, &globals_fixup, Some(&base));
+        if scope.is_none() {
+            let base = Rc::new(base_fixups.clone());
+            engine.use_snapshot_context(window, &globals_fixup, Some(&base));
+        }
         Ok(Bindings(Rc::new(Inner {
             table,
+            scope,
             ids,
             window,
             globals_fixup,
-            window_names: table.window_props.iter().map(GlobalProp::name).collect(),
-            host_slots: table
-                .window_props
+            window_names: props.iter().map(GlobalProp::name).collect(),
+            host_slots: props
                 .iter()
                 .filter_map(|p| match p {
                     GlobalProp::Other(n) => Some(n.get()),
@@ -415,6 +456,35 @@ impl Bindings {
         Ok(realm)
     }
 
+    /// Create a worker global realm (bindings from
+    /// [`Bindings::define_worker`]): the scope's global with its own
+    /// properties in Chrome's order. Workers run in a secure context and
+    /// have no OS-gated members.
+    pub fn new_worker_realm(
+        &self,
+        engine: &mut dyn lb_js::RealmOps,
+        global_host: Option<HostRef>,
+        module_loader: Option<ModuleLoader>,
+    ) -> Result<RealmId, JsError> {
+        debug_assert!(self.0.scope.is_some());
+        self.new_window_realm(
+            engine,
+            WindowRealmOptions {
+                window_host: global_host,
+                world: None,
+                module_loader,
+                insecure: false,
+                os_apis: None,
+                host_slots: false,
+            },
+        )
+    }
+
+    /// Whether these bindings are for a worker scope.
+    pub fn is_worker(&self) -> bool {
+        self.0.scope.is_some()
+    }
+
     /// The interface fixups of a realm: the base ones plus the removals of
     /// a non-secure context and of the OS gates `apis` turns off. Made once
     /// per combination.
@@ -440,10 +510,12 @@ impl Bindings {
             return f.clone();
         }
         let mut all = self.0.base_fixups.clone();
-        if insecure {
+        if insecure && self.0.scope.is_none() {
             add_insecure_removals(self.0.table, &self.0.ids, &mut all);
         }
-        if let Some(apis) = apis {
+        if let Some(apis) = apis
+            && self.0.scope.is_none()
+        {
             add_os_gate_removals(self.0.table, &self.0.ids, apis, &mut all);
         }
         let f: InterfaceFixups = Rc::new(all);
@@ -731,6 +803,7 @@ fn symbol_members(d: &InterfaceDesc, out: &mut Vec<Member>) {
 fn interface_spec(
     table: &'static Table,
     d: &'static InterfaceDesc,
+    order: Option<&'static IfaceOrder>,
     registry: &Registry,
     stubs: &Stubs,
     ids: &HashMap<&'static str, InterfaceId>,
@@ -746,13 +819,15 @@ fn interface_spec(
         _ => spec.length = u32::from(d.constructor_length),
     }
     spec.to_string_tag = false;
-    spec.statics = d
-        .static_order
+    let (static_order, proto_order) = match order {
+        Some(o) => (o.static_order, o.proto_order),
+        None => (d.static_order, d.proto_order),
+    };
+    spec.statics = static_order
         .iter()
         .map(|s| slot_member(d, *s, registry, stubs, true))
         .collect();
-    let mut proto: Vec<Member> = d
-        .proto_order
+    let mut proto: Vec<Member> = proto_order
         .iter()
         .map(|s| slot_member(d, *s, registry, stubs, false))
         .collect();
@@ -828,14 +903,15 @@ fn namespace_member(n: &'static NamespaceDesc, registry: &Registry, stubs: &Stub
 /// Own properties of the global, in table order.
 fn global_members(
     table: &'static Table,
+    props: &'static [GlobalProp],
     window: &'static InterfaceDesc,
     registry: &Registry,
     stubs: &Stubs,
     ids: &HashMap<&'static str, InterfaceId>,
     factories: &HashMap<&'static str, InterfaceId>,
 ) -> Result<Vec<Member>, InstallError> {
-    let mut out = Vec::with_capacity(table.window_props.len());
-    for p in table.window_props {
+    let mut out = Vec::with_capacity(props.len());
+    for p in props {
         match *p {
             GlobalProp::Builtin(_) => {}
             // A slot the host fills (`window.chrome`), in Chrome's place.
@@ -920,10 +996,12 @@ fn js_list<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
 /// `Error.prototype`.
 fn base_fixups(
     table: &Table,
+    props: &[GlobalProp],
+    scope: Option<&WorkerScopeDesc>,
     ids: &HashMap<&'static str, InterfaceId>,
 ) -> Result<HashMap<InterfaceId, InterfaceFixup>, InstallError> {
     let mut out = HashMap::new();
-    let window = window_interfaces(table);
+    let window = global_interfaces(props);
     for d in table.interfaces {
         let Some(&id) = ids.get(d.name.get()) else {
             continue;
@@ -931,8 +1009,14 @@ fn base_fixups(
         if !window.contains(d.name.get()) {
             continue;
         }
-        let mut fx = InterfaceFixup {
-            proto_late: d
+        // Members after `constructor`: by position in a scope's order,
+        // else by the members' own flag.
+        let proto_late = match scope.and_then(|w| w.order(d.name.get())) {
+            Some(o) => o.proto_order.get()[o.ctor_at.min(o.proto_order.len())..]
+                .iter()
+                .map(|s| d.slot_name(*s).to_owned())
+                .collect(),
+            None => d
                 .proto_order
                 .iter()
                 .filter(|s| match **s {
@@ -942,6 +1026,9 @@ fn base_fixups(
                 })
                 .map(|s| d.slot_name(*s).to_owned())
                 .collect(),
+        };
+        let mut fx = InterfaceFixup {
+            proto_late,
             unscopables: d.unscopables.iter().map(|s| s.get().to_owned()).collect(),
             ..Default::default()
         };
@@ -959,8 +1046,12 @@ fn base_fixups(
 
 /// Interfaces whose interface object is on the window.
 fn window_interfaces(table: &Table) -> std::collections::HashSet<&'static str> {
-    table
-        .window_props
+    global_interfaces(table.window_props)
+}
+
+/// Interfaces whose interface object is on a global with `props`.
+fn global_interfaces(props: &[GlobalProp]) -> std::collections::HashSet<&'static str> {
+    props
         .iter()
         .filter_map(|p| match p {
             GlobalProp::Interface(n) => Some(n.get()),
@@ -973,12 +1064,12 @@ fn window_interfaces(table: &Table) -> std::collections::HashSet<&'static str> {
 /// not expose here (e.g. `SharedArrayBuffer` outside cross-origin
 /// isolation) are removed. The script's value lists them and the final
 /// own-property count, one per line.
-fn globals_script(table: &Table) -> String {
+fn globals_script(props: &[GlobalProp]) -> String {
     let mut s = String::from(GLOBALS_PRELUDE);
     let _ = write!(
         s,
         "const k=new Set({}),x=[];for(const n of O.getOwnPropertyNames(g))if(!k.has(n)){{const d=gd(g,n);if(d&&d.configurable){{delete g[n];x.push(n+'\\n');}}}}return x.join('')+O.getOwnPropertyNames(g).length",
-        js_list(table.window_props.iter().map(GlobalProp::name))
+        js_list(props.iter().map(GlobalProp::name))
     );
     s.push_str("})()");
     s
@@ -1110,7 +1201,7 @@ mod tests {
         for (i, d) in table.interfaces.iter().enumerate() {
             ids.insert(d.name.get(), InterfaceId(i as u32));
         }
-        let fx = base_fixups(table, &ids).unwrap();
+        let fx = base_fixups(table, table.window_props, None, &ids).unwrap();
         let xhr = &fx[&ids["XMLHttpRequest"]];
         assert_eq!(
             xhr.proto_late.first().map(String::as_str),
@@ -1118,7 +1209,7 @@ mod tests {
         );
         assert!(fx.values().any(|f| !f.unscopables.is_empty()));
         assert!(fx[&ids["DOMException"]].error_proto);
-        let globals = globals_script(table);
+        let globals = globals_script(table.window_props);
         assert!(globals.starts_with("(function(){") && globals.ends_with("})()"));
     }
 }

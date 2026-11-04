@@ -24,12 +24,14 @@ fn main() -> ExitCode {
             "--no-insecure-fixture" => inputs.insecure_fixture = None,
             "--overlay" => inputs.overlay = value(),
             "--no-overlay" => inputs.overlay = None,
+            "--worker-fixture" => inputs.worker_fixture = value(),
+            "--no-worker-fixture" => inputs.worker_fixture = None,
             "--idl" => inputs.idl_root = value().unwrap_or(inputs.idl_root),
             "--out" => inputs.out = value().unwrap_or(inputs.out),
             "--check" => check = true,
             "-h" | "--help" => {
                 println!(
-                    "usage: lb-webidl-gen --family chrome [--fixture FILE] [--insecure-fixture FILE | --no-insecure-fixture] [--overlay FILE | --no-overlay] [--idl DIR] [--out FILE] [--check]"
+                    "usage: lb-webidl-gen --family chrome [--fixture FILE] [--insecure-fixture FILE | --no-insecure-fixture] [--overlay FILE | --no-overlay] [--worker-fixture FILE | --no-worker-fixture] [--idl DIR] [--out FILE] [--check]"
                 );
                 return ExitCode::SUCCESS;
             }

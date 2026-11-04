@@ -232,7 +232,35 @@ pub struct Table {
     /// OS-gated members from the overlay: `(gate, owner, name)`; owner
     /// `Window` means a window global property.
     pub os_gated: Vec<(String, String, String)>,
+    /// Worker global scopes (dedicated, shared), from the worker fixture.
+    pub workers: Vec<WorkerScope>,
     pub coverage: Coverage,
+}
+
+/// One worker global scope: its global interface, own properties in
+/// Chrome's order, and the interfaces whose members or order differ from
+/// the window's there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkerScope {
+    /// `DedicatedWorkerGlobalScope` or `SharedWorkerGlobalScope`.
+    pub global: String,
+    /// Exposure bit of the scope (`DedicatedWorker`, `SharedWorker`).
+    pub exposed: u16,
+    pub props: Vec<GlobalProp>,
+    /// Index into `props` where late properties start.
+    pub late_start: usize,
+    pub overrides: Vec<IfaceOrder>,
+}
+
+/// An interface's prototype and static members in one worker scope, as
+/// slots of the interface's own member lists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IfaceOrder {
+    pub iface: String,
+    pub proto_order: Vec<Slot>,
+    /// Prototype members from this index on come after `constructor`.
+    pub ctor_at: usize,
+    pub static_order: Vec<Slot>,
 }
 
 impl Table {
