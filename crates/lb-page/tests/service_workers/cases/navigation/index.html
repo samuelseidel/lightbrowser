@@ -6,8 +6,6 @@ log('load ' + n + ' controller=' + !!sw.controller);
 if (n === 0) {
   sw.register('sw.js').then(function () { return sw.ready }).then(function () { return caches.keys() }).then(function (k) { log('caches ' + JSON.stringify(k)); again() });
 } else {
-  var e = performance.getEntriesByType('navigation')[0];
-  log('nav entry ' + e.name.split(O).join('') + ' type=' + e.type);
   swlog(sw.controller).then(n === 1 ? again : end);
 }
 </script>
