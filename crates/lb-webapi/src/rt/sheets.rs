@@ -70,7 +70,8 @@ pub(crate) struct CssState {
 
 /// A change for the style engine.
 pub(crate) enum Update {
-    Link(NodeId, Option<Rc<SheetTree>>),
+    /// A link's sheet (entry key), parsed when layout applies it.
+    Link(NodeId, Option<u32>),
     StyleImports(NodeId, Vec<Option<Rc<SheetTree>>>),
     StyleOverride(NodeId, Option<Rc<Stylesheet>>),
     Disabled(NodeId, bool),
@@ -83,9 +84,12 @@ impl CssState {
 }
 
 impl Update {
-    pub(crate) fn apply(self, styles: &mut lb_css::StyleEngine) {
+    pub(crate) fn apply(self, styles: &mut lb_css::StyleEngine, st: &mut CssState) {
         match self {
-            Update::Link(n, t) => styles.set_external_tree(n, t),
+            Update::Link(n, k) => {
+                let t = k.map(|k| build_tree(st, k));
+                styles.set_external_tree(n, t)
+            }
             Update::StyleImports(n, i) => styles.set_style_imports(n, i),
             Update::StyleOverride(n, s) => styles.set_style_override(n, s),
             Update::Disabled(n, d) => styles.set_sheet_disabled(n, d),
@@ -114,7 +118,8 @@ struct SheetEntry {
     href: Option<String>,
     origin_clean: bool,
     text: String,
-    parsed: Rc<Stylesheet>,
+    /// Parsed on first use (layout or the CSSOM).
+    parsed: Option<Rc<Stylesheet>>,
     /// Sheet keys of the loaded imports, in import order.
     imports: Vec<Option<u32>>,
     /// The rule list, made on first CSSOM use.
@@ -136,7 +141,8 @@ struct Loaded {
     ok: bool,
     origin_clean: bool,
     text: String,
-    parsed: Rc<Stylesheet>,
+    /// Only when the text has `@import`s (to load them).
+    parsed: Option<Rc<Stylesheet>>,
     imports: Vec<Option<Loaded>>,
 }
 
@@ -346,9 +352,7 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
         if let Some(k) = st.owners.get(&n).and_then(|o| o.sheet) {
             let e = &mut st.sheets[k as usize];
             e.text = text;
-            e.parsed = parsed
-                .clone()
-                .unwrap_or_else(|| Rc::new(Stylesheet::parse(&e.text, Origin::Author)));
+            e.parsed = parsed.clone();
             e.imports = Vec::new();
             e.rules = None;
         }
@@ -517,8 +521,7 @@ fn finish_link(w: &Rc<Window>, n: NodeId, seq: u32, loaded: Loaded) {
             st.sheets[old as usize].owner = None;
         }
         let key = add_loaded(&mut st, loaded, Some(n), None, href);
-        let tree = build_tree(&st, key);
-        st.updates.push(Update::Link(n, Some(tree)));
+        st.updates.push(Update::Link(n, Some(key)));
         st.owners.insert(n, o);
         key
     };
@@ -563,8 +566,10 @@ fn finish_style(w: &Rc<Window>, n: NodeId, seq: u32, imports: Vec<Option<Loaded>
                     st.sheets[*k as usize].parent = Some((sheet, import_uid(&mut st, sheet, i)));
                 }
             }
-            let trees: Vec<Option<Rc<SheetTree>>> =
-                keys.iter().map(|k| k.map(|k| build_tree(&st, k))).collect();
+            let trees: Vec<Option<Rc<SheetTree>>> = keys
+                .iter()
+                .map(|k| k.map(|k| build_tree(&mut st, k)))
+                .collect();
             st.sheets[sheet as usize].imports = keys;
             st.updates.push(Update::StyleImports(n, trees));
         }
@@ -617,7 +622,7 @@ fn failed(url: Url) -> Loaded {
         ok: false,
         origin_clean: true,
         text: String::new(),
-        parsed: Rc::new(Stylesheet::parse("", Origin::Author)),
+        parsed: None,
         imports: Vec::new(),
     }
 }
@@ -716,9 +721,12 @@ fn got_sheet(
         w.bg.borrow_mut().hint = true;
     }
     let base = resp.url.clone();
-    let mut sheet = Stylesheet::parse(&text, Origin::Author);
-    sheet.resolve_urls(&base);
-    let parsed = Rc::new(sheet);
+    // Parse now only to find `@import`s; otherwise when layout needs it.
+    let parsed = text.to_ascii_lowercase().contains("@import").then(|| {
+        let mut sheet = Stylesheet::parse(&text, Origin::Author);
+        sheet.resolve_urls(&base);
+        Rc::new(sheet)
+    });
     let mut loaded = Loaded {
         url,
         ok: true,
@@ -727,10 +735,10 @@ fn got_sheet(
         parsed: parsed.clone(),
         imports: Vec::new(),
     };
-    if parsed.imports.is_empty() {
+    let Some(parsed) = parsed.filter(|p| !p.imports.is_empty()) else {
         done(w, loaded);
         return;
-    }
+    };
     chain.push(loaded.url.to_string());
     let n = parsed.imports.len();
     let results: Rc<RefCell<Vec<Option<Loaded>>>> =
@@ -811,7 +819,7 @@ fn new_style_entry(st: &mut CssState, n: NodeId, text: &str) -> u32 {
         href: None,
         origin_clean: true,
         text: text.to_owned(),
-        parsed: Rc::new(Stylesheet::parse(text, Origin::Author)),
+        parsed: None,
         imports: Vec::new(),
         rules: None,
         disabled: false,
@@ -834,13 +842,29 @@ fn import_uid(st: &mut CssState, sheet: u32, i: usize) -> u32 {
         .unwrap_or(u32::MAX)
 }
 
-fn build_tree(st: &CssState, key: u32) -> Rc<SheetTree> {
-    let e = &st.sheets[key as usize];
+/// The parsed sheet of an entry (parsed now if needed; `url()`s resolve
+/// against the sheet's URL).
+fn sheet_of(st: &mut CssState, key: u32) -> Rc<Stylesheet> {
+    let e = &mut st.sheets[key as usize];
+    if let Some(p) = &e.parsed {
+        return p.clone();
+    }
+    let mut sheet = Stylesheet::parse(&e.text, Origin::Author);
+    if let Some(base) = e.href.as_deref().and_then(|h| Url::parse(h).ok()) {
+        sheet.resolve_urls(&base);
+    }
+    let p = Rc::new(sheet);
+    e.parsed = Some(p.clone());
+    p
+}
+
+pub(crate) fn build_tree(st: &mut CssState, key: u32) -> Rc<SheetTree> {
+    let sheet = sheet_of(st, key);
+    let imports: Vec<Option<u32>> = st.sheets[key as usize].imports.clone();
     Rc::new(SheetTree {
-        sheet: e.parsed.clone(),
-        imports: e
-            .imports
-            .iter()
+        sheet,
+        imports: imports
+            .into_iter()
             .map(|k| k.map(|k| build_tree(st, k)))
             .collect(),
     })
@@ -994,7 +1018,7 @@ fn sheet_modified(w: &Rc<Window>, sheet: u32) {
         // Imports keep their loaded sheets by position.
         e.imports.resize(parsed.imports.len(), None);
         e.text = text;
-        e.parsed = parsed.clone();
+        e.parsed = Some(parsed.clone());
     }
     // The top-level sheet and its owner.
     let mut top = sheet;
@@ -1005,10 +1029,10 @@ fn sheet_modified(w: &Rc<Window>, sheet: u32) {
         return;
     };
     let link = st.owners.get(&owner).is_some_and(|o| o.link);
-    let tree = build_tree(&st, top);
     if link {
-        st.updates.push(Update::Link(owner, Some(tree)));
+        st.updates.push(Update::Link(owner, Some(top)));
     } else {
+        let tree = build_tree(&mut st, top);
         st.updates
             .push(Update::StyleOverride(owner, Some(tree.sheet.clone())));
         st.updates

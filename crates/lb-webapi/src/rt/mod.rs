@@ -1388,8 +1388,11 @@ impl Window {
             engine.styles().set_base_url(Some(self.base_url()));
         }
         let updates = std::mem::take(&mut self.css.borrow_mut().updates);
-        for u in updates {
-            u.apply(engine.styles());
+        if !updates.is_empty() {
+            let mut st = self.css.borrow_mut();
+            for u in updates {
+                u.apply(engine.styles(), &mut st);
+            }
         }
         let doc = self.doc_rc(slot);
         f(engine, &doc.borrow())
