@@ -1,6 +1,8 @@
 # ADR 0014: Page screenshots painted on demand from the layout
 
-Status: Accepted (2026-11-03)
+Status: Accepted (2026-11-03). Scope extended by ADR 0020 (background
+images and gradients, border radius, box shadows; background images now
+load like Chrome's).
 
 ## Context
 

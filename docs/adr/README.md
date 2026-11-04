@@ -19,11 +19,13 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0011](0011-per-destination-headers.md) | Request headers per destination, captured from local Chromium | Accepted (2026-11-03) |
 | [0012](0012-frames-as-realms.md) | Frames are realms in the page's engine, built on the spot (`RealmOps`) | Accepted (2026-11-03); cross-frame gaps closed by 0017 |
 | [0013](0013-startup-snapshot-and-size-budget.md) | V8 startup snapshot made in memory; binary budget follows the V8 floor | Accepted (2026-11-03) |
-| [0014](0014-on-demand-page-screenshots.md) | Page screenshots painted on demand from the layout | Accepted (2026-11-03) |
+| [0014](0014-on-demand-page-screenshots.md) | Page screenshots painted on demand from the layout | Accepted (2026-11-03); scope extended by 0020 |
 | [0015](0015-os-personas.md) | OS personas: one OS axis, read through accessors | Accepted (2026-11-03) |
 | [0016](0016-lazy-interface-objects.md) | Lazy interfaces and interface objects; hot code packed at link time | Accepted (2026-11-03) |
 | [0017](0017-cross-document-nodes-and-detached-frames.md) | Nodes carry their document; one node wrapper per world; removed frames stay usable | Accepted (2026-11-03) |
 | [0018](0018-connection-reuse.md) | Connection reuse as Chrome does it: per-context pool, HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS resumption, network thread | Accepted (2026-11-04) |
+| [0019](0019-style-sheet-loading-and-cssom.md) | Style sheets load as Chrome loads them: script- and parser-blocking sheets, `@import`, CSSOM | Accepted (2026-11-04) |
+| [0020](0020-css-background-images-and-box-decorations.md) | CSS background images load like Chrome's; screenshots paint backgrounds, radius and shadows | Accepted (2026-11-04) |
 
 ## Adding an ADR
 
