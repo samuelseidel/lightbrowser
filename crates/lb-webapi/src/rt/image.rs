@@ -18,6 +18,13 @@
 //! - Canvas taint: an image is origin-clean when same-origin, a data: URL,
 //!   or requested with `crossorigin` and answered with a matching
 //!   `Access-Control-Allow-Origin`.
+//! - Reuse within a document, as Blink's resource fetcher does whatever
+//!   the cache headers say: elements asking for a URL (fragment ignored,
+//!   same CORS mode) that is already loading wait on that one request;
+//!   one that another element of the document holds loaded is complete at
+//!   once (its `load` event is still a task). Failed loads are not reused.
+//! - While a new source loads, the element keeps its current image
+//!   (`naturalWidth`, layout size), as the spec's current request does.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -55,6 +62,19 @@ pub(crate) struct ImgState {
     waiters: Vec<Resolver>,
     /// Waiting for the viewport (`loading=lazy`).
     lazy: bool,
+    /// Requested with `crossorigin`.
+    cors: bool,
+}
+
+/// An element waiting on a shared image request: node, load sequence,
+/// whether it delays the document's `load`.
+pub(crate) type Waiter = (NodeId, u32, bool);
+
+/// Key of an image request within a document: URL without fragment, CORS.
+fn fetch_key(url: &Url, cors: bool) -> (String, bool) {
+    let mut u = url.clone();
+    u.set_fragment(None);
+    (u.into(), cors)
 }
 
 impl ImgState {
@@ -70,6 +90,7 @@ impl ImgState {
             cors_ok: true,
             waiters: Vec::new(),
             lazy: false,
+            cors: false,
         }
     }
 }
@@ -110,17 +131,22 @@ pub(crate) fn candidates(w: &Window, m: &Mutation, out: &mut Vec<(NodeId, bool)>
 
 /// Starts or restarts loads for the [`candidates`] of a mutation batch.
 pub(crate) fn process(js: &mut dyn Js, w: &Rc<Window>, nodes: Vec<(NodeId, bool)>) {
+    // The last mutation of a node decides; loads start in document order.
     let mut seen = HashSet::new();
+    let mut todo: Vec<(NodeId, bool)> = nodes
+        .iter()
+        .rev()
+        .filter(|(n, _)| seen.insert(*n))
+        .copied()
+        .collect();
+    todo.reverse();
     let mut lazy_check = false;
-    for (n, forced) in nodes.iter().rev() {
-        if !seen.insert(*n) {
-            continue;
-        }
+    for (n, forced) in todo {
         lazy_check |= update(
             js,
             w,
-            *n,
-            *forced || !w.paint.images.borrow().contains_key(&(0, *n)),
+            n,
+            forced || !w.paint.images.borrow().contains_key(&(0, n)),
         );
     }
     if lazy_check {
@@ -285,22 +311,71 @@ fn update(js: &mut dyn Js, w: &Rc<Window>, n: NodeId, forced: bool) -> bool {
                 );
                 return false;
             }
+            // The current image stays until the new one has loaded.
             with_state(w, n, |st| {
                 st.url = Some(url.clone());
                 st.status = Status::Loading;
-                st.info = None;
-                st.bytes = None;
-                st.decoded = None;
+                if st.info.is_none() {
+                    st.bytes = None;
+                    st.decoded = None;
+                }
             });
             if is_lazy(w, n) && url.scheme() != "data" {
                 with_state(w, n, |st| st.lazy = true);
                 return true;
             }
             let _ = js;
+            if url.scheme() != "data" && reuse_available(w, n, &url, seq) {
+                return false;
+            }
             fetch(w, n, url, seq, true);
             false
         }
     }
+}
+
+/// "List of available images": another element of this document holds
+/// `url` loaded, so `n` is complete at once and gets `load` in a task.
+fn reuse_available(w: &Rc<Window>, n: NodeId, url: &Url, seq: u32) -> bool {
+    let cors = w.with_doc(|d| d.get_attribute(n, "crossorigin").is_some());
+    let key = fetch_key(url, cors);
+    let found = w.paint.images.borrow().iter().find_map(|((slot, m), st)| {
+        (*slot == 0
+            && *m != n
+            && st.status == Status::Loaded
+            && st.cors == cors
+            && st.bytes.is_some()
+            && st.url.as_ref().is_some_and(|u| fetch_key(u, cors) == key))
+        .then(|| {
+            (
+                st.info,
+                st.bytes.clone(),
+                st.content_type.clone(),
+                st.decoded.clone(),
+                st.cors_ok,
+            )
+        })
+    });
+    let Some((info, bytes, ct, decoded, cors_ok)) = found else {
+        return false;
+    };
+    with_state(w, n, |st| {
+        st.status = Status::Loaded;
+        st.info = info;
+        st.bytes = bytes;
+        st.content_type = ct;
+        st.decoded = decoded;
+        st.cors_ok = cors_ok;
+        st.cors = cors;
+    });
+    set_layout_size(w, n, info.map(|i| (i.width as f32, i.height as f32)));
+    w.pending_loads.set(w.pending_loads.get() + 1);
+    let w2 = w.clone();
+    w.queue_task(
+        TaskSource::Networking,
+        Box::new(move |js, _| settle(js, &w2, n, seq, true, true)),
+    );
+    true
 }
 
 /// Starts lazy images that are now near the viewport (within 1250px).
@@ -346,38 +421,39 @@ pub(crate) fn data_url(url: &Url) -> Option<(Vec<u8>, String)> {
     Some((bytes, mime))
 }
 
+/// Stores a finished load in `n`'s state (if `seq` is still current).
+fn apply(
+    w: &Window,
+    n: NodeId,
+    seq: u32,
+    r: &Result<(bytes::Bytes, Option<String>, bool), ()>,
+) -> bool {
+    let Ok((bytes, ct, cors_ok)) = r else {
+        return false;
+    };
+    let probed = decode::probe(bytes, ct.as_deref());
+    with_state(w, n, |st| {
+        if st.seq != seq {
+            return false;
+        }
+        st.cors_ok = *cors_ok;
+        match probed {
+            Ok(info) => {
+                st.info = Some(info);
+                st.bytes = Some(bytes.clone());
+                st.content_type = ct.clone();
+                st.decoded = None;
+                true
+            }
+            Err(_) => false,
+        }
+    })
+}
+
 fn fetch(w: &Rc<Window>, n: NodeId, url: Url, seq: u32, delay_load: bool) {
     if delay_load {
         w.pending_loads.set(w.pending_loads.get() + 1);
     }
-    let done = move |js: &mut dyn Js,
-                     w: &Rc<Window>,
-                     r: Result<(bytes::Bytes, Option<String>, bool), ()>| {
-        let ok = match r {
-            Ok((bytes, ct, cors_ok)) => {
-                let probed = decode::probe(&bytes, ct.as_deref());
-                let current = with_state(w, n, |st| st.seq == seq);
-                if current {
-                    with_state(w, n, |st| {
-                        st.cors_ok = cors_ok;
-                        match probed {
-                            Ok(info) => {
-                                st.info = Some(info);
-                                st.bytes = Some(bytes);
-                                st.content_type = ct;
-                                true
-                            }
-                            Err(_) => false,
-                        }
-                    })
-                } else {
-                    false
-                }
-            }
-            Err(()) => false,
-        };
-        settle(js, w, n, seq, ok, delay_load);
-    };
     if url.scheme() == "data" {
         let r = data_url(&url)
             .map(|(b, m)| (b.into(), Some(m), true))
@@ -385,11 +461,25 @@ fn fetch(w: &Rc<Window>, n: NodeId, url: Url, seq: u32, delay_load: bool) {
         let w2 = w.clone();
         w.queue_task(
             TaskSource::Networking,
-            Box::new(move |js, _| done(js, &w2, r)),
+            Box::new(move |js, _| {
+                let ok = apply(&w2, n, seq, &r);
+                settle(js, &w2, n, seq, ok, delay_load);
+            }),
         );
         return;
     }
     let cors = w.with_doc(|d| d.get_attribute(n, "crossorigin").is_some());
+    with_state(w, n, |st| st.cors = cors);
+    // One request per URL and CORS mode at a time in a document.
+    let key = fetch_key(&url, cors);
+    {
+        let mut inflight = w.paint.image_fetches.borrow_mut();
+        if let Some(waiting) = inflight.get_mut(&key) {
+            waiting.push((n, seq, delay_load));
+            return;
+        }
+        inflight.insert(key.clone(), vec![(n, seq, delay_load)]);
+    }
     let mut req = NetRequest::get(url.clone(), Destination::Image, Some(w.url()));
     if cors {
         req.mode = "cors";
@@ -409,7 +499,29 @@ fn fetch(w: &Rc<Window>, n: NodeId, url: Url, seq: u32, delay_load: bool) {
                     (resp.body, ct, same || (cors && acao))
                 })
                 .map_err(|_| ());
-            done(js, w, r)
+            let waiting = w
+                .paint
+                .image_fetches
+                .borrow_mut()
+                .remove(&key)
+                .unwrap_or_default();
+            // Every waiting element has the image before any `load` runs;
+            // each event is its own task, as in Blink.
+            let done: Vec<(Waiter, bool)> = waiting
+                .into_iter()
+                .map(|wt| (wt, apply(w, wt.0, wt.1, &r)))
+                .collect();
+            for (i, ((n, seq, counted), ok)) in done.into_iter().enumerate() {
+                if i == 0 {
+                    settle(js, w, n, seq, ok, counted);
+                } else {
+                    let w2 = w.clone();
+                    w.queue_task(
+                        TaskSource::Networking,
+                        Box::new(move |js, _| settle(js, &w2, n, seq, ok, counted)),
+                    );
+                }
+            }
         }),
     );
 }
@@ -527,7 +639,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let (slot, n) = this_node(cx, w)?;
             let (status, info, _, _) = state_of(w, slot, n);
             let v = match (status, info) {
-                (Status::Loaded, Some(i)) => {
+                (Status::Loaded | Status::Loading, Some(i)) => {
                     if k == 0 {
                         i.width
                     } else {
@@ -570,7 +682,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             }
             let (status, info, _, _) = state_of(w, slot, n);
             let v = match (status, info) {
-                (Status::Loaded, Some(i)) => {
+                (Status::Loaded | Status::Loading, Some(i)) => {
                     if k == 0 {
                         i.width
                     } else {

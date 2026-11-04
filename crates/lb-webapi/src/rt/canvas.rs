@@ -88,6 +88,9 @@ pub(crate) struct PaintState {
     /// Gradient/pattern `Rc` address → object id (`fillStyle` getter).
     ids: RefCell<HashMap<usize, u32>>,
     pub(crate) images: RefCell<HashMap<(u32, NodeId), super::image::ImgState>>,
+    /// Image requests in flight, by URL without fragment and CORS mode,
+    /// with the elements waiting on each (`image::fetch`).
+    pub(crate) image_fetches: RefCell<HashMap<(String, bool), Vec<super::image::Waiter>>>,
 }
 
 /// Context factories by kind, per runtime.

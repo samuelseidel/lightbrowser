@@ -3,6 +3,7 @@
 
 mod common;
 mod frames;
+mod images;
 mod report;
 mod service_workers;
 mod stylesheets;

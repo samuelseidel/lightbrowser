@@ -1,0 +1,8 @@
+<!doctype html><html><head><!--LOG--></head><body>
+<img id=a1 src="slow-a.png" onload="log('load a1 '+this.complete+' '+this.naturalWidth)">
+<img id=a2 src="slow-a.png" onload="log('load a2 '+this.complete+' '+this.naturalWidth)">
+<img id=b src="b.png" onload="log('load b '+this.complete+' '+this.naturalWidth)">
+<img id=a3 src="slow-a.png#frag" onload="log('load a3 '+this.complete+' '+this.naturalWidth)">
+<img id=a4 src="slow-a.png?q" onload="log('load a4 '+this.complete+' '+this.naturalWidth)">
+<script>log('parsed '+St('a1')+' '+St('a2')+' '+St('a3')+' '+St('a4'))</script>
+</body></html>

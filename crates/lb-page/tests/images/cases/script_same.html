@@ -1,0 +1,9 @@
+<!doctype html><html><head><!--LOG--></head><body>
+<script>
+var imgs=[];
+for(var i=0;i<4;i++){var im=W(new Image(),'n'+i);im.src='slow-a.png';imgs.push(im);log('set n'+i+' complete='+im.complete+' w='+im.naturalWidth);}
+var d=W(document.createElement('img'),'d');d.src='slow-a.png';document.body.appendChild(d);
+log('appended d complete='+d.complete);
+setTimeout(function(){log('timeout0')},0);
+</script>
+</body></html>
