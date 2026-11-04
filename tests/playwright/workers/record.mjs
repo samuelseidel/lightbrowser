@@ -35,6 +35,11 @@ if (mode === 'compare') {
       console.log(`result ${k}:\n  ${arg1}: ${show(a.results[k])}\n  ${arg2}: ${show(b.results[k])}`);
     }
   }
+  // Chrome's own targets (browser UI, prerender "other" targets) are not
+  // part of the comparison.
+  const noise = (t) => ['browser_ui', 'other', 'browser'].includes(t.on) || ['browser_ui', 'other', 'browser'].includes(t.type);
+  a.trace = a.trace.filter((t) => !noise(t));
+  b.trace = b.trace.filter((t) => !noise(t));
   const n = Math.max(a.trace.length, b.trace.length);
   for (let i = 0; i < n; i++) {
     const x = show(a.trace[i]);
@@ -42,6 +47,26 @@ if (mode === 'compare') {
     console.log(`${x === y ? ' ' : '!'} ${String(i).padStart(3)} ${x ?? '-'}${x === y ? '' : `\n        ${y ?? '-'}`}`);
     if (x !== y) same = false;
   }
+  // Per session type: how often each message occurs (order aside).
+  const counts = (tr) => {
+    const m = new Map();
+    for (const t of tr) {
+      const k = `${t.on} ${t.send ? 'send ' + t.send : t.reply ? 'reply ' + t.reply + (t.error ? ' ERROR ' + t.error : '') : 'ev ' + t.ev + (t.type && t.ev === 'attachedToTarget' ? ' ' + t.type + ' waiting=' + t.waiting : '')}`;
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    return m;
+  };
+  const ca = counts(a.trace);
+  const cb = counts(b.trace);
+  console.log('\nmessage counts that differ (first file / second file):');
+  let nd = 0;
+  for (const k of [...new Set([...ca.keys(), ...cb.keys()])].sort()) {
+    if (ca.get(k) !== cb.get(k)) {
+      nd++;
+      console.log(`  ${k}: ${ca.get(k) ?? 0} / ${cb.get(k) ?? 0}`);
+    }
+  }
+  console.log(`  ${nd} of ${new Set([...ca.keys(), ...cb.keys()]).size} kinds differ`);
   console.log(same ? 'same' : 'different');
   process.exit(0);
 }

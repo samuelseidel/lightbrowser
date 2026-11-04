@@ -34,6 +34,14 @@ export const workerPages = {
     };
   `),
   '/wk/data.txt': text('worker data'),
+  '/wk/nested/': html(
+    'Nested',
+    `<iframe src="/wk/nested/frame.html"></iframe>
+    <script>var outer = new Worker('/wk/outer.js', { name: 'outer' });</script>`,
+  ),
+  '/wk/nested/frame.html': html('Frame', `<script>var fw = new Worker('/wk/inner.js', { name: 'in-frame' });</script>`),
+  '/wk/outer.js': js(`self.inner = new Worker('/wk/inner.js', { name: 'inner' });`),
+  '/wk/inner.js': js(`self.who = self.name;`),
   '/wk/shared/': html(
     'Shared',
     `<script>
@@ -137,6 +145,23 @@ export async function runScenario(browser, base) {
     out.secondWorker = await w2.evaluate(() => self.counter);
     await page.goto(`${base}/wk/data.txt`);
     out.closeOnNavigation = await closed2;
+    await context.close();
+  }
+  // --- nested workers and a frame's worker ---
+  {
+    const context = await browser.newContext({ viewport: null });
+    const page = await context.newPage();
+    const names = [];
+    const all = new Promise((resolve) => {
+      page.on('worker', async (w) => {
+        names.push(await w.evaluate(() => self.name));
+        if (names.length === 3) resolve();
+      });
+    });
+    await page.goto(`${base}/wk/nested/`);
+    await Promise.race([all, new Promise((r) => setTimeout(r, 5000))]);
+    out.nestedNames = names.sort();
+    out.nestedPageWorkers = page.workers().length;
     await context.close();
   }
   // --- shared worker: not a page worker in Playwright ---

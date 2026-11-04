@@ -238,6 +238,14 @@ impl BrowserContext {
         self.0.inspector.get()
     }
 
+    /// Shorten the idle timeout after which this context's service
+    /// workers are stopped (30 s as in Chrome; ADR 0029). For tests.
+    #[cfg(feature = "chrome")]
+    #[doc(hidden)]
+    pub fn set_sw_idle_timeout(&self, d: std::time::Duration) {
+        self.0.service_workers.set_idle_timeout(d);
+    }
+
     /// The service worker registry of this context (ADR 0022).
     #[cfg(feature = "chrome")]
     pub(crate) fn service_workers(&self) -> &Arc<crate::sw::SwShared> {

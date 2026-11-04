@@ -46,12 +46,32 @@ const SOFT_UPDATE_DELAY: Duration = Duration::from_millis(1500);
 /// loopback: exactly 30 s; never while DevTools is attached to it).
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
+impl SwShared {
+    /// The idle timeout of this context's versions.
+    pub(crate) fn idle_timeout(&self) -> Duration {
+        match self.idle_ms.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => IDLE_TIMEOUT,
+            ms => Duration::from_millis(ms),
+        }
+    }
+
+    pub(crate) fn set_idle_timeout(&self, d: Duration) {
+        self.idle_ms.store(
+            d.as_millis().max(1) as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
 /// The registry of one context.
 #[derive(Default)]
 pub(crate) struct SwShared {
     st: Mutex<Registry>,
     /// Held while a stopped version is started again (one thread each).
     restart: Mutex<()>,
+    /// [`IDLE_TIMEOUT`] unless a test shortened it (milliseconds; 0 =
+    /// the default).
+    idle_ms: std::sync::atomic::AtomicU64,
     /// The job queue (one job at a time).
     jobs: tokio::sync::Mutex<()>,
     /// Version states changed (fetches wait for `activated`).
@@ -653,11 +673,12 @@ pub(crate) async fn idle_watch(ctx: WeakContext, vid: u64, inspected: impl Fn() 
                 return;
             }
             let idle = v.last_event.elapsed();
+            let limit = sh.idle_timeout();
             if inspected() {
                 v.last_event = std::time::Instant::now();
-                IDLE_TIMEOUT
+                limit
             } else if v.inflight == 0
-                && idle >= IDLE_TIMEOUT
+                && idle >= limit
                 && matches!(v.state, SwState::Installed | SwState::Activated)
             {
                 v.inbox = None;
@@ -666,13 +687,20 @@ pub(crate) async fn idle_watch(ctx: WeakContext, vid: u64, inspected: impl Fn() 
                 }
                 return;
             } else if v.inflight > 0 {
-                IDLE_TIMEOUT
+                limit
             } else {
-                IDLE_TIMEOUT.saturating_sub(idle)
+                limit.saturating_sub(idle)
             }
         };
         tokio::time::sleep(wait.max(Duration::from_millis(1))).await;
     }
+}
+
+/// The scope of registration `reg`.
+pub(crate) fn scope_of(ctx: &BrowserContext, reg: u64) -> Option<String> {
+    lock(ctx.service_workers())
+        .reg(reg)
+        .map(|r| r.scope.to_string())
 }
 
 /// The controller of a navigation to `url` (the matching registration's

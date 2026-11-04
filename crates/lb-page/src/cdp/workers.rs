@@ -100,6 +100,8 @@ pub(crate) struct Announce {
     pub name: String,
     /// Dedicated workers: the target of the page or worker that made it.
     pub parent: Option<String>,
+    /// Service workers: the registration's scope.
+    pub scope: Option<String>,
     pub control: Arc<WorkerControl>,
 }
 
@@ -181,7 +183,14 @@ pub(crate) fn announce(inspector: Option<&Arc<Inspector>>, a: Announce) -> Optio
             mix(shared.seed.rotate_left(17) ^ n) as i64
         ),
     };
-    shared.emit(&target, PageEvent::WorkerCreated { info, context });
+    shared.emit(
+        &target,
+        PageEvent::WorkerCreated {
+            info,
+            context,
+            scope: a.scope,
+        },
+    );
     Some(Link {
         agent: Rc::new(WorkerAgent {
             target,
@@ -335,6 +344,20 @@ impl WorkerAgent {
         self.emit(PageEvent::ResponseReceived(Box::new(
             super::net::worker_response(&self.target, resp, "Script", self.shared.mono()),
         )));
+        self.data_received(&self.target, resp.body.len());
+    }
+
+    /// `Network.dataReceived` (Chrome sends one before `loadingFinished`).
+    fn data_received(&self, id: &str, len: usize) {
+        self.emit(PageEvent::Custom {
+            method: "Network.dataReceived".into(),
+            params: serde_json::json!({
+                "requestId": id,
+                "timestamp": self.shared.mono(),
+                "dataLength": len,
+                "encodedDataLength": 0,
+            }),
+        });
     }
 
     pub(crate) fn script_finished(&self, len: usize) {
@@ -373,6 +396,7 @@ impl WorkerAgent {
                 self.emit(PageEvent::ResponseReceived(Box::new(
                     super::net::worker_response(id, resp, rtype, self.shared.mono()),
                 )));
+                self.data_received(id, resp.body.len());
                 self.emit(PageEvent::LoadingFinished(LoadingFinished {
                     request_id: id.to_string(),
                     timestamp: self.shared.mono(),

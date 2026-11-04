@@ -287,8 +287,12 @@ impl<H: PageHost + 'static> Shared<H> {
     fn on_host_event(&self, ev: HostEvent) {
         let t = ev.target_id.as_str();
         match ev.event {
-            PageEvent::WorkerCreated { info, context } => {
-                self.worker_created(t, info, context);
+            PageEvent::WorkerCreated {
+                info,
+                context,
+                scope,
+            } => {
+                self.worker_created(t, info, context, scope);
                 return;
             }
             PageEvent::WorkerDestroyed => {
@@ -551,7 +555,13 @@ impl<H: PageHost + 'static> Shared<H> {
     /// sessions, attach it where auto-attach is on (dedicated workers to
     /// sessions of their parent target, shared and service workers to
     /// browser sessions), and let it run unless a session waits.
-    fn worker_created(&self, id: &str, mut info: TargetInfo, context: ExecutionContext) {
+    fn worker_created(
+        &self,
+        id: &str,
+        mut info: TargetInfo,
+        context: ExecutionContext,
+        scope: Option<String>,
+    ) {
         info.target_id = id.to_string();
         info.attached = false;
         let (discover, attachers) = {
@@ -561,6 +571,21 @@ impl<H: PageHost + 'static> Shared<H> {
             }
             let parent = info.parent_id.clone();
             let dedicated = info.kind == "worker";
+            let ctx = info.browser_context_id.clone();
+            // Pages of the context inside a service worker's scope.
+            let in_scope: HashSet<TargetId> = match &scope {
+                Some(sc) => st
+                    .targets
+                    .iter()
+                    .filter(|t| {
+                        t.info.kind == "page"
+                            && t.info.browser_context_id == ctx
+                            && t.info.url.starts_with(sc.as_str())
+                    })
+                    .map(|t| t.info.target_id.clone())
+                    .collect(),
+                None => HashSet::new(),
+            };
             st.targets.push(TargetState {
                 info,
                 viewport: None,
@@ -581,7 +606,7 @@ impl<H: PageHost + 'static> Shared<H> {
                     if dedicated {
                         parent.is_some() && s.target == parent
                     } else {
-                        s.target.is_none()
+                        s.target.as_ref().is_none_or(|t| in_scope.contains(t))
                     }
                 })
                 .filter_map(|(k, s)| s.auto_attach.map(|w| (k.clone(), w)))
@@ -643,6 +668,24 @@ impl<H: PageHost + 'static> Shared<H> {
     pub fn close_target(&self, id: &str) -> Result<(), CdpError> {
         if self.state.borrow().target(id).is_none() {
             return Err(CdpError::server("No target with given id found"));
+        }
+        // A page's dedicated workers (and theirs) go first, innermost
+        // first, as Chrome detaches them before the page.
+        let mut doomed: Vec<TargetId> = Vec::new();
+        {
+            let st = self.state.borrow();
+            let mut frontier = vec![id.to_string()];
+            while let Some(p) = frontier.pop() {
+                for t in &st.targets {
+                    if t.info.kind == "worker" && t.info.parent_id.as_deref() == Some(p.as_str()) {
+                        doomed.push(t.info.target_id.clone());
+                        frontier.push(t.info.target_id.clone());
+                    }
+                }
+            }
+        }
+        for w in doomed.iter().rev() {
+            self.worker_destroyed(w);
         }
         let host_result = self.host.close_page(id);
         let sessions: Vec<String> = self

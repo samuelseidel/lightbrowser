@@ -182,3 +182,84 @@ async fn registrations_are_per_context() {
     let same = open(&b, &c1, &srv.url("/lifecycle/x.html"), WaitUntil::Load).await;
     assert_eq!(check(same).await, "1 true");
 }
+
+/// An idle version stops and the next event starts it again with fresh
+/// globals, without fetching its script again (ADR 0029). Chrome 153
+/// stopped it exactly 30 s after the last event and answered a message
+/// and a fetch with a restarted worker (`tests/playwright/workers/
+/// idle_chrome.json`: counter 1, 2, 3, then 1 after 42 s idle, then 2 for
+/// a fetch, one script request); the timeout is shortened here.
+#[tokio::test]
+async fn idle_version_stops_and_restarts() {
+    let page_src = "<!DOCTYPE html><title>idle</title><script>\
+        navigator.serviceWorker.register('/idle/sw.js');\
+        window.ask = () => new Promise((r) => { navigator.serviceWorker.onmessage = (e) => r(String(e.data)); \
+          navigator.serviceWorker.controller.postMessage('inc'); });\
+        window.ping = () => fetch('/idle/ping').then((r) => r.text());\
+        </script>";
+    let sw = "self.n = 0;\
+        self.addEventListener('install', () => self.skipWaiting());\
+        self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));\
+        self.addEventListener('message', (e) => { self.n++; e.source.postMessage(self.n); });\
+        self.addEventListener('fetch', (e) => { if (new URL(e.request.url).pathname === '/idle/ping') \
+          e.respondWith(new Response(String(++self.n))); });";
+    let fetches = Arc::new(Mutex::new(0u32));
+    let f2 = fetches.clone();
+    let srv = serve_target(Arc::new(move |p: &str, _t: &str| match p {
+        "/idle/sw.js" => {
+            *f2.lock().unwrap() += 1;
+            Some(Resource::new("text/javascript", sw).header("Cache-Control", "no-store"))
+        }
+        "/idle/" => Some(Resource::new("text/html", page_src)),
+        _ => None,
+    }))
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let timeout = Duration::from_millis(400);
+    ctx.set_sw_idle_timeout(timeout);
+    let page = open(&b, &ctx, &srv.url("/idle/"), WaitUntil::Load).await;
+    let eval = |expr: &'static str| {
+        let page = &page;
+        async move {
+            page.evaluate(&format!("window.R = ''; {expr}.then(v => window.R = v)"))
+                .await
+                .unwrap();
+            let t0 = Instant::now();
+            loop {
+                if let Ok(lb_js::JsValue::String(s)) = page.evaluate("window.R").await
+                    && !s.is_empty()
+                {
+                    return s;
+                }
+                assert!(t0.elapsed() < Duration::from_secs(5), "{expr}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    };
+    let t0 = Instant::now();
+    while !matches!(
+        page.evaluate("!!navigator.serviceWorker.controller").await,
+        Ok(lb_js::JsValue::Bool(true))
+    ) {
+        assert!(t0.elapsed() < Duration::from_secs(5));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(eval("ask()").await, "1");
+    tokio::time::sleep(timeout / 2).await;
+    assert_eq!(eval("ask()").await, "2");
+    tokio::time::sleep(timeout / 2).await;
+    // Still running: each event moved the deadline.
+    assert_eq!(eval("ask()").await, "3");
+    tokio::time::sleep(timeout * 2).await;
+    // Stopped and started again for the message: fresh globals.
+    assert_eq!(eval("ask()").await, "1");
+    assert_eq!(eval("ping()").await, "2");
+    tokio::time::sleep(timeout * 2).await;
+    // A fetch starts it too.
+    assert_eq!(eval("ping()").await, "1");
+    assert_eq!(
+        *fetches.lock().unwrap(),
+        1,
+        "the script is not fetched again"
+    );
+}

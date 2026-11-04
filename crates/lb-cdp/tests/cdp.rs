@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use lb_cdp::mock::MockHost;
+use lb_cdp::types::TargetInfo;
 use lb_cdp::{Server, ServerConfig, block_on_local};
 use lb_persona::PersonaProfile;
 use serde_json::{Value, json};
@@ -1219,4 +1220,138 @@ fn contexts_die_with_their_connection_and_browser_close_stops() {
             .unwrap();
     })
     .unwrap();
+}
+
+/// Workers as targets (ADR 0029), as Chrome 153 sends them to Playwright
+/// (`tests/playwright/workers/chrome.json`): a dedicated worker attaches
+/// to its page's session waiting for the debugger and runs once that
+/// session sends `Runtime.runIfWaitingForDebugger`; its context has no
+/// `auxData`; page-only domains are not found on it; it detaches when it
+/// ends. Shared and service workers attach to the browser session and run
+/// when it detaches; service workers also to pages in their scope.
+#[test]
+fn worker_targets() {
+    block_on_local(async {
+        let h = host();
+        let (url, _) = start(h.clone()).await;
+        let (mut c, ctx, page, s) = new_page(&url).await;
+        let sid = Some(s.as_str());
+        let info = |kind: &str, url: &str, title: &str, parent: Option<&str>| TargetInfo {
+            target_id: String::new(),
+            kind: kind.into(),
+            title: title.into(),
+            url: url.into(),
+            attached: false,
+            opener_id: None,
+            parent_id: parent.map(str::to_string),
+            can_access_opener: false,
+            parent_frame_id: parent.map(str::to_string),
+            browser_context_id: Some(ctx.clone()),
+        };
+        h.start_worker(
+            "W1",
+            info("worker", "http://127.0.0.1/w.js", "dw", Some(&page)),
+            "dw",
+            None,
+        );
+        let a = c.event("Target.attachedToTarget", sid).await;
+        assert_eq!(a["waitingForDebugger"], true);
+        let ti = &a["targetInfo"];
+        assert_eq!(ti["type"], "worker");
+        assert_eq!(ti["targetId"], "W1");
+        assert_eq!(ti["title"], "dw");
+        assert_eq!(ti["parentId"], page.as_str());
+        assert_eq!(ti["parentFrameId"], page.as_str());
+        assert_eq!(ti["attached"], true);
+        let w = a["sessionId"].as_str().unwrap().to_string();
+        let wid = Some(w.as_str());
+        assert!(h.resumed_workers().is_empty());
+        assert_eq!(h.worker_session_count("W1"), Some(1));
+        c.ok("Runtime.enable", json!({}), wid).await;
+        let created = c.event("Runtime.executionContextCreated", wid).await;
+        assert_eq!(created["context"]["id"], 1);
+        assert_eq!(created["context"]["name"], "dw");
+        assert_eq!(created["context"]["origin"], "http://127.0.0.1/w.js");
+        assert!(created["context"].get("auxData").is_none());
+        c.ok("Network.enable", json!({}), wid).await;
+        let e = c.call("Page.enable", json!({}), wid).await.unwrap_err();
+        assert_eq!(e["message"], "'Page.enable' wasn't found");
+        assert!(h.resumed_workers().is_empty());
+        c.ok("Runtime.runIfWaitingForDebugger", json!({}), wid)
+            .await;
+        assert_eq!(h.resumed_workers(), vec!["W1".to_string()]);
+        let targets = c.ok("Target.getTargets", json!({}), None).await;
+        assert!(
+            targets["targetInfos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["targetId"] == "W1" && t["type"] == "worker")
+        );
+        h.end_worker("W1");
+        let d = c.event("Target.detachedFromTarget", sid).await;
+        assert_eq!(d["sessionId"], w.as_str());
+        assert_eq!(d["targetId"], "W1");
+
+        // A shared worker: browser session; detaching lets it run.
+        h.start_worker(
+            "W2",
+            info("shared_worker", "http://127.0.0.1/s.js", "sw1", None),
+            "sw1",
+            None,
+        );
+        let a = c.event("Target.attachedToTarget", None).await;
+        assert_eq!(a["targetInfo"]["type"], "shared_worker");
+        assert_eq!(a["waitingForDebugger"], true);
+        let w2 = a["sessionId"].as_str().unwrap().to_string();
+        c.ok("Target.detachFromTarget", json!({"sessionId": w2}), None)
+            .await;
+        assert_eq!(h.resumed_workers().last().unwrap(), "W2");
+        assert_eq!(h.worker_session_count("W2"), Some(0));
+
+        // A service worker of the page's scope: browser and page sessions.
+        let page_url = c
+            .ok("Target.getTargetInfo", json!({"targetId": page}), None)
+            .await["targetInfo"]["url"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        h.start_worker(
+            "W3",
+            info(
+                "service_worker",
+                "http://127.0.0.1/sw.js",
+                "Service Worker http://127.0.0.1/sw.js",
+                None,
+            ),
+            "",
+            Some(&page_url),
+        );
+        let on_browser = c.event("Target.attachedToTarget", None).await;
+        let on_page = c.event("Target.attachedToTarget", sid).await;
+        assert_eq!(on_browser["targetInfo"]["type"], "service_worker");
+        assert_eq!(on_page["targetInfo"]["type"], "service_worker");
+        let (b3, p3) = (
+            on_browser["sessionId"].as_str().unwrap().to_string(),
+            on_page["sessionId"].as_str().unwrap().to_string(),
+        );
+        assert_eq!(h.worker_session_count("W3"), Some(2));
+        c.ok("Runtime.runIfWaitingForDebugger", json!({}), Some(&b3))
+            .await;
+        assert_eq!(h.resumed_workers().last().unwrap(), "W2");
+        c.ok(
+            "Target.detachFromTarget",
+            json!({"sessionId": p3}),
+            Some(&s),
+        )
+        .await;
+        assert_eq!(h.resumed_workers().last().unwrap(), "W3");
+        c.ok(
+            "Emulation.setUserAgentOverride",
+            json!({"userAgent": ""}),
+            Some(&b3),
+        )
+        .await;
+        assert_eq!(h.worker_session_count("W3"), Some(1));
+    });
 }

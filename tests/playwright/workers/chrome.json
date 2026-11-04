@@ -43,7 +43,14 @@
   "close": "closed",
   "pageWorkersAfter": 0,
   "evaluateAfterClose": "closed",
+  "secondWorker": 1,
   "closeOnNavigation": "closed",
+  "nestedNames": [
+   "in-frame",
+   "inner",
+   "outer"
+  ],
+  "nestedPageWorkers": 3,
   "sharedReply": "shared got hi",
   "sharedPageWorkers": 0,
   "sharedTargets": [
@@ -237,11 +244,6 @@
    "reply": "Runtime.enable"
   },
   {
-   "on": "page",
-   "ev": "Log.entryAdded",
-   "text": "hello from worker 42"
-  },
-  {
    "on": "worker",
    "reply": "Network.enable"
   },
@@ -256,7 +258,16 @@
   },
   {
    "on": "worker",
+   "reply": "Target.setAutoAttach"
+  },
+  {
+   "on": "worker",
    "ev": "Network.dataReceived"
+  },
+  {
+   "on": "page",
+   "ev": "Log.entryAdded",
+   "text": "hello from worker 42"
   },
   {
    "on": "worker",
@@ -274,10 +285,6 @@
   {
    "on": "worker",
    "ev": "Network.loadingFinished"
-  },
-  {
-   "on": "worker",
-   "reply": "Target.setAutoAttach"
   },
   {
    "on": "worker",
@@ -372,14 +379,14 @@
    "reply": "Runtime.callFunctionOn"
   },
   {
-   "on": "worker",
-   "ev": "Runtime.consoleAPICalled",
-   "type": "warning"
-  },
-  {
    "on": "page",
    "ev": "Log.entryAdded",
    "text": "warned [object Object]"
+  },
+  {
+   "on": "worker",
+   "ev": "Runtime.consoleAPICalled",
+   "type": "warning"
   },
   {
    "on": "worker",
@@ -459,17 +466,8 @@
    "res": "Script /wk/worker.js sw=false"
   },
   {
-   "on": "page",
-   "ev": "Log.entryAdded",
-   "text": "hello from worker 42"
-  },
-  {
    "on": "worker",
    "ev": "Network.dataReceived"
-  },
-  {
-   "on": "worker",
-   "reply": "Target.setAutoAttach"
   },
   {
    "on": "worker",
@@ -482,7 +480,338 @@
   },
   {
    "on": "worker",
+   "send": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
    "ev": "Network.loadingFinished"
+  },
+  {
+   "on": "page",
+   "ev": "Log.entryAdded",
+   "text": "hello from worker 42"
+  },
+  {
+   "on": "worker",
+   "reply": "Target.setAutoAttach"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "page",
+   "ev": "detachedFromTarget",
+   "type": "worker"
+  },
+  {
+   "on": "browser",
+   "ev": "attachedToTarget",
+   "type": "other",
+   "waiting": true,
+   "keys": "attached,browserContextId,canAccessOpener,targetId,title,type,url"
+  },
+  {
+   "on": "other",
+   "send": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "browser",
+   "ev": "attachedToTarget",
+   "type": "browser_ui",
+   "waiting": true,
+   "keys": "attached,browserContextId,canAccessOpener,targetId,title,type,url"
+  },
+  {
+   "on": "browser_ui",
+   "send": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "browser",
+   "ev": "attachedToTarget",
+   "type": "browser_ui",
+   "waiting": true,
+   "keys": "attached,browserContextId,canAccessOpener,targetId,title,type,url"
+  },
+  {
+   "on": "browser_ui",
+   "send": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "browser_ui",
+   "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "browser_ui",
+   "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "other",
+   "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "browser",
+   "ev": "detachedFromTarget",
+   "type": "browser_ui"
+  },
+  {
+   "on": "browser",
+   "ev": "detachedFromTarget",
+   "type": "browser_ui"
+  },
+  {
+   "on": "browser",
+   "ev": "detachedFromTarget",
+   "type": "other"
+  },
+  {
+   "on": "page",
+   "ev": "attachedToTarget",
+   "type": "worker",
+   "waiting": true,
+   "keys": "attached,browserContextId,canAccessOpener,parentFrameId,parentId,targetId,title,type,url"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.enable"
+  },
+  {
+   "on": "worker",
+   "send": "Network.enable"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "worker",
+   "send": "Target.setAutoAttach"
+  },
+  {
+   "on": "page",
+   "ev": "attachedToTarget",
+   "type": "worker",
+   "waiting": true,
+   "keys": "attached,browserContextId,canAccessOpener,parentFrameId,parentId,targetId,title,type,url"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.enable"
+  },
+  {
+   "on": "worker",
+   "send": "Network.enable"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "worker",
+   "send": "Target.setAutoAttach"
+  },
+  {
+   "on": "worker",
+   "ev": "Runtime.executionContextCreated",
+   "ctxKeys": "id,name,origin,uniqueId"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.enable"
+  },
+  {
+   "on": "worker",
+   "reply": "Network.enable"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.responseReceived",
+   "res": "Script /wk/outer.js sw=false"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.dataReceived"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.requestWillBeSent",
+   "req": "Script /wk/inner.js"
+  },
+  {
+   "on": "worker",
+   "ev": "Inspector.workerScriptLoaded"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.loadingFinished"
+  },
+  {
+   "on": "worker",
+   "reply": "Target.setAutoAttach"
+  },
+  {
+   "on": "worker",
+   "ev": "attachedToTarget",
+   "type": "worker",
+   "waiting": true,
+   "keys": "attached,browserContextId,canAccessOpener,parentFrameId,parentId,targetId,title,type,url"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.enable"
+  },
+  {
+   "on": "worker",
+   "send": "Network.enable"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "worker",
+   "send": "Target.setAutoAttach"
+  },
+  {
+   "on": "worker",
+   "ev": "Runtime.executionContextCreated",
+   "ctxKeys": "id,name,origin,uniqueId"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.enable"
+  },
+  {
+   "on": "worker",
+   "reply": "Network.enable"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.responseReceived",
+   "res": "Script /wk/inner.js sw=false"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.dataReceived"
+  },
+  {
+   "on": "worker",
+   "reply": "Target.setAutoAttach"
+  },
+  {
+   "on": "worker",
+   "ev": "Inspector.workerScriptLoaded"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.loadingFinished"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "ev": "Runtime.executionContextCreated",
+   "ctxKeys": "id,name,origin,uniqueId"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.enable"
+  },
+  {
+   "on": "worker",
+   "reply": "Network.enable"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.responseReceived",
+   "res": "Script /wk/inner.js sw=false"
+  },
+  {
+   "on": "worker",
+   "reply": "Target.setAutoAttach"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.dataReceived"
+  },
+  {
+   "on": "worker",
+   "ev": "Inspector.workerScriptLoaded"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.loadingFinished"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "page",
+   "ev": "detachedFromTarget",
+   "type": "worker"
   },
   {
    "on": "page",
@@ -620,18 +949,18 @@
    "reply": "Runtime.runIfWaitingForDebugger"
   },
   {
-   "on": "browser",
-   "ev": "detachedFromTarget",
-   "type": "browser_ui"
-  },
-  {
-   "on": "browser",
-   "ev": "detachedFromTarget",
-   "type": "browser_ui"
-  },
-  {
    "on": "other",
    "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "browser",
+   "ev": "detachedFromTarget",
+   "type": "browser_ui"
+  },
+  {
+   "on": "browser",
+   "ev": "detachedFromTarget",
+   "type": "browser_ui"
   },
   {
    "on": "browser",
@@ -683,10 +1012,6 @@
   },
   {
    "on": "service_worker",
-   "reply": "Runtime.runIfWaitingForDebugger"
-  },
-  {
-   "on": "service_worker",
    "reply": "Network.enable"
   },
   {
@@ -704,12 +1029,20 @@
   },
   {
    "on": "service_worker",
+   "ev": "Network.responseReceived",
+   "res": "Script /wk/sw/sw.js sw=false"
+  },
+  {
+   "on": "service_worker",
+   "reply": "Runtime.runIfWaitingForDebugger"
+  },
+  {
+   "on": "service_worker",
    "ev": "Network.dataReceived"
   },
   {
-   "on": "page",
-   "ev": "detachedFromTarget",
-   "type": "service_worker"
+   "on": "service_worker",
+   "ev": "Inspector.workerScriptLoaded"
   },
   {
    "on": "service_worker",
@@ -718,6 +1051,11 @@
   {
    "on": "service_worker",
    "ev": "Network.loadingFinished"
+  },
+  {
+   "on": "page",
+   "ev": "detachedFromTarget",
+   "type": "service_worker"
   },
   {
    "on": "service_worker",
@@ -774,6 +1112,11 @@
   },
   {
    "on": "page",
+   "ev": "detachedFromTarget",
+   "type": "service_worker"
+  },
+  {
+   "on": "browser",
    "ev": "detachedFromTarget",
    "type": "service_worker"
   }

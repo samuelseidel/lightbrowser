@@ -73,6 +73,10 @@ struct MockState {
     next_script: u64,
     next_intercept: u64,
     input_log: Vec<String>,
+    /// Workers the server let run (`resume_worker`), in order.
+    resumed: Vec<String>,
+    /// Session counts the server reported per worker.
+    worker_sessions: HashMap<String, usize>,
 }
 
 /// See the module docs.
@@ -227,6 +231,40 @@ impl MockHost {
         if let Some(s) = self.sink.borrow().as_ref() {
             s.emit(target, ev);
         }
+    }
+
+    /// Test hook: a worker target `id` starts (ADR 0029).
+    pub fn start_worker(&self, id: &str, info: TargetInfo, name: &str, scope: Option<&str>) {
+        let context = ExecutionContext {
+            id: 1,
+            frame_id: id.to_string(),
+            world: World::Worker(name.to_string()),
+            origin: info.url.clone(),
+            unique_id: format!("{id}.1"),
+        };
+        self.emit(
+            id,
+            PageEvent::WorkerCreated {
+                info,
+                context,
+                scope: scope.map(str::to_string),
+            },
+        );
+    }
+
+    /// Test hook: worker `id` ends.
+    pub fn end_worker(&self, id: &str) {
+        self.emit(id, PageEvent::WorkerDestroyed);
+    }
+
+    /// Workers the server let run, in order.
+    pub fn resumed_workers(&self) -> Vec<String> {
+        self.state.borrow().resumed.clone()
+    }
+
+    /// The last session count the server reported for worker `id`.
+    pub fn worker_session_count(&self, id: &str) -> Option<usize> {
+        self.state.borrow().worker_sessions.get(id).copied()
     }
 
     fn now(&self) -> f64 {
@@ -845,6 +883,17 @@ impl PageHost for MockHost {
     fn close_page(&self, target_id: &str) -> HostResult<()> {
         self.state.borrow_mut().pages.remove(target_id);
         Ok(())
+    }
+
+    fn resume_worker(&self, target_id: &str) {
+        self.state.borrow_mut().resumed.push(target_id.to_string());
+    }
+
+    fn worker_sessions(&self, target_id: &str, count: usize) {
+        self.state
+            .borrow_mut()
+            .worker_sessions
+            .insert(target_id.to_string(), count);
     }
 
     async fn navigate(&self, target_id: &str, req: NavigateRequest) -> HostResult<NavigateResult> {

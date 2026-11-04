@@ -271,6 +271,10 @@ pub enum PageEvent {
     WorkerCreated {
         info: TargetInfo,
         context: ExecutionContext,
+        /// Service workers: their registration's scope. Chrome also
+        /// attaches a starting service worker to the auto-attaching
+        /// sessions of the context's pages inside that scope.
+        scope: Option<String>,
     },
     /// The worker ended (terminated, closed, its document went, or an idle
     /// service worker was stopped): its sessions are detached and the

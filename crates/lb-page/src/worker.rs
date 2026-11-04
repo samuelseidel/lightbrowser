@@ -258,6 +258,9 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
                 } else {
                     None
                 },
+                scope: service
+                    .as_ref()
+                    .and_then(|s| crate::sw::scope_of(&ctx, s.registration)),
                 control: control.clone(),
             },
         ),
