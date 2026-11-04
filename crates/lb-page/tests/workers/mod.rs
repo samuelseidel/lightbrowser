@@ -86,3 +86,127 @@ macro_rules! cases {
 cases!(
     basic, clone, errors, imports, network, scope, shared, terminate, transfer, urls,
 );
+
+/// The worker globals' surface, dumped in a dedicated and a shared worker
+/// by the same code as `tools/dump_worker_surface.js`: own properties of
+/// the global (names, descriptor kinds, lengths, order) and every
+/// interface object's prototype and statics must equal the capture of
+/// Chrome 153 (`tests/fixtures/chromium_153_worker_surface.json`).
+#[tokio::test]
+async fn surface_matches_chrome() {
+    let tool = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/dump_worker_surface.js"),
+    )
+    .unwrap();
+    // The capture's `dumpScope`, as an expression (no global binding).
+    let start = tool.find("function dumpScope()").unwrap();
+    let end = tool[start..].find("\n}\n").unwrap() + start + 2;
+    let dump = &tool[start..end];
+    let worker_src = |shared: bool| {
+        let body = format!("({dump})()");
+        if shared {
+            format!("onconnect = (e) => e.ports[0].postMessage(JSON.stringify({body}));")
+        } else {
+            format!("postMessage(JSON.stringify({body}));")
+        }
+    };
+    let page = "<!doctype html><script>var R={};\
+        var w=new Worker('/d.js');w.onmessage=e=>R.dedicated=e.data;\
+        var s=new SharedWorker('/s.js');s.port.onmessage=e=>R.shared=e.data;</script>";
+    let srv = super::common::serve(vec![
+        ("/", Resource::html(page)),
+        ("/d.js", Resource::js(&worker_src(false))),
+        ("/s.js", Resource::js(&worker_src(true))),
+    ])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &srv.url("/"), WaitUntil::Load).await;
+    let t0 = Instant::now();
+    let got = loop {
+        let v = page
+            .evaluate("R.dedicated && R.shared ? JSON.stringify(R) : ''")
+            .await
+            .unwrap();
+        if let lb_js::JsValue::String(s) = &v
+            && !s.is_empty()
+        {
+            break s.clone();
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "workers did not answer"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let got: serde_json::Value = serde_json::from_str(&got).unwrap();
+    let want: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/chromium_153_worker_surface.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    // Engine built-ins that differ on the window too (not worker
+    // specific): V8 152 lacks `Iterator.zip`, `Iterator.zipKeyed` and
+    // `Iterator.prototype.join`, and Blink's `WebAssembly.compileStreaming`
+    // / `instantiateStreaming` are not installed. Removed from both sides.
+    let known = |name: &str, list: &serde_json::Value| -> serde_json::Value {
+        let drop: &[&str] = match name {
+            "Iterator" => &["zip", "zipKeyed", "join"],
+            "WebAssembly" => &["compileStreaming", "instantiateStreaming"],
+            _ => &[],
+        };
+        serde_json::Value::Array(
+            list.as_array()
+                .into_iter()
+                .flatten()
+                .filter(|p| !drop.contains(&p[0].as_str().unwrap_or("")))
+                .cloned()
+                .collect(),
+        )
+    };
+    let mut bad = Vec::new();
+    for kind in ["dedicated", "shared"] {
+        let g: serde_json::Value = serde_json::from_str(got[kind].as_str().unwrap()).unwrap();
+        let w = &want[kind];
+        for key in ["globalProps", "globalSymbols", "protoChain", "toString"] {
+            if g[key] != w[key] {
+                bad.push(format!("{kind} {key}:\n got {}\nwant {}", g[key], w[key]));
+            }
+        }
+        for (name, wi) in w["interfaces"].as_object().unwrap() {
+            let gi = &g["interfaces"][name];
+            for key in [
+                "length",
+                "static",
+                "proto",
+                "protoSymbols",
+                "parent",
+                "toStringTag",
+            ] {
+                let (gv, wv) = match key {
+                    "static" | "proto" => (known(name, &gi[key]), known(name, &wi[key])),
+                    _ => (gi[key].clone(), wi[key].clone()),
+                };
+                if gv != wv {
+                    bad.push(format!(
+                        "{kind} {name}.{key}:\n got {}\nwant {}",
+                        gi[key], wi[key]
+                    ));
+                }
+            }
+        }
+        for (name, wn) in w["namespaces"].as_object().unwrap() {
+            if known(name, &g["namespaces"][name]["props"]) != known(name, &wn["props"]) {
+                bad.push(format!("{kind} namespace {name}"));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "{} differences:\n{}",
+        bad.len(),
+        bad.join("\n")
+    );
+}
