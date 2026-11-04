@@ -1,0 +1,10 @@
+<!doctype html><html><head><!--LOG-->
+</head><body><div id=t></div>
+<script>setTimeout(function(){log('timer p2='+!!document.getElementById('p2')+' p3='+!!document.getElementById('p3')+' p4='+!!document.getElementById('p4'))},200)</script>
+<link rel=stylesheet media=print href=slower-c.css onload="log('c load '+!!document.getElementById('p2'))">
+<p id=p2>y</p>
+<style>@import url(slower-b.css);</style>
+<p id=p3>z</p>
+<link rel=stylesheet href=slow-a.css media="(max-width: 10px)">
+<p id=p4>z</p>
+</body></html>

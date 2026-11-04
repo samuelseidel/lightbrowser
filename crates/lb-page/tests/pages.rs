@@ -4,6 +4,7 @@
 mod common;
 mod frames;
 mod report;
+mod stylesheets;
 
 use std::time::Duration;
 

@@ -253,6 +253,16 @@ pub(crate) struct MoRecord {
 
 /// See [`Window::after_mutation`].
 pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
+    // Style elements the parser closed: their sheets start now.
+    let closed = w
+        .parser
+        .try_borrow_mut()
+        .ok()
+        .and_then(|mut p| p.as_mut().map(|p| p.take_closed_styles()))
+        .unwrap_or_default();
+    for n in closed {
+        super::sheets::style_changed(w, n);
+    }
     loop {
         let batch = std::mem::take(&mut *w.mutations.borrow_mut());
         if batch.is_empty() {
@@ -260,6 +270,9 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
         }
         let mut scripts = Vec::new();
         let mut images = Vec::new();
+        let mut links: Vec<NodeId> = Vec::new();
+        let mut styles: Vec<NodeId> = Vec::new();
+        let mut removed = false;
         for (slot, m) in coalesce(w, &batch) {
             observe_record(js, w, slot, &m);
         }
@@ -269,6 +282,7 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
                 continue;
             }
             super::image::candidates(w, &m, &mut images);
+            sheet_candidates(w, &m, &mut links, &mut styles, &mut removed);
             match m {
                 Mutation::ChildInserted { node, .. } => {
                     let (handlers, found) = w.with_doc(|d| {
@@ -325,12 +339,89 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
                 _ => {}
             }
         }
+        if removed {
+            super::sheets::nodes_removed(w);
+        }
+        links.dedup();
+        for n in links {
+            super::sheets::link_changed(w, n);
+        }
+        styles.dedup();
+        for n in styles {
+            super::sheets::style_changed(w, n);
+        }
         if !images.is_empty() {
             super::image::process(js, w, images);
         }
         for s in scripts {
             super::script::prepare_dynamic(js, w, s);
         }
+    }
+}
+
+/// Style sheet owners a mutation may change: links (inserted, `rel` /
+/// `href` changes) and style elements (inserted, text changes). A style
+/// element the parser is still filling waits for its end tag.
+fn sheet_candidates(
+    w: &Window,
+    m: &Mutation,
+    links: &mut Vec<NodeId>,
+    styles: &mut Vec<NodeId>,
+    removed: &mut bool,
+) {
+    let style_parent = |d: &lb_dom::Document, n: NodeId| {
+        d.parent(n)
+            .filter(|&p| d.is_html_element_named(p, &local_name!("style")))
+    };
+    let parsing = |d: &lb_dom::Document, n: NodeId| {
+        d.flags(n).contains(NodeFlags::PARSER_INSERTED)
+            && !w.css.borrow().has_owner(n)
+            && w.parser.borrow().is_some()
+    };
+    match m {
+        Mutation::ChildInserted { node, .. } => w.with_doc(|d| {
+            if !d.is_connected(*node) {
+                return;
+            }
+            if let Some(p) = style_parent(d, *node) {
+                if !parsing(d, p) {
+                    styles.push(p);
+                }
+                return;
+            }
+            for n in d.inclusive_descendants(*node) {
+                if d.is_html_element_named(n, &local_name!("link")) {
+                    links.push(n);
+                } else if d.is_html_element_named(n, &local_name!("style")) && !parsing(d, n) {
+                    styles.push(n);
+                }
+            }
+        }),
+        Mutation::ChildRemoved { parent, .. } => w.with_doc(|d| {
+            *removed = true;
+            if d.is_html_element_named(*parent, &local_name!("style")) && d.is_connected(*parent) {
+                styles.push(*parent);
+            }
+        }),
+        Mutation::Attribute { element, name, .. } if name.ns == ns!() => w.with_doc(|d| {
+            if d.is_html_element_named(*element, &local_name!("link"))
+                && matches!(&*name.local, "rel" | "href")
+            {
+                links.push(*element);
+            } else if d.is_html_element_named(*element, &local_name!("style"))
+                && &*name.local == "type"
+            {
+                styles.push(*element);
+            }
+        }),
+        Mutation::CharacterData { node, .. } => w.with_doc(|d| {
+            if let Some(p) = style_parent(d, *node)
+                && d.is_connected(p)
+            {
+                styles.push(p);
+            }
+        }),
+        _ => {}
     }
 }
 

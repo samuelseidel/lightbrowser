@@ -116,6 +116,7 @@ pub fn parse_chunks(chunks: &[&str]) -> (Document, Vec<NodeId>) {
             ParseStep::Script(s) => scripts.push(s),
             ParseStep::Done => break,
             ParseStep::NeedInput => panic!("NeedInput after end"),
+            ParseStep::StyleSheet(_) => panic!("style sheet pauses are off"),
         }
     }
     (doc, scripts)

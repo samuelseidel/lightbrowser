@@ -26,6 +26,11 @@ pub enum ParseStep {
     /// `src`, `async` or `defer`; the page layer decides what to execute.
     /// Scripts inside `<template>` and SVG scripts yield too.
     Script(NodeId),
+    /// A `<link>` element was just inserted or a `<style>` element just
+    /// closed (only with [`ParserOptions::pause_at_style_sheets`]). The
+    /// page layer may wait for its style sheet before calling `run` again;
+    /// there is no insertion point for `document.write`.
+    StyleSheet(NodeId),
     /// End of input; the tree is complete.
     Done,
 }
@@ -35,17 +40,76 @@ pub enum ParseStep {
 pub struct ParserOptions {
     /// Affects `<noscript>` parsing. True for a normal page.
     pub scripting_enabled: bool,
+    /// Stop after each HTML `<link>` start tag and `</style>` end tag
+    /// ([`ParseStep::StyleSheet`]), so the page layer can pause parsing
+    /// for a style sheet in `<body>` as Chrome does.
+    pub pause_at_style_sheets: bool,
 }
 
 impl Default for ParserOptions {
     fn default() -> Self {
         ParserOptions {
             scripting_enabled: true,
+            pause_at_style_sheets: false,
         }
     }
 }
 
-type Tok = Tokenizer<TreeBuilder<NodeId, Sink>>;
+/// The tree builder, plus the style sheet pause points.
+struct PauseSink {
+    tb: TreeBuilder<NodeId, Sink>,
+    pause: bool,
+    /// The `<link>` / `<style>` the tokenizer last stopped at (it reports
+    /// pauses as `Script`).
+    paused_at: std::cell::Cell<Option<NodeId>>,
+}
+
+impl html5ever::tokenizer::TokenSink for PauseSink {
+    type Handle = NodeId;
+
+    fn process_token(
+        &self,
+        token: html5ever::tokenizer::Token,
+        line_number: u64,
+    ) -> html5ever::tokenizer::TokenSinkResult<NodeId> {
+        use html5ever::tokenizer::{TagKind, Token, TokenSinkResult};
+        let watch = match &token {
+            Token::TagToken(t) if self.pause => match (t.kind, &t.name) {
+                (TagKind::StartTag, n) if *n == local_name!("link") => {
+                    self.tb.sink.last_link.set(None);
+                    Some(true)
+                }
+                (TagKind::EndTag, n) if *n == local_name!("style") => Some(false),
+                _ => None,
+            },
+            _ => None,
+        };
+        let r = self.tb.process_token(token, line_number);
+        if let (Some(link), TokenSinkResult::Continue) = (watch, &r) {
+            let n = if link {
+                self.tb.sink.last_link.take()
+            } else {
+                self.tb.sink.last_style.take()
+            };
+            if let Some(n) = n {
+                self.paused_at.set(Some(n));
+                return TokenSinkResult::Script(n);
+            }
+        }
+        r
+    }
+
+    fn end(&self) {
+        self.tb.end()
+    }
+
+    fn adjusted_current_node_present_but_not_in_html_namespace(&self) -> bool {
+        self.tb
+            .adjusted_current_node_present_but_not_in_html_namespace()
+    }
+}
+
+type Tok = Tokenizer<PauseSink>;
 
 /// Incremental document parser. One per document load.
 ///
@@ -87,8 +151,13 @@ impl HtmlParser {
             ..Default::default()
         };
         let tb = TreeBuilder::new(sink, tb_opts);
+        let ps = PauseSink {
+            tb,
+            pause: opts.pause_at_style_sheets,
+            paused_at: std::cell::Cell::new(None),
+        };
         HtmlParser {
-            tok: Tokenizer::new(tb, TokenizerOpts::default()),
+            tok: Tokenizer::new(ps, TokenizerOpts::default()),
             input: BufferQueue::default(),
             inserted: BufferQueue::default(),
             pending_script: None,
@@ -187,6 +256,10 @@ impl HtmlParser {
                 &self.input
             };
             match self.tok.feed(queue) {
+                TokenizerResult::Script(s) if self.tok.sink.paused_at.get() == Some(s) => {
+                    self.tok.sink.paused_at.set(None);
+                    break ParseStep::StyleSheet(s);
+                }
                 TokenizerResult::Script(s) => {
                     self.blocked_on = Some(s);
                     break ParseStep::Script(s);
@@ -228,6 +301,10 @@ impl HtmlParser {
         self.lend(doc);
         loop {
             match self.tok.feed(&self.inserted) {
+                // Written text does not pause for style sheets.
+                TokenizerResult::Script(s) if self.tok.sink.paused_at.get() == Some(s) => {
+                    self.tok.sink.paused_at.set(None);
+                }
                 TokenizerResult::Script(s) => {
                     self.pending_script = Some(s);
                     break;
@@ -238,6 +315,12 @@ impl HtmlParser {
         }
         self.take_back(doc);
         true
+    }
+
+    /// HTML `<style>` elements closed since the last call (their text is
+    /// complete), in order.
+    pub fn take_closed_styles(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut *self.sink().closed_styles.borrow_mut())
     }
 
     /// Script the parser is currently stopped at, if any.
@@ -267,15 +350,15 @@ impl HtmlParser {
     }
 
     fn sink(&self) -> &Sink {
-        &self.tok.sink.sink
+        &self.tok.sink.tb.sink
     }
 
     fn lend(&mut self, doc: &mut Document) {
-        std::mem::swap(&mut *self.tok.sink.sink.doc.borrow_mut(), doc);
+        std::mem::swap(&mut *self.tok.sink.tb.sink.doc.borrow_mut(), doc);
     }
 
     fn take_back(&mut self, doc: &mut Document) {
-        std::mem::swap(&mut *self.tok.sink.sink.doc.borrow_mut(), doc);
+        std::mem::swap(&mut *self.tok.sink.tb.sink.doc.borrow_mut(), doc);
     }
 }
 

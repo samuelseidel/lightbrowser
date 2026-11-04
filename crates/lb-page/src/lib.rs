@@ -127,6 +127,7 @@ pub async fn load_document(
     let mut doc = lb_dom::Document::new();
     let mut parser = lb_dom::HtmlParser::with_options(lb_dom::ParserOptions {
         scripting_enabled: false,
+        ..Default::default()
     });
     parser.push_str(&if html { text } else { text_document(&text) });
     parser.end();

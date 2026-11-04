@@ -21,6 +21,7 @@
 //! come from the persona via [`MediaEnv::from_persona`].
 
 mod computed;
+pub mod cssom;
 mod engine;
 mod media;
 mod props;
@@ -30,11 +31,11 @@ mod ua;
 mod values;
 
 pub use computed::{ComputedStyle, CustomMap, Defaults, Transform};
-pub use engine::{SheetId, StyleEngine, StyleStats, in_display_none};
+pub use engine::{SheetId, SheetTree, StyleEngine, StyleStats, in_display_none};
 pub use media::{MediaEnv, MediaQueryList, MediaQueryResult, OsKind, PointerKind, match_media};
 pub use props::{
     CustomDeclaration, Decl, Declaration, DeclarationBlock, FamilyName, FontSizeSpec,
-    FontWeightSpec, LonghandId, Sv, SystemFont,
+    FontWeightSpec, LonghandId, Sv, SystemFont, declaration_longhands, is_valid_declaration,
 };
 pub use serialize::{computed_property_names, computed_value, longhand_value};
 pub use sheet::{ImportRule, Origin, StyleRule, Stylesheet};

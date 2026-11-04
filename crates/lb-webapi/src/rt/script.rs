@@ -264,6 +264,7 @@ fn run_script_parser(js: &mut dyn Js, w: &Rc<Window>, to_end: bool) {
                     prepare_dynamic(js, w, n);
                 }
             }
+            ParseStep::StyleSheet(_) => {}
             ParseStep::NeedInput | ParseStep::Done => {
                 let _ = to_end;
                 return;

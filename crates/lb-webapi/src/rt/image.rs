@@ -332,7 +332,7 @@ pub fn load_visible_lazy_images(w: &Rc<Window>) {
     }
 }
 
-fn data_url(url: &Url) -> Option<(Vec<u8>, String)> {
+pub(crate) fn data_url(url: &Url) -> Option<(Vec<u8>, String)> {
     let rest = url.as_str().strip_prefix("data:")?;
     let (meta, data) = rest.split_once(',')?;
     let base64 = meta.to_ascii_lowercase().ends_with(";base64");

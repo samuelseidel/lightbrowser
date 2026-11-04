@@ -193,3 +193,39 @@ fn many_small_chunks() {
     assert_eq!(dump(&doc), one_shot);
     assert_eq!(scripts.len(), 4);
 }
+
+#[test]
+fn pauses_after_links_and_style_end_tags_when_asked() {
+    let mut doc = Document::new();
+    let mut parser = HtmlParser::with_options(lb_dom::ParserOptions {
+        pause_at_style_sheets: true,
+        ..Default::default()
+    });
+    parser.push_str(
+        "<!DOCTYPE html><head><link rel=stylesheet href=a.css><style>p{}</style></head>\
+         <body><p id=a>A</p><link rel=stylesheet href=b.css><p id=b>B</p><svg><style>x</style></svg>",
+    );
+    parser.end();
+    let mut seen = Vec::new();
+    loop {
+        match parser.run(&mut doc) {
+            ParseStep::StyleSheet(n) => {
+                assert!(parser.blocked_on().is_none());
+                let name = doc.element(n).unwrap().name.local.to_string();
+                let b_parsed = doc.get_element_by_id("b").is_some();
+                seen.push(format!("{name}:{b_parsed}"));
+            }
+            ParseStep::Done => break,
+            s => panic!("{s:?}"),
+        }
+    }
+    // The body link pauses before `#b` is parsed; SVG `<style>` is not HTML.
+    assert_eq!(seen, ["link:false", "style:false", "link:false"]);
+    assert_eq!(parser.take_closed_styles().len(), 1);
+    // Without the option the parser runs through.
+    let mut doc = Document::new();
+    let mut parser = HtmlParser::new();
+    parser.push_str("<link rel=stylesheet href=a.css><style>p{}</style>");
+    parser.end();
+    assert_eq!(parser.run(&mut doc), ParseStep::Done);
+}

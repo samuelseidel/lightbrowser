@@ -297,6 +297,57 @@ fn doc_event(page: &PageState, doc: Doc, name: &str) {
     }
 }
 
+/// Wait until `cond` holds (re-checked whenever the page's loads change).
+async fn wait_for(
+    page: &PageState,
+    w: &Rc<Window>,
+    doc: Doc,
+    cond: impl Fn(&Window) -> bool,
+) -> Result<(), PageError> {
+    loop {
+        if !current(page, w, doc) {
+            return Err(PageError::Aborted);
+        }
+        let notified = page.loads.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if cond(w) {
+            return Ok(());
+        }
+        notified.await;
+    }
+}
+
+/// A parser script waits for script-blocking style sheets. Afterwards the
+/// gate stays closed (sheet events wait) until the caller ran its script
+/// and called `set_script_waiting_for_sheets(false)`.
+async fn wait_script_sheets(page: &PageState, w: &Rc<Window>, doc: Doc) -> Result<(), PageError> {
+    if w.script_blocking_sheets() == 0 {
+        return Ok(());
+    }
+    w.set_script_waiting_for_sheets(true);
+    let r = wait_for(page, w, doc, |w| w.script_blocking_sheets() == 0).await;
+    if r.is_err() {
+        w.set_script_waiting_for_sheets(false);
+    }
+    r
+}
+
+/// After a parser script that waited for sheets: their `load` events fire
+/// before parsing resumes.
+async fn resume_after_sheets(
+    page: &PageState,
+    w: &Rc<Window>,
+    doc: Doc,
+    waited: bool,
+) -> Result<(), PageError> {
+    if !waited {
+        return Ok(());
+    }
+    w.set_script_waiting_for_sheets(false);
+    wait_for(page, w, doc, |w| w.sheet_events_pending() == 0).await
+}
+
 /// Parse the document, run its scripts and fire the load events.
 pub(crate) async fn load(
     ws: &Rc<WorkerState>,
@@ -331,9 +382,23 @@ pub(crate) async fn load(
             }
             ParseStep::Done => break,
             ParseStep::Script(n) => {
-                parser_script(ws, page, w, n, &mut deferred).await;
+                parser_script(ws, page, w, n, doc, &mut deferred).await?;
+            }
+            ParseStep::StyleSheet(_) => {
+                // A sheet in <body> stops the parser until it loaded and
+                // its `load` event fired (Chrome).
+                if w.parser_blocking_sheets() > 0 {
+                    wait_for(page, w, doc, |w| w.parser_blocking_sheets() == 0).await?;
+                    wait_for(page, w, doc, |w| w.sheet_events_pending() == 0).await?;
+                }
             }
         }
+    }
+    // Chrome ends parsing in a later task than the last script ran in:
+    // tasks queued by then (element `load` events, ...) run first.
+    for _ in 0..w.queued_task_count() {
+        let Some(task) = w.take_task() else { break };
+        with_js(ws, w, |js| task(js, w));
     }
     w.finish_parser();
     if !current(page, w, doc) {
@@ -352,21 +417,35 @@ pub(crate) async fn load(
             false,
         )
     });
+    // Deferred scripts wait for script-blocking sheets too; once those
+    // loaded, the scripts and DOMContentLoaded run before the sheets'
+    // `load` events (Chrome).
     for d in deferred {
         if !current(page, w, doc) {
+            w.set_script_waiting_for_sheets(false);
             return Err(PageError::Aborted);
         }
         match d {
             Deferred::Classic(n, h) => {
+                if !h.is_finished() {
+                    w.set_script_waiting_for_sheets(false);
+                }
                 let r = join(h).await;
+                wait_script_sheets(page, w, doc).await?;
                 run_fetched_classic(ws, w, n, &r);
             }
             Deferred::Module(n, url, src) => {
                 let source = match src {
                     Source::Inline(s) => Some(s),
-                    Source::Fetch(h) => ok_body(&join(h).await)
-                        .map(|r| script::script_source(&r.body, r.header("content-type"))),
+                    Source::Fetch(h) => {
+                        if !h.is_finished() {
+                            w.set_script_waiting_for_sheets(false);
+                        }
+                        ok_body(&join(h).await)
+                            .map(|r| script::script_source(&r.body, r.header("content-type")))
+                    }
                 };
+                wait_script_sheets(page, w, doc).await?;
                 match source {
                     Some(s) => run_module(ws, page, w, n, &url, s).await,
                     None => {
@@ -389,41 +468,7 @@ pub(crate) async fn load(
         )
     });
     doc_event(page, doc, "DOMContentLoaded");
-
-    // Stylesheets (handed to lb-css; applied lazily on first style query).
-    for link in w.pending_stylesheets() {
-        let href = w.with_doc(|d| d.get_attribute(link, "href").map(str::to_owned));
-        let Some(url) = href.and_then(|h| w.resolve_url(&h)) else {
-            continue;
-        };
-        w.pending_loads.set(w.pending_loads.get() + 1);
-        let h = spawn_fetch(page, w, url, Destination::Style);
-        let w2 = w.clone();
-        tokio::task::spawn_local(async move {
-            let r = join(h).await;
-            let ok = ok_body(&r).map(|resp| {
-                decode_text(
-                    &resp.body,
-                    resp.header("content-type").or(Some("text/css")),
-                    false,
-                )
-                .0
-            });
-            let found = ok.is_some();
-            if let Some(css) = ok {
-                w2.add_stylesheet(link, css);
-            }
-            w2.queue_task(
-                TaskSource::Networking,
-                Box::new(move |js, w| {
-                    let ev = if found { "load" } else { "error" };
-                    fire_event(js, w, w.node_ref(0, link), ev, false, false);
-                    w.pending_loads.set(w.pending_loads.get().saturating_sub(1));
-                    w.wake();
-                }),
-            );
-        });
-    }
+    w.set_script_waiting_for_sheets(false);
 
     // Wait for async scripts, stylesheets and script-inserted scripts.
     loop {
@@ -539,8 +584,9 @@ async fn parser_script(
     page: &Rc<PageState>,
     w: &Rc<Window>,
     n: NodeId,
+    doc: Doc,
     deferred: &mut Vec<Deferred>,
-) {
+) -> Result<(), PageError> {
     let kind = w.with_doc(|d| {
         if !d.is_html_element_named(n, &local_name!("script"))
             || d.flags(n).contains(NodeFlags::ALREADY_STARTED)
@@ -557,9 +603,9 @@ async fn parser_script(
         }
         Some(kind)
     });
-    let Some(kind) = kind else { return };
+    let Some(kind) = kind else { return Ok(()) };
     if kind == ScriptKind::Data {
-        return;
+        return Ok(());
     }
     w.set_node_flags(n, NodeFlags::ALREADY_STARTED, true);
     let src = script::script_src(w, n);
@@ -567,11 +613,14 @@ async fn parser_script(
     let line = w.parser_script_line(n).unwrap_or(1).saturating_sub(1) as u32;
     match (kind, src) {
         (ScriptKind::Classic, None) => {
+            let waited = w.script_blocking_sheets() > 0;
+            wait_script_sheets(page, w, doc).await?;
             let text = script::inline_text(w, n);
             let url = w.url().to_string();
             with_js(ws, w, |js| {
                 script::execute_classic(js, w, Some(n), &text, &url, line)
             });
+            resume_after_sheets(page, w, doc, waited).await?;
         }
         (_, Some(None)) => {
             let w2 = w.clone();
@@ -599,9 +648,13 @@ async fn parser_script(
             } else if is_defer {
                 deferred.push(Deferred::Classic(n, h));
             } else {
-                // Parser-blocking.
+                // Parser-blocking: waits for the script and for
+                // script-blocking style sheets.
                 let r = join(h).await;
+                let waited = w.script_blocking_sheets() > 0;
+                wait_script_sheets(page, w, doc).await?;
                 run_fetched_classic(ws, w, n, &r);
+                resume_after_sheets(page, w, doc, waited).await?;
             }
         }
         (ScriptKind::Module, src) => {
@@ -637,6 +690,7 @@ async fn parser_script(
         }
         (ScriptKind::Data, _) => {}
     }
+    Ok(())
 }
 
 fn src_node(n: NodeId) -> Option<NodeId> {

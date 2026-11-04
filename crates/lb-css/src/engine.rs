@@ -2,7 +2,7 @@
 //! element and caches computed styles until the document or the engine
 //! changes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use lb_dom::{Document, NodeId, NodeType, local_name, ns};
@@ -41,6 +41,25 @@ struct ActiveRule {
     rank: u8,
 }
 
+/// A style sheet with the sheets its `@import` rules loaded, in import
+/// order (`None` for an import that failed or was not loaded). Imported
+/// rules come before the importing sheet's own rules in the cascade.
+#[derive(Clone, Debug)]
+pub struct SheetTree {
+    pub sheet: Rc<Stylesheet>,
+    pub imports: Vec<Option<Rc<SheetTree>>>,
+}
+
+impl SheetTree {
+    /// A sheet without imports.
+    pub fn leaf(sheet: Rc<Stylesheet>) -> Rc<SheetTree> {
+        Rc::new(SheetTree {
+            sheet,
+            imports: Vec::new(),
+        })
+    }
+}
+
 struct DocSheet {
     node: NodeId,
     text: String,
@@ -60,7 +79,13 @@ pub struct StyleEngine {
     ua: Rc<Stylesheet>,
     extra: Vec<(SheetId, Rc<Stylesheet>)>,
     next_sheet: u32,
-    external: HashMap<NodeId, Rc<Stylesheet>>,
+    external: HashMap<NodeId, Rc<SheetTree>>,
+    /// Loaded `@import`s of `<style>` elements.
+    style_imports: HashMap<NodeId, Vec<Option<Rc<SheetTree>>>>,
+    /// `<style>` sheets changed through the CSSOM (replace the text).
+    overrides: HashMap<NodeId, Rc<Stylesheet>>,
+    /// Owners whose sheet is disabled (`CSSStyleSheet.disabled`).
+    disabled: HashSet<NodeId>,
     doc_sheets: Vec<DocSheet>,
     active: Vec<ActiveRule>,
     cache: Vec<Option<Rc<ComputedStyle>>>,
@@ -105,6 +130,9 @@ impl StyleEngine {
             extra: Vec::new(),
             next_sheet: 0,
             external: HashMap::new(),
+            style_imports: HashMap::new(),
+            overrides: HashMap::new(),
+            disabled: HashSet::new(),
             doc_sheets: Vec::new(),
             active: Vec::new(),
             cache: Vec::new(),
@@ -170,17 +198,62 @@ impl StyleEngine {
 
     /// Sets (or clears) the fetched text of a `<link rel=stylesheet>`.
     pub fn set_external_sheet(&mut self, link: NodeId, css: Option<&str>) {
-        match css {
-            Some(css) => {
-                self.stats.sheets_parsed += 1;
-                self.external
-                    .insert(link, Rc::new(Stylesheet::parse(css, Origin::Author)));
+        let tree = css.map(|css| {
+            self.stats.sheets_parsed += 1;
+            SheetTree::leaf(Rc::new(Stylesheet::parse(css, Origin::Author)))
+        });
+        self.set_external_tree(link, tree);
+    }
+
+    /// Sets (or clears) the loaded sheet of a `<link rel=stylesheet>`,
+    /// with its imports.
+    pub fn set_external_tree(&mut self, link: NodeId, tree: Option<Rc<SheetTree>>) {
+        match tree {
+            Some(t) => {
+                self.external.insert(link, t);
             }
             None => {
                 self.external.remove(&link);
             }
         }
         self.invalidate();
+    }
+
+    /// Sets the loaded `@import`s of a `<style>` element, in the order of
+    /// its sheet's import rules.
+    pub fn set_style_imports(&mut self, style: NodeId, imports: Vec<Option<Rc<SheetTree>>>) {
+        if imports.is_empty() {
+            self.style_imports.remove(&style);
+        } else {
+            self.style_imports.insert(style, imports);
+        }
+        self.invalidate();
+    }
+
+    /// Replaces a `<style>` element's sheet (CSSOM changes), or goes back
+    /// to its text with `None`.
+    pub fn set_style_override(&mut self, style: NodeId, sheet: Option<Rc<Stylesheet>>) {
+        match sheet {
+            Some(s) => {
+                self.overrides.insert(style, s);
+            }
+            None => {
+                self.overrides.remove(&style);
+            }
+        }
+        self.invalidate();
+    }
+
+    /// `CSSStyleSheet.disabled` of the sheet owned by `owner`.
+    pub fn set_sheet_disabled(&mut self, owner: NodeId, disabled: bool) {
+        let changed = if disabled {
+            self.disabled.insert(owner)
+        } else {
+            self.disabled.remove(&owner)
+        };
+        if changed {
+            self.invalidate();
+        }
     }
 
     /// Drops every cached style. Call after changing something the engine
@@ -234,64 +307,100 @@ impl StyleEngine {
         // Document sheets in tree order; reuse parses whose text is unchanged.
         let mut old: HashMap<NodeId, DocSheet> =
             self.doc_sheets.drain(..).map(|s| (s.node, s)).collect();
-        let mut author: Vec<(Rc<Stylesheet>, Option<String>)> = Vec::new();
+        let mut author: Vec<(Rc<SheetTree>, Option<String>)> = Vec::new();
         for n in doc.descendants(Document::DOCUMENT) {
             if doc.is_html_element_named(n, &local_name!("style")) {
                 let ty = doc.get_attribute(n, "type").unwrap_or("");
                 if !(ty.is_empty() || ty.eq_ignore_ascii_case("text/css")) {
                     continue;
                 }
-                let text = doc.child_text_content(n);
-                let sheet = match old.remove(&n) {
-                    Some(s) if s.text == text => s.sheet,
-                    _ => {
-                        self.stats.sheets_parsed += 1;
-                        Rc::new(Stylesheet::parse(&text, Origin::Author))
-                    }
+                let sheet = if let Some(o) = self.overrides.get(&n) {
+                    o.clone()
+                } else {
+                    let text = doc.child_text_content(n);
+                    let sheet = match old.remove(&n) {
+                        Some(s) if s.text == text => s.sheet,
+                        _ => {
+                            self.stats.sheets_parsed += 1;
+                            Rc::new(Stylesheet::parse(&text, Origin::Author))
+                        }
+                    };
+                    self.doc_sheets.push(DocSheet {
+                        node: n,
+                        text,
+                        sheet: sheet.clone(),
+                    });
+                    sheet
                 };
-                self.doc_sheets.push(DocSheet {
-                    node: n,
-                    text,
-                    sheet: sheet.clone(),
+                if self.disabled.contains(&n) {
+                    continue;
+                }
+                let tree = Rc::new(SheetTree {
+                    sheet,
+                    imports: self.style_imports.get(&n).cloned().unwrap_or_default(),
                 });
-                author.push((sheet, doc.get_attribute(n, "media").map(str::to_owned)));
+                author.push((tree, doc.get_attribute(n, "media").map(str::to_owned)));
             } else if is_stylesheet_link(doc, n)
-                && let Some(sheet) = self.external.get(&n)
+                && let Some(tree) = self.external.get(&n)
             {
-                if doc.has_attribute(n, "disabled") {
+                if doc.has_attribute(n, "disabled") || self.disabled.contains(&n) {
                     continue;
                 }
                 author.push((
-                    sheet.clone(),
+                    tree.clone(),
                     doc.get_attribute(n, "media").map(str::to_owned),
                 ));
             }
         }
         for (_, s) in &self.extra {
-            author.push((s.clone(), None));
+            author.push((SheetTree::leaf(s.clone()), None));
         }
 
         self.active.clear();
         let env = &self.env;
-        let push_sheet = |active: &mut Vec<ActiveRule>, sheet: &Rc<Stylesheet>, rank: u8| {
-            for (i, rule) in sheet.rules.iter().enumerate() {
+        fn push_tree(
+            active: &mut Vec<ActiveRule>,
+            tree: &SheetTree,
+            rank: u8,
+            env: &MediaEnv,
+            depth: u32,
+        ) {
+            if depth < 32 {
+                for (imp, rule) in tree.imports.iter().zip(&tree.sheet.imports) {
+                    if let Some(t) = imp
+                        && rule.media.matches(env)
+                    {
+                        push_tree(active, t, rank, env, depth + 1);
+                    }
+                }
+            }
+            for (i, rule) in tree.sheet.rules.iter().enumerate() {
                 if rule.media_matches(env) {
                     active.push(ActiveRule {
-                        sheet: sheet.clone(),
+                        sheet: tree.sheet.clone(),
                         index: i as u32,
                         rank,
                     });
                 }
             }
-        };
-        push_sheet(&mut self.active, &self.ua, RANK_UA);
-        for (sheet, media) in &author {
+        }
+        push_tree(
+            &mut self.active,
+            &SheetTree {
+                sheet: self.ua.clone(),
+                imports: Vec::new(),
+            },
+            RANK_UA,
+            env,
+            0,
+        );
+        for (tree, media) in &author {
             if let Some(m) = media
                 && !MediaQueryList::parse(m).matches(env)
             {
                 continue;
             }
-            push_sheet(&mut self.active, sheet, RANK_AUTHOR);
+            push_tree(&mut self.active, tree, RANK_AUTHOR, env, 0);
         }
     }
 

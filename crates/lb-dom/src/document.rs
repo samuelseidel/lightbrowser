@@ -145,7 +145,9 @@ impl Document {
         let mut parser = crate::HtmlParser::new();
         parser.push_str(html);
         parser.end();
-        while let crate::ParseStep::Script(_) = parser.run(&mut doc) {}
+        while let crate::ParseStep::Script(_) | crate::ParseStep::StyleSheet(_) =
+            parser.run(&mut doc)
+        {}
         doc
     }
 

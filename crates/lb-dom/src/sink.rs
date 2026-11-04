@@ -24,6 +24,12 @@ pub(crate) struct Sink {
     line: Cell<u64>,
     pub(crate) script_lines: RefCell<HashMap<NodeId, u64>>,
     pub(crate) errors: Cell<u32>,
+    /// Last HTML `<link>` / `<style>` element created (for style sheet
+    /// pauses, see [`crate::ParserOptions::pause_at_style_sheets`]).
+    pub(crate) last_link: Cell<Option<NodeId>>,
+    pub(crate) last_style: Cell<Option<NodeId>>,
+    /// HTML `<style>` elements the parser closed, for the page layer.
+    pub(crate) closed_styles: RefCell<Vec<NodeId>>,
 }
 
 impl Sink {
@@ -35,6 +41,9 @@ impl Sink {
             line: Cell::new(1),
             script_lines: RefCell::new(HashMap::new()),
             errors: Cell::new(0),
+            last_link: Cell::new(None),
+            last_style: Cell::new(None),
+            closed_styles: RefCell::new(Vec::new()),
         }
     }
 }
@@ -67,6 +76,11 @@ impl TreeSink for Sink {
 
     fn create_element(&self, name: QualName, attrs: Vec<Attribute>, flags: ElementFlags) -> NodeId {
         let is_script = name.ns == ns!(html) && name.local == local_name!("script");
+        let html = name.ns == ns!(html);
+        let (is_link, is_style) = (
+            html && name.local == local_name!("link"),
+            html && name.local == local_name!("style"),
+        );
         let mut doc = self.doc.borrow_mut();
         let id = doc.create_element(name, attrs);
         if flags.mathml_annotation_xml_integration_point
@@ -79,6 +93,11 @@ impl TreeSink for Sink {
             if is_script {
                 self.script_lines.borrow_mut().insert(id, self.line.get());
             }
+        }
+        if is_link {
+            self.last_link.set(Some(id));
+        } else if is_style {
+            self.last_style.set(Some(id));
         }
         id
     }
@@ -126,6 +145,17 @@ impl TreeSink for Sink {
             system_id,
         });
         doc.insert_unchecked(self.root, dt, None);
+    }
+
+    fn pop(&self, node: &NodeId) {
+        if self.document_parser
+            && self
+                .doc
+                .borrow()
+                .is_html_element_named(*node, &local_name!("style"))
+        {
+            self.closed_styles.borrow_mut().push(*node);
+        }
     }
 
     fn mark_script_already_started(&self, node: &NodeId) {

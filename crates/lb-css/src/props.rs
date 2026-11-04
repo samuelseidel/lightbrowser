@@ -623,6 +623,26 @@ pub(crate) fn push_declaration(
 }
 
 /// Parses `value` for (normalized) property `name` into longhand values.
+/// True if `name: value` is a declaration the cascade accepts (the CSSOM
+/// drops the others, as Chrome does).
+pub fn is_valid_declaration(name: &str, value: &str) -> bool {
+    let n = normalize_name(&name.to_ascii_lowercase());
+    parse_property(&n, value).is_some()
+}
+
+/// The longhands a declaration sets, in order (shorthands expand, as in
+/// `CSSStyleDeclaration.length` of a rule). Empty if it does not parse.
+pub fn declaration_longhands(name: &str, value: &str) -> Vec<&'static str> {
+    let n = normalize_name(&name.to_ascii_lowercase());
+    let mut out: Vec<&'static str> = Vec::new();
+    for (id, _) in parse_property(&n, value).unwrap_or_default() {
+        if !out.contains(&id.name()) {
+            out.push(id.name());
+        }
+    }
+    out
+}
+
 pub(crate) fn parse_property(name: &str, value: &str) -> Option<Vec<(LonghandId, Sv)>> {
     let mut p = Parser::new(value);
     let r = p.parse_entirely(|p| parse_property_inner(name, p)).ok()?;

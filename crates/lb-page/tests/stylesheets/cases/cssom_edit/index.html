@@ -1,0 +1,30 @@
+<!doctype html><html><head><!--LOG-->
+<style id=s>@import url(i.css) screen; @media (min-width: 1px) { #t { color: rgb(9, 9, 9) } p { margin: 0 } } @font-face { font-family: X; src: local(Arial) } #t { color: rgb(1, 1, 1); foo: bar; padding: 2px }</style>
+</head><body><div id=t></div>
+<script>
+var sh = document.getElementById('s').sheet, R = sh.cssRules;
+log('n ' + R.length + ' ' + [].map.call(R, function (r) { return r.constructor.name + ':' + r.type }).join(','));
+log('import ' + R[0].href + ' ' + R[0].media.mediaText + ' ' + (R[0].styleSheet && R[0].styleSheet.cssRules.length) + ' ' + (R[0].styleSheet.ownerRule === R[0]) + ' ' + (R[0].styleSheet.parentStyleSheet === sh) + ' ' + R[0].styleSheet.href.replace(location.origin, ''));
+log('media ' + R[1].conditionText + ' ' + R[1].media.length + ' ' + R[1].cssRules.length + ' ' + (R[1].cssRules[0].parentRule === R[1]) + ' ' + R[1].cssRules[1].selectorText);
+log('font ' + R[2].style.getPropertyValue('font-family'));
+log('style ' + R[3].cssText + ' | ' + R[3].style.length + ' ' + (R === sh.cssRules) + ' ' + (R[3] === sh.cssRules[3]));
+log('C0 ' + C());
+var i = sh.insertRule('#t { color: rgb(2, 2, 2) }', sh.cssRules.length);
+log('insert ' + i + ' ' + R.length + ' ' + C());
+R[3].style.color = 'rgb(3, 3, 3)'; sh.deleteRule(4);
+log('edit ' + C() + ' ' + R[3].cssText);
+R[3].selectorText = '#nope';
+log('sel ' + C() + ' ' + R[3].selectorText);
+try { sh.insertRule('#t {', 99) } catch (e) { log(e.name + ': ' + e.message) }
+try { sh.insertRule('nonsense!!', 0) } catch (e) { log(e.name + ': ' + e.message) }
+try { sh.deleteRule(10) } catch (e) { log(e.name + ': ' + e.message) }
+try { sh.insertRule('@import url(x.css);', 2) } catch (e) { log(e.name + ': ' + e.message) }
+R[1].insertRule('#t { color: rgb(4, 4, 4) }', 2);
+log('nested ' + R[1].cssRules.length + ' ' + C());
+var s2 = document.createElement('style'); document.head.appendChild(s2);
+s2.sheet.insertRule('#t { color: rgb(5, 5, 5) }', 0);
+log('cssinjs ' + C() + ' ' + s2.sheet.cssRules.length + ' ' + JSON.stringify(s2.textContent));
+sh.disabled = true;
+log('disabled ' + C() + ' ' + document.styleSheets.length);
+</script>
+</body></html>

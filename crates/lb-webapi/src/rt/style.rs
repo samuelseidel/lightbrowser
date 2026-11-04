@@ -358,7 +358,7 @@ pub(crate) fn parse_decls(text: &str) -> Vec<(String, String, bool)> {
     out
 }
 
-fn serialize_decls(decls: &[(String, String, bool)]) -> String {
+pub(crate) fn serialize_decls(decls: &[(String, String, bool)]) -> String {
     decls
         .iter()
         .map(|(n, v, i)| format!("{n}: {v}{};", if *i { " !important" } else { "" }))
@@ -366,18 +366,47 @@ fn serialize_decls(decls: &[(String, String, bool)]) -> String {
         .join(" ")
 }
 
-fn this_style(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(u32, NodeId, bool), HostError> {
+/// What a `CSSStyleDeclaration` reads: an element's inline style or
+/// computed style, or a CSS rule's declarations.
+#[derive(Copy, Clone)]
+enum Src {
+    Node {
+        slot: u32,
+        node: NodeId,
+        computed: bool,
+    },
+    Rule {
+        sheet: u32,
+        uid: u32,
+    },
+}
+
+impl Src {
+    fn computed(self) -> bool {
+        matches!(self, Src::Node { computed: true, .. })
+    }
+}
+
+fn this_style(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<Src, HostError> {
     let id = this_obj(cx)?;
     style_of(w, id).ok_or_else(illegal)
 }
 
-fn style_of(w: &Window, id: u32) -> Option<(u32, NodeId, bool)> {
+fn style_of(w: &Window, id: u32) -> Option<Src> {
     w.with_obj(id, |o| match o {
         Obj::Style {
             slot,
             node,
             computed,
-        } => Some((*slot, *node, *computed)),
+        } => Some(Src::Node {
+            slot: *slot,
+            node: *node,
+            computed: *computed,
+        }),
+        Obj::RuleStyle { sheet, uid } => Some(Src::Rule {
+            sheet: *sheet,
+            uid: *uid,
+        }),
         _ => None,
     })
     .flatten()
@@ -391,25 +420,49 @@ fn inline_decls(w: &Window, slot: u32, n: NodeId) -> Vec<(String, String, bool)>
     })
 }
 
-fn write_decls(w: &Window, slot: u32, n: NodeId, decls: &[(String, String, bool)]) {
-    let text = serialize_decls(decls);
-    let _ = w.doc_slot_mut(slot, |d| d.set_attribute(n, "style", &text));
-}
-
-fn get_value(w: &Window, slot: u32, n: NodeId, computed: bool, name: &str) -> String {
-    if computed {
-        w.with_layout(slot, |l, d| l.resolved_style_value(d, n, name))
-    } else {
-        inline_decls(w, slot, n)
-            .into_iter()
-            .find(|(k, _, _)| k == name)
-            .map(|(_, v, _)| v)
-            .unwrap_or_default()
+/// The declarations of a non-computed source.
+fn decls(w: &Window, src: Src) -> Vec<(String, String, bool)> {
+    match src {
+        Src::Node { slot, node, .. } => inline_decls(w, slot, node),
+        Src::Rule { sheet, uid } => super::sheets::rule_decls(w, sheet, uid),
     }
 }
 
-fn set_value(w: &Window, slot: u32, n: NodeId, name: &str, value: &str, important: bool) {
-    let mut decls = inline_decls(w, slot, n);
+/// Indexed property names: a rule's longhands, an inline style's names.
+fn names(w: &Window, src: Src) -> Vec<String> {
+    match src {
+        Src::Rule { sheet, uid } => super::sheets::rule_longhands(w, sheet, uid),
+        _ => decls(w, src).into_iter().map(|d| d.0).collect(),
+    }
+}
+
+fn write_decls(w: &Rc<Window>, src: Src, decls: &[(String, String, bool)]) {
+    let text = serialize_decls(decls);
+    match src {
+        Src::Node { slot, node, .. } => {
+            let _ = w.doc_slot_mut(slot, |d| d.set_attribute(node, "style", &text));
+        }
+        Src::Rule { sheet, uid } => super::sheets::set_rule_decls(w, sheet, uid, text),
+    }
+}
+
+fn get_value(w: &Window, src: Src, name: &str) -> String {
+    match src {
+        Src::Node {
+            slot,
+            node,
+            computed: true,
+        } => w.with_layout(slot, |l, d| l.resolved_style_value(d, node, name)),
+        _ => decls(w, src)
+            .into_iter()
+            .find(|(k, _, _)| k == name)
+            .map(|(_, v, _)| v)
+            .unwrap_or_default(),
+    }
+}
+
+fn set_value(w: &Rc<Window>, src: Src, name: &str, value: &str, important: bool) {
+    let mut decls = decls(w, src);
     if value.is_empty() {
         decls.retain(|(k, _, _)| k != name);
     } else if let Some(e) = decls.iter_mut().find(|(k, _, _)| k == name) {
@@ -418,7 +471,7 @@ fn set_value(w: &Window, slot: u32, n: NodeId, name: &str, value: &str, importan
     } else {
         decls.push((name.to_owned(), value.to_owned(), important));
     }
-    write_decls(w, slot, n, &decls);
+    write_decls(w, src, &decls);
 }
 
 fn readonly_err(w: &Window, op: &str, name: &str) -> HostError {
@@ -495,44 +548,44 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         cx.ret(w.obj_arg(id))
     });
     getter(reg, rt, "CSSStyleDeclaration", "cssText", |cx, w| {
-        let (slot, n, computed) = this_style(cx, w)?;
-        if computed {
+        let src = this_style(cx, w)?;
+        if src.computed() {
             return cx.ret("");
         }
-        cx.ret(serialize_decls(&inline_decls(w, slot, n)))
+        cx.ret(serialize_decls(&decls(w, src)))
     });
     setter(reg, rt, "CSSStyleDeclaration", "cssText", |cx, w| {
-        let (slot, n, computed) = this_style(cx, w)?;
-        if computed {
+        let src = this_style(cx, w)?;
+        if src.computed() {
             return Err(readonly_err(w, "cssText", "cssText"));
         }
         let v = cx.arg_string(0)?;
         let decls = parse_decls(&v);
-        write_decls(w, slot, n, &decls);
+        write_decls(w, src, &decls);
         w.after_mutation(cx);
         Ok(())
     });
     getter(reg, rt, "CSSStyleDeclaration", "length", |cx, w| {
-        let (slot, n, computed) = this_style(cx, w)?;
-        if computed {
+        let src = this_style(cx, w)?;
+        if src.computed() {
             return cx.ret(lb_css::computed_property_names().len() as u32);
         }
-        cx.ret(inline_decls(w, slot, n).len() as u32)
+        cx.ret(names(w, src).len() as u32)
     });
     getter(reg, rt, "CSSStyleDeclaration", "parentRule", |cx, _w| {
         cx.ret(Arg::Null)
     });
     getter(reg, rt, "CSSStyleDeclaration", "cssFloat", |cx, w| {
-        let (slot, n, computed) = this_style(cx, w)?;
-        cx.ret(get_value(w, slot, n, computed, "float"))
+        let src = this_style(cx, w)?;
+        cx.ret(get_value(w, src, "float"))
     });
     setter(reg, rt, "CSSStyleDeclaration", "cssFloat", |cx, w| {
-        let (slot, n, computed) = this_style(cx, w)?;
-        if computed {
+        let src = this_style(cx, w)?;
+        if src.computed() {
             return Err(readonly_err(w, "cssFloat", "float"));
         }
         let v = cx.arg_string(0)?;
-        set_value(w, slot, n, "float", &v, false);
+        set_value(w, src, "float", &v, false);
         w.after_mutation(cx);
         Ok(())
     });
@@ -543,9 +596,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         "getPropertyValue",
         |cx, w| {
             need_args(cx, 1, "getPropertyValue", "CSSStyleDeclaration")?;
-            let (slot, n, computed) = this_style(cx, w)?;
+            let src = this_style(cx, w)?;
             let name = cx.arg_string(0)?.to_ascii_lowercase();
-            cx.ret(get_value(w, slot, n, computed, &name))
+            cx.ret(get_value(w, src, &name))
         },
     );
     method(
@@ -554,22 +607,20 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         "CSSStyleDeclaration",
         "getPropertyPriority",
         |cx, w| {
-            let (slot, n, computed) = this_style(cx, w)?;
+            let src = this_style(cx, w)?;
             let name = cx.arg_string(0)?.to_ascii_lowercase();
-            if computed {
+            if src.computed() {
                 return cx.ret("");
             }
-            let imp = inline_decls(w, slot, n)
-                .into_iter()
-                .any(|(k, _, i)| k == name && i);
+            let imp = decls(w, src).into_iter().any(|(k, _, i)| k == name && i);
             cx.ret(if imp { "important" } else { "" })
         },
     );
     method(reg, rt, "CSSStyleDeclaration", "setProperty", |cx, w| {
         need_args(cx, 2, "setProperty", "CSSStyleDeclaration")?;
-        let (slot, n, computed) = this_style(cx, w)?;
+        let src = this_style(cx, w)?;
         let name = cx.arg_string(0)?;
-        if computed {
+        if src.computed() {
             return Err(readonly_err(w, "setProperty", &name));
         }
         let value = if cx.arg_kind(1) == lb_js::ValueKind::Null {
@@ -585,8 +636,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         };
         set_value(
             w,
-            slot,
-            n,
+            src,
             &name,
             value.trim(),
             prio.eq_ignore_ascii_case("important"),
@@ -596,27 +646,27 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "CSSStyleDeclaration", "removeProperty", |cx, w| {
         need_args(cx, 1, "removeProperty", "CSSStyleDeclaration")?;
-        let (slot, n, computed) = this_style(cx, w)?;
+        let src = this_style(cx, w)?;
         let name = cx.arg_string(0)?.to_ascii_lowercase();
-        if computed {
+        if src.computed() {
             return Err(readonly_err(w, "removeProperty", &name));
         }
-        let old = get_value(w, slot, n, false, &name);
+        let old = get_value(w, src, &name);
         if !old.is_empty() {
-            set_value(w, slot, n, &name, "", false);
+            set_value(w, src, &name, "", false);
             w.after_mutation(cx);
         }
         cx.ret(old)
     });
     method(reg, rt, "CSSStyleDeclaration", "item", |cx, w| {
-        let (slot, n, computed) = this_style(cx, w)?;
+        let src = this_style(cx, w)?;
         let i = cx.arg_u32(0)? as usize;
-        let v = if computed {
+        let v = if src.computed() {
             lb_css::computed_property_names()
                 .get(i)
                 .map(|s| s.to_string())
         } else {
-            inline_decls(w, slot, n).get(i).map(|d| d.0.clone())
+            names(w, src).get(i).cloned()
         };
         cx.ret(v.unwrap_or_default())
     });
@@ -630,17 +680,17 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
                 return Ok(None);
             };
-            let Some((slot, n, computed)) = style_of(&w, h.id) else {
+            let Some(src) = style_of(&w, h.id) else {
                 return Ok(None);
             };
-            Ok(if computed {
+            Ok(if src.computed() {
                 lb_css::computed_property_names()
                     .get(i as usize)
                     .map(|s| Arg::String(s.to_string()))
             } else {
-                inline_decls(&w, slot, n)
+                names(&w, src)
                     .get(i as usize)
-                    .map(|d| Arg::String(d.0.clone()))
+                    .map(|d| Arg::String(d.clone()))
             })
         }),
     );
@@ -657,10 +707,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
                 return Ok(None);
             };
-            let Some((slot, n, computed)) = style_of(&w, h.id) else {
+            let Some(src) = style_of(&w, h.id) else {
                 return Ok(None);
             };
-            Ok(Some(Arg::String(get_value(&w, slot, n, computed, &css))))
+            Ok(Some(Arg::String(get_value(&w, src, &css))))
         }),
     );
     let rt3 = rt.clone();
@@ -676,13 +726,13 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
                 return Ok(false);
             };
-            let Some((slot, n, computed)) = style_of(&w, h.id) else {
+            let Some(src) = style_of(&w, h.id) else {
                 return Ok(false);
             };
-            if computed {
+            if src.computed() {
                 return Err(readonly_err(&w, "setProperty", &css));
             }
-            set_value(&w, slot, n, &css, value.trim(), false);
+            set_value(&w, src, &css, value.trim(), false);
             Ok(true)
         }),
     );

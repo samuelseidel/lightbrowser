@@ -66,6 +66,7 @@ mod rtc;
 pub mod screenshot;
 pub mod script;
 mod serializer;
+mod sheets;
 mod style;
 mod table;
 mod tags;
@@ -360,6 +361,7 @@ impl Runtime {
         gpu::register(reg, &rt);
         frames::register(reg, &rt);
         table::register(reg, &rt);
+        sheets::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -680,7 +682,8 @@ pub struct Window {
     console_sink: RefCell<Option<Rc<dyn Fn(&ConsoleMessage)>>>,
     pub clock: Clock,
     pub(crate) layout: RefCell<Option<lb_layout::LayoutEngine>>,
-    pub(crate) sheets: RefCell<HashMap<NodeId, String>>,
+    /// Style sheets: loads, blocking counters, CSSOM (`sheets.rs`).
+    pub(crate) css: RefCell<sheets::CssState>,
     ready_state: Cell<ReadyState>,
     pub(crate) history: RefCell<History>,
     pub(crate) observers: RefCell<Vec<u32>>,
@@ -780,7 +783,7 @@ impl Window {
             console_sink: RefCell::new(None),
             clock: Clock::new(init.virtual_time),
             layout: RefCell::new(None),
-            sheets: RefCell::new(HashMap::new()),
+            css: RefCell::new(sheets::CssState::default()),
             ready_state: Cell::new(ReadyState::Loading),
             history: RefCell::new(History {
                 entries: vec![HistEntry { url, state: None }],
@@ -1062,7 +1065,10 @@ impl Window {
 
     /// Start the document parser (navigation).
     pub fn start_parser(&self) {
-        *self.parser.borrow_mut() = Some(lb_dom::HtmlParser::new());
+        *self.parser.borrow_mut() = Some(lb_dom::HtmlParser::with_options(lb_dom::ParserOptions {
+            pause_at_style_sheets: true,
+            ..Default::default()
+        }));
     }
 
     /// Queue decoded document text for the parser.
@@ -1194,6 +1200,11 @@ impl Window {
     pub fn take_task(&self) -> Option<TaskFn> {
         let mut q = self.tasks.borrow_mut();
         q.iter_mut().find_map(|q| q.pop_front())
+    }
+
+    /// Number of queued tasks.
+    pub fn queued_task_count(&self) -> usize {
+        self.tasks.borrow().iter().map(|q| q.len()).sum()
     }
 
     pub fn has_tasks(&self) -> bool {
@@ -1371,9 +1382,9 @@ impl Window {
         if created {
             image::apply_intrinsic(self, engine);
         }
-        let sheets = std::mem::take(&mut *self.sheets.borrow_mut());
-        for (link, text) in sheets {
-            engine.styles().set_external_sheet(link, Some(&text));
+        let updates = std::mem::take(&mut self.css.borrow_mut().updates);
+        for u in updates {
+            u.apply(engine.styles());
         }
         let doc = self.doc_rc(slot);
         f(engine, &doc.borrow())
@@ -1386,27 +1397,6 @@ impl Window {
         f: impl FnOnce(&mut lb_layout::LayoutEngine, &Document) -> R,
     ) -> R {
         self.with_layout(0, f)
-    }
-
-    /// Hand a fetched stylesheet to the style engine (applied lazily).
-    pub fn add_stylesheet(&self, link: NodeId, text: String) {
-        self.sheets.borrow_mut().insert(link, text);
-    }
-
-    /// Nodes of `<link rel=stylesheet>` elements whose sheet is not loaded.
-    pub fn pending_stylesheets(&self) -> Vec<NodeId> {
-        let doc = self.doc_rc(0);
-        let doc = doc.borrow();
-        doc.descendants(Document::DOCUMENT)
-            .filter(|&n| {
-                doc.is_html_element_named(n, &lb_dom::local_name!("link"))
-                    && doc.get_attribute(n, "rel").is_some_and(|r| {
-                        r.split_ascii_whitespace()
-                            .any(|t| t.eq_ignore_ascii_case("stylesheet"))
-                    })
-                    && doc.get_attribute(n, "href").is_some()
-            })
-            .collect()
     }
 
     /// Resolve a URL against the document base URL.
@@ -1611,6 +1601,13 @@ pub(crate) enum Obj {
     Font(Box<fonts::FontObj>),
     /// Navigator surface objects (plugins, UA data, permissions, ...).
     Nav(Box<navigator::NavObj>),
+    /// CSSOM objects (style sheets, rules, rule lists, media lists).
+    Css(Box<sheets::CssObj>),
+    /// `CSSStyleRule.style`: the declarations of a rule.
+    RuleStyle {
+        sheet: u32,
+        uid: u32,
+    },
 }
 
 impl Obj {
@@ -1656,6 +1653,8 @@ impl Obj {
             Obj::Audio(a) => a.iface_name(),
             Obj::Font(f) => f.iface_name(),
             Obj::Nav(n) => n.iface_name(),
+            Obj::Css(c) => c.iface_name(),
+            Obj::RuleStyle { .. } => "CSSStyleDeclaration",
         }
     }
 }
