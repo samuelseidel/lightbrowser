@@ -1,0 +1,5 @@
+<script>var L=[];function log(s){L.push(String(s))}function end(){log('end')}
+function err(e){return e&&e.name!==undefined?(Object.prototype.toString.call(e)+' '+e.name+': '+e.message):'value '+String(e)}
+function t(n,f){try{log(n+': '+f())}catch(e){log(n+' threw '+err(e))}}
+function d(n){if(n===null)return 'null';if(n===undefined)return 'undefined';if(n instanceof ShadowRoot)return '#shadow('+d(n.host)+')';if(n.nodeType===9)return '#document';if(n.nodeType===3)return '"'+n.data+'"';if(n.nodeType===11)return '#fragment';if(n.nodeType!==1)return n.nodeName;return n.localName+(n.id?'#'+n.id:'')}
+function ds(a){return '['+Array.from(a,d).join(',')+']'}</script>

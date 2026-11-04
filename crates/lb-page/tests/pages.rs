@@ -7,6 +7,7 @@ mod frames;
 mod images;
 mod report;
 mod service_workers;
+mod shadow;
 mod stylesheets;
 mod workers;
 
