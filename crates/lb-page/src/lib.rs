@@ -51,6 +51,8 @@ mod frames;
 mod nav;
 #[cfg(feature = "chrome")]
 mod page;
+#[cfg(feature = "chrome")]
+mod worker;
 
 pub use context::{BrowserContext, ContextOptions, FetchTrace, PageError};
 pub use lb_webapi::host::{ConsoleMessage, Destination, NetRequest, NetResponse, decode_text};

@@ -1,0 +1,31 @@
+<!doctype html><title>urls</title><!--LOG-->
+<script>
+var src = "postMessage([self.location.protocol, self.origin, self.name, typeof importScripts].join(' '))";
+var blobUrl = URL.createObjectURL(new Blob([src], {type: 'text/javascript'}));
+var steps = [
+  function () { var w = new Worker(blobUrl, {name: 'blobby'}); w.onmessage = function (e) { log('blob ' + e.data.replace(/:\d+/, ':PORT')); next(); }; },
+  function () { var w = new Worker('data:text/javascript,' + encodeURIComponent(src)); w.onmessage = function (e) { log('data ' + e.data); next(); }; w.onerror = function (e) { log('data error'); next(); }; },
+  function () {
+    var w = new Worker('mod.js', {type: 'module'});
+    w.onmessage = function (e) { log('module ' + e.data.replace(/:\d+/g, ':PORT')); next(); };
+    w.onerror = function (e) { log('module error ' + e.message); next(); };
+  },
+  function () {
+    var w = new Worker('classic-import.js');
+    w.onerror = function (e) { log('classic import ' + e.constructor.name + ' [' + e.message + ']'); e.preventDefault(); next(); };
+  },
+  function () {
+    var m = URL.createObjectURL(new Blob(["export const v = 'blobmod';"], {type: 'text/javascript'}));
+    var w = new Worker(URL.createObjectURL(new Blob(["import { v } from '" + m + "'; postMessage(v + ' ' + typeof importScripts)"], {type: 'text/javascript'})), {type: 'module'});
+    w.onmessage = function (e) { log('blob module ' + e.data); next(); };
+    w.onerror = function () { log('blob module error'); next(); };
+  },
+  function () {
+    var w = new Worker('modimport.js', {type: 'module'});
+    w.onmessage = function (e) { log('module importScripts ' + e.data); next(); };
+  },
+];
+var i = 0;
+function next() { if (i < steps.length) steps[i++](); else end(); }
+next();
+</script>

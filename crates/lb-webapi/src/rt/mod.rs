@@ -74,6 +74,7 @@ mod tags;
 mod webgl;
 mod webgl_ext;
 mod window;
+pub mod worker;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -100,6 +101,9 @@ pub use events::{EventData, EventExtra, fire_event, fire_event_with};
 pub use image::load_visible_lazy_images;
 pub use script::ScriptKind;
 pub(crate) use webgl::{extension_names, extension_spec};
+pub use worker::{
+    Inbox, InboxRx, RemoteTask, ScopeInit, WorkerControl, WorkerHost, WorkerKind, WorkerStart,
+};
 
 /// Host ref kind of DOM nodes (`kind = K_NODE | document_key << 8`).
 pub const K_NODE: u32 = 1;
@@ -167,6 +171,16 @@ pub trait Js {
     fn top_level(&self) -> bool;
     /// Materialize a value (e.g. a new `DOMException`) as a handle.
     fn make(&mut self, v: Arg) -> Option<Handle>;
+    /// Rebuild a structured clone in this realm (host objects from
+    /// `hosts`, by index). `Err` is a message.
+    fn deserialize(
+        &mut self,
+        s: &lb_js::Serialized,
+        hosts: &[(InterfaceId, HostRef)],
+    ) -> Result<Handle, String>;
+    /// The value of the exception last reported as a `JsError` (once):
+    /// `ErrorEvent.error` of uncaught exceptions.
+    fn take_exception(&mut self) -> Option<Handle>;
     /// Realm building (child frames), from the event loop or a callback.
     fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps;
 }
@@ -213,6 +227,16 @@ impl Js for CallCtx<'_, '_, '_> {
     }
     fn make(&mut self, v: Arg) -> Option<Handle> {
         self.make_handle(v).ok()
+    }
+    fn deserialize(
+        &mut self,
+        s: &lb_js::Serialized,
+        hosts: &[(InterfaceId, HostRef)],
+    ) -> Result<Handle, String> {
+        CallCtx::deserialize(self, s, hosts)
+    }
+    fn take_exception(&mut self) -> Option<Handle> {
+        CallCtx::take_exception(self)
     }
     fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps {
         self
@@ -277,6 +301,18 @@ impl Js for EngineJs<'_> {
     }
     fn make(&mut self, v: Arg) -> Option<Handle> {
         self.engine.make_handle(self.realm, v).ok()
+    }
+    fn deserialize(
+        &mut self,
+        s: &lb_js::Serialized,
+        hosts: &[(InterfaceId, HostRef)],
+    ) -> Result<Handle, String> {
+        self.engine
+            .deserialize(self.realm, s, hosts)
+            .map_err(|e| e.message)
+    }
+    fn take_exception(&mut self) -> Option<Handle> {
+        self.engine.take_exception(self.realm)
     }
     fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps {
         self.engine
@@ -363,6 +399,7 @@ impl Runtime {
         frames::register(reg, &rt);
         table::register(reg, &rt);
         sheets::register(reg, &rt);
+        worker::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -728,6 +765,8 @@ pub struct Window {
     pub(crate) frames: frames::FrameState,
     /// `document.visibilityState` is "hidden" (set while unloading).
     pub(crate) hidden: Cell<bool>,
+    /// Inbox, child workers, blob URLs; worker scope settings (ADR 0021).
+    pub(crate) wk: worker::WorkerSide,
 }
 
 impl std::fmt::Debug for Window {
@@ -817,6 +856,7 @@ impl Window {
             load_info: RefCell::new(LoadInfo::default()),
             frames: frames::FrameState::default(),
             hidden: Cell::new(false),
+            wk: worker::WorkerSide::default(),
         });
         rt.register_doc(key, &w, 0, &doc);
         w
@@ -899,6 +939,24 @@ impl Window {
         realm: RealmId,
     ) -> Result<(), JsError> {
         window::install_console(engine, realm, &self.rt)?;
+        self.setup_helpers(engine, realm)?;
+        navigator::setup_realm(self, engine, realm)?;
+        chrome::install(self, engine, realm)?;
+        Ok(())
+    }
+
+    /// The realm's main-world realm id (worker scopes).
+    pub(crate) fn set_realm(&self, realm: RealmId) {
+        self.realm.set(realm);
+    }
+
+    /// Per-realm function handles the implementations use (mutation
+    /// observer delivery, `Array.prototype.values`, `JSON`, `freeze`).
+    pub(crate) fn setup_helpers(
+        &self,
+        engine: &mut dyn lb_js::RealmOps,
+        realm: RealmId,
+    ) -> Result<(), JsError> {
         let rt = self.rt.clone();
         let deliver = engine.new_function(
             realm,
@@ -928,9 +986,6 @@ impl Window {
         hp.json_parse = Some(parse);
         hp.json_stringify = Some(stringify);
         hp.freeze = Some(freeze);
-        drop(hp);
-        navigator::setup_realm(self, engine, realm)?;
-        chrome::install(self, engine, realm)?;
         Ok(())
     }
 
@@ -1458,6 +1513,7 @@ impl Window {
 
     pub fn close(&self) {
         self.closed.set(true);
+        self.close_workers();
         self.timers.borrow_mut().clear();
         self.raf.borrow_mut().clear();
         for q in self.tasks.borrow_mut().iter_mut() {
@@ -1609,6 +1665,8 @@ pub(crate) enum Obj {
     Font(Box<fonts::FontObj>),
     /// Navigator surface objects (plugins, UA data, permissions, ...).
     Nav(Box<navigator::NavObj>),
+    /// Workers, message channels and ports, worker location and navigator.
+    Worker(Box<worker::WorkerHostObj>),
     /// CSSOM objects (style sheets, rules, rule lists, media lists).
     Css(Box<sheets::CssObj>),
     /// `CSSStyleRule.style`: the declarations of a rule.
@@ -1661,6 +1719,7 @@ impl Obj {
             Obj::Audio(a) => a.iface_name(),
             Obj::Font(f) => f.iface_name(),
             Obj::Nav(n) => n.iface_name(),
+            Obj::Worker(x) => x.iface_name(),
             Obj::Css(c) => c.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
         }

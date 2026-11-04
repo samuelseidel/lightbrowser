@@ -137,6 +137,15 @@ pub async fn serve_fn(routes: Arc<dyn Fn(&str) -> Option<Resource> + Send + Sync
                     }).to_string());
                     r.headers.push(("x-reply".into(), "yes".into()));
                     Some(r)
+                } else if path.ends_with("/echo-cookie") {
+                    let cookie = headers
+                        .iter()
+                        .find(|(k, _)| k == "cookie")
+                        .map_or("", |(_, v)| v.as_str());
+                    Some(Resource::new(
+                        "application/json",
+                        serde_json::json!({ "cookie": cookie }).to_string(),
+                    ))
                 } else {
                     routes(&path)
                 };

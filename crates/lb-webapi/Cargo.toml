@@ -22,6 +22,8 @@ lb-layout = { path = "../lb-layout" }
 # Canvas 2D raster and image codecs (chrome build only for now).
 lb-paint = { path = "../lb-paint", optional = true }
 url = "2"
+# Inboxes of windows on other threads (workers, ADR 0021).
+tokio = { version = "1", default-features = false, features = ["sync"] }
 encoding_rs = "0.8"
 serde_json = "1"
 percent-encoding = "2"

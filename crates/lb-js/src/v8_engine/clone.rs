@@ -108,29 +108,34 @@ impl v8::ValueDeserializerImpl for DeDelegate {
 }
 
 /// Serialize `value` in the current context, transferring `transfer`
-/// (`ArrayBuffer`s; anything else is the host's business). Errors are
-/// `DataCloneError` messages.
+/// (`ArrayBuffer`s; anything else is the host's business). `Err(Some(m))`
+/// is a `DataCloneError` message; `Err(None)` means script threw (a
+/// getter) or execution was terminated: with `rethrow` that exception is
+/// pending again for the caller's JS.
 pub(super) fn serialize_in(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
     transfer: &[v8::Local<'_, v8::ArrayBuffer>],
     host: HostWriter<'_>,
-) -> Result<Serialized, String> {
+    rethrow: bool,
+) -> Result<Serialized, Option<String>> {
     for (i, ab) in transfer.iter().enumerate() {
         let v: v8::Local<v8::Value> = (*ab).into();
         if transfer[..i].iter().any(|x| {
             let x: v8::Local<v8::Value> = (*x).into();
             x.strict_equals(v)
         }) {
-            return Err(format!(
+            return Err(Some(format!(
                 "ArrayBuffer at index {i} is a duplicate of an earlier ArrayBuffer."
-            ));
+            )));
         }
         if ab.was_detached() {
-            return Err(format!("ArrayBuffer at index {i} is already detached."));
+            return Err(Some(format!(
+                "ArrayBuffer at index {i} is already detached."
+            )));
         }
         if !ab.is_detachable() {
-            return Err(format!("ArrayBuffer at index {i} is not detachable."));
+            return Err(Some(format!("ArrayBuffer at index {i} is not detachable.")));
         }
     }
     let error = Rc::new(RefCell::new(None));
@@ -151,16 +156,16 @@ pub(super) fn serialize_in(
         if ser.write_value(context, value) != Some(true) {
             let msg = error.borrow_mut().take();
             if tc.has_terminated() {
-                return Err("Execution terminated".into());
+                return Err(None);
             }
-            let msg = msg.or_else(|| {
-                tc.exception().map(|e| {
-                    e.to_rust_string_lossy(tc)
-                        .trim_start_matches("Error: ")
-                        .to_owned()
-                })
-            });
-            return Err(msg.unwrap_or_else(|| "The object could not be cloned.".into()));
+            if msg.is_some() {
+                return Err(msg);
+            }
+            if rethrow {
+                tc.rethrow();
+                return Err(None);
+            }
+            return Err(tc.exception().map(|e| e.to_rust_string_lossy(tc)));
         }
         ser.release()
     };
@@ -211,17 +216,18 @@ pub(super) fn serialize_handle(
     value: crate::Handle,
     transfer: &[crate::Handle],
     host: HostWriter<'_>,
-) -> Result<Serialized, String> {
-    let v = load_handle(scope, state, value).map_err(|e| e.message)?;
+    rethrow: bool,
+) -> Result<Serialized, Option<String>> {
+    let v = load_handle(scope, state, value).map_err(|e| Some(e.message))?;
     let mut abs = Vec::with_capacity(transfer.len());
     for h in transfer {
-        let t = load_handle(scope, state, *h).map_err(|e| e.message)?;
+        let t = load_handle(scope, state, *h).map_err(|e| Some(e.message))?;
         abs.push(
             v8::Local::<v8::ArrayBuffer>::try_from(t)
-                .map_err(|_| "Value does not have a transferable type.".to_owned())?,
+                .map_err(|_| Some("Value does not have a transferable type.".to_owned()))?,
         );
     }
-    serialize_in(scope, v, &abs, host)
+    serialize_in(scope, v, &abs, host, rethrow)
 }
 
 /// Deserialize into a new handle of `realm`.

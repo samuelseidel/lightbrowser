@@ -188,6 +188,7 @@ async fn navigate_frame(
         .map(|u| u.to_string())
         .unwrap_or_default();
     let w = Window::new(&rt, init);
+    w.set_worker_host(parent.worker_host());
     let r = ws.with_engine(|e| wf::commit_child(e, &parent, id, &w, creator));
     match r {
         Some(Ok(())) => {}

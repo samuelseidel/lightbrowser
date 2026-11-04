@@ -551,6 +551,44 @@ pub(crate) fn screen_dims(w: &Window) -> lb_persona::profile::ScreenInfo {
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/// `btoa` of the window or a worker scope (`iface` in messages).
+pub(crate) fn btoa_impl(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    iface: &str,
+) -> Result<(), HostError> {
+    need_args(cx, 1, "btoa", iface)?;
+    let s = cx.arg_string(0)?;
+    let mut bytes = Vec::with_capacity(s.len());
+    for c in s.chars() {
+        if c as u32 > 0xFF {
+            return Err(w.rt.err(
+                "InvalidCharacterError",
+                format!("Failed to execute 'btoa' on '{iface}': The string to be encoded contains characters outside of the Latin1 range."),
+            ));
+        }
+        bytes.push(c as u32 as u8);
+    }
+    cx.ret(base64_encode(&bytes))
+}
+
+/// `atob` of the window or a worker scope.
+pub(crate) fn atob_impl(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    iface: &str,
+) -> Result<(), HostError> {
+    need_args(cx, 1, "atob", iface)?;
+    let s = cx.arg_string(0)?;
+    match base64_decode(&s) {
+        Some(b) => cx.ret(b.into_iter().map(char::from).collect::<String>()),
+        None => Err(w.rt.err(
+            "InvalidCharacterError",
+            format!("Failed to execute 'atob' on '{iface}': The string to be decoded is not correctly encoded."),
+        )),
+    }
+}
+
 pub(crate) fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
@@ -840,24 +878,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         cx.ret(Arg::Null)
     });
     method(reg, rt, "Window", "btoa", |cx, w| {
-        need_args(cx, 1, "btoa", "Window")?;
-        let s = cx.arg_string(0)?;
-        let mut bytes = Vec::with_capacity(s.len());
-        for c in s.chars() {
-            if c as u32 > 0xFF {
-                return Err(w.rt.err("InvalidCharacterError", "Failed to execute 'btoa' on 'Window': The string to be encoded contains characters outside of the Latin1 range."));
-            }
-            bytes.push(c as u32 as u8);
-        }
-        cx.ret(base64_encode(&bytes))
+        btoa_impl(cx, w, "Window")
     });
     method(reg, rt, "Window", "atob", |cx, w| {
-        need_args(cx, 1, "atob", "Window")?;
-        let s = cx.arg_string(0)?;
-        match base64_decode(&s) {
-            Some(b) => cx.ret(b.into_iter().map(char::from).collect::<String>()),
-            None => Err(w.rt.err("InvalidCharacterError", "Failed to execute 'atob' on 'Window': The string to be decoded is not correctly encoded.")),
-        }
+        atob_impl(cx, w, "Window")
     });
     method(reg, rt, "Window", "postMessage", |cx, w| {
         need_args(cx, 1, "postMessage", "Window")?;
@@ -878,43 +902,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                         data: Some(data),
                         origin,
                         source: None,
+                        ports: None,
                     },
                 );
             }),
         );
         Ok(())
-    });
-    method(reg, rt, "Window", "structuredClone", |cx, w| {
-        need_args(cx, 1, "structuredClone", "Window")?;
-        let (parse, stringify) = {
-            let h = w.helpers.borrow();
-            (h.json_parse, h.json_stringify)
-        };
-        let (Some(parse), Some(stringify)) = (parse, stringify) else {
-            return Err(illegal());
-        };
-        let v = cx.arg_handle(0);
-        let s = cx.try_call_handle(stringify, Arg::Undefined, &[Arg::Handle(v)]);
-        cx.release(v);
-        let s = s.map_err(|e| {
-            w.rt.err(
-                "DataCloneError",
-                format!(
-                    "Failed to execute 'structuredClone' on 'Window': {}",
-                    e.message
-                ),
-            )
-        })?;
-        if cx.handle_kind(s) == ValueKind::Undefined {
-            cx.release(s);
-            return cx.ret(Arg::Undefined);
-        }
-        let r = cx.try_call_handle(parse, Arg::Undefined, &[Arg::Handle(s)]);
-        cx.release(s);
-        match r {
-            Ok(h) => cx.ret(Arg::Handle(h)),
-            Err(e) => Err(w.rt.err("DataCloneError", e.message)),
-        }
     });
     method(reg, rt, "Window", "reportError", |cx, w| {
         need_args(cx, 1, "reportError", "Window")?;

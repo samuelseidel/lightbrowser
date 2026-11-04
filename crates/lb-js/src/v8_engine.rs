@@ -889,6 +889,9 @@ struct State {
     /// with their V8 code cache once they were compiled twice (see
     /// `run_script`).
     code_cache: Vec<(u64, Option<Rc<[u8]>>)>,
+    /// The value of the last exception turned into a [`JsError`], for
+    /// `ErrorEvent.error` ([`Engine::take_exception`]).
+    last_exception: Option<v8::Global<v8::Value>>,
 }
 
 type SharedState = Rc<RefCell<State>>;
@@ -1132,11 +1135,16 @@ impl Engine {
             snap,
             creating: None,
             code_cache: Vec::new(),
+            last_exception: None,
         }));
         {
             let mut iso = Entered::new(&mut isolate);
             iso.set_microtasks_policy(v8::MicrotasksPolicy::Explicit);
             iso.set_slot(state.clone());
+            iso.set_host_initialize_import_meta_object_callback(import_meta);
+            // As Blink: errors keep a detailed stack trace, whose top frame
+            // is where error events say the error happened.
+            iso.set_capture_stack_trace_for_uncaught_exceptions(true, 10);
             if let Some(heap) = &heap {
                 iso.add_near_heap_limit_callback(near_heap_limit, Rc::as_ptr(heap) as *mut c_void);
             }
@@ -1591,8 +1599,12 @@ impl Engine {
         host: HostWriter<'_>,
     ) -> Result<Serialized, JsError> {
         self.run(realm, |scope, state| {
-            clone::serialize_handle(scope, state, value, transfer, host)
-                .map_err(|m| JsError::new(JsErrorKind::Exception, m))
+            clone::serialize_handle(scope, state, value, transfer, host, false).map_err(|m| {
+                JsError::new(
+                    JsErrorKind::Exception,
+                    m.unwrap_or_else(|| "Execution terminated".into()),
+                )
+            })
         })
     }
 
@@ -1608,6 +1620,17 @@ impl Engine {
             clone::deserialize_handle(scope, state, realm, s, hosts)
                 .map_err(|m| JsError::new(JsErrorKind::Exception, m))
         })
+    }
+
+    /// The value of the last exception reported as a [`JsError`], as a
+    /// handle of `realm` (once).
+    pub fn take_exception(&mut self, realm: RealmId) -> Option<Handle> {
+        let g = self.state.borrow_mut().last_exception.take()?;
+        self.run(realm, |scope, state| {
+            let v = v8::Local::new(scope, &g);
+            Ok(store_handle(scope, state, realm, v))
+        })
+        .ok()
     }
 
     /// The realm's global object as a handle.
@@ -2870,6 +2893,44 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         }
     }
 
+    /// Compile and run a classic script in the call's realm
+    /// (`importScripts`). A compile error comes back as `Err(Some(message))`
+    /// with nothing thrown; an exception thrown while running stays pending
+    /// for the caller's JS (`Err(None)`; return [`HostError::Thrown`]).
+    pub fn run_classic(
+        &mut self,
+        source: &str,
+        origin: ScriptOrigin<'_>,
+    ) -> Result<(), Option<String>> {
+        v8::tc_scope!(let tc, self.scope);
+        let Some(code) = v8::String::new(tc, source) else {
+            return Err(Some("Invalid or unexpected token".into()));
+        };
+        let origin = script_origin(tc, origin, false);
+        let Some(script) = v8::Script::compile(tc, code, Some(&origin)) else {
+            if tc.has_terminated() {
+                return Err(None);
+            }
+            let msg = tc
+                .exception()
+                .and_then(|e| v8::Local::<v8::Object>::try_from(e).ok())
+                .and_then(|o| {
+                    let k = v8_str(tc, "message");
+                    o.get(tc, k.into())
+                })
+                .map(|m| m.to_rust_string_lossy(tc))
+                .unwrap_or_default();
+            return Err(Some(msg));
+        };
+        if script.run(tc).is_some() {
+            return Ok(());
+        }
+        if !tc.has_terminated() {
+            tc.rethrow();
+        }
+        Err(None)
+    }
+
     /// Like [`CallCtx::try_evaluate`], keeping the result as a handle.
     pub fn try_evaluate_handle(
         &mut self,
@@ -3009,22 +3070,29 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         self.state.borrow_mut().handles.remove(h.idx, h.generation);
     }
 
+    /// The value of the last exception reported as a [`JsError`] (once).
+    pub fn take_exception(&mut self) -> Option<Handle> {
+        let g = self.state.borrow_mut().last_exception.take()?;
+        let v = v8::Local::new(self.scope, &g);
+        Some(store_handle(self.scope, &self.state, self.realm, v))
+    }
+
     /// Whether a held value is an `ArrayBuffer` (not shared).
     pub fn is_array_buffer(&mut self, h: Handle) -> bool {
         load_handle(self.scope, &self.state, h).is_ok_and(|v| v.is_array_buffer())
     }
 
     /// Structured-clone a held value (see [`Serialized`]); `transfer` are
-    /// held `ArrayBuffer`s. `Err` is a `DataCloneError` message; a
-    /// getter that threw during serialization leaves its exception
-    /// caught (the caller throws the `DataCloneError` instead).
+    /// held `ArrayBuffer`s. `Err(Some(m))` is a `DataCloneError` message;
+    /// `Err(None)`: a getter threw (or execution was terminated) and that
+    /// exception is pending again (return [`HostError::Thrown`]).
     pub fn serialize(
         &mut self,
         value: Handle,
         transfer: &[Handle],
         host: HostWriter<'_>,
-    ) -> Result<Serialized, String> {
-        clone::serialize_handle(self.scope, &self.state, value, transfer, host)
+    ) -> Result<Serialized, Option<String>> {
+        clone::serialize_handle(self.scope, &self.state, value, transfer, host, true)
     }
 
     /// Rebuild a structured clone in the call's realm (or its wrap realm).
@@ -4405,6 +4473,35 @@ fn compile_module<'s>(
     Some(module)
 }
 
+/// `import.meta` of a module: `url`, the module's URL (as Chrome).
+extern "C" fn import_meta(
+    context: v8::Local<v8::Context>,
+    module: v8::Local<v8::Module>,
+    meta: v8::Local<v8::Object>,
+) {
+    // SAFETY: V8 calls this synchronously on the isolate's thread while
+    // evaluating the module; the context belongs to that isolate.
+    v8::callback_scope!(unsafe scope, context);
+    v8::scope!(let scope, scope);
+    let state = shared_state(scope);
+    let realm = current_realm(scope);
+    let url = {
+        let st = state.borrow();
+        let hash = module.get_identity_hash();
+        st.realms.get(&realm).and_then(|r| {
+            r.modules
+                .iter()
+                .find(|m| m.hash == hash && v8::Local::new(scope, &m.module) == module)
+                .map(|m| m.url.clone())
+        })
+    };
+    if let Some(url) = url {
+        let k = v8_str(scope, "url");
+        let v = v8_str(scope, &url);
+        meta.create_data_property(scope, k.into(), v.into());
+    }
+}
+
 fn resolve_module<'s>(
     context: v8::Local<'s, v8::Context>,
     specifier: v8::Local<'s, v8::String>,
@@ -4523,6 +4620,24 @@ fn exception_to_error(
         }
         err.line = msg.get_line_number(scope).map(|l| l as u32);
         err.column = Some(msg.get_start_column() as u32);
+    }
+    // An error object's own creation site, as Blink reports it
+    // (`throw new Error()` points at `new`, not at `throw`).
+    if let Some(frame) = v8::Exception::get_stack_trace(scope, exc)
+        .filter(|t| t.get_frame_count() > 0)
+        .and_then(|t| t.get_frame(scope, 0))
+        && frame.get_line_number() > 0
+    {
+        if let Some(name) = frame.get_script_name_or_source_url(scope) {
+            err.url = Some(name.to_rust_string_lossy(scope));
+        }
+        err.line = Some(frame.get_line_number() as u32);
+        err.column = Some((frame.get_column() as u32).saturating_sub(1));
+    }
+    if let Some(state) = scope.get_slot::<SharedState>().cloned()
+        && let Ok(mut st) = state.try_borrow_mut()
+    {
+        st.last_exception = Some(v8::Global::new(scope, exc));
     }
     err
 }

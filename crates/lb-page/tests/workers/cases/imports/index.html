@@ -1,0 +1,6 @@
+<!doctype html><title>imports</title><!--LOG-->
+<script>
+var w = new Worker('w.js');
+w.onmessage = function (e) { e.data.forEach(log); end(); };
+w.onerror = function (e) { log('error ' + e.message); end(); };
+</script>

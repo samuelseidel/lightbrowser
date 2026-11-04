@@ -5,6 +5,7 @@ mod common;
 mod frames;
 mod report;
 mod stylesheets;
+mod workers;
 
 use std::time::Duration;
 

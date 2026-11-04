@@ -56,6 +56,28 @@ struct Shared {
     /// most 6 sockets per group, one HTTP/2 session per group, TLS session
     /// resumption. Never shared with another context.
     connections: ConnectionPool,
+    /// Running shared workers by (script URL, name), chrome build
+    /// (ADR 0021); terminated with the context.
+    #[cfg(feature = "chrome")]
+    pub(crate) shared_workers: Mutex<
+        std::collections::HashMap<
+            (String, String),
+            (lb_webapi::rt::Inbox, Arc<lb_webapi::rt::WorkerControl>),
+        >,
+    >,
+}
+
+#[cfg(feature = "chrome")]
+impl Drop for Shared {
+    fn drop(&mut self) {
+        let workers = self
+            .shared_workers
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner());
+        for (_, (_, c)) in workers.drain() {
+            c.terminate();
+        }
+    }
 }
 
 /// What happened on the wire for one [`BrowserContext::fetch_traced`] call,
@@ -128,6 +150,8 @@ impl BrowserContext {
             header_profile: std::sync::OnceLock::new(),
             favicons: Mutex::new(HashSet::new()),
             connections: ConnectionPool::new(),
+            #[cfg(feature = "chrome")]
+            shared_workers: Mutex::new(std::collections::HashMap::new()),
         }));
         ctx.put_back(probe);
         Ok(ctx)
@@ -156,6 +180,19 @@ impl BrowserContext {
     }
 
     /// The context's connection pool.
+    /// Running shared workers of this context (ADR 0021).
+    #[cfg(feature = "chrome")]
+    pub(crate) fn shared_workers(
+        &self,
+    ) -> &Mutex<
+        std::collections::HashMap<
+            (String, String),
+            (lb_webapi::rt::Inbox, Arc<lb_webapi::rt::WorkerControl>),
+        >,
+    > {
+        &self.0.shared_workers
+    }
+
     pub fn connections(&self) -> &ConnectionPool {
         &self.0.connections
     }

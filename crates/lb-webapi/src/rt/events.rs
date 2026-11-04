@@ -43,6 +43,9 @@ pub enum EventExtra {
         origin: String,
         /// `MessageEvent.source` (the sender's window), if any.
         source: Option<Handle>,
+        /// `MessageEvent.ports`: a frozen array (made on first read for
+        /// events made by script).
+        ports: Option<Handle>,
     },
     PageTransition {
         persisted: bool,
@@ -477,6 +480,11 @@ pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
         .map_or_else(|| e.message.clone(), str::to_owned);
     let message = format!("Uncaught {head}");
     let mut canceled = false;
+    let error = if e.kind == lb_js::JsErrorKind::Exception {
+        js.take_exception()
+    } else {
+        None
+    };
     if w.error_depth.get() == 0 {
         w.error_depth.set(1);
         let extra = EventExtra::Error {
@@ -484,10 +492,15 @@ pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
             filename: e.url.clone().unwrap_or_default(),
             lineno: e.line.unwrap_or(0),
             colno: e.column.map_or(0, |c| c + 1),
-            error: None,
+            error,
         };
         canceled = !fire_event_with(js, w, WINDOW_REF, "ErrorEvent", "error", false, true, extra);
         w.error_depth.set(0);
+    }
+    if !canceled && w.is_worker() {
+        // A worker's uncaught error goes on to its `Worker` object.
+        super::worker::forward_error(w, &message, e);
+        return;
     }
     if !canceled {
         let text = match &e.stack {
@@ -855,6 +868,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             data: d.get(cx, "data")?,
             origin: d.string(cx, "origin")?.unwrap_or_default(),
             source: d.get(cx, "source")?,
+            ports: None,
         };
         d.release(cx);
         e.time = coarse_now(w);
@@ -1077,6 +1091,30 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         EventExtra::Message { origin, .. } => origin,
         _ => String::new(),
     }));
+    getter(reg, rt, "MessageEvent", "ports", |cx, w| {
+        let id = this_event(cx, w)?;
+        let have = with_ev(w, id, |e| match &e.extra {
+            EventExtra::Message { ports, .. } => Some(*ports),
+            _ => None,
+        })
+        .flatten();
+        let ports = match have {
+            Some(Some(h)) => Some(h),
+            _ => {
+                let h = super::worker::empty_ports(cx, w);
+                with_ev(w, id, |e| {
+                    if let EventExtra::Message { ports, .. } = &mut e.extra {
+                        *ports = h;
+                    }
+                });
+                h
+            }
+        };
+        match ports {
+            Some(h) => cx.ret(Arg::Handle(h)),
+            None => cx.ret(Arg::Array(Vec::new())),
+        }
+    });
     extra_get!("MessageEvent", "source", |cx, x| cx.ret(match x {
         EventExtra::Message {
             source: Some(h), ..

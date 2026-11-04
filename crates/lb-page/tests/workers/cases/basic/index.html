@@ -1,0 +1,14 @@
+<!doctype html><title>basic</title><!--LOG-->
+<script>
+var w = new Worker('w.js', {name: 'one'});
+log('worker ' + Object.prototype.toString.call(w) + ' ' + (w instanceof EventTarget));
+log('keys ' + Object.getOwnPropertyNames(Worker.prototype).join());
+w.postMessage({n: 1, d: new Date(7), m: new Map([['k', 'v']]), s: new Set([1, 2]), r: /x/gi, nested: [1, [2, 3]], u: undefined, big: 5n});
+w.postMessage('second');
+var count = 0;
+w.onmessage = function (e) {
+  log('ctor ' + e.constructor.name + ' type ' + e.type + ' origin [' + e.origin + '] lastEventId [' + e.lastEventId + '] source ' + e.source + ' ports ' + e.ports.length + ' ' + Object.isFrozen(e.ports) + ' ' + (e.ports === e.ports) + ' target ' + (e.target === w) + ' bubbles ' + e.bubbles + ' cancelable ' + e.cancelable + ' trusted ' + e.isTrusted);
+  log('data ' + JSON.stringify(e.data));
+  if (++count === 2) end();
+};
+</script>

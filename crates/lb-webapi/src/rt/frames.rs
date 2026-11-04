@@ -448,6 +448,7 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
     let id = next_frame_id(parent);
     let blank = Url::parse("about:blank").expect("about:blank parses");
     let child = Window::new(&parent.rt, child_window_init(parent, blank));
+    child.set_worker_host(parent.worker_host());
     link(&child, parent, el, id, Some(effective_url(parent)));
     child.set_console_sink(parent.console_sink.borrow().clone());
     let name = parent.with_doc(|d| d.get_attribute(el, "name").map(str::to_owned));
@@ -885,6 +886,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                         data,
                         origin: src_origin,
                         source: Some(src_global),
+                        ports: None,
                     },
                 );
             }),

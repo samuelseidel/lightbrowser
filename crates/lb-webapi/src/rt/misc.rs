@@ -777,16 +777,35 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         "createObjectURL",
         ImplKind::StaticMethod,
         super::wf(rt, |cx, w| {
-            let origin = w.url().origin().ascii_serialization();
-            let n = w.objs.borrow().len();
-            cx.ret(format!("blob:{origin}/{:08x}-0000-4000-8000-{:012x}", n, n))
+            need_args(cx, 1, "createObjectURL", "URL")?;
+            let blob = cx
+                .arg_host(0)
+                .filter(|h| h.kind == K_OBJ)
+                .and_then(|h| {
+                    w.with_obj(h.id, |o| match o {
+                        Obj::Blob(b) => Some((b.bytes.clone(), b.type_.clone())),
+                        _ => None,
+                    })
+                })
+                .flatten();
+            let Some((bytes, type_)) = blob else {
+                return Err(HostError::type_error(
+                    "Failed to execute 'createObjectURL' on 'URL': Overload resolution failed.",
+                ));
+            };
+            cx.ret(super::worker::create_blob_url(w, bytes, type_))
         }),
     );
     reg.register(
         "URL",
         "revokeObjectURL",
         ImplKind::StaticMethod,
-        super::wf(rt, |_cx, _w| Ok(())),
+        super::wf(rt, |cx, _w| {
+            need_args(cx, 1, "revokeObjectURL", "URL")?;
+            let u = cx.arg_string(0)?;
+            super::worker::revoke_blob_url(&u);
+            Ok(())
+        }),
     );
     for prop in [
         "href", "origin", "protocol", "username", "password", "host", "hostname", "port",

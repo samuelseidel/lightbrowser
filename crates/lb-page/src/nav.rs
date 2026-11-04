@@ -167,6 +167,7 @@ pub(crate) async fn navigate_committed(
         },
     );
     w.set_console_sink(Some(page.console_sink()));
+    w.set_worker_host(Some(crate::worker::Workers::new(page.ctx.clone())));
     let realm = match ws.with_engine(|e| w.create_realm(e, &bindings)) {
         Some(Ok(r)) => r,
         Some(Err(e)) => {
@@ -700,7 +701,7 @@ fn src_node(n: NodeId) -> Option<NodeId> {
 
 /// Static import specifiers of a module (`import ... from "x"`,
 /// `import "x"`, `export ... from "x"`). A scan, not a parser.
-fn import_specifiers(src: &str) -> Vec<String> {
+pub(crate) fn import_specifiers(src: &str) -> Vec<String> {
     let mut out = Vec::new();
     let b = src.as_bytes();
     let mut i = 0;
