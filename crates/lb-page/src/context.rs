@@ -13,6 +13,16 @@ use lb_persona::{Persona, PersonaProfile};
 use lb_webapi::host::{Destination, NetRequest, NetResponse, StoragePartition};
 use url::Url;
 
+/// Running shared workers of a context by (script URL, name): their
+/// inbox and control (ADR 0021).
+#[cfg(feature = "chrome")]
+pub(crate) type SharedWorkers = Mutex<
+    std::collections::HashMap<
+        (String, String),
+        (lb_webapi::rt::Inbox, Arc<lb_webapi::rt::WorkerControl>),
+    >,
+>;
+
 /// How to create a [`BrowserContext`].
 #[derive(Clone)]
 pub struct ContextOptions {
@@ -59,12 +69,7 @@ struct Shared {
     /// Running shared workers by (script URL, name), chrome build
     /// (ADR 0021); terminated with the context.
     #[cfg(feature = "chrome")]
-    pub(crate) shared_workers: Mutex<
-        std::collections::HashMap<
-            (String, String),
-            (lb_webapi::rt::Inbox, Arc<lb_webapi::rt::WorkerControl>),
-        >,
-    >,
+    pub(crate) shared_workers: SharedWorkers,
 }
 
 #[cfg(feature = "chrome")]
@@ -182,14 +187,7 @@ impl BrowserContext {
     /// The context's connection pool.
     /// Running shared workers of this context (ADR 0021).
     #[cfg(feature = "chrome")]
-    pub(crate) fn shared_workers(
-        &self,
-    ) -> &Mutex<
-        std::collections::HashMap<
-            (String, String),
-            (lb_webapi::rt::Inbox, Arc<lb_webapi::rt::WorkerControl>),
-        >,
-    > {
+    pub(crate) fn shared_workers(&self) -> &SharedWorkers {
         &self.0.shared_workers
     }
 

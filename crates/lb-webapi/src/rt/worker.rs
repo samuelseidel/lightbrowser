@@ -482,16 +482,12 @@ fn serialize_args(
             }
         };
         if !matches!(cx.handle_kind(seq), ValueKind::Undefined) {
-            let len = match cx.get_property(seq, "length")? {
-                l => {
-                    let n = match cx.handle_value(l) {
-                        lb_js::JsValue::Number(n) => n as usize,
-                        _ => 0,
-                    };
-                    cx.release(l);
-                    n
-                }
+            let l = cx.get_property(seq, "length")?;
+            let len = match cx.handle_value(l) {
+                lb_js::JsValue::Number(n) => n as usize,
+                _ => 0,
             };
+            cx.release(l);
             for i in 0..len {
                 let item = cx.get_property(seq, &i.to_string())?;
                 list.push(item);

@@ -36,7 +36,7 @@ pub(crate) struct Workers {
 }
 
 impl Workers {
-    pub(crate) fn new(ctx: BrowserContext) -> Rc<dyn WorkerHost> {
+    pub(crate) fn host(ctx: BrowserContext) -> Rc<dyn WorkerHost> {
         Rc::new(Workers { ctx })
     }
 }
@@ -226,7 +226,7 @@ async fn run(ctx: BrowserContext, start: WorkerStart) -> Result<(), String> {
         control: control.clone(),
         parent,
     });
-    w.set_worker_host(Some(Workers::new(ctx.clone())));
+    w.set_worker_host(Some(Workers::host(ctx.clone())));
     let realm = w
         .create_worker_realm(&mut engine, &bindings)
         .map_err(|e| e.to_string())?;

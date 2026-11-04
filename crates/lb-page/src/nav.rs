@@ -167,7 +167,7 @@ pub(crate) async fn navigate_committed(
         },
     );
     w.set_console_sink(Some(page.console_sink()));
-    w.set_worker_host(Some(crate::worker::Workers::new(page.ctx.clone())));
+    w.set_worker_host(Some(crate::worker::Workers::host(page.ctx.clone())));
     let realm = match ws.with_engine(|e| w.create_realm(e, &bindings)) {
         Some(Ok(r)) => r,
         Some(Err(e)) => {
