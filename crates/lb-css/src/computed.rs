@@ -158,9 +158,8 @@ pub struct ComputedStyle {
     pub aspect_ratio: Option<f32>,
     /// Background layers (shared until changed).
     pub background: Rc<crate::bg::Background>,
-    /// Corner radii: top-left, top-right, bottom-right, bottom-left, each
-    /// (horizontal, vertical).
-    pub radius: [(Lp, Lp); 4],
+    /// Corner radii (see [`ComputedStyle::radii`]); `None` when all are 0.
+    pub radius: Option<Rc<[(Lp, Lp); 4]>>,
     pub box_shadow: Rc<[crate::bg::BoxShadow]>,
     pub custom: Rc<CustomMap>,
 }
@@ -237,12 +236,7 @@ impl ComputedStyle {
             direction: Direction::Ltr,
             aspect_ratio: None,
             background: Rc::new(crate::bg::Background::default()),
-            radius: [
-                (Lp::ZERO, Lp::ZERO),
-                (Lp::ZERO, Lp::ZERO),
-                (Lp::ZERO, Lp::ZERO),
-                (Lp::ZERO, Lp::ZERO),
-            ],
+            radius: None,
             box_shadow: Rc::from(Vec::new()),
             custom: Rc::new(CustomMap::new()),
         }
@@ -260,6 +254,29 @@ impl ComputedStyle {
         s.font_size_keyword = parent.font_size_keyword;
         s.custom = parent.custom.clone();
         s
+    }
+
+    /// Corner radii: top-left, top-right, bottom-right, bottom-left, each
+    /// (horizontal, vertical).
+    pub fn radii(&self) -> &[(Lp, Lp); 4] {
+        const ZERO: [(Lp, Lp); 4] = [
+            (Lp::ZERO, Lp::ZERO),
+            (Lp::ZERO, Lp::ZERO),
+            (Lp::ZERO, Lp::ZERO),
+            (Lp::ZERO, Lp::ZERO),
+        ];
+        self.radius.as_deref().unwrap_or(&ZERO)
+    }
+
+    /// Sets one corner radius (kept unallocated while all are 0).
+    pub fn set_radius(&mut self, corner: usize, r: (Lp, Lp)) {
+        let zero = matches!(r, (Lp::Px(a), Lp::Px(b)) if a == 0.0 && b == 0.0);
+        if zero && self.radius.is_none() {
+            return;
+        }
+        let mut all = self.radii().clone();
+        all[corner] = r;
+        self.radius = Some(Rc::new(all));
     }
 
     /// Used line height in px. `normal` needs font metrics, so the caller
@@ -391,10 +408,10 @@ pub(crate) fn copy_field(id: LonghandId, from: &ComputedStyle, to: &mut Computed
             Rc::make_mut(&mut to.background).origin = from.background.origin.clone()
         }
         L::BackgroundClip => Rc::make_mut(&mut to.background).clip = from.background.clip.clone(),
-        L::BorderTopLeftRadius => to.radius[0] = from.radius[0].clone(),
-        L::BorderTopRightRadius => to.radius[1] = from.radius[1].clone(),
-        L::BorderBottomRightRadius => to.radius[2] = from.radius[2].clone(),
-        L::BorderBottomLeftRadius => to.radius[3] = from.radius[3].clone(),
+        L::BorderTopLeftRadius => to.set_radius(0, from.radii()[0].clone()),
+        L::BorderTopRightRadius => to.set_radius(1, from.radii()[1].clone()),
+        L::BorderBottomRightRadius => to.set_radius(2, from.radii()[2].clone()),
+        L::BorderBottomLeftRadius => to.set_radius(3, from.radii()[3].clone()),
         L::BoxShadow => to.box_shadow = from.box_shadow.clone(),
     }
 }
@@ -867,10 +884,10 @@ fn apply(
         (L::BackgroundClip, Sv::Boxes(list)) => {
             Rc::make_mut(&mut s.background).clip = list.to_vec();
         }
-        (L::BorderTopLeftRadius, Sv::Radius(a, b)) => s.radius[0] = (lp(a), lp(b)),
-        (L::BorderTopRightRadius, Sv::Radius(a, b)) => s.radius[1] = (lp(a), lp(b)),
-        (L::BorderBottomRightRadius, Sv::Radius(a, b)) => s.radius[2] = (lp(a), lp(b)),
-        (L::BorderBottomLeftRadius, Sv::Radius(a, b)) => s.radius[3] = (lp(a), lp(b)),
+        (L::BorderTopLeftRadius, Sv::Radius(a, b)) => s.set_radius(0, (lp(a), lp(b))),
+        (L::BorderTopRightRadius, Sv::Radius(a, b)) => s.set_radius(1, (lp(a), lp(b))),
+        (L::BorderBottomRightRadius, Sv::Radius(a, b)) => s.set_radius(2, (lp(a), lp(b))),
+        (L::BorderBottomLeftRadius, Sv::Radius(a, b)) => s.set_radius(3, (lp(a), lp(b))),
         (L::BoxShadow, Sv::Shadows(list)) => {
             let current = s.color;
             let px = |c: &Calc| lp(c).resolve(0.0);

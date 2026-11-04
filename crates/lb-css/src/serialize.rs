@@ -79,7 +79,7 @@ pub fn computed_value(s: &ComputedStyle, name: &str) -> Option<String> {
         "flex-flow" => format!("{} {}", s.flex_direction.as_str(), s.flex_wrap.as_str()),
         "background-position" => crate::bg::list_css(&s.background, "background-position")?,
         "background" => crate::bg::shorthand_css(&s.background, s.background_color),
-        "border-radius" => crate::bg::radius_shorthand_css(&s.radius),
+        "border-radius" => crate::bg::radius_shorthand_css(s.radii()),
         other => {
             let id = LonghandId::from_name(other)?;
             longhand_value(s, id)
@@ -212,10 +212,10 @@ pub fn longhand_value(s: &ComputedStyle, id: LonghandId) -> String {
         | L::BackgroundAttachment
         | L::BackgroundOrigin
         | L::BackgroundClip => crate::bg::list_css(&s.background, id.name()).unwrap_or_default(),
-        L::BorderTopLeftRadius => crate::bg::radius_css(&s.radius[0]),
-        L::BorderTopRightRadius => crate::bg::radius_css(&s.radius[1]),
-        L::BorderBottomRightRadius => crate::bg::radius_css(&s.radius[2]),
-        L::BorderBottomLeftRadius => crate::bg::radius_css(&s.radius[3]),
+        L::BorderTopLeftRadius => crate::bg::radius_css(&s.radii()[0]),
+        L::BorderTopRightRadius => crate::bg::radius_css(&s.radii()[1]),
+        L::BorderBottomRightRadius => crate::bg::radius_css(&s.radii()[2]),
+        L::BorderBottomLeftRadius => crate::bg::radius_css(&s.radii()[3]),
         L::BoxShadow => crate::bg::shadows_css(&s.box_shadow),
     }
 }

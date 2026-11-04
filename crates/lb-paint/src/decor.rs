@@ -59,7 +59,7 @@ pub(crate) fn is_zero(r: &Radii) -> bool {
 /// Used outer radii of a box in CSS px (overlapping radii scaled down).
 pub(crate) fn used_radii(style: &ComputedStyle, b: Rect) -> Radii {
     let mut r: Radii = [0, 1, 2, 3].map(|i| {
-        let (h, v) = &style.radius[i];
+        let (h, v) = &style.radii()[i];
         (h.resolve(b.width).max(0.0), v.resolve(b.height).max(0.0))
     });
     if r.iter().all(|(a, b)| *a == 0.0 && *b == 0.0) {
