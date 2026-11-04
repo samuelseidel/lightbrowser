@@ -1441,6 +1441,12 @@ impl Document {
         let mut ids: Vec<NodeId> = Vec::with_capacity(plan.len());
         for (copy, parent, into) in plan {
             if let ShallowCopy::Shadow(mut d) = copy {
+                // A shadow root at the top of a copy has no host: it is
+                // copied as a plain fragment (callers reject this case).
+                if parent == usize::MAX {
+                    ids.push(self.create_document_fragment());
+                    continue;
+                }
                 let host = ids[parent];
                 d.host = host;
                 let sr = self.push(NodeData::ShadowRoot(d));

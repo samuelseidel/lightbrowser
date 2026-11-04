@@ -1648,6 +1648,12 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         need_args(cx, 1, "importNode", "Document")?;
         let (slot, _) = this_node(cx, w)?;
         let (s2, n) = arg_node(cx, w, 0, "importNode", "Document")?;
+        if w.doc_slot(s2, |d| d.is_shadow_root(n)) {
+            return Err(w.rt.err(
+                "NotSupportedError",
+                "Failed to execute 'importNode' on 'Document': The node provided is a shadow root, which may not be imported.",
+            ));
+        }
         let deep = cx.arg_bool(1);
         let (src, dst) = (w.doc_rc(s2), w.doc_rc(slot));
         let c = if Rc::ptr_eq(&src, &dst) {
@@ -1664,6 +1670,12 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         let (s2, n) = arg_node(cx, w, 0, "adoptNode", "Document")?;
         if n == Document::DOCUMENT {
             return Err(w.rt.err("NotSupportedError", "Failed to execute 'adoptNode' on 'Document': The node provided is of type '#document', which may not be adopted."));
+        }
+        if w.doc_slot(s2, |d| d.is_shadow_root(n)) {
+            return Err(w.rt.err(
+                "HierarchyRequestError",
+                "Failed to execute 'adoptNode' on 'Document': The node provided is a shadow root, which may not be adopted.",
+            ));
         }
         let c = if s2 == slot {
             w.doc_slot_mut(slot, |d| d.detach(n));

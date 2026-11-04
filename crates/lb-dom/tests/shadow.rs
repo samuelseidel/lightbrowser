@@ -123,3 +123,17 @@ fn custom_element_names() {
         assert!(!is_valid_custom_element_name(bad), "{bad}");
     }
 }
+
+#[test]
+fn copying_a_shadow_root_itself_does_not_panic() {
+    let mut d = Document::parse_html("<div id=h></div>");
+    let h = d.get_element_by_id("h").unwrap();
+    let sr = d.attach_shadow(h, &init(ShadowRootMode::Open)).unwrap();
+    d.set_inner_html(sr, "<b>x</b>");
+    let mut other = Document::new();
+    let (copy, map) = other.import_node_mapped(&d, sr);
+    assert_eq!(other.inner_html(copy), "<b>x</b>");
+    assert_eq!(map.len(), 3);
+    let c = d.clone_node(sr, true);
+    assert!(!d.is_shadow_root(c));
+}
