@@ -1301,6 +1301,7 @@ version = "0.0.1"
 dependencies = [
  "lb-persona",
  "libc",
+ "url",
  "v8",
  "zstd",
 ]
