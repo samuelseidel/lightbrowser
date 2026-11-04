@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve bench/corpus on 127.0.0.1 only (plain HTTP/1.1, no caching).
+"""Serve bench/corpus on 127.0.0.1 only (plain HTTP/1.1 keep-alive, no caching).
 
 Prints `listening 127.0.0.1:PORT` once ready. Port 0 picks a free port.
 It is a separate process so its work never competes with the runner's GIL.
@@ -16,6 +16,13 @@ ROOT = Path(__file__).resolve().parent / "corpus"
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # TCP_NODELAY, as nginx (`tcp_nodelay on`), Go and most servers set on
+    # persistent connections. http.server writes the head and the body in
+    # separate sends; with Nagle on, the body of every response after the
+    # first on a kept-alive connection waits for the client's delayed ACK
+    # (40 ms on Linux). Browsers that reuse connections (Chromium, and
+    # LightBrowser since ADR 0018) paid that per request, curl too.
+    disable_nagle_algorithm = True
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")

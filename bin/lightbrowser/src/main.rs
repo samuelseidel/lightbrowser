@@ -274,7 +274,9 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
     .map_err(|e| e.to_string())?;
 
     // The page and its network run on the browser's worker thread; this
-    // runtime only waits for it.
+    // runtime only waits for it. One page on one worker: its connections
+    // can stay on that thread (no network thread, ADR 0018).
+    ctx.connections().use_calling_thread();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

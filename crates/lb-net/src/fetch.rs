@@ -250,15 +250,17 @@ impl NetContext {
 /// polls: TLS, h1/h2, DNS) is compiled once, in this crate, instead of once
 /// per crate that awaits it (M6 binary size, ADR 0013).
 ///
-/// With a [`ConnectionPool`] (`ctx.pool`), the request runs on the network
-/// thread ([`crate::pool::net_runtime`]) and reuses the pool's connections:
-/// HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS resumption
-/// (ADR 0018). It then completes even if the returned future is dropped.
+/// With a [`ConnectionPool`] (`ctx.pool`), the request reuses the pool's
+/// connections: HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS
+/// resumption (ADR 0018). It runs on the network thread
+/// ([`crate::pool::net_runtime`]) and then completes even if the returned
+/// future is dropped, unless the pool
+/// [uses the calling thread](ConnectionPool::use_calling_thread).
 pub fn fetch(
     ctx: &mut NetContext,
     req: Request,
 ) -> Pin<Box<dyn Future<Output = Result<Response, NetError>> + Send + '_>> {
-    if ctx.pool.is_some() {
+    if ctx.pool.as_ref().is_some_and(|p| !p.uses_calling_thread()) {
         let mut owned = ctx.detached();
         let task =
             crate::pool::net_runtime().spawn(async move { fetch_chain(&mut owned, req).await });

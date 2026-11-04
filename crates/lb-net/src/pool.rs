@@ -30,7 +30,10 @@
 //!
 //! Every pooled connection is driven by one network thread
 //! ([`net_runtime`]), like Chrome's network service, so pages on different
-//! worker threads share the pool. Nothing is written to disk.
+//! worker threads share the pool. A context whose pages all run on one
+//! thread (`lightbrowser fetch`: one page) can keep its connections on that
+//! thread instead ([`ConnectionPool::use_calling_thread`]): no extra thread,
+//! no extra allocator arena. Nothing is written to disk.
 //!
 //! Not modelled: connection coalescing across host names (HTTP/2 IP
 //! pooling), privacy-mode groups (credentials `omit` requests share the
@@ -409,6 +412,8 @@ struct Inner {
     connector: Mutex<Option<(bool, Arc<TlsConnector>)>>,
     dialer: Dialer,
     next_id: AtomicU64,
+    /// Requests run on the caller's runtime, not the network thread.
+    inline: AtomicBool,
 }
 
 /// The connection pool of one browser context. Cheap to clone (shared).
@@ -440,8 +445,22 @@ impl ConnectionPool {
                 connector: Mutex::new(None),
                 dialer: Dialer::default(),
                 next_id: AtomicU64::new(1),
+                inline: AtomicBool::new(false),
             }),
         }
+    }
+
+    /// Run this pool's requests and connections on the runtime that makes
+    /// them instead of the network thread. Only for a context whose
+    /// requests all come from one thread (its connections are bound to
+    /// that thread's runtime); call it before the first request.
+    pub fn use_calling_thread(&self) {
+        self.inner.inline.store(true, Ordering::Relaxed);
+    }
+
+    /// See [`use_calling_thread`](Self::use_calling_thread).
+    pub fn uses_calling_thread(&self) -> bool {
+        self.inner.inline.load(Ordering::Relaxed)
     }
 
     /// Connections opened so far (TCP connects that succeeded).
