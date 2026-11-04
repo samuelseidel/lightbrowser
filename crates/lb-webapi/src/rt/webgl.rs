@@ -43,7 +43,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use lb_js::{Arg, CallCtx, HostError, JsValue, Member, ValueKind, ViewKind};
-use lb_paint::tiny_skia;
 use lb_persona::PersonaProfile;
 
 use super::canvas::{CanvasTarget, ContextFactory, ExternalContext, canvas_size};
@@ -51,18 +50,14 @@ use super::webgl_ext::{EXTENSIONS, ExtDesc};
 use super::{Dict, K_OBJ, Obj, Runtime, Window, getter, illegal, method, setter, this_obj};
 use crate::registry::{ImplKind, Registry, host_fn};
 
+#[path = "webgl_pipe.rs"]
+mod pipe;
+
 const IFACES: [&str; 2] = ["WebGLRenderingContext", "WebGL2RenderingContext"];
 
 // GL enums used here.
 const DEPTH_BUFFER_BIT: u32 = 0x0100;
 const COLOR_BUFFER_BIT: u32 = 0x4000;
-const POINTS: u32 = 0;
-const LINES: u32 = 1;
-const LINE_LOOP: u32 = 2;
-const LINE_STRIP: u32 = 3;
-const TRIANGLES: u32 = 4;
-const TRIANGLE_STRIP: u32 = 5;
-const TRIANGLE_FAN: u32 = 6;
 const NO_ERROR: u32 = 0;
 const INVALID_ENUM: u32 = 0x0500;
 const INVALID_VALUE: u32 = 0x0501;
@@ -174,11 +169,8 @@ impl ResKind {
     }
 }
 
-/// One GLSL variable: (name, GL type, array size).
-type Var = (String, u32, i32);
-
 #[derive(Default)]
-struct Res {
+pub(crate) struct Res {
     deleted: bool,
     // Buffer
     bytes: Vec<u8>,
@@ -187,23 +179,36 @@ struct Res {
     shader_type: u32,
     source: String,
     compiled: bool,
+    shader: Option<Rc<lb_gl::ir::Shader>>,
+    info_log: String,
     // Program
     shaders: Vec<u32>,
     linked: bool,
-    attribs: Vec<(Var, i32)>,
-    uniforms: Vec<Var>,
+    prog: Option<Rc<lb_gl::program::Program>>,
+    prog_log: String,
+    udata: Vec<u32>,
+    block_bind: Vec<u32>,
+    link_gen: u32,
     bound_locations: HashMap<String, i32>,
-    frag_color: Option<[f32; 4]>,
-    frag_hash: u32,
+    // Texture, renderbuffer, framebuffer, vertex array, sampler
+    tex: Option<Box<lb_gl::texture::Texture>>,
+    rb: Option<lb_gl::image::Image>,
+    rb_format: u32,
+    rb_samples: u32,
+    fbo: Option<Box<pipe::Fbo>>,
+    vao: Option<Box<pipe::Vao>>,
+    sampler: Option<lb_gl::texture::SamplerParams>,
 }
 
 #[derive(Clone, Copy, Default)]
-struct Attrib {
+pub(crate) struct Attrib {
     enabled: bool,
     buffer: Option<u32>,
     size: u32,
     ty: u32,
     normalized: bool,
+    integer: bool,
+    divisor: u32,
     stride: u32,
     offset: u32,
 }
@@ -216,9 +221,10 @@ pub(crate) struct Gl {
     attrs: Attrs,
     width: u32,
     height: u32,
-    /// Drawing buffer, RGBA rows top-down, as stored (premultiplied when
-    /// `premultipliedAlpha`).
-    fb: Option<Vec<u8>>,
+    /// Drawing buffer (multisampled when `antialias`), allocated on first
+    /// use; depth/stencil buffer when requested.
+    color: Option<lb_gl::image::Image>,
+    ds: Option<lb_gl::image::Image>,
     clear_color: [f32; 4],
     color_mask: [bool; 4],
     viewport: [i32; 4],
@@ -234,7 +240,10 @@ pub(crate) struct Gl {
     bound: HashMap<u32, u32>,
     res: HashMap<u32, Res>,
     attribs: Vec<Attrib>,
-    uniforms: HashMap<(u32, String), Vec<f32>>,
+    default_vao: pipe::Vao,
+    generic: Vec<[u32; 4]>,
+    units: Vec<pipe::Unit>,
+    ubo: Vec<(Option<u32>, usize, usize)>,
     active_texture: u32,
     seed: Option<[u8; 16]>,
 }
@@ -252,7 +261,9 @@ pub(crate) enum GlObj {
     },
     Location {
         program: u32,
-        name: String,
+        index: u32,
+        elem: u32,
+        lgen: u32,
     },
     ActiveInfo {
         name: String,
@@ -841,426 +852,6 @@ fn state_default(pname: u32, webgl2: bool) -> Option<Arg> {
 }
 
 // ---------------------------------------------------------------------------
-// GLSL declarations
-// ---------------------------------------------------------------------------
-
-fn glsl_type(t: &str) -> Option<u32> {
-    Some(match t {
-        "float" => 0x1406,
-        "vec2" => 0x8B50,
-        "vec3" => 0x8B51,
-        "vec4" => 0x8B52,
-        "int" => 0x1404,
-        "ivec2" => 0x8B53,
-        "ivec3" => 0x8B54,
-        "ivec4" => 0x8B55,
-        "bool" => 0x8B56,
-        "bvec2" => 0x8B57,
-        "bvec3" => 0x8B58,
-        "bvec4" => 0x8B59,
-        "mat2" => 0x8B5A,
-        "mat3" => 0x8B5B,
-        "mat4" => 0x8B5C,
-        "sampler2D" => 0x8B5E,
-        "samplerCube" => 0x8B60,
-        "sampler3D" => 0x8B5F,
-        "sampler2DShadow" => 0x8B62,
-        "sampler2DArray" => 0x8DC1,
-        "uint" => 0x1405,
-        "uvec2" => 0x8DC6,
-        "uvec3" => 0x8DC7,
-        "uvec4" => 0x8DC8,
-        "isampler2D" => 0x8DCA,
-        "usampler2D" => 0x8DD2,
-        _ => return None,
-    })
-}
-
-/// Strips comments.
-fn strip_comments(src: &str) -> String {
-    let mut out = String::with_capacity(src.len());
-    let b = src.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
-            }
-        } else if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
-            i += 2;
-            while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
-                i += 1;
-            }
-            i += 2;
-        } else {
-            out.push(b[i] as char);
-            i += 1;
-        }
-    }
-    out
-}
-
-/// Global declarations with `qualifier` (`attribute`, `in`, `uniform`).
-fn declarations(src: &str, qualifiers: &[&str]) -> Vec<Var> {
-    let src = strip_comments(src);
-    let mut out = Vec::new();
-    let mut depth = 0i32;
-    for stmt in src.split(';') {
-        let opens = stmt.matches('{').count() as i32;
-        let closes = stmt.matches('}').count() as i32;
-        let at_top = depth == 0 && opens == 0;
-        depth += opens - closes;
-        if !at_top {
-            continue;
-        }
-        let stmt = match stmt.rfind('}') {
-            Some(p) => &stmt[p + 1..],
-            None => stmt,
-        };
-        let mut toks: Vec<&str> = stmt
-            .split(|c: char| c.is_whitespace() || c == ',')
-            .filter(|t| !t.is_empty())
-            .collect();
-        // Drop layout(...) and precision/interpolation qualifiers.
-        if let Some(p) = toks.iter().position(|t| t.starts_with("layout")) {
-            let end = toks
-                .iter()
-                .skip(p)
-                .position(|t| t.contains(')'))
-                .map_or(p, |e| p + e);
-            toks.drain(p..=end);
-        }
-        let Some(q) = toks.iter().position(|t| qualifiers.contains(t)) else {
-            continue;
-        };
-        let rest: Vec<&str> = toks[q + 1..]
-            .iter()
-            .copied()
-            .filter(|t| {
-                !matches!(
-                    *t,
-                    "highp" | "mediump" | "lowp" | "flat" | "smooth" | "centroid"
-                )
-            })
-            .collect();
-        let Some((ty, names)) = rest.split_first() else {
-            continue;
-        };
-        let Some(gt) = glsl_type(ty) else { continue };
-        for raw in names {
-            let (name, size) = match raw.find('[') {
-                Some(b) => {
-                    let n = raw[b + 1..].trim_end_matches(']').parse().unwrap_or(1);
-                    (&raw[..b], n)
-                }
-                None => (*raw, 1),
-            };
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                out.push((name.to_owned(), gt, size));
-            }
-        }
-    }
-    out
-}
-
-fn is_used(src: &str, name: &str) -> bool {
-    let src = strip_comments(src);
-    let mut count = 0;
-    let bytes = src.as_bytes();
-    let mut start = 0;
-    while let Some(p) = src[start..].find(name) {
-        let i = start + p;
-        let before = i.checked_sub(1).map(|j| bytes[j]);
-        let after = bytes.get(i + name.len()).copied();
-        let ident = |c: Option<u8>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_');
-        if !ident(before) && !ident(after) {
-            count += 1;
-        }
-        start = i + name.len();
-    }
-    count > 1
-}
-
-/// A constant `vec4(a, b, c, d)` written to the fragment output.
-fn constant_frag_color(src: &str) -> Option<[f32; 4]> {
-    let src = strip_comments(src);
-    let p = src.find("gl_FragColor").or_else(|| {
-        declarations(&src, &["out"])
-            .first()
-            .and_then(|(n, ..)| src.rfind(n.as_str()))
-    })?;
-    let rest = &src[p..];
-    let eq = rest.find('=')?;
-    let stmt = &rest[eq + 1..rest.find(';')?];
-    let v = stmt.trim().strip_prefix("vec4")?.trim();
-    let inner = v.strip_prefix('(')?.strip_suffix(')')?;
-    let nums: Vec<f32> = inner
-        .split(',')
-        .map(|t| t.trim().trim_end_matches('f').parse::<f32>())
-        .collect::<Result<_, _>>()
-        .ok()?;
-    match nums.len() {
-        4 => Some([nums[0], nums[1], nums[2], nums[3]]),
-        1 => Some([nums[0]; 4]),
-        _ => None,
-    }
-}
-
-fn fnv(s: &str) -> u32 {
-    let mut h: u32 = 0x811c_9dc5;
-    for b in s.bytes() {
-        h ^= u32::from(b);
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    h
-}
-
-// ---------------------------------------------------------------------------
-// Pixels
-// ---------------------------------------------------------------------------
-
-impl Gl {
-    fn ensure_fb(&mut self) -> &mut Vec<u8> {
-        let len = self.width as usize * self.height as usize * 4;
-        self.fb.get_or_insert_with(|| vec![0; len])
-    }
-
-    fn resize(&mut self, w: u32, h: u32) {
-        self.width = w;
-        self.height = h;
-        self.fb = None;
-    }
-
-    fn clear(&mut self, mask: u32) {
-        if mask & COLOR_BUFFER_BIT == 0 || self.bound.contains_key(&0x8CA6) {
-            return;
-        }
-        let (w, h) = (self.width as i32, self.height as i32);
-        let c = self.clear_color;
-        let a = c[3].clamp(0.0, 1.0);
-        let px: [u8; 4] = std::array::from_fn(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-        let px = if self.attrs.alpha {
-            px
-        } else {
-            [px[0], px[1], px[2], 255]
-        };
-        let _ = a;
-        let (x0, y0, x1, y1) = if self.enabled.contains(&SCISSOR_TEST) {
-            let s = self.scissor;
-            (
-                s[0].max(0),
-                s[1].max(0),
-                (s[0] + s[2]).min(w),
-                (s[1] + s[3]).min(h),
-            )
-        } else {
-            (0, 0, w, h)
-        };
-        let mask_c = self.color_mask;
-        let width = self.width as usize;
-        let fb = self.ensure_fb();
-        for gy in y0..y1 {
-            let row = (h - 1 - gy) as usize;
-            for x in x0..x1 {
-                let i = (row * width + x as usize) * 4;
-                for k in 0..4 {
-                    if mask_c[k] {
-                        fb[i + k] = px[k];
-                    }
-                }
-            }
-        }
-    }
-
-    /// Clip-space x/y of vertex `i` from the position attribute.
-    fn positions(&self) -> Option<(Vec<u8>, Attrib)> {
-        let a = self
-            .attribs
-            .iter()
-            .find(|a| a.enabled && a.buffer.is_some() && a.ty == FLOAT && a.size >= 2)?;
-        let buf = self.res.get(&a.buffer?)?;
-        Some((buf.bytes.clone(), *a))
-    }
-
-    fn draw_color(&self) -> [u8; 4] {
-        let prog = self.bound.get(&0x8B8D).copied();
-        if let Some(p) = prog {
-            if let Some((_, v)) = self
-                .uniforms
-                .iter()
-                .filter(|((pp, _), v)| *pp == p && v.len() == 4)
-                .min_by(|a, b| a.0.1.cmp(&b.0.1))
-            {
-                return std::array::from_fn(|i| (v[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-            }
-            if let Some(r) = self.res.get(&p) {
-                if let Some(c) = r.frag_color {
-                    return std::array::from_fn(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
-                }
-                let h = r.frag_hash;
-                return [(h >> 16) as u8, (h >> 8) as u8, h as u8, 255];
-            }
-        }
-        [255, 255, 255, 255]
-    }
-
-    fn draw(&mut self, mode: u32, indices: &[u32]) {
-        if self.bound.contains_key(&0x8CA6)
-            || self.enabled.contains(&0x8C89)
-            || self.width == 0
-            || self.height == 0
-        {
-            return;
-        }
-        let Some((bytes, a)) = self.positions() else {
-            return;
-        };
-        let stride = if a.stride == 0 { a.size * 4 } else { a.stride } as usize;
-        let vp = self.viewport;
-        let h = self.height as f32;
-        let pt = |i: u32| -> Option<(f32, f32)> {
-            let o = a.offset as usize + i as usize * stride;
-            let f = |k: usize| -> Option<f32> {
-                let b = bytes.get(o + k * 4..o + k * 4 + 4)?;
-                Some(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-            };
-            let (x, y) = (f(0)?, f(1)?);
-            let wx = vp[0] as f32 + (x + 1.0) / 2.0 * vp[2] as f32;
-            let wy = vp[1] as f32 + (y + 1.0) / 2.0 * vp[3] as f32;
-            Some((wx, h - wy))
-        };
-        let pts: Vec<(f32, f32)> = indices.iter().filter_map(|i| pt(*i)).collect();
-        let color = self.draw_color();
-        let mut pb = tiny_skia::PathBuilder::new();
-        let mut fill = true;
-        let tri = |pb: &mut tiny_skia::PathBuilder, a: (f32, f32), b: (f32, f32), c: (f32, f32)| {
-            pb.move_to(a.0, a.1);
-            pb.line_to(b.0, b.1);
-            pb.line_to(c.0, c.1);
-            pb.close();
-        };
-        match mode {
-            TRIANGLES => {
-                for t in pts.chunks_exact(3) {
-                    tri(&mut pb, t[0], t[1], t[2]);
-                }
-            }
-            TRIANGLE_STRIP => {
-                for k in 2..pts.len() {
-                    tri(&mut pb, pts[k - 2], pts[k - 1], pts[k]);
-                }
-            }
-            TRIANGLE_FAN => {
-                for k in 2..pts.len() {
-                    tri(&mut pb, pts[0], pts[k - 1], pts[k]);
-                }
-            }
-            LINES | LINE_STRIP | LINE_LOOP => {
-                fill = false;
-                if mode == LINES {
-                    for l in pts.chunks_exact(2) {
-                        pb.move_to(l[0].0, l[0].1);
-                        pb.line_to(l[1].0, l[1].1);
-                    }
-                } else if let Some(first) = pts.first() {
-                    pb.move_to(first.0, first.1);
-                    for p in &pts[1..] {
-                        pb.line_to(p.0, p.1);
-                    }
-                    if mode == LINE_LOOP {
-                        pb.close();
-                    }
-                }
-            }
-            POINTS => {
-                for p in &pts {
-                    if let Some(r) = tiny_skia::Rect::from_xywh(p.0 - 0.5, p.1 - 0.5, 1.0, 1.0) {
-                        pb.push_rect(r);
-                    }
-                }
-            }
-            _ => {
-                self.set_error(INVALID_ENUM);
-                return;
-            }
-        }
-        let Some(path) = pb.finish() else { return };
-        let (w, hh, aa) = (self.width, self.height, self.attrs.antialias);
-        let alpha = self.attrs.alpha;
-        let fb = self.ensure_fb();
-        let Some(mut pm) = tiny_skia::PixmapMut::from_bytes(fb, w, hh) else {
-            return;
-        };
-        let mut paint = tiny_skia::Paint::default();
-        let a = if alpha { color[3] } else { 255 };
-        paint.set_color_rgba8(color[0], color[1], color[2], a);
-        paint.anti_alias = aa;
-        if fill {
-            pm.fill_path(
-                &path,
-                &paint,
-                tiny_skia::FillRule::Winding,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-        } else {
-            let stroke = tiny_skia::Stroke {
-                width: 1.0,
-                ..Default::default()
-            };
-            pm.stroke_path(
-                &path,
-                &paint,
-                &stroke,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-        }
-    }
-
-    /// Unpremultiplied, noised RGBA rows top-down (what leaves the canvas).
-    fn readback(&self) -> lb_paint::Bitmap {
-        let mut bmp = self.readback_clean();
-        let Some(fb) = &self.fb else { return bmp };
-        if let Some(seed) = self.seed {
-            lb_paint::CanvasNoise::new(seed).apply(
-                fb,
-                self.width,
-                self.height,
-                0,
-                0,
-                self.width,
-                &mut bmp.data,
-            );
-        }
-        bmp
-    }
-
-    /// Readback without noise (page screenshots only).
-    fn readback_clean(&self) -> lb_paint::Bitmap {
-        let mut bmp = lb_paint::Bitmap::new(self.width, self.height);
-        let Some(fb) = &self.fb else { return bmp };
-        bmp.data.copy_from_slice(fb);
-        if self.attrs.premultiplied_alpha {
-            for px in bmp.data.chunks_exact_mut(4) {
-                let a = u32::from(px[3]);
-                if a != 0 && a != 255 {
-                    for c in &mut px[..3] {
-                        *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
-                    }
-                }
-            }
-        }
-        if !self.attrs.alpha {
-            for px in bmp.data.chunks_exact_mut(4) {
-                px[3] = 255;
-            }
-        }
-        bmp
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Context factory
 // ---------------------------------------------------------------------------
 
@@ -1323,7 +914,8 @@ fn make_context(
         attrs: a,
         width,
         height,
-        fb: None,
+        color: None,
+        ds: None,
         clear_color: [0.0; 4],
         color_mask: [true; 4],
         viewport: [0, 0, width as i32, height as i32],
@@ -1340,7 +932,10 @@ fn make_context(
         bound: HashMap::new(),
         res: HashMap::new(),
         attribs: vec![Attrib::default(); 16],
-        uniforms: HashMap::new(),
+        default_vao: pipe::Vao::default(),
+        generic: vec![[0, 0, 0, 1f32.to_bits()]; 16],
+        units: vec![pipe::Unit::default(); 32],
+        ubo: vec![(None, 0, 0); 72],
         active_texture: TEXTURE0,
     }));
     let id = new_gl(
@@ -1410,9 +1005,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_queries(reg, rt);
     register_state(reg, rt);
     register_objects(reg, rt);
-    register_drawing(reg, rt);
     register_helpers(reg, rt);
     register_extensions(reg, rt);
+    pipe::register(reg, rt);
 }
 
 /// Every operation without its own implementation: argument check, then
@@ -2032,6 +1627,10 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
         let pname = match target {
             ARRAY_BUFFER => 0x8894,
             ELEMENT_ARRAY_BUFFER => 0x8895,
+            0x8A11 => 0x8A28,
+            0x88EB => 0x88ED,
+            0x88EC => 0x88EF,
+            0x8C8E => 0x8C8F,
             _ => target,
         };
         let usage = cx.arg_u32(2)?;
@@ -2067,6 +1666,10 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
         let pname = match target {
             ARRAY_BUFFER => 0x8894,
             ELEMENT_ARRAY_BUFFER => 0x8895,
+            0x8A11 => 0x8A28,
+            0x88EB => 0x88ED,
+            0x88EC => 0x88EF,
+            0x8C8E => 0x8C8F,
             _ => target,
         };
         let off = cx.arg_f64(1)?.max(0.0) as usize;
@@ -2096,6 +1699,10 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
         let pname = match target {
             ARRAY_BUFFER => 0x8894,
             ELEMENT_ARRAY_BUFFER => 0x8895,
+            0x8A11 => 0x8A28,
+            0x88EB => 0x88ED,
+            0x88EC => 0x88EF,
+            0x8C8E => 0x8C8F,
             _ => target,
         };
         let g = gl.borrow();
@@ -2128,14 +1735,6 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
             None => cx.ret(Arg::Null),
         }
     });
-    gl_op(reg, rt, "compileShader", |cx, w, gl| {
-        if let Some(id) = arg_res(cx, w, 0, gl)
-            && let Some(r) = gl.borrow_mut().res.get_mut(&id)
-        {
-            r.compiled = strip_comments(&r.source).contains("main");
-        }
-        Ok(())
-    });
     gl_op(reg, rt, "getShaderParameter", |cx, w, gl| {
         let p = cx.arg_u32(1)?;
         let r = arg_res(cx, w, 0, gl).and_then(|id| {
@@ -2155,19 +1754,6 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
                 gl.borrow_mut().set_error(INVALID_ENUM);
                 cx.ret(Arg::Null)
             }
-        }
-    });
-    gl_op(reg, rt, "getShaderInfoLog", |cx, w, gl| {
-        let r = arg_res(cx, w, 0, gl).and_then(|id| {
-            gl.borrow()
-                .res
-                .get(&id)
-                .map(|r| (r.compiled, r.source.is_empty()))
-        });
-        match r {
-            Some((true, _)) => cx.ret(""),
-            Some((false, _)) => cx.ret("ERROR: 0:1: '' : No main() function\n"),
-            None => cx.ret(Arg::Null),
         }
     });
     gl_op(reg, rt, "attachShader", |cx, w, gl| {
@@ -2214,453 +1800,6 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
         }
         Ok(())
     });
-    gl_op(reg, rt, "linkProgram", |cx, w, gl| {
-        let Some(p) = arg_res(cx, w, 0, gl) else {
-            return Ok(());
-        };
-        let mut g = gl.borrow_mut();
-        let shaders: Vec<(u32, String, bool)> = g
-            .res
-            .get(&p)
-            .map(|r| {
-                r.shaders
-                    .iter()
-                    .filter_map(|s| {
-                        g.res
-                            .get(s)
-                            .map(|x| (x.shader_type, x.source.clone(), x.compiled))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let vs = shaders.iter().find(|s| s.0 == VERTEX_SHADER);
-        let fs = shaders.iter().find(|s| s.0 == FRAGMENT_SHADER);
-        let linked = matches!((vs, fs), (Some(v), Some(f)) if v.2 && f.2);
-        let (vsrc, fsrc) = (
-            vs.map(|s| s.1.clone()).unwrap_or_default(),
-            fs.map(|s| s.1.clone()).unwrap_or_default(),
-        );
-        let attribs: Vec<Var> = declarations(&vsrc, &["attribute", "in"])
-            .into_iter()
-            .filter(|(n, ..)| is_used(&vsrc, n))
-            .collect();
-        let mut uniforms: Vec<Var> = Vec::new();
-        for (src, other) in [(&vsrc, &fsrc), (&fsrc, &vsrc)] {
-            for u in declarations(src, &["uniform"]) {
-                if (is_used(src, &u.0) || is_used(other, &u.0))
-                    && !uniforms.iter().any(|x| x.0 == u.0)
-                {
-                    uniforms.push(u);
-                }
-            }
-        }
-        let frag_color = constant_frag_color(&fsrc);
-        let frag_hash = fnv(&fsrc);
-        if let Some(r) = g.res.get_mut(&p) {
-            let mut used: HashSet<i32> = r.bound_locations.values().copied().collect();
-            let mut next = 0;
-            r.attribs = attribs
-                .into_iter()
-                .map(|v| {
-                    let loc = match r.bound_locations.get(&v.0) {
-                        Some(l) => *l,
-                        None => {
-                            while used.contains(&next) {
-                                next += 1;
-                            }
-                            used.insert(next);
-                            next
-                        }
-                    };
-                    (v, loc)
-                })
-                .collect();
-            r.uniforms = uniforms;
-            r.linked = linked;
-            r.frag_color = frag_color;
-            r.frag_hash = frag_hash;
-        }
-        Ok(())
-    });
-    gl_op(reg, rt, "validateProgram", |_cx, _w, _gl| Ok(()));
-    gl_op(reg, rt, "getProgramParameter", |cx, w, gl| {
-        let p = cx.arg_u32(1)?;
-        let Some(id) = arg_res(cx, w, 0, gl) else {
-            return cx.ret(Arg::Null);
-        };
-        let webgl2 = gl.borrow().webgl2;
-        let v = {
-            let g = gl.borrow();
-            let Some(r) = g.res.get(&id) else {
-                drop(g);
-                return cx.ret(Arg::Null);
-            };
-            match p {
-                LINK_STATUS => Some(Arg::Bool(r.linked)),
-                DELETE_STATUS => Some(Arg::Bool(r.deleted)),
-                VALIDATE_STATUS => Some(Arg::Bool(r.linked)),
-                ATTACHED_SHADERS => Some(Arg::Number(r.shaders.len() as f64)),
-                ACTIVE_ATTRIBUTES => Some(Arg::Number(r.attribs.len() as f64)),
-                ACTIVE_UNIFORMS => Some(Arg::Number(r.uniforms.len() as f64)),
-                TRANSFORM_FEEDBACK_BUFFER_MODE if webgl2 => {
-                    Some(Arg::Number(f64::from(SEPARATE_ATTRIBS)))
-                }
-                TRANSFORM_FEEDBACK_VARYINGS | ACTIVE_UNIFORM_BLOCKS if webgl2 => {
-                    Some(Arg::Number(0.0))
-                }
-                _ => None,
-            }
-        };
-        match v {
-            Some(a) => cx.ret(a),
-            None => {
-                gl.borrow_mut().set_error(INVALID_ENUM);
-                cx.ret(Arg::Null)
-            }
-        }
-    });
-    gl_op(reg, rt, "getProgramInfoLog", |cx, w, gl| {
-        let r = arg_res(cx, w, 0, gl).and_then(|id| gl.borrow().res.get(&id).map(|r| r.linked));
-        match r {
-            Some(_) => cx.ret(""),
-            None => cx.ret(Arg::Null),
-        }
-    });
-    gl_op(reg, rt, "getAttribLocation", |cx, w, gl| {
-        let name = cx.arg_string(1)?;
-        let loc = arg_res(cx, w, 0, gl).and_then(|id| {
-            gl.borrow().res.get(&id).and_then(|r| {
-                r.linked
-                    .then(|| r.attribs.iter().find(|(v, _)| v.0 == name).map(|(_, l)| *l))
-                    .flatten()
-            })
-        });
-        cx.ret(loc.unwrap_or(-1))
-    });
-    gl_op(reg, rt, "getUniformLocation", |cx, w, gl| {
-        let name = cx.arg_string(1)?;
-        let Some(p) = arg_res(cx, w, 0, gl) else {
-            return cx.ret(Arg::Null);
-        };
-        let base = name.split('[').next().unwrap_or("").to_owned();
-        let ok = gl
-            .borrow()
-            .res
-            .get(&p)
-            .is_some_and(|r| r.linked && r.uniforms.iter().any(|u| u.0 == base));
-        if !ok {
-            return cx.ret(Arg::Null);
-        }
-        let id = new_gl(
-            w,
-            GlObj::Location {
-                program: p,
-                name: base,
-            },
-        );
-        cx.ret(w.obj_arg(id))
-    });
-    for (op, attr) in [("getActiveAttrib", true), ("getActiveUniform", false)] {
-        gl_op(reg, rt, op, move |cx, w, gl| {
-            let i = cx.arg_u32(1)? as usize;
-            let Some(p) = arg_res(cx, w, 0, gl) else {
-                return cx.ret(Arg::Null);
-            };
-            let v = gl.borrow().res.get(&p).and_then(|r| {
-                if attr {
-                    r.attribs.get(i).map(|(v, _)| v.clone())
-                } else {
-                    r.uniforms.get(i).cloned()
-                }
-            });
-            let Some((name, ty, size)) = v else {
-                gl.borrow_mut().set_error(INVALID_VALUE);
-                return cx.ret(Arg::Null);
-            };
-            let name = if size > 1 && !attr {
-                format!("{name}[0]")
-            } else {
-                name
-            };
-            let id = new_gl(w, GlObj::ActiveInfo { name, size, ty });
-            cx.ret(w.obj_arg(id))
-        });
-    }
-    gl_op(reg, rt, "getUniform", |cx, w, gl| {
-        let Some(h) = cx.arg_host(1).filter(|h| h.kind == K_OBJ) else {
-            return cx.ret(Arg::Null);
-        };
-        let key = with_gl(w, h.id, |g| match g {
-            GlObj::Location { program, name } => Some((*program, name.clone())),
-            _ => None,
-        });
-        let v = key.and_then(|k| gl.borrow().uniforms.get(&k).cloned());
-        match v {
-            Some(v) if v.len() == 1 => cx.ret(f64::from(v[0])),
-            Some(v) => cx.ret(Arg::Float32Array(v)),
-            None => cx.ret(0),
-        }
-    });
-}
-
-/// Uniform setters store values (used for the draw color).
-fn register_uniforms(reg: &mut Registry, rt: &Runtime) {
-    let names: Vec<&'static str> = IFACES
-        .iter()
-        .filter_map(|i| crate::generated::chromium::TABLE.interface(i))
-        .flat_map(|d| d.operations.iter().map(|o| o.name.get()))
-        .filter(|n| n.starts_with("uniform") && !n.starts_with("uniformBlock"))
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    for name in names {
-        let vector = name.ends_with('v');
-        let matrix = name.starts_with("uniformMatrix");
-        gl_op(reg, rt, name, move |cx, w, gl| {
-            let Some(h) = cx.arg_host(0).filter(|h| h.kind == K_OBJ) else {
-                return Ok(());
-            };
-            let Some(key) = with_gl(w, h.id, |g| match g {
-                GlObj::Location { program, name } => Some((*program, name.clone())),
-                _ => None,
-            }) else {
-                return Ok(());
-            };
-            let first = if matrix { 2 } else { 1 };
-            let vals: Vec<f32> = if vector {
-                match cx.arg_view_kind(first) {
-                    Some(ViewKind::Float32) => cx
-                        .arg_bytes(first)
-                        .map(|b| {
-                            b.chunks_exact(4)
-                                .map(|c| f32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    _ => match cx.arg_value(first) {
-                        JsValue::Json(s) => serde_json::from_str::<Vec<f64>>(&s)
-                            .map(|v| v.into_iter().map(|x| x as f32).collect())
-                            .unwrap_or_default(),
-                        _ => Vec::new(),
-                    },
-                }
-            } else {
-                let mut v = Vec::new();
-                for i in 1..cx.len() {
-                    v.push(cx.arg_f64(i)? as f32);
-                }
-                v
-            };
-            gl.borrow_mut().uniforms.insert(key, vals);
-            Ok(())
-        });
-    }
-}
-
-fn register_drawing(reg: &mut Registry, rt: &Runtime) {
-    register_uniforms(reg, rt);
-    gl_op(reg, rt, "enableVertexAttribArray", |cx, _w, gl| {
-        let i = cx.arg_u32(0)? as usize;
-        let mut g = gl.borrow_mut();
-        match g.attribs.get_mut(i) {
-            Some(a) => a.enabled = true,
-            None => g.set_error(INVALID_VALUE),
-        }
-        Ok(())
-    });
-    gl_op(reg, rt, "disableVertexAttribArray", |cx, _w, gl| {
-        let i = cx.arg_u32(0)? as usize;
-        let mut g = gl.borrow_mut();
-        match g.attribs.get_mut(i) {
-            Some(a) => a.enabled = false,
-            None => g.set_error(INVALID_VALUE),
-        }
-        Ok(())
-    });
-    gl_op(reg, rt, "vertexAttribPointer", |cx, _w, gl| {
-        let i = cx.arg_u32(0)? as usize;
-        let size = cx.arg_u32(1)?;
-        let ty = cx.arg_u32(2)?;
-        let normalized = cx.arg_bool(3);
-        let stride = cx.arg_u32(4)?;
-        let offset = cx.arg_f64(5)?.max(0.0) as u32;
-        let mut g = gl.borrow_mut();
-        let buffer = g.bound.get(&0x8894).copied();
-        if buffer.is_none() && offset != 0 {
-            g.set_error(INVALID_OPERATION);
-            return Ok(());
-        }
-        match g.attribs.get_mut(i) {
-            Some(a) if (1..=4).contains(&size) => {
-                a.buffer = buffer;
-                a.size = size;
-                a.ty = ty;
-                a.normalized = normalized;
-                a.stride = stride;
-                a.offset = offset;
-            }
-            _ => g.set_error(INVALID_VALUE),
-        }
-        Ok(())
-    });
-    gl_op(reg, rt, "getVertexAttrib", |cx, w, gl| {
-        let i = cx.arg_u32(0)? as usize;
-        let p = cx.arg_u32(1)?;
-        let a = gl.borrow().attribs.get(i).copied();
-        let Some(a) = a else {
-            gl.borrow_mut().set_error(INVALID_VALUE);
-            return cx.ret(Arg::Null);
-        };
-        match p {
-            0x8622 => cx.ret(a.enabled),
-            0x8623 => cx.ret(if a.size == 0 { 4 } else { a.size }),
-            0x8624 => cx.ret(a.stride),
-            0x8625 => cx.ret(if a.ty == 0 { FLOAT } else { a.ty }),
-            0x886A => cx.ret(a.normalized),
-            0x889F => cx.ret(opt_obj(w, a.buffer)),
-            0x8626 => cx.ret(Arg::Float32Array(vec![0.0, 0.0, 0.0, 1.0])),
-            _ => cx.ret(Arg::Null),
-        }
-    });
-    gl_op(reg, rt, "getVertexAttribOffset", |cx, _w, gl| {
-        let i = cx.arg_u32(0)? as usize;
-        let v = gl.borrow().attribs.get(i).map_or(0, |a| a.offset);
-        cx.ret(v)
-    });
-    gl_op(reg, rt, "clear", |cx, _w, gl| {
-        let mask = cx.arg_u32(0)?;
-        if mask & !(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT | 0x0400) != 0 {
-            gl.borrow_mut().set_error(INVALID_VALUE);
-            return Ok(());
-        }
-        gl.borrow_mut().clear(mask);
-        Ok(())
-    });
-    for name in ["drawArrays", "drawArraysInstanced"] {
-        gl_op(reg, rt, name, |cx, _w, gl| {
-            let mode = cx.arg_u32(0)?;
-            let first = cx.arg_i32(1)?;
-            let count = cx.arg_i32(2)?;
-            if first < 0 || count < 0 {
-                gl.borrow_mut().set_error(INVALID_VALUE);
-                return Ok(());
-            }
-            let idx: Vec<u32> = (first as u32..(first + count) as u32).collect();
-            gl.borrow_mut().draw(mode, &idx);
-            Ok(())
-        });
-    }
-    for name in ["drawElements", "drawElementsInstanced", "drawRangeElements"] {
-        gl_op(reg, rt, name, move |cx, _w, gl| {
-            let ranged = name == "drawRangeElements";
-            let mode = cx.arg_u32(0)?;
-            let count = cx.arg_i32(if ranged { 3 } else { 1 })?;
-            let ty = cx.arg_u32(if ranged { 4 } else { 2 })?;
-            let off = cx.arg_f64(if ranged { 5 } else { 3 })?.max(0.0) as usize;
-            if count < 0 {
-                gl.borrow_mut().set_error(INVALID_VALUE);
-                return Ok(());
-            }
-            let idx: Vec<u32> = {
-                let g = gl.borrow();
-                let Some(buf) = g.bound.get(&0x8895).and_then(|id| g.res.get(id)) else {
-                    drop(g);
-                    gl.borrow_mut().set_error(INVALID_OPERATION);
-                    return Ok(());
-                };
-                let b = &buf.bytes;
-                (0..count as usize)
-                    .filter_map(|k| match ty {
-                        UNSIGNED_BYTE => b.get(off + k).map(|v| u32::from(*v)),
-                        UNSIGNED_SHORT => b
-                            .get(off + k * 2..off + k * 2 + 2)
-                            .map(|s| u32::from(u16::from_le_bytes([s[0], s[1]]))),
-                        UNSIGNED_INT => b
-                            .get(off + k * 4..off + k * 4 + 4)
-                            .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])),
-                        _ => None,
-                    })
-                    .collect()
-            };
-            gl.borrow_mut().draw(mode, &idx);
-            Ok(())
-        });
-    }
-    gl_op(reg, rt, "readPixels", |cx, _w, gl| {
-        let x = cx.arg_i32(0)?;
-        let y = cx.arg_i32(1)?;
-        let wd = cx.arg_i32(2)?;
-        let ht = cx.arg_i32(3)?;
-        let format = cx.arg_u32(4)?;
-        let ty = cx.arg_u32(5)?;
-        if wd < 0 || ht < 0 {
-            gl.borrow_mut().set_error(INVALID_VALUE);
-            return Ok(());
-        }
-        if format != RGBA || ty != UNSIGNED_BYTE {
-            gl.borrow_mut().set_error(INVALID_OPERATION);
-            return Ok(());
-        }
-        if cx.arg_kind(6) != ValueKind::Object || cx.arg_view_kind(6).is_none() {
-            return Err(HostError::type_error(
-                "Failed to execute 'readPixels' on 'WebGLRenderingContext': parameter 7 is not of type 'ArrayBufferView'.",
-            ));
-        }
-        if cx.arg_view_kind(6) != Some(ViewKind::Uint8)
-            && cx.arg_view_kind(6) != Some(ViewKind::Uint8Clamped)
-        {
-            gl.borrow_mut().set_error(INVALID_OPERATION);
-            return Ok(());
-        }
-        let dst_off = if cx.len() > 7 {
-            cx.arg_f64(7)?.max(0.0) as usize
-        } else {
-            0
-        };
-        let bmp = gl.borrow().readback_raw();
-        let (fw, fh) = (bmp.width as i32, bmp.height as i32);
-        let mut out = vec![0u8; wd as usize * ht as usize * 4];
-        for row in 0..ht {
-            let gy = y + row;
-            if gy < 0 || gy >= fh {
-                continue;
-            }
-            let src_row = (fh - 1 - gy) as usize;
-            for col in 0..wd {
-                let gx = x + col;
-                if gx < 0 || gx >= fw {
-                    continue;
-                }
-                let s = (src_row * fw as usize + gx as usize) * 4;
-                let d = (row as usize * wd as usize + col as usize) * 4;
-                out[d..d + 4].copy_from_slice(&bmp.data[s..s + 4]);
-            }
-        }
-        cx.write_arg_bytes(6, dst_off, &out);
-        Ok(())
-    });
-}
-
-impl Gl {
-    /// Stored values with the readback noise (`readPixels` returns stored,
-    /// not unpremultiplied, values).
-    fn readback_raw(&self) -> lb_paint::Bitmap {
-        let mut bmp = lb_paint::Bitmap::new(self.width, self.height);
-        let Some(fb) = &self.fb else { return bmp };
-        bmp.data.copy_from_slice(fb);
-        if let Some(seed) = self.seed {
-            lb_paint::CanvasNoise::new(seed).apply(
-                fb,
-                self.width,
-                self.height,
-                0,
-                0,
-                self.width,
-                &mut bmp.data,
-            );
-        }
-        bmp
-    }
 }
 
 fn register_helpers(reg: &mut Registry, rt: &Runtime) {
@@ -2789,22 +1928,6 @@ fn register_extensions(reg: &mut Registry, rt: &Runtime) {
             let gl = this_ext(cx, w)?;
             let ok = arg_res(cx, w, 0, &gl).is_some();
             if ok { cx.ret("") } else { cx.ret(Arg::Null) }
-        },
-    );
-    method(
-        reg,
-        rt,
-        "ANGLEInstancedArrays",
-        "drawArraysInstancedANGLE",
-        |cx, w| {
-            super::need_args(cx, 4, "drawArraysInstancedANGLE", "ANGLEInstancedArrays")?;
-            let gl = this_ext(cx, w)?;
-            let mode = cx.arg_u32(0)?;
-            let first = cx.arg_i32(1)?.max(0) as u32;
-            let count = cx.arg_i32(2)?.max(0) as u32;
-            let idx: Vec<u32> = (first..first + count).collect();
-            gl.borrow_mut().draw(mode, &idx);
-            Ok(())
         },
     );
 }

@@ -542,7 +542,7 @@ fn ret_image_data(cx: &mut CallCtx<'_, '_, '_>, w: &Window, b: Bitmap) -> Result
 }
 
 /// `ImageData` argument `i` as a bitmap (copied).
-fn arg_image_data(
+pub(crate) fn arg_image_data(
     cx: &mut CallCtx<'_, '_, '_>,
     w: &Window,
     i: usize,

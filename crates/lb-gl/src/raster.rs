@@ -555,7 +555,7 @@ impl Raster<'_, '_, '_, '_> {
                 self.to_window(v[1]),
                 self.to_window(v[2]),
             ];
-            self.raster_tri(&w, &provoking);
+            self.raster_tri(&w, &provoking, false);
             return;
         }
         for k in 0..6 {
@@ -599,7 +599,11 @@ impl Raster<'_, '_, '_, '_> {
         }
         let w: Vec<WV> = poly.iter().map(|x| self.to_window(x)).collect();
         for i in 1..w.len() - 1 {
-            self.raster_tri(&[w[0].clone(), w[i].clone(), w[i + 1].clone()], &provoking);
+            self.raster_tri(
+                &[w[0].clone(), w[i].clone(), w[i + 1].clone()],
+                &provoking,
+                false,
+            );
         }
     }
 
@@ -614,14 +618,15 @@ impl Raster<'_, '_, '_, '_> {
         (x0, y0, x1, y1)
     }
 
-    fn raster_tri(&mut self, w: &[WV; 3], provoking: &[f32]) {
+    /// `line`: a multisampled line's half (no culling or offset).
+    fn raster_tri(&mut self, w: &[WV; 3], provoking: &[f32], line: bool) {
         let area = (w[1].x - w[0].x) * (w[2].y - w[0].y) - (w[2].x - w[0].x) * (w[1].y - w[0].y);
         if area == 0.0 || !area.is_finite() {
             return;
         }
         let ccw = area > 0.0;
-        let front = ccw == self.d.fixed.front_ccw;
-        if let Some(c) = self.d.fixed.cull {
+        let front = line || ccw == self.d.fixed.front_ccw;
+        if let Some(c) = self.d.fixed.cull.filter(|_| !line) {
             let culled = match c {
                 0x0404 => front,
                 0x0405 => !front,
@@ -687,7 +692,7 @@ impl Raster<'_, '_, '_, '_> {
         };
         // Polygon offset.
         let mut zoff = 0.0f32;
-        if let Some((factor, units)) = self.d.fixed.polygon_offset {
+        if let Some((factor, units)) = self.d.fixed.polygon_offset.filter(|_| !line) {
             let dzdx = ((w[1].z - w[0].z) as f64 * (w[2].y - w[0].y)
                 - (w[2].z - w[0].z) as f64 * (w[1].y - w[0].y))
                 / area;
@@ -825,7 +830,7 @@ impl Raster<'_, '_, '_, '_> {
                         0.5 + (f64::from(px) + 0.5 - cx) / size,
                         0.5 - (f64::from(py) + 0.5 - cy) / size,
                     ),
-                    None => (0.0, 0.0),
+                    None => (0.5, 0.5),
                 };
                 self.fe.regs[c as usize][l] = (s as f32).to_bits();
                 self.fe.regs[c as usize + 1][l] = (t as f32).to_bits();
@@ -1033,6 +1038,27 @@ impl Raster<'_, '_, '_, '_> {
         let wa = self.to_window(&ca);
         let wb = self.to_window(&cb);
         let provoking = b.var.clone();
+        if self.t.samples > 1 {
+            // Multisampled lines are rectangles one pixel wide.
+            let (dx, dy) = (wb.x - wa.x, wb.y - wa.y);
+            let len = (dx * dx + dy * dy).sqrt();
+            if len == 0.0 {
+                return;
+            }
+            let (nx, ny) = (-dy / len * 0.5, dx / len * 0.5);
+            let at = |v: &WV, sx: f64| WV {
+                x: v.x + nx * sx,
+                y: v.y + ny * sx,
+                ..v.clone()
+            };
+            let (a0, a1, b0, b1) = (at(&wa, 1.0), at(&wa, -1.0), at(&wb, 1.0), at(&wb, -1.0));
+            self.raster_tri(&[a0.clone(), a1, b1.clone()], &provoking, true);
+            if self.fe.aborted {
+                return;
+            }
+            self.raster_tri(&[a0, b1, b0], &provoking, true);
+            return;
+        }
         let (dx, dy) = (wb.x - wa.x, wb.y - wa.y);
         let xmajor = dx.abs() >= dy.abs();
         let len = if xmajor { dx.abs() } else { dy.abs() };

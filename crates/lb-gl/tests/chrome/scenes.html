@@ -1,0 +1,156 @@
+<!doctype html>
+<!-- WebGL scenes compared between LightBrowser and Chrome's SwiftShader
+     (scenes.mjs). Each scene returns its readPixels bytes. Loopback only. -->
+<meta charset="utf-8">
+<script>
+function prog(gl, vs, fs) {
+  const p = gl.createProgram();
+  for (const [t, s] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+    gl.attachShader(p, sh);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  gl.useProgram(p);
+  return p;
+}
+function attr(gl, p, name, data, size) {
+  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(p, name); gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+function read(gl) {
+  const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+  const px = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  let s = ''; for (let i = 0; i < px.length; i += 0x8000) s += String.fromCharCode.apply(null, px.subarray(i, i + 0x8000));
+  return { w, h, b64: btoa(s), err: gl.getError() };
+}
+function ctx(kind, attrs, w = 64, h = 64) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  return c.getContext(kind, attrs);
+}
+const VS = 'attribute vec2 p; attribute vec3 c; varying vec3 v; void main(){ v = c; gl_Position = vec4(p, 0.0, 1.0); }';
+const FS = 'precision mediump float; varying vec3 v; void main(){ gl_FragColor = vec4(v, 1.0); }';
+const scenes = {
+  gradient_aa(gl = ctx('webgl')) {
+    const p = prog(gl, VS, FS);
+    attr(gl, p, 'p', [-0.8, -0.8, 0.8, -0.7, 0.1, 0.85], 2);
+    attr(gl, p, 'c', [1, 0, 0, 0, 1, 0, 0, 0, 1], 3);
+    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return read(gl);
+  },
+  gradient_noaa() { return scenes.gradient_aa(ctx('webgl', { antialias: false })); },
+  fingerprintjs_like() {
+    // A triangle strip with a uniform offset, as common fingerprint scripts do.
+    const gl = ctx('webgl', {}, 128, 64);
+    const p = prog(gl,
+      'attribute vec2 attrVertex; varying vec2 varyinTexCoordinate; uniform vec2 uniformOffset; void main(){ varyinTexCoordinate = attrVertex + uniformOffset; gl_Position = vec4(attrVertex, 0, 1); }',
+      'precision mediump float; varying vec2 varyinTexCoordinate; void main(){ gl_FragColor = vec4(varyinTexCoordinate, 0, 1); }');
+    attr(gl, p, 'attrVertex', [-0.2, -0.9, 0, 0.4, -0.26, 0, 0, 0.732134444, 0], 3);
+    gl.uniform2f(gl.getUniformLocation(p, 'uniformOffset'), 1, 1);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 3);
+    return read(gl);
+  },
+  texture_mip() {
+    const gl = ctx('webgl');
+    const c2 = document.createElement('canvas'); c2.width = c2.height = 32;
+    const x = c2.getContext('2d');
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { x.fillStyle = (i + j) % 2 ? '#f80' : '#08f'; x.fillRect(i * 8, j * 8, 8, 8); }
+    const p = prog(gl,
+      'attribute vec2 p; varying vec2 uv; void main(){ uv = p * vec2(2.0, 3.0); gl_Position = vec4(p * 0.9, 0.0, 1.0); }',
+      'precision mediump float; varying vec2 uv; uniform sampler2D t; void main(){ gl_FragColor = texture2D(t, uv); }');
+    attr(gl, p, 'p', [-1, -1, 1, -1, -1, 1, 1, 1], 2);
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c2);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return read(gl);
+  },
+  depth_blend() {
+    const gl = ctx('webgl');
+    const p = prog(gl,
+      'attribute vec3 p; attribute vec4 c; varying vec4 v; void main(){ v = c; gl_Position = vec4(p, 1.0); }',
+      'precision mediump float; varying vec4 v; void main(){ gl_FragColor = v; }');
+    attr(gl, p, 'p', [-0.9, -0.9, 0.5, 0.5, -0.9, 0.5, -0.2, 0.7, 0.5, -0.5, -0.5, -0.2, 0.9, -0.3, 0.8, 0.1, 0.9, 0.8], 3);
+    attr(gl, p, 'c', [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0.5, 1, 0.6, 0, 0.5, 1, 0.6, 0, 0.5, 1, 0.6], 4);
+    gl.enable(gl.DEPTH_TEST); gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0.1, 0.1, 0.1, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    return read(gl);
+  },
+  lines_points() {
+    const gl = ctx('webgl');
+    const p = prog(gl,
+      'attribute vec2 p; void main(){ gl_PointSize = 5.0; gl_Position = vec4(p, 0.0, 1.0); }',
+      'precision mediump float; void main(){ gl_FragColor = vec4(gl_PointCoord, 0.5, 1.0); }');
+    attr(gl, p, 'p', [-0.8, -0.8, 0.7, -0.3, -0.5, 0.6, 0.6, 0.8], 2);
+    gl.drawArrays(gl.LINE_STRIP, 0, 4);
+    gl.drawArrays(gl.POINTS, 0, 4);
+    return read(gl);
+  },
+  shader_math() {
+    const gl = ctx('webgl');
+    const p = prog(gl,
+      'attribute vec2 p; varying vec2 q; void main(){ q = p; gl_Position = vec4(p, 0.0, 1.0); }',
+      `precision highp float; varying vec2 q;
+       float h(vec2 x){ return fract(sin(dot(x, vec2(12.9898, 78.233))) * 43758.5453); }
+       void main(){
+         vec2 z = q * 1.5; float it = 0.0;
+         for (int i = 0; i < 24; i++) { z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + vec2(-0.4, 0.6); if (dot(z,z) > 4.0) break; it += 1.0; }
+         gl_FragColor = vec4(it / 24.0, h(floor(q * 8.0)), abs(sin(q.x * 9.0) * cos(q.y * 7.0)), 1.0);
+       }`);
+    attr(gl, p, 'p', [-1, -1, 1, -1, -1, 1, 1, 1], 2);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return read(gl);
+  },
+  webgl2_instanced() {
+    const gl = ctx('webgl2');
+    const p = prog(gl,
+      `#version 300 es
+       in vec2 p; flat out int id; out vec2 uv;
+       layout(std140) uniform B { vec4 tint; float scale; };
+       void main(){ id = gl_InstanceID; uv = p; vec2 o = vec2(float(gl_InstanceID % 3) - 1.0, float(gl_InstanceID / 3) - 1.0) * 0.6;
+         gl_Position = vec4(p * scale + o, 0.0, 1.0); }`,
+      `#version 300 es
+       precision highp float; flat in int id; in vec2 uv; out vec4 o; uniform B { vec4 tint; float scale; };
+       void main(){ o = vec4(fract(float(id) * 0.37), uv * 0.5 + 0.5, 1.0) * tint; }`);
+    attr(gl, p, 'p', [-1, -1, 1, -1, 0, 1], 2);
+    const ub = gl.createBuffer(); gl.bindBuffer(gl.UNIFORM_BUFFER, ub);
+    gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([1, 0.9, 0.8, 1, 0.25, 0, 0, 0]), gl.STATIC_DRAW);
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ub);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 9);
+    return read(gl);
+  },
+  render_to_texture() {
+    const gl = ctx('webgl');
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 16, 16, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    let p = prog(gl, VS, FS);
+    attr(gl, p, 'p', [-1, -1, 1, -1, 0, 1], 2); attr(gl, p, 'c', [1, 1, 0, 0, 1, 1, 1, 0, 1], 3);
+    gl.viewport(0, 0, 16, 16); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, 64, 64);
+    p = prog(gl, 'attribute vec2 p; varying vec2 uv; void main(){ uv = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }',
+      'precision mediump float; varying vec2 uv; uniform sampler2D t; void main(){ gl_FragColor = texture2D(t, uv); }');
+    attr(gl, p, 'p', [-1, -1, 1, -1, -1, 1, 1, 1], 2);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return read(gl);
+  },
+};
+const OUT = {};
+for (const [k, f] of Object.entries(scenes)) {
+  try { OUT[k] = f(); } catch (e) { OUT[k] = { error: String(e) }; }
+}
+window.OUT = OUT;
+</script>
