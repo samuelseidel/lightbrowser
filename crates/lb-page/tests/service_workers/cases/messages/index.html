@@ -1,0 +1,20 @@
+<!doctype html><title>messages</title><!--LOG-->
+<script>
+var n = load(), sw = navigator.serviceWorker;
+if (n === 0) {
+  sw.register('sw.js').then(function () { return sw.ready }).then(again);
+} else {
+  var c = sw.controller;
+  var got = 0;
+  sw.onmessage = function (e) {
+    log('page message ' + e.constructor.name + ' ' + JSON.stringify(e.data) + ' origin=' + rel(e.origin) + ' source===controller ' + (e.source === c) + ' ' + Object.prototype.toString.call(e.source) + ' ports=' + e.ports.length + ' lastEventId="' + e.lastEventId + '"');
+    if (e.ports.length) { e.ports[0].postMessage('via port'); return }
+    if (++got === 2) swlog(c).then(end);
+  };
+  c.postMessage({ a: 1, d: new Date(0), m: new Map([[1, 2]]) });
+  var ch = new MessageChannel();
+  ch.port1.onmessage = function (e) { log('port1 got ' + e.data); if (++got === 2) swlog(c).then(end) };
+  c.postMessage('with port', [ch.port2]);
+  try { c.postMessage(function () {}) } catch (e) { log('post fn ' + e.name + ': ' + e.message) }
+}
+</script>

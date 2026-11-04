@@ -1,0 +1,14 @@
+<!doctype html><title>clients</title><!--LOG-->
+<script>
+var n = load(), sw = navigator.serviceWorker;
+if (n === 0) {
+  sw.register('sw.js').then(function () { return sw.ready }).then(again);
+} else {
+  var fr = document.createElement('iframe');
+  fr.src = 'frame.html';
+  fr.onload = function () {
+    ask(sw.controller, 'clients').then(function (l) { l.forEach(function (x) { log('sw: ' + x) }); end() });
+  };
+  document.documentElement.appendChild(fr);
+}
+</script>
