@@ -50,6 +50,40 @@ impl lb_webapi::host::NetHost for PageNet {
     }
 }
 
+/// A navigation request through the controlling service worker's `fetch`
+/// event when there is one with a fetch handler, else the network.
+pub(crate) async fn sw_or_network(
+    page: &Rc<PageState>,
+    req: NetRequest,
+    sw: Option<&(lb_webapi::rt::sw::VersionInfo, bool)>,
+    replaced: String,
+    reserved: &str,
+    reload: bool,
+) -> Result<NetResponse, String> {
+    sw_or_network_loader(page, req, sw, replaced, reserved, reload, None).await
+}
+
+async fn sw_or_network_loader(
+    page: &Rc<PageState>,
+    req: NetRequest,
+    sw: Option<&(lb_webapi::rt::sw::VersionInfo, bool)>,
+    replaced: String,
+    reserved: &str,
+    reload: bool,
+    loader: Option<String>,
+) -> Result<NetResponse, String> {
+    use lb_webapi::rt::sw::{FetchOutcome, SwRequest};
+    if let Some((v, true)) = sw {
+        let sreq = SwRequest::from_net(&req, replaced, reserved.to_owned(), reload);
+        match crate::sw::navigation_fetch(&page.ctx, v.id, sreq).await {
+            FetchOutcome::Fallback => {}
+            FetchOutcome::Respond(r) => return Ok(r),
+            FetchOutcome::Error => return Err("net::ERR_FAILED".into()),
+        }
+    }
+    crate::cdp::net::page_fetch(page, req, loader).await
+}
+
 /// Navigate (script-initiated or from [`crate::Page::navigate`]).
 pub(crate) async fn navigate(
     ws: Rc<WorkerState>,
@@ -77,6 +111,11 @@ pub(crate) async fn navigate_committed(
     page.loading.set(true);
     let agent = page.agent();
     let loader = agent.as_ref().map(|a| a.nav_started(seq));
+    let reload = page.reloading.replace(false);
+    // The service worker controlling the URL (ADR 0022) and the new
+    // document's client id (`resultingClientId`).
+    let sw = crate::sw::navigation_controller(&page.ctx, &url);
+    let reserved = lb_webapi::rt::sw::uuid4();
 
     // Fetch (about:blank needs none).
     let resp = if url.scheme() == "about" {
@@ -91,7 +130,23 @@ pub(crate) async fn navigate_committed(
     } else {
         let mut req = NetRequest::get(url.clone(), Destination::Document, initiator.clone());
         req.mode = "navigate";
-        crate::cdp::net::page_fetch(&page, req, loader.clone()).await
+        // The document being replaced, as the request's client (Chrome
+        // reports it for same-origin navigations such as reloads).
+        let replaced = page
+            .window()
+            .filter(|w| w.url().origin() == url.origin())
+            .map(|w| w.client_id())
+            .unwrap_or_default();
+        sw_or_network_loader(
+            &page,
+            req,
+            sw.as_ref(),
+            replaced,
+            &reserved,
+            reload,
+            loader.clone(),
+        )
+        .await
     };
     if page.nav_seq.get() != seq || page.closed.get() {
         let _ = committed.send(Err(PageError::Aborted));
@@ -167,7 +222,13 @@ pub(crate) async fn navigate_committed(
         },
     );
     w.set_console_sink(Some(page.console_sink()));
-    w.set_worker_host(Some(crate::worker::Workers::host(page.ctx.clone())));
+    w.set_worker_host(Some(crate::worker::Workers::host(&page.ctx)));
+    w.set_sw_host(Some(crate::sw::host(&page.ctx)));
+    let controller = sw.map(|(v, _)| v);
+    w.init_sw_client(Some(reserved), false, controller.clone());
+    if let (Some(v), Some(h)) = (&controller, w.sw_host()) {
+        h.schedule_update(v.id);
+    }
     let realm = match ws.with_engine(|e| w.create_realm(e, &bindings)) {
         Some(Ok(r)) => r,
         Some(Err(e)) => {
@@ -234,8 +295,10 @@ fn spawn_fetch(
     let req = NetRequest::get(url, dest, Some(w.url()));
     w.in_flight.set(w.in_flight.get() + 1);
     let w2 = Rc::downgrade(w);
+    let fut = w.net_fetch(req);
+    let _ = page;
     tokio::task::spawn_local(async move {
-        let r = crate::cdp::net::page_fetch(&page, req, None).await;
+        let r = fut.await;
         if let Some(w) = w2.upgrade() {
             w.in_flight.set(w.in_flight.get().saturating_sub(1));
             w.wake();
@@ -469,6 +532,7 @@ pub(crate) async fn load(
         )
     });
     doc_event(page, doc, "DOMContentLoaded");
+    w.sw_enable_messages();
     w.set_script_waiting_for_sheets(false);
     w.load_background_images();
 

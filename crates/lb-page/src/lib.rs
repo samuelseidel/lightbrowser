@@ -52,6 +52,8 @@ mod nav;
 #[cfg(feature = "chrome")]
 mod page;
 #[cfg(feature = "chrome")]
+mod sw;
+#[cfg(feature = "chrome")]
 mod worker;
 
 pub use context::{BrowserContext, ContextOptions, FetchTrace, PageError};

@@ -77,6 +77,8 @@ impl Inbox {
 pub enum WorkerKind {
     Dedicated,
     Shared,
+    /// A service worker version (ADR 0022).
+    Service,
 }
 
 impl WorkerKind {
@@ -85,6 +87,7 @@ impl WorkerKind {
         match self {
             WorkerKind::Dedicated => "DedicatedWorkerGlobalScope",
             WorkerKind::Shared => "SharedWorkerGlobalScope",
+            WorkerKind::Service => "ServiceWorkerGlobalScope",
         }
     }
 }
@@ -179,6 +182,9 @@ pub struct WorkerStart {
     pub control: Arc<WorkerControl>,
     /// Dedicated workers: the creator's inbox and its `Worker` object.
     pub parent: Option<(Inbox, u32)>,
+    /// Service workers: the version and what to report after the script
+    /// ran.
+    pub service: Option<super::sw::ServiceStart>,
 }
 
 /// Worker threads, provided by the page layer.
@@ -450,7 +456,7 @@ fn adopt_port(w: &Rc<Window>, core: Arc<PortCore>) -> u32 {
 /// arguments as a payload; ports in the transfer list are taken from `w`
 /// (the sending objects stop working). `op` and `iface` name the call in
 /// error messages.
-fn serialize_args(
+pub(crate) fn serialize_args(
     cx: &mut CallCtx<'_, '_, '_>,
     w: &Rc<Window>,
     op: &str,
@@ -591,16 +597,13 @@ fn serialize_args(
     })
 }
 
-/// Fire `message` (or `messageerror` when the data cannot be rebuilt here)
-/// at `target` of `w` with a payload from another window or thread.
-fn deliver(
+/// Rebuild a payload in `w`: the data (`Err` when it cannot be rebuilt
+/// here) and the frozen `ports` array of the adopted ports.
+pub(crate) fn unpack(
     js: &mut dyn Js,
     w: &Rc<Window>,
-    target: HostRef,
     p: Payload,
-    origin: String,
-    source: Option<Arg>,
-) {
+) -> (Result<Handle, ()>, Option<Handle>) {
     let port_ids: Vec<u32> = p.ports.into_iter().map(|c| adopt_port(w, c)).collect();
     let hosts: Vec<(InterfaceId, HostRef)> = p
         .entries
@@ -617,43 +620,41 @@ fn deliver(
         })
         .collect();
     let ports = ports_array(js, w, &port_ids);
+    let data = js.deserialize(&p.data, &hosts).map_err(|_| ());
+    (data, ports)
+}
+
+/// Fire `message` (or `messageerror` when the data cannot be rebuilt here)
+/// at `target` of `w` with a payload from another window or thread.
+pub(crate) fn deliver(
+    js: &mut dyn Js,
+    w: &Rc<Window>,
+    target: HostRef,
+    p: Payload,
+    origin: String,
+    source: Option<Arg>,
+) {
+    let (data, ports) = unpack(js, w, p);
     let source = source.and_then(|s| js.make(s));
-    match js.deserialize(&p.data, &hosts) {
-        Ok(data) => {
-            fire_event_with(
-                js,
-                w,
-                target,
-                "MessageEvent",
-                "message",
-                false,
-                false,
-                EventExtra::Message {
-                    data: Some(data),
-                    origin,
-                    source,
-                    ports,
-                },
-            );
-        }
-        Err(_) => {
-            fire_event_with(
-                js,
-                w,
-                target,
-                "MessageEvent",
-                "messageerror",
-                false,
-                false,
-                EventExtra::Message {
-                    data: None,
-                    origin,
-                    source,
-                    ports,
-                },
-            );
-        }
-    }
+    let (type_, data) = match data {
+        Ok(d) => ("message", Some(d)),
+        Err(()) => ("messageerror", None),
+    };
+    fire_event_with(
+        js,
+        w,
+        target,
+        "MessageEvent",
+        type_,
+        false,
+        false,
+        EventExtra::Message {
+            data,
+            origin,
+            source,
+            ports,
+        },
+    );
 }
 
 /// `MessageEvent.ports`: a frozen array of the port objects.
@@ -776,6 +777,9 @@ impl Window {
             engine.set_time_zone(&p.locale.timezone);
         }
         self.setup_helpers(engine, realm)?;
+        if self.sw.scope_set() {
+            self.setup_sw_scope(engine, realm)?;
+        }
         super::navigator::setup_realm(self, engine, realm)?;
         super::window::install_console(engine, realm, &self.rt)?;
         Ok(realm)
@@ -995,6 +999,7 @@ fn new_start(
         inbox: tx,
         inbox_rx: rx,
         parent: None,
+        service: None,
     }
 }
 

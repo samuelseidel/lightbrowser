@@ -70,6 +70,10 @@ struct Shared {
     /// (ADR 0021); terminated with the context.
     #[cfg(feature = "chrome")]
     pub(crate) shared_workers: SharedWorkers,
+    /// Service worker registrations, versions, clients and caches of this
+    /// context, chrome build (ADR 0022); in memory only.
+    #[cfg(feature = "chrome")]
+    pub(crate) service_workers: Arc<crate::sw::SwShared>,
 }
 
 #[cfg(feature = "chrome")]
@@ -82,6 +86,7 @@ impl Drop for Shared {
         for (_, (_, c)) in workers.drain() {
             c.terminate();
         }
+        self.service_workers.terminate_all();
     }
 }
 
@@ -107,6 +112,18 @@ pub struct BrowserContext(Arc<Shared>);
 impl std::fmt::Debug for BrowserContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("BrowserContext").field(&self.0.opts).finish()
+    }
+}
+
+/// A [`BrowserContext`] that does not keep it alive.
+#[cfg(feature = "chrome")]
+#[derive(Clone)]
+pub(crate) struct WeakContext(std::sync::Weak<Shared>);
+
+#[cfg(feature = "chrome")]
+impl WeakContext {
+    pub(crate) fn upgrade(&self) -> Option<BrowserContext> {
+        self.0.upgrade().map(BrowserContext)
     }
 }
 
@@ -157,6 +174,8 @@ impl BrowserContext {
             connections: ConnectionPool::new(),
             #[cfg(feature = "chrome")]
             shared_workers: Mutex::new(std::collections::HashMap::new()),
+            #[cfg(feature = "chrome")]
+            service_workers: Arc::default(),
         }));
         ctx.put_back(probe);
         Ok(ctx)
@@ -184,13 +203,26 @@ impl BrowserContext {
         &self.0.client_hints
     }
 
-    /// The context's connection pool.
     /// Running shared workers of this context (ADR 0021).
     #[cfg(feature = "chrome")]
     pub(crate) fn shared_workers(&self) -> &SharedWorkers {
         &self.0.shared_workers
     }
 
+    /// The service worker registry of this context (ADR 0022).
+    #[cfg(feature = "chrome")]
+    pub(crate) fn service_workers(&self) -> &Arc<crate::sw::SwShared> {
+        &self.0.service_workers
+    }
+
+    /// A handle that does not keep the context alive (worker threads hold
+    /// one, so a context whose pages are gone drops and ends its workers).
+    #[cfg(feature = "chrome")]
+    pub(crate) fn downgrade(&self) -> WeakContext {
+        WeakContext(Arc::downgrade(&self.0))
+    }
+
+    /// The context's connection pool.
     pub fn connections(&self) -> &ConnectionPool {
         &self.0.connections
     }

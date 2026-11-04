@@ -73,6 +73,14 @@ pub async fn serve(routes: Vec<(&str, Resource)>) -> Server {
 
 /// Serve whatever `handler` returns for a path (plus `/echo`).
 pub async fn serve_fn(routes: Arc<dyn Fn(&str) -> Option<Resource> + Send + Sync>) -> Server {
+    serve_target(Arc::new(move |path: &str, _target: &str| routes(path))).await
+}
+
+/// Like [`serve_fn`], the handler also gets the request target (with the
+/// query).
+pub async fn serve_target(
+    routes: Arc<dyn Fn(&str, &str) -> Option<Resource> + Send + Sync>,
+) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let log = Arc::new(Mutex::new(Vec::new()));
@@ -147,7 +155,7 @@ pub async fn serve_fn(routes: Arc<dyn Fn(&str) -> Option<Resource> + Send + Sync
                         serde_json::json!({ "cookie": cookie }).to_string(),
                     ))
                 } else {
-                    routes(&path)
+                    routes(&path, &target)
                 };
                 let resp = resp.unwrap_or_else(|| {
                     let mut r = Resource::new("text/plain", "not found");
@@ -157,8 +165,19 @@ pub async fn serve_fn(routes: Arc<dyn Fn(&str) -> Option<Resource> + Send + Sync
                 if resp.delay_ms > 0 {
                     tokio::time::sleep(Duration::from_millis(resp.delay_ms)).await;
                 }
+                let reason = match resp.status {
+                    200 => "OK",
+                    201 => "Created",
+                    204 => "No Content",
+                    301 => "Moved Permanently",
+                    302 => "Found",
+                    304 => "Not Modified",
+                    404 => "Not Found",
+                    500 => "Internal Server Error",
+                    _ => "X",
+                };
                 let mut out = format!(
-                    "HTTP/1.1 {} X\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+                    "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
                     resp.status,
                     resp.content_type,
                     resp.body.len()

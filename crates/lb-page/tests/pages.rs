@@ -4,6 +4,7 @@
 mod common;
 mod frames;
 mod report;
+mod service_workers;
 mod stylesheets;
 mod workers;
 

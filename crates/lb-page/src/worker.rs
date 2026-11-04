@@ -23,33 +23,40 @@ use lb_webapi::{Bindings, Registry};
 use tokio::sync::Notify;
 use url::Url;
 
-use crate::context::BrowserContext;
+use crate::context::{BrowserContext, WeakContext};
 
 /// JS heap cap of a worker's engine.
 const WORKER_HEAP: usize = 512 << 20;
 /// One frame at 60 Hz (`requestAnimationFrame` in dedicated workers).
 const FRAME_MS: f64 = 1000.0 / 60.0;
 
-/// The [`WorkerHost`] of a context's windows and worker scopes.
+/// The [`WorkerHost`] of a context's windows and worker scopes. Weak:
+/// worker threads do not keep their context alive.
 pub(crate) struct Workers {
-    ctx: BrowserContext,
+    ctx: WeakContext,
 }
 
 impl Workers {
-    pub(crate) fn host(ctx: BrowserContext) -> Rc<dyn WorkerHost> {
-        Rc::new(Workers { ctx })
+    pub(crate) fn host(ctx: &BrowserContext) -> Rc<dyn WorkerHost> {
+        Rc::new(Workers {
+            ctx: ctx.downgrade(),
+        })
     }
 }
 
 impl WorkerHost for Workers {
     fn start(&self, start: WorkerStart) {
-        spawn(self.ctx.clone(), start);
+        if let Some(ctx) = self.ctx.upgrade() {
+            spawn(ctx, start);
+        }
     }
 
     fn connect_shared(&self, start: WorkerStart, connect: RemoteTask) {
+        let Some(ctx) = self.ctx.upgrade() else {
+            return;
+        };
         let key = (start.url.to_string(), start.name.clone());
-        let mut reg = self
-            .ctx
+        let mut reg = ctx
             .shared_workers()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -61,11 +68,11 @@ impl WorkerHost for Workers {
         start.inbox.send(connect);
         reg.insert(key, (start.inbox.clone(), start.control.clone()));
         drop(reg);
-        spawn(self.ctx.clone(), start);
+        spawn(ctx.clone(), start);
     }
 
     fn fetch_sync(&self, req: NetRequest) -> Result<NetResponse, String> {
-        let ctx = self.ctx.clone();
+        let ctx = self.ctx.upgrade().ok_or("context closed")?;
         // The worker thread already runs a runtime; block on another
         // thread's.
         std::thread::scope(|s| {
@@ -85,31 +92,43 @@ impl WorkerHost for Workers {
 /// The network host of a worker scope: the context's stack on the worker
 /// thread.
 struct WorkerNet {
-    ctx: BrowserContext,
+    ctx: WeakContext,
 }
 
 impl lb_webapi::host::NetHost for WorkerNet {
     fn fetch(&self, req: NetRequest) -> lb_webapi::host::LocalFuture<Result<NetResponse, String>> {
-        let ctx = self.ctx.clone();
-        Box::pin(async move { ctx.fetch(req).await })
+        let ctx = self.ctx.upgrade();
+        Box::pin(async move {
+            match ctx {
+                Some(ctx) => ctx.fetch(req).await,
+                None => Err("context closed".into()),
+            }
+        })
     }
     fn spawn(&self, fut: lb_webapi::host::LocalFuture<()>) {
         tokio::task::spawn_local(fut);
     }
     fn cookie_string(&self, url: &Url) -> String {
-        self.ctx.cookies().document_cookie(url)
+        self.ctx
+            .upgrade()
+            .map(|c| c.cookies().document_cookie(url))
+            .unwrap_or_default()
     }
     fn set_cookie_string(&self, url: &Url, cookie: &str) {
-        self.ctx.cookies().set_document_cookie(url, cookie);
+        if let Some(c) = self.ctx.upgrade() {
+            c.cookies().set_document_cookie(url, cookie);
+        }
     }
 }
 
 /// Start the thread of one worker.
-fn spawn(ctx: BrowserContext, start: WorkerStart) {
+pub(crate) fn spawn(ctx: BrowserContext, start: WorkerStart) {
     let name = match start.kind {
         WorkerKind::Dedicated => "lb-dedicated-worker",
         WorkerKind::Shared => "lb-shared-worker",
+        WorkerKind::Service => "lb-service-worker",
     };
+    let ctx = ctx.downgrade();
     let r = std::thread::Builder::new()
         .name(name.into())
         .spawn(move || thread_main(ctx, start));
@@ -118,7 +137,7 @@ fn spawn(ctx: BrowserContext, start: WorkerStart) {
     }
 }
 
-fn thread_main(ctx: BrowserContext, start: WorkerStart) {
+fn thread_main(ctx: WeakContext, start: WorkerStart) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -139,7 +158,7 @@ fn thread_main(ctx: BrowserContext, start: WorkerStart) {
 
 /// Load the script, build the scope, run the script, then the event loop
 /// until the worker closes or is terminated.
-async fn run(ctx: BrowserContext, start: WorkerStart) -> Result<(), String> {
+async fn run(wctx: WeakContext, start: WorkerStart) -> Result<(), String> {
     let WorkerStart {
         kind,
         url,
@@ -155,10 +174,16 @@ async fn run(ctx: BrowserContext, start: WorkerStart) -> Result<(), String> {
         inbox_rx,
         control,
         parent,
+        service,
     } = start;
     if control.is_terminated() {
         return Ok(());
     }
+    // Strong only while starting: a running worker does not keep its
+    // context alive.
+    let Some(ctx) = wctx.upgrade() else {
+        return Ok(());
+    };
     // The script (Chrome fires a plain `error` event at the `Worker` when
     // it cannot be loaded).
     let (script_url, text) = match source {
@@ -207,7 +232,7 @@ async fn run(ctx: BrowserContext, start: WorkerStart) -> Result<(), String> {
             url: script_url.clone(),
             persona,
             profile,
-            net: Rc::new(WorkerNet { ctx: ctx.clone() }),
+            net: Rc::new(WorkerNet { ctx: wctx.clone() }),
             local_storage: StorageArea::new(),
             session_storage: StorageArea::new(),
             virtual_time,
@@ -226,12 +251,20 @@ async fn run(ctx: BrowserContext, start: WorkerStart) -> Result<(), String> {
         control: control.clone(),
         parent,
     });
-    w.set_worker_host(Some(Workers::host(ctx.clone())));
+    w.set_worker_host(Some(Workers::host(&ctx)));
+    w.set_sw_host(Some(crate::sw::host(&ctx)));
+    let evaluated = service.map(|s| {
+        w.init_sw_scope(s.version, s.registration);
+        s.evaluated
+    });
     let realm = w
         .create_worker_realm(&mut engine, &bindings)
         .map_err(|e| e.to_string())?;
     control.set_isolate(engine.terminate_handle());
     w.attach_inbox(inbox, inbox_rx);
+    if evaluated.is_some() {
+        w.sw_list();
+    }
 
     // Run the script (module graph: static imports first).
     let result = if module {
@@ -244,6 +277,7 @@ async fn run(ctx: BrowserContext, start: WorkerStart) -> Result<(), String> {
             .evaluate(realm, &text, ScriptOrigin::new(script_url.as_str()))
             .map(|_| ())
     };
+    let threw = result.is_err();
     if let Err(e) = result
         && e.kind != JsErrorKind::Host
         && e.kind != JsErrorKind::Terminated
@@ -255,6 +289,18 @@ async fn run(ctx: BrowserContext, start: WorkerStart) -> Result<(), String> {
         w.report_exception(&mut js, &e);
     }
     engine.perform_microtask_checkpoint();
+    // A service worker whose script threw is not installed.
+    if let Some(done) = evaluated {
+        if threw {
+            done(Err(()));
+            w.close();
+            rt.detach(realm);
+            engine.drop_realm(realm);
+            return Ok(());
+        }
+        done(Ok(w.has_fetch_handler()));
+    }
+    drop(ctx);
 
     event_loop(&mut engine, &w, &notify).await;
 

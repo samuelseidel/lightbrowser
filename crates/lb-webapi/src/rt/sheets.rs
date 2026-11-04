@@ -671,7 +671,7 @@ fn load_sheet(
     }
     let req = NetRequest::get(url.clone(), Destination::Style, Some(referrer));
     w.in_flight.set(w.in_flight.get() + 1);
-    let fut = w.net.fetch(req);
+    let fut = w.net_fetch(req);
     let weak = Rc::downgrade(w);
     w.net.spawn(Box::pin(async move {
         let r = fut.await;

@@ -424,27 +424,16 @@ impl PageHost for CdpHost {
     }
 
     async fn reload(&self, target_id: &str, _ignore_cache: bool) -> HostResult<()> {
-        let url = self
+        let page = self
             .pages
             .borrow()
             .get(target_id)
-            .map(|p| {
-                p.frame
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .url
-                    .clone()
-            })
+            .map(|p| p.page.clone())
             .ok_or_else(|| HostError::new("No target with given id found"))?;
-        self.navigate(
-            target_id,
-            NavigateRequest {
-                url,
-                ..Default::default()
-            },
-        )
-        .await
-        .map(|_| ())
+        match page.reload().await {
+            Ok(_) | Err(PageError::Net(_)) | Err(PageError::Aborted) => Ok(()),
+            Err(e) => Err(page_err(e)),
+        }
     }
 
     fn frame_tree(&self, target_id: &str) -> HostResult<FrameTree> {

@@ -69,6 +69,7 @@ pub mod script;
 mod serializer;
 mod sheets;
 mod style;
+pub mod sw;
 mod table;
 mod tags;
 mod webgl;
@@ -400,6 +401,7 @@ impl Runtime {
         table::register(reg, &rt);
         sheets::register(reg, &rt);
         worker::register(reg, &rt);
+        sw::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -767,6 +769,8 @@ pub struct Window {
     pub(crate) hidden: Cell<bool>,
     /// Inbox, child workers, blob URLs; worker scope settings (ADR 0021).
     pub(crate) wk: worker::WorkerSide,
+    /// Service worker client or scope state, objects (ADR 0022).
+    pub(crate) sw: sw::SwSide,
 }
 
 impl std::fmt::Debug for Window {
@@ -857,6 +861,7 @@ impl Window {
             frames: frames::FrameState::default(),
             hidden: Cell::new(false),
             wk: worker::WorkerSide::default(),
+            sw: sw::SwSide::default(),
         });
         rt.register_doc(key, &w, 0, &doc);
         w
@@ -1514,6 +1519,7 @@ impl Window {
     pub fn close(&self) {
         self.closed.set(true);
         self.close_workers();
+        self.close_sw();
         self.timers.borrow_mut().clear();
         self.raf.borrow_mut().clear();
         for q in self.tasks.borrow_mut().iter_mut() {
@@ -1667,6 +1673,8 @@ pub(crate) enum Obj {
     Nav(Box<navigator::NavObj>),
     /// Workers, message channels and ports, worker location and navigator.
     Worker(Box<worker::WorkerHostObj>),
+    /// Service worker objects and the Cache API.
+    Sw(Box<sw::SwObj>),
     /// CSSOM objects (style sheets, rules, rule lists, media lists).
     Css(Box<sheets::CssObj>),
     /// `CSSStyleRule.style`: the declarations of a rule.
@@ -1720,6 +1728,7 @@ impl Obj {
             Obj::Font(f) => f.iface_name(),
             Obj::Nav(n) => n.iface_name(),
             Obj::Worker(x) => x.iface_name(),
+            Obj::Sw(x) => x.iface_name(),
             Obj::Css(c) => c.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
         }

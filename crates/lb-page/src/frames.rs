@@ -110,6 +110,14 @@ async fn navigate_frame(
         a.frame_started_loading(id);
     }
     let parent_url = wf::effective_url(&parent);
+    // A service worker controlling the frame's URL sees the navigation
+    // first (ADR 0022).
+    let sw = if nav.srcdoc.is_none() {
+        crate::sw::navigation_controller(&page.ctx, &nav.url)
+    } else {
+        None
+    };
+    let reserved = lb_webapi::rt::sw::uuid4();
     let (resp, creator) = match &nav.srcdoc {
         Some(doc) => (
             Ok(NetResponse {
@@ -138,7 +146,9 @@ async fn navigate_frame(
                 NetRequest::get(nav.url.clone(), Destination::Iframe, nav.initiator.clone());
             req.mode = "navigate";
             parent.in_flight.set(parent.in_flight.get() + 1);
-            let r = crate::cdp::net::page_fetch(&page, req, None).await;
+            let r =
+                crate::nav::sw_or_network(&page, req, sw.as_ref(), String::new(), &reserved, false)
+                    .await;
             parent
                 .in_flight
                 .set(parent.in_flight.get().saturating_sub(1));
@@ -189,6 +199,12 @@ async fn navigate_frame(
         .unwrap_or_default();
     let w = Window::new(&rt, init);
     w.set_worker_host(parent.worker_host());
+    w.set_sw_host(parent.sw_host());
+    let controller = sw.map(|(v, _)| v);
+    w.init_sw_client(Some(reserved), true, controller.clone());
+    if let (Some(v), Some(h)) = (&controller, w.sw_host()) {
+        h.schedule_update(v.id);
+    }
     let r = ws.with_engine(|e| wf::commit_child(e, &parent, id, &w, creator));
     match r {
         Some(Ok(())) => {}

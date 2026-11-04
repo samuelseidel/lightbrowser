@@ -112,7 +112,7 @@ pub(crate) fn abort_signal(js: &mut dyn Js, w: &Rc<Window>, sig: u32, reason: Op
     }
 }
 
-fn new_signal(w: &Window) -> u32 {
+pub(crate) fn new_signal(w: &Window) -> u32 {
     w.new_obj(Obj::AbortSignal(Box::default()))
 }
 
@@ -136,7 +136,7 @@ pub(crate) struct HeadersData {
 }
 
 impl HeadersData {
-    fn append(&mut self, n: &str, v: &str) {
+    pub(crate) fn append(&mut self, n: &str, v: &str) {
         self.list.push((n.to_ascii_lowercase(), normalize_value(v)));
     }
     fn set(&mut self, n: &str, v: &str) {
@@ -157,7 +157,7 @@ impl HeadersData {
             None => self.list.push((n, v)),
         }
     }
-    fn get(&self, n: &str) -> Option<String> {
+    pub(crate) fn get(&self, n: &str) -> Option<String> {
         let n = n.to_ascii_lowercase();
         let vals: Vec<&str> = self
             .list
@@ -199,7 +199,7 @@ fn valid_name(n: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
 }
 
-fn headers_of(w: &Window, id: u32) -> Option<HeadersData> {
+pub(crate) fn headers_of(w: &Window, id: u32) -> Option<HeadersData> {
     w.with_obj(id, |o| match o {
         Obj::Headers(h) => Some((**h).clone()),
         _ => None,
@@ -331,14 +331,20 @@ pub(crate) struct RequestData {
     pub credentials: String,
     pub cache: String,
     pub redirect: String,
+    /// `Request.destination` (`""` for requests made by script).
+    pub destination: &'static str,
 }
 
-fn new_headers(w: &Window, h: HeadersData) -> u32 {
+pub(crate) fn new_headers(w: &Window, h: HeadersData) -> u32 {
     w.new_obj(Obj::Headers(Box::new(h)))
 }
 
 /// Take the body of a Request/Response for a body-reading method.
-fn take_body(w: &Window, id: u32, op: &str) -> Result<(Vec<u8>, Option<String>), HostError> {
+pub(crate) fn take_body(
+    w: &Window,
+    id: u32,
+    op: &str,
+) -> Result<(Vec<u8>, Option<String>), HostError> {
     let iface = w.with_obj(id, |o| o.iface_name()).unwrap_or("Response");
     let r = w.with_obj(id, |o| match o {
         Obj::Response(r) => {
@@ -434,7 +440,7 @@ fn cors_ok(origin: &url::Origin, resp: &NetResponse) -> bool {
 
 /// Response headers visible to script (forbidden response header names
 /// are filtered).
-fn visible_headers(resp: &NetResponse, cors: bool) -> HeadersData {
+pub(crate) fn visible_headers(resp: &NetResponse, cors: bool) -> HeadersData {
     let mut h = HeadersData::default();
     let safelisted = [
         "cache-control",
@@ -481,7 +487,7 @@ pub(crate) fn start_request(
     done: Box<dyn FnOnce(&mut dyn Js, &Rc<Window>, Result<NetResponse, String>)>,
 ) {
     w.in_flight.set(w.in_flight.get() + 1);
-    let fut = w.net.fetch(req);
+    let fut = w.net_fetch(req);
     let weak = Rc::downgrade(w);
     w.net.spawn(Box::pin(async move {
         let r = fut.await;
@@ -599,17 +605,28 @@ fn build_request(
         &'static str,
         String,
     )> = None;
+    let mut destination = "";
     if let Some(h) = cx.arg_host(0).filter(|h| h.kind == K_OBJ) {
         base = w
             .with_obj(h.id, |o| match o {
-                Obj::Request(r) => Some((
-                    r.method.clone(),
-                    r.url.clone(),
-                    r.headers,
-                    r.body.clone(),
-                    r.mode,
-                    r.credentials.clone(),
-                )),
+                Obj::Request(r) => {
+                    destination = r.destination;
+                    // A navigation request copied into a new one is
+                    // same-origin (Fetch: "navigate" becomes "same-origin").
+                    let mode = if r.mode == "navigate" {
+                        "same-origin"
+                    } else {
+                        r.mode
+                    };
+                    Some((
+                        r.method.clone(),
+                        r.url.clone(),
+                        r.headers,
+                        r.body.clone(),
+                        mode,
+                        r.credentials.clone(),
+                    ))
+                }
                 _ => None,
             })
             .flatten()
@@ -768,6 +785,7 @@ fn build_request(
         credentials,
         cache,
         redirect,
+        destination,
     }))))
 }
 
@@ -1348,8 +1366,8 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         cx.ret(v)
     });
     getter(reg, rt, "Request", "destination", |cx, w| {
-        rq(cx, w, |_| ())?;
-        cx.ret("")
+        let v = rq(cx, w, |r| r.destination)?;
+        cx.ret(v)
     });
     getter(reg, rt, "Request", "referrer", |cx, w| {
         rq(cx, w, |_| ())?;
@@ -1372,7 +1390,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         cx.ret(v)
     });
     method(reg, rt, "Request", "clone", |cx, w| {
-        let (m, u, h, b, used, mode, cred, cache, redirect, sig) = rq(cx, w, |r| {
+        let (m, u, h, b, used, mode, cred, cache, redirect, sig, dest) = rq(cx, w, |r| {
             (
                 r.method.clone(),
                 r.url.clone(),
@@ -1384,6 +1402,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 r.cache.clone(),
                 r.redirect.clone(),
                 r.signal,
+                r.destination,
             )
         })?;
         if used {
@@ -1405,6 +1424,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             credentials: cred,
             cache,
             redirect,
+            destination: dest,
         })));
         cx.ret(w.obj_arg(id))
     });
