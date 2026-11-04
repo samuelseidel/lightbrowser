@@ -26,6 +26,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0018](0018-connection-reuse.md) | Connection reuse as Chrome does it: per-context pool, HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS resumption, network thread | Accepted (2026-11-04) |
 | [0019](0019-style-sheet-loading-and-cssom.md) | Style sheets load as Chrome loads them: script- and parser-blocking sheets, `@import`, CSSOM | Accepted (2026-11-04) |
 | [0020](0020-css-background-images-and-box-decorations.md) | CSS background images load like Chrome's; screenshots paint backgrounds, radius and shadows | Accepted (2026-11-04) |
+| [0021](0021-workers.md) | Dedicated and shared workers on their own threads and isolates; worker globals from a Chrome capture; V8 structured clone, message ports | Accepted (2026-11-04) |
 
 ## Adding an ADR
 

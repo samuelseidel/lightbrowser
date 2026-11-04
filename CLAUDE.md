@@ -50,7 +50,7 @@ passes 6 of 6; binary 40.38 MB, idle RSS 7.1 MB; after the frames work
 regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
-gaps in ADR 0003), workers and service workers, shader execution in
+gaps in ADR 0003), service workers, shader execution in
 WebGL, CDP crawl wall time vs Lightpanda (0.82 vs 0.74 s in
 `bench/results/2026-11-04-5490a8e.json`, 5 of 6 checks; `fetch` peak
 RSS 22.7 vs 24.4 MB). Style sheets (ADR 0019): links and `@import`s load
@@ -72,8 +72,17 @@ document key, so one frame's DOM methods act on another frame's nodes,
 nodes keep one wrapper per world and adoption keeps identity; a removed
 frame's window stays usable, detached, as in Chrome; `Image`/`Audio`/
 `Option` share their interface's prototype (all checked against local
-Chrome in `lb-page`'s `frames::cross_realm` tests). See "Where we stand"
-and the status sections in `docs/ROADMAP.md`.
+Chrome in `lb-page`'s `frames::cross_realm` tests). Workers (ADR 0021):
+`Worker` and `SharedWorker` run on their own thread with their own V8
+isolate (none until a page makes one); the worker globals match a Chrome
+capture (`tests/fixtures/chromium_153_worker_surface.json`,
+`tools/dump_worker_surface.js`); `WorkerNavigator` and UA client hints come
+from the page's `Arc<Persona>`; `postMessage`/`structuredClone` use V8's
+serializer with `ArrayBuffer` and `MessagePort` transfer; `importScripts`,
+`fetch`/XHR with the context's cookies, `blob:`/`data:`/module workers;
+10 Chrome-recorded cases in `lb-page` `tests/workers/`; the bench rule
+`worker_navigator_mismatch` and 42 worker checks in `fingerprint-report`.
+See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 
 ## Internal use and legal
 - Internal only. Never push binaries to public repos or registries.
@@ -89,11 +98,11 @@ and the status sections in `docs/ROADMAP.md`.
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use | M1 done; `site` (ADR 0018) |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done (one arena per document; `import_node_mapped` for adoption across documents; `ParseStep::StyleSheet` pauses for style sheets); no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`) and CSS background images (`rt/bgimage.rs`). WebGL runs no shaders; no workers, crypto or WebSocket |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`) and workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`). WebGL runs no shaders; no crypto or WebSocket |
 | `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
-| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot` done; no workers or popups |
+| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, worker threads (`worker.rs`) done; no service workers or popups; workers are not CDP targets |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
 | `sdk/python` | `lightbrowser` package: launcher, `Persona`, sync/async Playwright wrappers with `human_*` and `verify_fingerprint`, scenarios T-001..T-007 | Done; needs Python Playwright >= 1.63 |
@@ -132,6 +141,10 @@ cargo test -p lb-page --test connections
 # WPT subset (loopback) and the Playwright CDP smoke test
 cargo test -p lb-page --test wpt -- --nocapture
 cargo build -p lightbrowser && node --test tests/playwright/   # 20 tests; LIGHTBROWSER_BIN overrides
+# Workers vs Chrome (10 cases + worker global surface vs the capture)
+cargo test -p lb-page --test pages workers
+# re-record: crates/lb-page/tests/workers/{serve.py,chrome.mjs};
+# worker surface fixture: node tools/dump_worker_surface.js tests/fixtures/chromium_153_worker_surface.json
 # Style sheets vs Chrome (18 cases) and screenshots vs Chrome goldens
 cargo test -p lb-page --test pages stylesheets
 cargo test -p lb-page --test screenshot_golden -- --nocapture
@@ -149,7 +162,7 @@ node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
 # stop both servers afterwards
-python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (33)
+python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (38)
 # Linux ground truth from local Chrome (loopback, headed under xvfb-run): see tools/os_truth/README.md
 # Python SDK tests (run from sdk/python; scenarios need Playwright >= 1.63, else skipped)
 (cd sdk/python && python3 -m pytest tests)
