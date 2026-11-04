@@ -285,6 +285,8 @@ enum HostEntry {
     /// `ports[i]`.
     Port(usize),
     Blob(Vec<u8>, String),
+    /// A `CryptoKey` (keys are immutable; both sides share it).
+    Key(std::sync::Arc<super::crypto::CryptoKey>),
 }
 
 /// One posted message: the clone and what travels beside it.
@@ -562,6 +564,10 @@ pub(crate) fn serialize_args(
                     entries.push(HostEntry::Blob(bytes, ty));
                     return Ok((entries.len() - 1) as u32);
                 }
+                if let Some(k) = super::crypto::clone_key(w, h) {
+                    entries.push(HostEntry::Key(k));
+                    return Ok((entries.len() - 1) as u32);
+                }
             }
             Err(format!("{class} object could not be cloned."))
         };
@@ -616,6 +622,10 @@ pub(crate) fn unpack(
             HostEntry::Blob(bytes, type_) => {
                 let id = w.new_obj(Obj::Blob(Box::new(BlobData { bytes, type_ })));
                 (w.rt.iface("Blob"), HostRef::new(K_OBJ, id))
+            }
+            HostEntry::Key(k) => {
+                let id = w.new_obj(Obj::Crypto(Box::new(super::crypto::CryptoObj::Key(k))));
+                (w.rt.iface("CryptoKey"), HostRef::new(K_OBJ, id))
             }
         })
         .collect();
@@ -1340,6 +1350,10 @@ fn structured_clone(
             HostEntry::Blob(bytes, type_) => {
                 let id = w.new_obj(Obj::Blob(Box::new(BlobData { bytes, type_ })));
                 (w.rt.iface("Blob"), HostRef::new(K_OBJ, id))
+            }
+            HostEntry::Key(k) => {
+                let id = w.new_obj(Obj::Crypto(Box::new(super::crypto::CryptoObj::Key(k))));
+                (w.rt.iface("CryptoKey"), HostRef::new(K_OBJ, id))
             }
         })
         .collect();

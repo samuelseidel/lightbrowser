@@ -177,7 +177,7 @@ fn snapshot_realms_work() {
             r2,
             "try { new Node() } catch (x) { x instanceof TypeError && x.message }"
         ),
-        JsValue::String("Illegal constructor".into())
+        JsValue::String("Failed to construct 'Node': Illegal constructor".into())
     );
     assert_eq!(
         eval(

@@ -1,0 +1,38 @@
+<!doctype html><!--LOG--><script>
+var S = crypto.subtle;
+(async () => {
+  var key = await S.importKey('raw', new Uint8Array(16), 'AES-GCM', true, ['encrypt']);
+  await a('encrypt no args', () => S.encrypt());
+  await a('encrypt 2 args', () => S.encrypt('AES-GCM', key));
+  await a('encrypt not key', () => S.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, 'x', new Uint8Array(1)));
+  await a('encrypt bad data', () => S.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, key, 'x'));
+  await a('encrypt iv string', () => S.encrypt({ name: 'AES-GCM', iv: 'abc' }, key, new Uint8Array(1)));
+  await a('encrypt usage', () => S.decrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, key, new Uint8Array(32)));
+  await a('encrypt digest alg', () => S.encrypt('SHA-256', key, new Uint8Array(1)));
+  await a('encrypt hmac alg', () => S.encrypt('HMAC', key, new Uint8Array(1)));
+  await a('importKey no args', () => S.importKey());
+  await a('importKey usages string', () => S.importKey('raw', new Uint8Array(16), 'AES-GCM', true, 'encrypt'));
+  await a('importKey jwk not object', () => S.importKey('jwk', new Uint8Array(16), 'AES-GCM', true, ['encrypt']));
+  await a('importKey raw not buffer', () => S.importKey('raw', {}, 'AES-GCM', true, ['encrypt']));
+  await a('importKey unknown alg', () => S.importKey('raw', new Uint8Array(16), 'FOO', true, ['encrypt']));
+  await a('importKey sha alg', () => S.importKey('raw', new Uint8Array(16), 'SHA-256', true, ['encrypt']));
+  await a('exportKey bad format', () => S.exportKey('foo', key));
+  await a('exportKey not key', () => S.exportKey('raw', {}));
+  await a('generateKey unknown', () => S.generateKey('FOO', true, ['encrypt']));
+  await a('generateKey digest', () => S.generateKey('SHA-1', true, ['encrypt']));
+  await a('generateKey pbkdf2', () => S.generateKey('PBKDF2', true, ['deriveBits']));
+  await a('deriveBits not derive', () => S.deriveBits({ name: 'AES-GCM' }, key, 128));
+  await a('alg hash object', async () => { var k2 = await S.importKey('raw', new Uint8Array(16), { name: 'HMAC', hash: { name: 'SHA-256' } }, true, ['sign']); return JSON.stringify(k2.algorithm); });
+  await a('alg hash bad', () => S.importKey('raw', new Uint8Array(16), { name: 'HMAC', hash: 'SHA-3' }, true, ['sign']));
+  await a('alg name number', () => S.importKey('raw', new Uint8Array(16), { name: 5 }, true, ['sign']));
+  await a('alg getter throws', () => S.digest({ get name() { throw new Error('boom'); } }, new Uint8Array(1)));
+  await a('ed25519', async () => { var g = await S.generateKey('Ed25519', true, ['sign', 'verify']); return g.privateKey.algorithm.name; });
+  await a('x25519', async () => { var g = await S.generateKey('X25519', true, ['deriveBits']); return g.privateKey.algorithm.name; });
+  await a('wrap usage', () => S.wrapKey('raw', key, key, 'AES-GCM'));
+  t('key props', () => [key.type, key.extractable].join() + ' ' + Object.keys(key).length + ' ' + JSON.stringify(Object.getOwnPropertyNames(key)));
+  t('structuredClone key', () => { var c = structuredClone(key); return (c instanceof CryptoKey) + ' ' + c.type + ' ' + JSON.stringify(c.algorithm) + ' ' + (c === key); });
+  await a('cloned key works', async () => { var c = structuredClone(key); return hex(await S.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, c, new Uint8Array(1))); });
+  await a('postMessage key', () => new Promise(r => { var ch = new MessageChannel(); ch.port2.onmessage = e => r((e.data instanceof CryptoKey) + ' ' + e.data.usages); ch.port1.postMessage(key); }));
+  end();
+})();
+</script>

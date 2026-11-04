@@ -3223,6 +3223,12 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
         Ok(())
     }
 
+    /// Keep a raw V8 value as a handle (e.g. an exception caught in a
+    /// `TryCatch` made on [`CallCtx::scope`]).
+    pub fn handle_of(&mut self, v: v8::Local<'_, v8::Value>) -> Handle {
+        store_handle(self.scope, &self.state, self.realm, v)
+    }
+
     /// Escape hatch: the raw V8 scope.
     pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
         self.scope
@@ -3334,12 +3340,8 @@ fn ctor_trampoline<'s>(
     };
     let realm = current_realm(scope);
     let Some(f) = f else {
-        throw(
-            scope,
-            &state,
-            realm,
-            HostError::type_error("Illegal constructor"),
-        );
+        let msg = format!("Failed to construct '{iface}': Illegal constructor");
+        throw(scope, &state, realm, HostError::TypeError(msg));
         return;
     };
     if !args.is_construct_call() {
@@ -3924,6 +3926,17 @@ fn set_host(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, ho
     let id = v8::Integer::new_from_unsigned(scope, host.id);
     obj.set_internal_field(0, kind.into());
     obj.set_internal_field(1, id.into());
+}
+
+/// The host object behind a raw V8 value, if it is a wrapper (for host
+/// code that reads JS values on [`CallCtx::scope`] itself).
+pub fn host_of_value(
+    scope: &mut v8::PinScope<'_, '_>,
+    v: v8::Local<'_, v8::Value>,
+) -> Option<HostRef> {
+    v8::Local::<v8::Object>::try_from(v)
+        .ok()
+        .and_then(|o| read_host(scope, o))
 }
 
 fn read_host(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>) -> Option<HostRef> {

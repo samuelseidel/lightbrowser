@@ -9,7 +9,7 @@ publish = false
 # Same family features as lb-js. The firefox build has only the descriptor
 # tables (no installer, no implementations) until SpiderMonkey lands in M4b.
 default = ["chrome"]
-chrome = ["lb-js/chrome", "dep:lb-paint"]
+chrome = ["lb-js/chrome", "dep:lb-paint", "dep:boring", "dep:boring-sys", "dep:foreign-types"]
 firefox = ["lb-js/firefox"]
 
 [dependencies]
@@ -25,6 +25,12 @@ url = "2"
 # Inboxes of windows on other threads (workers, ADR 0021).
 tokio = { version = "1", default-features = false, features = ["sync"] }
 encoding_rs = "0.8"
+# Web Crypto on the BoringSSL lb-net already links (chrome build).
+boring = { version = "5", optional = true }
+# Raw FFI for what `boring` does not wrap (RSA-OAEP digests and labels,
+# raw Ed25519/X25519 keys).
+boring-sys = { version = "5", optional = true }
+foreign-types = { version = "0.5", optional = true }
 serde_json = "1"
 percent-encoding = "2"
 form_urlencoded = "1"

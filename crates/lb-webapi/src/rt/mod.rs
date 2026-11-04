@@ -51,6 +51,7 @@ mod bgimage;
 pub mod canvas;
 mod chrome;
 mod coll;
+mod crypto;
 mod dom;
 mod events;
 mod fonts;
@@ -460,6 +461,7 @@ impl Runtime {
         sheets::register(reg, &rt);
         worker::register(reg, &rt);
         sw::register(reg, &rt);
+        crypto::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -1733,6 +1735,8 @@ pub(crate) enum Obj {
     Sw(Box<sw::SwObj>),
     /// CSSOM objects (style sheets, rules, rule lists, media lists).
     Css(Box<sheets::CssObj>),
+    /// `Crypto`, `SubtleCrypto` and `CryptoKey`.
+    Crypto(Box<crypto::CryptoObj>),
     /// `CSSStyleRule.style`: the declarations of a rule.
     RuleStyle {
         sheet: u32,
@@ -1786,6 +1790,7 @@ impl Obj {
             Obj::Worker(x) => x.iface_name(),
             Obj::Sw(x) => x.iface_name(),
             Obj::Css(c) => c.iface_name(),
+            Obj::Crypto(c) => c.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
         }
     }

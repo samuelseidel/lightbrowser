@@ -183,7 +183,7 @@ fn constructor_needs_registration() {
             r,
             "try { new Event('x'); 'ok' } catch (err) { err.constructor.name + ': ' + err.message }"
         ),
-        "TypeError: Illegal constructor"
+        "TypeError: Failed to construct 'Event': Illegal constructor"
     );
 
     let mut reg = Registry::new();

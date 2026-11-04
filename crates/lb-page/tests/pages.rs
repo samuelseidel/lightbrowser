@@ -1,6 +1,7 @@
 //! Pages with scripts against a loopback server: the DOM after load.
 #![cfg(feature = "chrome")]
 
+mod apis;
 mod common;
 mod frames;
 mod images;

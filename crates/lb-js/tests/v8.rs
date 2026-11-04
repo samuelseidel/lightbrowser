@@ -382,11 +382,11 @@ fn interface_shape_matches_webidl() {
         ("Node.prototype.describe.length", JsValue::Number(1.0)),
         (
             "try { Node() } catch (e) { e.message }",
-            JsValue::String("Illegal constructor".into()),
+            JsValue::String("Failed to construct 'Node': Illegal constructor".into()),
         ),
         (
             "try { new Node() } catch (e) { e.message }",
-            JsValue::String("Illegal constructor".into()),
+            JsValue::String("Failed to construct 'Node': Illegal constructor".into()),
         ),
         (
             "try { Node.prototype.describe.call({}) } catch (e) { e.message }",

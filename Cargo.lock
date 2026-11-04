@@ -1397,8 +1397,11 @@ dependencies = [
 name = "lb-webapi"
 version = "0.0.1"
 dependencies = [
+ "boring",
+ "boring-sys",
  "bytes",
  "encoding_rs",
+ "foreign-types",
  "form_urlencoded",
  "lb-css",
  "lb-dom",
