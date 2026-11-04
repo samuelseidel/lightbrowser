@@ -72,7 +72,7 @@ client: Chrome's handshake and header order, cookies, permessage-deflate,
 `wss:` ClientHello with ALPN `http/1.1` only, as captured), dynamic
 `import()` (module map shared with static imports, `import.meta.resolve`),
 `blob:`/`data:` in `fetch()`/XHR and synchronous XHR (main thread and
-workers); 15 Chrome-recorded cases in `lb-page` `tests/apis/`. Style sheets (ADR 0019): links and `@import`s load
+workers); 15 Chrome-recorded cases in `lb-page` `tests/apis/`; binary 41.50 MB; bench 6 of 6 in one 5 x 50 run, 5 of 6 in another (`fetch` peak RSS 23.23 vs Lightpanda 23.20 MB). Style sheets (ADR 0019): links and `@import`s load
 on insertion; parser-made sheets block parser, `defer` and module
 scripts, and sheets after `<body>` stop the parser, as in Chrome;
 `document.styleSheets` and the CSSOM (`insertRule`, rules, `MediaList`)
