@@ -141,6 +141,38 @@
     const a = await n.gpu.requestAdapter();
     return a ? { vendor: a.info.vendor, architecture: a.info.architecture } : null;
   });
+  // The same values in a dedicated and a shared worker (each runs in its
+  // own engine; bot detectors compare them with the page's).
+  await probe('workers', async () => {
+    const src = 'async function v() { const n = navigator, d = n.userAgentData, o = Intl.DateTimeFormat().resolvedOptions();' +
+      'const r = { userAgent: n.userAgent, appVersion: n.appVersion, platform: n.platform, language: n.language,' +
+      'languages: Array.from(n.languages || []), hardwareConcurrency: n.hardwareConcurrency,' +
+      'deviceMemory: n.deviceMemory === undefined ? null : n.deviceMemory, gpu: "gpu" in n,' +
+      'timeZone: o.timeZone, locale: o.locale };' +
+      'if (d) { r.uaData = { brands: d.brands.map((b) => ({ brand: b.brand, version: b.version })), mobile: d.mobile, platform: d.platform };' +
+      'const h = await d.getHighEntropyValues(["architecture", "bitness", "model", "platformVersion", "uaFullVersion", "fullVersionList", "wow64", "formFactors"]);' +
+      'r.uaHigh = { architecture: h.architecture, bitness: h.bitness, model: h.model, platformVersion: h.platformVersion,' +
+      'uaFullVersion: h.uaFullVersion, wow64: h.wow64, formFactors: h.formFactors,' +
+      'fullVersionList: (h.fullVersionList || []).map((b) => ({ brand: b.brand, version: b.version })) }; }' +
+      'return r; }';
+    const url = (body) => URL.createObjectURL(new Blob([src + body], { type: 'text/javascript' }));
+    const wait = (p) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('worker timeout')), 5000))]);
+    const out = {};
+    const du = url(';v().then((r) => postMessage(r), (e) => postMessage({ __error: String(e) }));');
+    out.dedicated = await wait(new Promise((res, rej) => {
+      const w = new Worker(du);
+      w.onmessage = (e) => { w.terminate(); res(e.data); };
+      w.onerror = (e) => { w.terminate(); rej(new Error('worker error ' + e.message)); };
+    }));
+    const su = url(';onconnect = (e) => v().then((r) => e.ports[0].postMessage(r), (err) => e.ports[0].postMessage({ __error: String(err) }));');
+    out.shared = await wait(new Promise((res) => {
+      const w = new SharedWorker(su);
+      w.port.onmessage = (e) => res(e.data);
+    }));
+    URL.revokeObjectURL(du);
+    URL.revokeObjectURL(su);
+    return out;
+  });
   await probe('locale', () => {
     const o = Intl.DateTimeFormat().resolvedOptions();
     return { timeZone: o.timeZone, locale: o.locale, offset: new Date().getTimezoneOffset() };

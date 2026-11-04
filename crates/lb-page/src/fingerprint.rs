@@ -8,7 +8,9 @@
 //!   the main world). It probes navigator, UA client hints, screen, window
 //!   sizes, time zone and locale, WebGL, canvas, audio, fonts (width
 //!   measurement of the persona's list), permissions, battery, media
-//!   devices, voices, media queries and `performance.now` resolution. The
+//!   devices, voices, media queries and `performance.now` resolution, and
+//!   the navigator, UA client hints, WebGPU presence, time zone and locale
+//!   as a dedicated and a shared worker see them (ADR 0021). The
 //!   main world's global is inspected natively for automation tells.
 //! - **Compare** ([`diff`]): one check per value, with status `ok`,
 //!   `mismatch`, `unimplemented` (the surface is missing or threw) or
@@ -672,6 +674,91 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
     );
     c.eq(s, "intl.locale", "locale.locale", json!(p.locale.language));
     c.info(s, "date.timezoneOffset", "locale.offset");
+
+    // Workers (ADR 0021): a dedicated and a shared worker see the same
+    // persona as the page (navigator, UA client hints, WebGPU presence,
+    // time zone and locale).
+    if chrome {
+        for scope in ["dedicated", "shared"] {
+            let w = |k: &str| format!("workers.{scope}.{k}");
+            let n = |k: &str| format!("worker.{scope}.{k}");
+            for (k, v) in [
+                ("userAgent", json!(b.user_agent)),
+                ("appVersion", json!(b.app_version)),
+                ("platform", json!(p.os.platform)),
+                ("language", json!(p.locale.language)),
+                ("languages", json!(p.locale.languages)),
+                (
+                    "hardwareConcurrency",
+                    json!(p.hardware.hardware_concurrency),
+                ),
+                ("deviceMemory", json!(p.hardware.device_memory)),
+                ("timeZone", json!(p.locale.timezone)),
+                ("locale", json!(p.locale.language)),
+            ] {
+                c.eq(s, &n(k), &w(k), v);
+            }
+            // `navigator.gpu` exists in workers wherever the page has it.
+            let page_gpu = lookup(s, "webgpu").is_ok_and(|v| !v.is_null()) || p.webgpu().is_some();
+            c.eq(s, &n("gpu"), &w("gpu"), json!(page_gpu || chrome));
+            if let Some(ch) = &p.client_hints {
+                let brands = |l: &[lb_persona::BrandVersion]| -> Value {
+                    l.iter()
+                        .map(|x| json!({"brand": x.brand, "version": x.version}))
+                        .collect()
+                };
+                c.eq(
+                    s,
+                    &n("userAgentData.brands"),
+                    &w("uaData.brands"),
+                    brands(&ch.brands),
+                );
+                c.eq(
+                    s,
+                    &n("userAgentData.mobile"),
+                    &w("uaData.mobile"),
+                    json!(ch.mobile),
+                );
+                c.eq(
+                    s,
+                    &n("userAgentData.platform"),
+                    &w("uaData.platform"),
+                    json!(ch.platform),
+                );
+                for (k, v) in [
+                    ("architecture", json!(ch.architecture)),
+                    ("bitness", json!(ch.bitness)),
+                    ("model", json!(ch.model)),
+                    ("platformVersion", json!(ch.platform_version)),
+                    ("wow64", json!(ch.wow64)),
+                    ("fullVersionList", brands(&ch.full_version_list)),
+                ] {
+                    c.eq(
+                        s,
+                        &n(&format!("highEntropy.{k}")),
+                        &w(&format!("uaHigh.{k}")),
+                        v,
+                    );
+                }
+                if let Some(he) = p.high_entropy_hints() {
+                    c.eq(
+                        s,
+                        &n("highEntropy.formFactors"),
+                        &w("uaHigh.formFactors"),
+                        json!(he.form_factors),
+                    );
+                }
+                if let Some(v) = &ch.full_version {
+                    c.eq(
+                        s,
+                        &n("highEntropy.uaFullVersion"),
+                        &w("uaHigh.uaFullVersion"),
+                        json!(v),
+                    );
+                }
+            }
+        }
+    }
 
     // WebGL (a WebGL 2 context: the persona lists its version strings).
     let g = &p.hardware.gpu;
