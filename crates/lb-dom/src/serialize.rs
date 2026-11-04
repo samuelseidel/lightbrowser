@@ -12,17 +12,47 @@ use crate::node::{NodeData, NodeId};
 pub struct SerializeNode<'a> {
     doc: &'a Document,
     id: NodeId,
+    shadows: ShadowSerialization<'a>,
+}
+
+/// Which shadow roots `getHTML()` writes as declarative templates.
+#[derive(Clone, Copy, Default)]
+pub struct ShadowSerialization<'a> {
+    /// `serializableShadowRoots`: roots marked serializable.
+    pub serializable: bool,
+    /// `shadowRoots`: these roots in any case.
+    pub roots: &'a [NodeId],
 }
 
 impl<'a> SerializeNode<'a> {
     pub fn new(doc: &'a Document, id: NodeId) -> Self {
-        SerializeNode { doc, id }
+        SerializeNode {
+            doc,
+            id,
+            shadows: ShadowSerialization::default(),
+        }
+    }
+
+    fn shadow_to_write(&self, host: NodeId) -> Option<NodeId> {
+        let sr = self.doc.shadow_root(host)?;
+        let d = self.doc.shadow_root_data(sr)?;
+        ((self.shadows.serializable && d.serializable) || self.shadows.roots.contains(&sr))
+            .then_some(sr)
     }
 }
 
 enum Op {
     Open(NodeId),
     Close(NodeId),
+    CloseTemplate,
+}
+
+fn template_name() -> html5ever::QualName {
+    html5ever::QualName::new(
+        None,
+        html5ever::ns!(html),
+        html5ever::local_name!("template"),
+    )
 }
 
 impl SerializeNode<'_> {
@@ -38,13 +68,53 @@ impl SerializeNode<'_> {
     }
 }
 
+impl SerializeNode<'_> {
+    /// Write `host`'s shadow root as a `<template shadowrootmode>` start
+    /// tag and queue its children, if it is to be written.
+    fn open_shadow<S: Serializer>(
+        &self,
+        s: &mut S,
+        stack: &mut Vec<Op>,
+        host: NodeId,
+    ) -> io::Result<()> {
+        let Some(sr) = self.shadow_to_write(host) else {
+            return Ok(());
+        };
+        let d = self.doc.shadow_root_data(sr).expect("shadow root");
+        let attr = |n: &str| html5ever::QualName::new(None, html5ever::ns!(), n.into());
+        let mut attrs = vec![(
+            attr("shadowrootmode"),
+            match d.mode {
+                crate::ShadowRootMode::Open => "open",
+                crate::ShadowRootMode::Closed => "closed",
+            },
+        )];
+        if d.delegates_focus {
+            attrs.push((attr("shadowrootdelegatesfocus"), ""));
+        }
+        if d.serializable {
+            attrs.push((attr("shadowrootserializable"), ""));
+        }
+        if d.clonable {
+            attrs.push((attr("shadowrootclonable"), ""));
+        }
+        s.start_elem(template_name(), attrs.iter().map(|(n, v)| (n, *v)))?;
+        stack.push(Op::CloseTemplate);
+        self.push_children(stack, sr);
+        Ok(())
+    }
+}
+
 impl Serialize for SerializeNode<'_> {
     fn serialize<S: Serializer>(&self, s: &mut S, scope: TraversalScope) -> io::Result<()> {
         // Explicit stack: deep trees must not overflow the call stack.
         let mut stack = Vec::new();
         match scope {
             TraversalScope::IncludeNode => stack.push(Op::Open(self.id)),
-            TraversalScope::ChildrenOnly(_) => self.push_children(&mut stack, self.id),
+            TraversalScope::ChildrenOnly(_) => {
+                self.push_children(&mut stack, self.id);
+                self.open_shadow(s, &mut stack, self.id)?;
+            }
         }
         while let Some(op) = stack.pop() {
             match op {
@@ -54,8 +124,9 @@ impl Serialize for SerializeNode<'_> {
                         s.start_elem(e.name.clone(), e.attrs.iter().map(|a| (&a.name, &*a.value)))?;
                         stack.push(Op::Close(id));
                         self.push_children(&mut stack, id);
+                        self.open_shadow(s, &mut stack, id)?;
                     }
-                    NodeData::Document | NodeData::DocumentFragment => {
+                    NodeData::Document | NodeData::DocumentFragment | NodeData::ShadowRoot(_) => {
                         self.push_children(&mut stack, id)
                     }
                     NodeData::Doctype(d) => s.write_doctype(&d.name)?,
@@ -69,6 +140,7 @@ impl Serialize for SerializeNode<'_> {
                     let name = self.doc.qual_name(id).expect("element").clone();
                     s.end_elem(name)?;
                 }
+                Op::CloseTemplate => s.end_elem(template_name())?,
             }
         }
         Ok(())
@@ -77,13 +149,26 @@ impl Serialize for SerializeNode<'_> {
 
 impl Document {
     fn serialize_to_string(&self, id: NodeId, scope: TraversalScope) -> String {
+        self.serialize_with(id, scope, ShadowSerialization::default())
+    }
+
+    fn serialize_with(
+        &self,
+        id: NodeId,
+        scope: TraversalScope,
+        shadows: ShadowSerialization<'_>,
+    ) -> String {
         let mut out = Vec::new();
         let opts = SerializeOpts {
             traversal_scope: scope,
             ..Default::default()
         };
-        serialize(&mut out, &SerializeNode::new(self, id), opts)
-            .expect("writing to a Vec cannot fail");
+        let node = SerializeNode {
+            doc: self,
+            id,
+            shadows,
+        };
+        serialize(&mut out, &node, opts).expect("writing to a Vec cannot fail");
         String::from_utf8(out).expect("serializer output is UTF-8")
     }
 
@@ -97,6 +182,13 @@ impl Document {
     pub fn inner_html(&self, id: NodeId) -> String {
         let ctx = self.qual_name(id).cloned();
         self.serialize_to_string(id, TraversalScope::ChildrenOnly(ctx))
+    }
+
+    /// `getHTML(options)`: like `innerHTML`, writing the chosen shadow
+    /// roots as `<template shadowrootmode>` elements.
+    pub fn get_html(&self, id: NodeId, shadows: ShadowSerialization<'_>) -> String {
+        let ctx = self.qual_name(id).cloned();
+        self.serialize_with(id, TraversalScope::ChildrenOnly(ctx), shadows)
     }
 
     /// The whole document as markup, doctype included.

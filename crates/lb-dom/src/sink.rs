@@ -21,6 +21,9 @@ pub(crate) struct Sink {
     root: NodeId,
     /// Document parser (true) or fragment parser (false).
     document_parser: bool,
+    /// `<template shadowrootmode>` attaches shadow roots (document parser
+    /// and `setHTMLUnsafe`).
+    pub(crate) allow_shadow: bool,
     line: Cell<u64>,
     pub(crate) script_lines: RefCell<HashMap<NodeId, u64>>,
     pub(crate) errors: Cell<u32>,
@@ -38,6 +41,7 @@ impl Sink {
             doc: RefCell::new(doc),
             root,
             document_parser,
+            allow_shadow: document_parser,
             line: Cell::new(1),
             script_lines: RefCell::new(HashMap::new()),
             errors: Cell::new(0),
@@ -215,8 +219,23 @@ impl TreeSink for Sink {
         self.line.set(line_number);
     }
 
-    // No shadow DOM yet: `<template shadowrootmode>` stays a plain template.
     fn allow_declarative_shadow_roots(&self, _intended_parent: &NodeId) -> bool {
-        false
+        self.allow_shadow
+    }
+
+    fn attach_declarative_shadow(
+        &self,
+        location: &NodeId,
+        template: &NodeId,
+        attrs: &[Attribute],
+    ) -> bool {
+        let mut doc = self.doc.borrow_mut();
+        let Some(sr) = doc.attach_declarative(*location, attrs) else {
+            return false;
+        };
+        if let Some(e) = doc.element_mut(*template) {
+            e.template_contents = Some(sr);
+        }
+        true
     }
 }

@@ -1,6 +1,7 @@
 //! The document arena and the tree, attribute and text APIs.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 
 use html5ever::tendril::StrTendril;
@@ -22,6 +23,7 @@ pub enum DomError {
     InvalidCharacter,
     Namespace,
     NoModificationAllowed,
+    NotSupported,
     /// Bad selector or markup; the string says what failed.
     Syntax(String),
 }
@@ -35,6 +37,7 @@ impl DomError {
             DomError::InvalidCharacter => "InvalidCharacterError",
             DomError::Namespace => "NamespaceError",
             DomError::NoModificationAllowed => "NoModificationAllowedError",
+            DomError::NotSupported => "NotSupportedError",
             DomError::Syntax(_) => "SyntaxError",
         }
     }
@@ -69,6 +72,9 @@ pub struct Document {
     /// data and element state flags. See [`Document::render_generation`].
     render_extra: u64,
     hook: Option<Box<dyn MutationHook>>,
+    /// Manual slot assignment (`slot.assign()`): slot → nodes, node → slot.
+    pub(crate) manual_slots: HashMap<NodeId, Vec<NodeId>>,
+    pub(crate) manual_slot_of: HashMap<NodeId, NodeId>,
 }
 
 impl Default for Document {
@@ -97,6 +103,16 @@ enum ShallowCopy {
     Comment(StrTendril),
     Pi(ProcessingInstruction),
     Fragment,
+    Shadow(Box<crate::shadow::ShadowRootData>),
+}
+
+/// Where a planned copy goes in its parent.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Into {
+    Child,
+    Template,
+    /// The entry is the parent's shadow root.
+    Shadow,
 }
 
 impl Document {
@@ -119,6 +135,8 @@ impl Document {
             generation: 0,
             render_extra: 0,
             hook: None,
+            manual_slots: HashMap::new(),
+            manual_slot_of: HashMap::new(),
         };
         doc.nodes.push(Node::new(NodeData::Document));
         doc
@@ -135,6 +153,8 @@ impl Document {
             generation: 0,
             render_extra: 0,
             hook: None,
+            manual_slots: HashMap::new(),
+            manual_slot_of: HashMap::new(),
         }
     }
 
@@ -201,6 +221,15 @@ impl Document {
     }
 
     // ----- node creation -----
+
+    pub(crate) fn bump_generation(&mut self) {
+        self.generation += 1;
+    }
+
+    #[inline]
+    pub(crate) fn push_node(&mut self, data: NodeData) -> NodeId {
+        self.push(data)
+    }
 
     fn push(&mut self, data: NodeData) -> NodeId {
         let id = u32::try_from(self.nodes.len())
@@ -312,7 +341,7 @@ impl Document {
             NodeData::Text(_) => NodeType::Text,
             NodeData::Comment(_) => NodeType::Comment,
             NodeData::ProcessingInstruction(_) => NodeType::ProcessingInstruction,
-            NodeData::DocumentFragment => NodeType::DocumentFragment,
+            NodeData::DocumentFragment | NodeData::ShadowRoot(_) => NodeType::DocumentFragment,
         }
     }
 
@@ -393,7 +422,7 @@ impl Document {
             NodeData::Text(_) => "#text".into(),
             NodeData::Comment(_) => "#comment".into(),
             NodeData::ProcessingInstruction(p) => p.target.to_string(),
-            NodeData::DocumentFragment => "#document-fragment".into(),
+            NodeData::DocumentFragment | NodeData::ShadowRoot(_) => "#document-fragment".into(),
         }
     }
 
@@ -529,9 +558,10 @@ impl Document {
         self.ancestors(id).last().unwrap_or(id)
     }
 
-    /// True when the node is in the document tree.
+    /// True when the node is in the document tree (its shadow-including
+    /// root is the document).
     pub fn is_connected(&self, id: NodeId) -> bool {
-        self.root(id) == Self::DOCUMENT
+        self.shadow_including_root(id) == Self::DOCUMENT
     }
 
     /// `a.contains(b)`: `b` is `a` or a descendant of `a`.
@@ -776,7 +806,10 @@ impl Document {
     }
 
     fn insert_validated(&mut self, parent: NodeId, node: NodeId, before: Option<NodeId>) {
-        if matches!(self.node(node).data, NodeData::DocumentFragment) {
+        if matches!(
+            self.node(node).data,
+            NodeData::DocumentFragment | NodeData::ShadowRoot(_)
+        ) {
             let kids: Vec<NodeId> = self.children(node).collect();
             for k in kids {
                 self.insert_unchecked(parent, k, before);
@@ -800,7 +833,7 @@ impl Document {
         if !matches!(pt, T::Document | T::DocumentFragment | T::Element) {
             return Err(DomError::HierarchyRequest);
         }
-        if self.contains(node, parent) {
+        if self.shadow_including_contains(node, parent) {
             return Err(DomError::HierarchyRequest);
         }
         if let Some(c) = child
@@ -914,7 +947,7 @@ impl Document {
     pub fn text_content(&self, id: NodeId) -> Option<String> {
         match &self.node(id).data {
             NodeData::Document | NodeData::Doctype(_) => None,
-            NodeData::Element(_) | NodeData::DocumentFragment => {
+            NodeData::Element(_) | NodeData::DocumentFragment | NodeData::ShadowRoot(_) => {
                 let mut s = String::new();
                 for n in self.descendants(id) {
                     if let NodeData::Text(t) = &self.node(n).data {
@@ -1167,93 +1200,118 @@ impl Document {
             NodeData::Comment(t) => ShallowCopy::Comment(t.clone()),
             NodeData::ProcessingInstruction(p) => ShallowCopy::Pi((**p).clone()),
             NodeData::DocumentFragment => ShallowCopy::Fragment,
+            NodeData::ShadowRoot(d) => ShallowCopy::Shadow(d.clone()),
         }
     }
 
     /// `node.cloneNode(deep)`. Cloning the document node gives a fragment
     /// holding copies of its children (a second arena is not created).
+    /// Clonable shadow roots are cloned with their hosts (even shallow).
     pub fn clone_node(&mut self, id: NodeId, deep: bool) -> NodeId {
         // Two passes: snapshot under a shared borrow, then build.
-        let plan = Self::plan_copy(self, id, deep);
-        self.build_copy(plan)
+        let plan = Self::plan_copy_from(self, id, deep, false, None);
+        self.build_copy_ids(plan)[0]
     }
 
     /// `document.importNode(node, deep)`: copy a node from another document
     /// into this arena.
     pub fn import_node(&mut self, src: &Document, id: NodeId, deep: bool) -> NodeId {
-        let plan = Self::plan_copy(src, id, deep);
-        self.build_copy(plan)
+        let plan = Self::plan_copy_from(src, id, deep, false, None);
+        self.build_copy_ids(plan)[0]
     }
 
     /// Move a subtree of another document into this arena (adoption across
     /// arenas): the copy plus, for every copied node in pre-order, `(source
     /// node, copy)`, so callers can carry per-node state over. The source
-    /// subtree is left in place (detach it there).
+    /// subtree is left in place (detach it there). Shadow roots (all of
+    /// them) and manual slot assignments inside the subtree move along.
     pub fn import_node_mapped(
         &mut self,
         src: &Document,
         id: NodeId,
     ) -> (NodeId, Vec<(NodeId, NodeId)>) {
         let mut sources = Vec::new();
-        let plan = Self::plan_copy_from(src, id, true, Some(&mut sources));
+        let plan = Self::plan_copy_from(src, id, true, true, Some(&mut sources));
         let ids = self.build_copy_ids(plan);
-        (ids[0], sources.into_iter().zip(ids).collect())
+        let map: Vec<(NodeId, NodeId)> = sources.into_iter().zip(ids.iter().copied()).collect();
+        if !src.manual_slots.is_empty() {
+            let lookup: std::collections::HashMap<NodeId, NodeId> = map.iter().copied().collect();
+            for &(o, n) in &map {
+                if let Some(list) = src.manual_slots.get(&o) {
+                    let nodes: Vec<NodeId> =
+                        list.iter().filter_map(|x| lookup.get(x).copied()).collect();
+                    if !nodes.is_empty() {
+                        self.assign_slot(n, &nodes);
+                    }
+                }
+            }
+        }
+        (ids[0], map)
     }
 
-    /// Pre-order list of (copy, parent index in the plan, goes into the
-    /// parent's template contents).
-    fn plan_copy(src: &Document, id: NodeId, deep: bool) -> Vec<(ShallowCopy, usize, bool)> {
-        Self::plan_copy_from(src, id, deep, None)
-    }
-
-    /// [`Document::plan_copy`], also listing the source node of each entry.
+    /// Pre-order list of (copy, parent index in the plan, where it goes),
+    /// optionally also listing the source node of each entry. `all_shadows`
+    /// copies every shadow root (adoption), otherwise only clonable ones.
     fn plan_copy_from(
         src: &Document,
         id: NodeId,
         deep: bool,
+        all_shadows: bool,
         mut sources: Option<&mut Vec<NodeId>>,
-    ) -> Vec<(ShallowCopy, usize, bool)> {
-        let mut plan = vec![(src.shallow_copy(id), usize::MAX, false)];
+    ) -> Vec<(ShallowCopy, usize, Into)> {
+        let mut plan = vec![(src.shallow_copy(id), usize::MAX, Into::Child)];
         if let Some(s) = sources.as_deref_mut() {
             s.push(id);
         }
-        if !deep {
-            return plan;
-        }
-        // Stack of (source node, parent plan index, into template contents).
-        let mut stack: Vec<(NodeId, usize, bool)> = Vec::new();
-        let push_children = |stack: &mut Vec<_>, of: NodeId, idx: usize| {
-            let kids: Vec<NodeId> = src.children(of).collect();
-            for k in kids.into_iter().rev() {
-                stack.push((k, idx, false));
-            }
-            if let Some(tc) = src.template_contents(of) {
-                let kids: Vec<NodeId> = src.children(tc).collect();
+        // Stack of (source node, parent plan index, where it goes).
+        let mut stack: Vec<(NodeId, usize, Into)> = Vec::new();
+        let push_children = |stack: &mut Vec<_>, of: NodeId, idx: usize, deep: bool| {
+            if deep {
+                let kids: Vec<NodeId> = src.children(of).collect();
                 for k in kids.into_iter().rev() {
-                    stack.push((k, idx, true));
+                    stack.push((k, idx, Into::Child));
+                }
+                if let Some(tc) = src.template_contents(of)
+                    && !src.is_shadow_root(tc)
+                {
+                    let kids: Vec<NodeId> = src.children(tc).collect();
+                    for k in kids.into_iter().rev() {
+                        stack.push((k, idx, Into::Template));
+                    }
                 }
             }
+            if let Some(sr) = src.shadow_root(of)
+                && (all_shadows || src.shadow_root_data(sr).is_some_and(|d| d.clonable))
+            {
+                stack.push((sr, idx, Into::Shadow));
+            }
         };
-        push_children(&mut stack, id, 0);
-        while let Some((n, parent, into_tc)) = stack.pop() {
+        push_children(&mut stack, id, 0, deep);
+        while let Some((n, parent, into)) = stack.pop() {
             let idx = plan.len();
-            plan.push((src.shallow_copy(n), parent, into_tc));
+            plan.push((src.shallow_copy(n), parent, into));
             if let Some(s) = sources.as_deref_mut() {
                 s.push(n);
             }
-            push_children(&mut stack, n, idx);
+            push_children(&mut stack, n, idx, true);
         }
         plan
     }
 
-    fn build_copy(&mut self, plan: Vec<(ShallowCopy, usize, bool)>) -> NodeId {
-        self.build_copy_ids(plan)[0]
-    }
-
     /// The copies, one per plan entry, in plan order.
-    fn build_copy_ids(&mut self, plan: Vec<(ShallowCopy, usize, bool)>) -> Vec<NodeId> {
+    fn build_copy_ids(&mut self, plan: Vec<(ShallowCopy, usize, Into)>) -> Vec<NodeId> {
         let mut ids: Vec<NodeId> = Vec::with_capacity(plan.len());
-        for (copy, parent, into_tc) in plan {
+        for (copy, parent, into) in plan {
+            if let ShallowCopy::Shadow(mut d) = copy {
+                let host = ids[parent];
+                d.host = host;
+                let sr = self.push(NodeData::ShadowRoot(d));
+                if let Some(e) = self.element_mut(host) {
+                    e.shadow_root = Some(sr);
+                }
+                ids.push(sr);
+                continue;
+            }
             let id = match copy {
                 ShallowCopy::Document | ShallowCopy::Fragment => self.create_document_fragment(),
                 ShallowCopy::Doctype(d) => self.create_doctype_tendril(d),
@@ -1261,10 +1319,11 @@ impl Document {
                 ShallowCopy::Text(t) => self.create_text_tendril(t),
                 ShallowCopy::Comment(t) => self.create_comment_tendril(t),
                 ShallowCopy::Pi(p) => self.create_pi_tendril(p.target, p.data),
+                ShallowCopy::Shadow(_) => unreachable!(),
             };
             if parent != usize::MAX {
                 let mut p = ids[parent];
-                if into_tc {
+                if into == Into::Template {
                     p = self.template_contents(p).expect("template contents");
                 }
                 // Fresh nodes: no observer can see them, so no events.

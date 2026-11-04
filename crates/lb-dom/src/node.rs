@@ -130,6 +130,9 @@ pub(crate) enum NodeData {
     Comment(StrTendril),
     ProcessingInstruction(Box<ProcessingInstruction>),
     DocumentFragment,
+    /// A shadow root (a `DocumentFragment` to scripts). Its `parent` link
+    /// stays empty: the host is in [`crate::ShadowRootData::host`].
+    ShadowRoot(Box<crate::shadow::ShadowRootData>),
 }
 
 /// `<!DOCTYPE>` data.
@@ -156,6 +159,8 @@ pub struct ElementData {
     pub attrs: Vec<Attribute>,
     /// Content fragment of a `<template>`.
     pub template_contents: Option<NodeId>,
+    /// Shadow root hosted by this element.
+    pub shadow_root: Option<NodeId>,
     /// MathML `annotation-xml` HTML integration point (parser detail).
     pub mathml_annotation_xml_integration_point: bool,
 }
@@ -166,6 +171,7 @@ impl ElementData {
             name,
             attrs,
             template_contents: None,
+            shadow_root: None,
             mathml_annotation_xml_integration_point: false,
         }
     }

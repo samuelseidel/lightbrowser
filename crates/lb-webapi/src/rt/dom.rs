@@ -28,6 +28,7 @@ pub(crate) fn dom_err(w: &Window, op: &str, iface: &str, e: DomError) -> HostErr
         DomError::InvalidCharacter => "The string contains invalid characters.".to_owned(),
         DomError::Namespace => "The namespace is invalid.".to_owned(),
         DomError::NoModificationAllowed => "This node may not be modified.".to_owned(),
+        DomError::NotSupported => "The operation is not supported.".to_owned(),
         DomError::Syntax(s) => format!("'{s}' is not a valid selector."),
     };
     w.rt.err(

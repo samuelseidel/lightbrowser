@@ -18,6 +18,7 @@ mod node;
 mod parser;
 mod select;
 mod serialize;
+mod shadow;
 mod sink;
 
 pub use document::{Children, Descendants, Document, DomError};
@@ -25,7 +26,11 @@ pub use mutation::{Mutation, MutationHook};
 pub use node::{Doctype, ElementData, NodeFlags, NodeId, NodeType, ProcessingInstruction};
 pub use parser::{HtmlParser, ParseStep, ParserOptions};
 pub use select::{ElementFacts, ElementRef, SelectorList};
-pub use serialize::SerializeNode;
+pub use serialize::{SerializeNode, ShadowSerialization};
+pub use shadow::{
+    AttachShadowError, ShadowRootData, ShadowRootInit, ShadowRootMode, SlotAssignment,
+    is_valid_custom_element_name,
+};
 
 /// Interned names and helpers from html5ever, re-exported so callers use
 /// the same atom types.

@@ -368,6 +368,17 @@ impl Document {
     /// in it are marked already started. The mutation hook does not see the
     /// scratch tree.
     pub fn parse_fragment(&mut self, context: NodeId, html: &str) -> NodeId {
+        self.parse_fragment_with(context, html, false)
+    }
+
+    /// [`Document::parse_fragment`]; `declarative_shadow` lets
+    /// `<template shadowrootmode>` attach shadow roots (`setHTMLUnsafe`).
+    pub fn parse_fragment_with(
+        &mut self,
+        context: NodeId,
+        html: &str,
+        declarative_shadow: bool,
+    ) -> NodeId {
         let hook = self.set_mutation_hook(None);
         let root = self.create_document_fragment();
         let form = std::iter::once(context)
@@ -375,7 +386,8 @@ impl Document {
             .find(|&n| self.is_html_element_named(n, &local_name!("form")));
         let quirks = self.quirks_mode();
         let doc = std::mem::replace(self, Document::placeholder());
-        let sink = Sink::new(doc, root, false);
+        let mut sink = Sink::new(doc, root, false);
+        sink.allow_shadow = declarative_shadow;
         let tb_opts = TreeBuilderOpts {
             quirks_mode: quirks,
             ..Default::default()
@@ -403,8 +415,20 @@ impl Document {
 
     /// `element.innerHTML = html`. For `<template>` this replaces the
     /// template contents.
+    /// For a shadow root the host is the context element.
     pub fn set_inner_html(&mut self, element: NodeId, html: &str) {
-        let frag = self.parse_fragment(element, html);
+        self.set_html_with(element, html, false);
+    }
+
+    /// `setHTMLUnsafe(html)`: like `innerHTML`, with declarative shadow
+    /// roots.
+    pub fn set_html_unsafe(&mut self, element: NodeId, html: &str) {
+        self.set_html_with(element, html, true);
+    }
+
+    fn set_html_with(&mut self, element: NodeId, html: &str, dsd: bool) {
+        let context = self.shadow_host(element).unwrap_or(element);
+        let frag = self.parse_fragment_with(context, html, dsd);
         let target = self.template_contents(element).unwrap_or(element);
         self.remove_all_children(target);
         for k in self.take_children_silently(frag) {
