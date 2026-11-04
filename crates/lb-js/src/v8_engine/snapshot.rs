@@ -536,11 +536,16 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
         r.diverged = true;
         return None;
     }
-    let overflow = Overflow {
+    // Keys and the `reorder_last` plan are made on first use (no scope
+    // here; see `overflow_of`).
+    let overflow = Rc::new(Overflow {
         chunks: overflow,
         items,
         direct: Vec::new(),
-    };
+        keys: Vec::new(),
+        deferred: Vec::new(),
+        last: Vec::new(),
+    });
     let parent = spec.parent;
     let prototype_from = spec.prototype_from;
     let reorder_last = spec.reorder_last.clone();

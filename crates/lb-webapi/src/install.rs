@@ -131,6 +131,10 @@ struct Inner {
     globals_fixup: String,
     /// Every own property name of Chrome's window.
     window_names: std::collections::HashSet<&'static str>,
+    /// The engine globals the first realm deleted: every realm of an
+    /// engine starts with the same ones, so later realms delete these by
+    /// name instead of listing every key.
+    engine_extras: RefCell<Option<Vec<String>>>,
     /// Host property slots (`GlobalProp::Other`), removed unless the
     /// realm keeps them.
     host_slots: Vec<&'static str>,
@@ -336,6 +340,7 @@ impl Bindings {
             window,
             globals_fixup,
             window_names: props.iter().map(GlobalProp::name).collect(),
+            engine_extras: RefCell::new(None),
             host_slots: props
                 .iter()
                 .filter_map(|p| match p {
@@ -427,9 +432,14 @@ impl Bindings {
         // `SharedArrayBuffer` outside cross-origin isolation); V8 adds its
         // flag-gated ones to snapshot realms too.
         let names = &self.0.window_names;
-        let mut result = engine
-            .delete_globals_except(realm, &|n| names.contains(n))
-            .map(|_| JsValue::Undefined);
+        let known = self.0.engine_extras.borrow().clone();
+        let mut result = match known {
+            Some(extras) => engine.delete_globals(realm, &extras),
+            None => engine
+                .delete_globals_except(realm, &|n| names.contains(n))
+                .map(|deleted| *self.0.engine_extras.borrow_mut() = Some(deleted)),
+        }
+        .map(|_| JsValue::Undefined);
         if result.is_ok() && !options.host_slots && !self.0.host_slots.is_empty() {
             result = engine.evaluate(
                 realm,

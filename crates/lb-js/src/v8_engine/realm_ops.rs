@@ -107,20 +107,25 @@ pub trait RealmOps {
     /// Delete the configurable own string-keyed properties of the realm's
     /// global whose names `keep` rejects (engine built-ins a browser does
     /// not expose), as a script doing `delete globalThis[name]` would.
-    /// Returns how many own string keys the global has afterwards. Reads
-    /// no property values, so lazy interface objects stay lazy.
+    /// Returns the names deleted. Reads no property values, so lazy
+    /// interface objects stay lazy.
     fn delete_globals_except(
         &mut self,
         realm: RealmId,
         keep: &dyn Fn(&str) -> bool,
-    ) -> Result<usize, JsError>;
+    ) -> Result<Vec<String>, JsError>;
+    /// Delete these own properties of the realm's global where they exist
+    /// and are configurable (the names an earlier
+    /// [`RealmOps::delete_globals_except`] returned, without listing every
+    /// key again).
+    fn delete_globals(&mut self, realm: RealmId, names: &[String]) -> Result<(), JsError>;
 }
 
 /// Shared body of [`RealmOps::delete_globals_except`].
-fn delete_globals(
+fn delete_globals_listed(
     scope: &mut v8::PinScope<'_, '_>,
     keep: &dyn Fn(&str) -> bool,
-) -> Result<usize, JsError> {
+) -> Result<Vec<String>, JsError> {
     let global = scope.get_current_context().global(scope);
     let args = v8::GetPropertyNamesArgs {
         mode: v8::KeyCollectionMode::OwnOnly,
@@ -135,26 +140,50 @@ fn delete_globals(
     let k_conf = v8::String::new(scope, "configurable")
         .ok_or_else(|| JsError::host("string"))?
         .into();
-    let mut left = n as usize;
+    let mut deleted = Vec::new();
     for i in 0..n {
         let Some(key) = names.get_index(scope, i) else {
             continue;
         };
-        if keep(&key.to_rust_string_lossy(scope)) {
+        let name = key.to_rust_string_lossy(scope);
+        if keep(&name) {
             continue;
         }
-        let Ok(name) = v8::Local::<v8::Name>::try_from(key) else {
-            continue;
-        };
-        let configurable = global
-            .get_own_property_descriptor(scope, name)
-            .and_then(|d| v8::Local::<v8::Object>::try_from(d).ok())
-            .is_some_and(|d| d.get(scope, k_conf).is_some_and(|v| v.is_true()));
-        if configurable && global.delete(scope, key) == Some(true) {
-            left -= 1;
+        if delete_configurable(scope, global, key, k_conf) {
+            deleted.push(name);
         }
     }
-    Ok(left)
+    Ok(deleted)
+}
+
+/// Shared body of [`RealmOps::delete_globals`].
+fn delete_globals_named(scope: &mut v8::PinScope<'_, '_>, names: &[String]) -> Result<(), JsError> {
+    let global = scope.get_current_context().global(scope);
+    let k_conf = v8::String::new(scope, "configurable")
+        .ok_or_else(|| JsError::host("string"))?
+        .into();
+    for name in names {
+        let key = v8::String::new(scope, name).ok_or_else(|| JsError::host("string"))?;
+        delete_configurable(scope, global, key.into(), k_conf);
+    }
+    Ok(())
+}
+
+/// Delete `key` from `global` if it is an own configurable property.
+fn delete_configurable<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    global: v8::Local<'s, v8::Object>,
+    key: v8::Local<'s, v8::Value>,
+    k_conf: v8::Local<'s, v8::Value>,
+) -> bool {
+    let Ok(name) = v8::Local::<v8::Name>::try_from(key) else {
+        return false;
+    };
+    let configurable = global
+        .get_own_property_descriptor(scope, name)
+        .and_then(|d| v8::Local::<v8::Object>::try_from(d).ok())
+        .is_some_and(|d| d.get(scope, k_conf).is_some_and(|v| v.is_true()));
+    configurable && global.delete(scope, key) == Some(true)
 }
 
 /// Shared body of [`RealmOps::set_security_token`]: the token is an
@@ -281,8 +310,11 @@ impl RealmOps for Engine {
         &mut self,
         realm: RealmId,
         keep: &dyn Fn(&str) -> bool,
-    ) -> Result<usize, JsError> {
-        self.run(realm, |scope, _| delete_globals(scope, keep))
+    ) -> Result<Vec<String>, JsError> {
+        self.run(realm, |scope, _| delete_globals_listed(scope, keep))
+    }
+    fn delete_globals(&mut self, realm: RealmId, names: &[String]) -> Result<(), JsError> {
+        self.run(realm, |scope, _| delete_globals_named(scope, names))
     }
 }
 
@@ -538,7 +570,10 @@ impl RealmOps for CallCtx<'_, '_, '_> {
         &mut self,
         realm: RealmId,
         keep: &dyn Fn(&str) -> bool,
-    ) -> Result<usize, JsError> {
-        self.run_in(realm, |scope, _| delete_globals(scope, keep))
+    ) -> Result<Vec<String>, JsError> {
+        self.run_in(realm, |scope, _| delete_globals_listed(scope, keep))
+    }
+    fn delete_globals(&mut self, realm: RealmId, names: &[String]) -> Result<(), JsError> {
+        self.run_in(realm, |scope, _| delete_globals_named(scope, names))
     }
 }

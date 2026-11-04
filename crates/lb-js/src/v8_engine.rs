@@ -688,7 +688,8 @@ struct IfaceEntry {
     prototype_from: Option<InterfaceId>,
     /// Instance members not on the instance template, defined on each
     /// instance after it is created, in order (see `apply_overflow`).
-    overflow: Overflow,
+    /// Shared, so a realm's setup reads it without holding the state.
+    overflow: Rc<Overflow>,
     /// See [`InterfaceSpec::reorder_last`].
     reorder_last: Vec<PropKey>,
 }
@@ -710,6 +711,110 @@ struct Overflow {
     /// functions (V8 caches one per template and context), same
     /// descriptor.
     direct: Vec<Option<Direct>>,
+    /// Per item, its key as a V8 name (made once per isolate).
+    keys: Vec<v8::Global<v8::Name>>,
+    /// With the interface's `reorder_last` (a global): per item, whether
+    /// it is defined at the end instead of in member order.
+    deferred: Vec<bool>,
+    /// The steps after the members, in `reorder_last` order.
+    last: Vec<LastStep>,
+}
+
+impl Overflow {
+    /// Made by [`plan_overflow`] (the snapshot restores only the parts).
+    fn planned(&self) -> bool {
+        self.keys.len() == self.items.len()
+    }
+}
+
+/// An [`Overflow`] with its per-isolate keys and `reorder_last` plan.
+fn plan_overflow<'s>(
+    scope: &mut v8::PinScope<'s, '_, ()>,
+    chunks: Vec<v8::Global<v8::ObjectTemplate>>,
+    items: Vec<OverflowItem>,
+    direct: Vec<Option<Direct>>,
+    reorder_last: &[PropKey],
+) -> Overflow {
+    fn item_key(it: &OverflowItem) -> &PropKey {
+        match it {
+            OverflowItem::Interface { key, .. } | OverflowItem::Chunk { key, .. } => key,
+        }
+    }
+    let keys = items
+        .iter()
+        .map(|it| {
+            let k = v8_key(scope, item_key(it));
+            v8::Global::new(scope, k)
+        })
+        .collect();
+    // An item with a `reorder_last` key (its last occurrence) is defined
+    // at the end; other keys are existing properties moved there.
+    let mut deferred = vec![false; items.len()];
+    let mut last = Vec::with_capacity(reorder_last.len());
+    if !reorder_last.is_empty() {
+        let wanted: std::collections::HashSet<&PropKey> = reorder_last.iter().collect();
+        let mut index: HashMap<&PropKey, usize> = HashMap::new();
+        for (i, it) in items.iter().enumerate() {
+            if wanted.contains(item_key(it)) {
+                index.insert(item_key(it), i);
+            }
+        }
+        for &i in index.values() {
+            deferred[i] = true;
+        }
+        for key in reorder_last {
+            last.push(match index.get(key) {
+                Some(&i) => LastStep::Item(i),
+                None => {
+                    let k = v8_key(scope, key);
+                    LastStep::Move(v8::Global::new(scope, k))
+                }
+            });
+        }
+    }
+    Overflow {
+        chunks,
+        items,
+        direct,
+        keys,
+        deferred,
+        last,
+    }
+}
+
+/// The overflow plan of `iface`, planned now if the snapshot restored it.
+fn overflow_of(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    iface: InterfaceId,
+) -> Option<Rc<Overflow>> {
+    let (o, reorder_last) = {
+        let st = state.borrow();
+        let e = st.entry(iface)?;
+        if e.overflow.planned() {
+            return Some(e.overflow.clone());
+        }
+        (e.overflow.clone(), e.reorder_last.clone())
+    };
+    let o = Rc::new(plan_overflow(
+        scope,
+        o.chunks.clone(),
+        o.items.clone(),
+        Vec::new(),
+        &reorder_last,
+    ));
+    if let Some(IfaceSlot::Built(e)) = state.borrow_mut().interfaces.get_mut(iface.0 as usize) {
+        e.overflow = o.clone();
+    }
+    Some(o)
+}
+
+/// One key of `reorder_last` (see [`apply_overflow_with`]).
+enum LastStep {
+    /// An overflow item, defined here instead of in member order.
+    Item(usize),
+    /// Another own property (an engine built-in), moved here.
+    Move(v8::Global<v8::Name>),
 }
 
 /// A chunk member defined directly (see [`Overflow::direct`]).
@@ -721,6 +826,8 @@ enum Direct {
         PropAttrs,
     ),
     Value(JsValue, PropAttrs),
+    /// A namespace object: a fresh instance of its template.
+    Namespace(v8::Global<v8::ObjectTemplate>, PropAttrs),
 }
 
 /// What [`install_member`] made, for [`Direct`].
@@ -731,6 +838,7 @@ enum Made<'s> {
         Option<v8::Local<'s, v8::FunctionTemplate>>,
     ),
     Value,
+    Namespace(v8::Local<'s, v8::ObjectTemplate>),
 }
 
 #[derive(Clone)]
@@ -1894,6 +2002,9 @@ fn build_into(
                     (Some(Made::Value), MemberKind::Value(v)) => {
                         Some(Direct::Value(v.clone(), m.attrs))
                     }
+                    (Some(Made::Namespace(ot)), _) => {
+                        Some(Direct::Namespace(v8::Global::new(scope, ot), m.attrs))
+                    }
                     _ => None,
                 });
             }
@@ -1908,11 +2019,13 @@ fn build_into(
             OverflowItem::Interface { .. } => None,
         })
         .collect();
-    let overflow = Overflow {
+    let overflow = Rc::new(plan_overflow(
+        scope,
         chunks,
         items,
         direct,
-    };
+        &spec.reorder_last,
+    ));
     if spec.immutable_proto {
         inst.set_immutable_proto();
     }
@@ -2130,12 +2243,7 @@ fn setup_global<'s>(
     global: v8::Local<'s, v8::Object>,
 ) -> Result<(), JsError> {
     interface_object(scope, state, mat, iface);
-    let last = state
-        .borrow()
-        .entry(iface)
-        .map(|e| e.reorder_last.clone())
-        .unwrap_or_default();
-    apply_overflow_with(scope, state, iface, global, &last)
+    apply_overflow_with(scope, state, iface, global, true)
 }
 
 /// The global of a context deserialized from the snapshot (entered): the
@@ -3655,7 +3763,7 @@ fn install_member<'s>(
                 v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM,
             );
             template.set_with_attr(key, ot.into(), v8_attrs(m.attrs, false));
-            None
+            Some(Made::Namespace(ot))
         }
         MemberKind::Accessor { get, set } => {
             let getter = get.as_ref().map(|f| {
@@ -3901,59 +4009,29 @@ fn apply_overflow<'s>(
     iface: InterfaceId,
     obj: v8::Local<'s, v8::Object>,
 ) {
-    let _ = apply_overflow_with(scope, state, iface, obj, &[]);
+    let _ = apply_overflow_with(scope, state, iface, obj, false);
 }
 
-/// [`apply_overflow`], with the keys of `last` put at the end, in that
-/// order: members among them are skipped in member order and defined
-/// there, other existing own properties (engine built-ins) are moved
-/// there. The same result as defining everything and then moving `last`,
-/// without defining twice.
+/// [`apply_overflow`]; with `reorder_last`, the interface's
+/// `reorder_last` keys are put at the end, in that order: members among
+/// them are skipped in member order and defined there, other existing own
+/// properties (engine built-ins) are moved there. The same result as
+/// defining everything and then moving the keys, without defining twice.
 fn apply_overflow_with<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     state: &SharedState,
     iface: InterfaceId,
     obj: v8::Local<'s, v8::Object>,
-    last: &[PropKey],
+    reorder_last: bool,
 ) -> Result<(), JsError> {
-    /// [`Direct`] with local handles.
-    enum DirectL<'s> {
-        Method(v8::Local<'s, v8::FunctionTemplate>, PropAttrs),
-        Accessor(
-            Option<v8::Local<'s, v8::FunctionTemplate>>,
-            Option<v8::Local<'s, v8::FunctionTemplate>>,
-            PropAttrs,
-        ),
-        Value(JsValue, PropAttrs),
-    }
-    #[allow(clippy::type_complexity)]
-    let (chunks, items, direct): (
-        Vec<v8::Local<'s, v8::ObjectTemplate>>,
-        Vec<OverflowItem>,
-        Vec<Option<DirectL<'s>>>,
-    ) = {
-        let st = state.borrow();
-        let Some(entry) = st.entry(iface) else {
-            return Ok(());
-        };
-        let o = &entry.overflow;
-        let chunks = o.chunks.iter().map(|t| v8::Local::new(scope, t)).collect();
-        let l = |g: &v8::Global<v8::FunctionTemplate>| v8::Local::new(scope, g);
-        let direct = o
-            .direct
-            .iter()
-            .map(|d| {
-                Some(match d.as_ref()? {
-                    Direct::Method(ft, a) => DirectL::Method(l(ft), *a),
-                    Direct::Accessor(g, s, a) => {
-                        DirectL::Accessor(g.as_ref().map(l), s.as_ref().map(l), *a)
-                    }
-                    Direct::Value(v, a) => DirectL::Value(v.clone(), *a),
-                })
-            })
-            .collect();
-        (chunks, o.items.clone(), direct)
+    // The plan is shared: no state borrow is held while V8 runs (a GC may
+    // call back into the state).
+    let Some(o) = overflow_of(scope, state, iface) else {
+        return Ok(());
     };
+    if o.items.is_empty() {
+        return Ok(());
+    }
     let field = |scope: &mut v8::PinScope<'s, '_>, name: &str| -> v8::Local<'s, v8::Value> {
         v8_str(scope, name).into()
     };
@@ -3965,87 +4043,86 @@ fn apply_overflow_with<'s>(
         field(scope, "value"),
         field(scope, "writable"),
     ];
-    let item_key = |item: &OverflowItem| match item {
-        OverflowItem::Interface { key, .. } | OverflowItem::Chunk { key, .. } => key.clone(),
-    };
-    let deferred: HashMap<PropKey, usize> = if last.is_empty() {
-        HashMap::new()
-    } else {
-        let wanted: std::collections::HashSet<&PropKey> = last.iter().collect();
-        items
-            .iter()
-            .enumerate()
-            .filter(|(_, it)| wanted.contains(&item_key(it)))
-            .map(|(i, it)| (item_key(it), i))
-            .collect()
-    };
-    let mut tmps: Vec<Option<v8::Local<'s, v8::Object>>> = vec![None; chunks.len()];
-    let mut define = |scope: &mut v8::PinScope<'s, '_>, i: usize| match &items[i] {
-        OverflowItem::Interface { key, id, attrs } => {
-            let k = v8_key(scope, key);
-            define_lazy_interface(scope, obj, k, *id, *attrs);
-        }
-        OverflowItem::Chunk { key, .. } if direct.get(i).is_some_and(Option::is_some) => {
-            let k = v8_key(scope, key);
-            match &direct[i] {
-                Some(DirectL::Method(ft, a)) => {
-                    if let Some(f) = ft.get_function(scope) {
-                        obj.define_own_property(scope, k, f.into(), v8_attrs(*a, false));
+    let mut tmps: Vec<Option<v8::Local<'s, v8::Object>>> = vec![None; o.chunks.len()];
+    let mut define = |scope: &mut v8::PinScope<'s, '_>, i: usize| {
+        let k = v8::Local::new(scope, &o.keys[i]);
+        match &o.items[i] {
+            OverflowItem::Interface { id, attrs, .. } => {
+                define_lazy_interface(scope, obj, k, *id, *attrs);
+            }
+            OverflowItem::Chunk { .. } if o.direct.get(i).is_some_and(Option::is_some) => {
+                match &o.direct[i] {
+                    Some(Direct::Method(ft, a)) => {
+                        let ft = v8::Local::new(scope, ft);
+                        if let Some(f) = ft.get_function(scope) {
+                            obj.define_own_property(scope, k, f.into(), v8_attrs(*a, false));
+                        }
                     }
+                    Some(Direct::Accessor(g, s, a)) => {
+                        let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+                        let get = g
+                            .as_ref()
+                            .and_then(|ft| v8::Local::new(scope, ft).get_function(scope))
+                            .map_or(undefined, Into::into);
+                        let set = s
+                            .as_ref()
+                            .and_then(|ft| v8::Local::new(scope, ft).get_function(scope))
+                            .map_or(undefined, Into::into);
+                        let mut desc = v8::PropertyDescriptor::new_from_get_set(get, set);
+                        desc.set_enumerable(a.enumerable);
+                        desc.set_configurable(a.configurable);
+                        obj.define_property(scope, k, &desc);
+                    }
+                    Some(Direct::Value(v, a)) => {
+                        let value = js_to_v8(scope, v);
+                        obj.define_own_property(scope, k, value, v8_attrs(*a, false));
+                    }
+                    Some(Direct::Namespace(t, a)) => {
+                        let t = v8::Local::new(scope, t);
+                        if let Some(ns) = t.new_instance(scope) {
+                            obj.define_own_property(scope, k, ns.into(), v8_attrs(*a, false));
+                        }
+                    }
+                    None => {}
                 }
-                Some(DirectL::Accessor(g, s, a)) => {
-                    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
-                    let get = g
-                        .and_then(|ft| ft.get_function(scope))
-                        .map_or(undefined, Into::into);
-                    let set = s
-                        .and_then(|ft| ft.get_function(scope))
-                        .map_or(undefined, Into::into);
-                    let mut desc = v8::PropertyDescriptor::new_from_get_set(get, set);
-                    desc.set_enumerable(a.enumerable);
-                    desc.set_configurable(a.configurable);
-                    obj.define_property(scope, k, &desc);
-                }
-                Some(DirectL::Value(v, a)) => {
-                    let value = js_to_v8(scope, v);
-                    obj.define_own_property(scope, k, value, v8_attrs(*a, false));
-                }
-                None => {}
+            }
+            OverflowItem::Chunk { chunk, .. } => {
+                let tmp = match tmps[*chunk] {
+                    Some(t) => t,
+                    None => {
+                        let chunk_t = v8::Local::new(scope, &o.chunks[*chunk]);
+                        let Some(t) = chunk_t.new_instance(scope) else {
+                            return;
+                        };
+                        tmps[*chunk] = Some(t);
+                        t
+                    }
+                };
+                let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
+                    return;
+                };
+                let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
+                    return;
+                };
+                let desc = descriptor_with(scope, d, fields);
+                obj.define_property(scope, k, &desc);
             }
         }
-        OverflowItem::Chunk { key, chunk } => {
-            let tmp = match tmps[*chunk] {
-                Some(t) => t,
-                None => {
-                    let Some(t) = chunks[*chunk].new_instance(scope) else {
-                        return;
-                    };
-                    tmps[*chunk] = Some(t);
-                    t
-                }
-            };
-            let k = v8_key(scope, key);
-            let Some(d) = tmp.get_own_property_descriptor(scope, k) else {
-                return;
-            };
-            let Ok(d) = v8::Local::<v8::Object>::try_from(d) else {
-                return;
-            };
-            let desc = descriptor_with(scope, d, fields);
-            obj.define_property(scope, k, &desc);
-        }
     };
-    for (i, item) in items.iter().enumerate() {
-        if deferred.is_empty() || deferred.get(&item_key(item)) != Some(&i) {
+    let reorder = reorder_last && !o.last.is_empty();
+    for i in 0..o.items.len() {
+        if !(reorder && o.deferred[i]) {
             define(scope, i);
         }
     }
-    for key in last {
-        match deferred.get(key) {
-            Some(&i) => define(scope, i),
-            None => {
-                let k = v8_key(scope, key);
-                move_to_end(scope, obj, k)?;
+    if reorder {
+        for step in &o.last {
+            match step {
+                LastStep::Item(i) => define(scope, *i),
+                LastStep::Move(key) => {
+                    let k = v8::Local::new(scope, key);
+                    move_to_end(scope, obj, k)?;
+                }
             }
         }
     }
