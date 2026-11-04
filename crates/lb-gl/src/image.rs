@@ -232,6 +232,9 @@ pub struct Image {
     pub samples: u32,
     pub format: Format,
     pub data: Data,
+    /// Set once a draw rasterized into the image (readback noise applies
+    /// to rendered pixels only).
+    pub drawn: bool,
 }
 
 impl Image {
@@ -253,6 +256,7 @@ impl Image {
             samples: samples.max(1),
             format,
             data,
+            drawn: false,
         };
         if format.kind == Kind::Unorm && format.channels < 4 {
             // Missing alpha reads as 1.

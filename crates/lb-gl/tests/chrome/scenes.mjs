@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../../../..');
 const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib/node_modules/playwright/index.mjs');
 const out = process.argv[2] || fs.mkdtempSync('/tmp/lbscenes-');
-const page = fs.readFileSync(path.join(here, 'scenes.html'));
+const page = fs.readFileSync(path.join(here, process.env.PAGE || 'scenes.html'));
 const server = http.createServer((q, r) => { r.writeHead(q.url === '/' ? 200 : 404, { 'content-type': 'text/html' }); r.end(q.url === '/' ? page : ''); });
 await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const url = `http://127.0.0.1:${server.address().port}/`;

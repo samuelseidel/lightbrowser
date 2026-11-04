@@ -17,6 +17,8 @@ use lb_persona::{Persona, PersonaProfile};
 
 const SCENES: &str = include_str!("../../lb-gl/tests/chrome/scenes.html");
 const CHROME: &str = include_str!("../../lb-gl/tests/chrome/chrome_scenes.json");
+const API: &str = include_str!("../../lb-gl/tests/chrome/api.html");
+const CHROME_API: &str = include_str!("../../lb-gl/tests/chrome/chrome_api.json");
 
 fn ctx(persona_file: &str, seed: Option<&str>) -> BrowserContext {
     let persona = Arc::new(Persona::default_chrome());
@@ -44,7 +46,11 @@ fn ctx(persona_file: &str, seed: Option<&str>) -> BrowserContext {
 }
 
 async fn scenes(persona_file: &str, seed: Option<&str>) -> serde_json::Value {
-    let s = serve(vec![("/", Resource::html(SCENES))]).await;
+    run_page(SCENES, persona_file, seed).await
+}
+
+async fn run_page(html: &str, persona_file: &str, seed: Option<&str>) -> serde_json::Value {
+    let s = serve(vec![("/", Resource::html(html))]).await;
     let b = browser();
     let c = ctx(persona_file, seed);
     let page = open(&b, &c, &s.url("/"), WaitUntil::Load).await;
@@ -172,4 +178,21 @@ fn md5_like(b: &[u8]) -> u64 {
         h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
+}
+
+/// Errors, queries, uniform round trips, framebuffer status and
+/// readPixels results equal Chrome's (`chrome_api.json`, `api.mjs`).
+#[tokio::test]
+async fn api_results_equal_chrome() {
+    let chrome: serde_json::Value = serde_json::from_str(CHROME_API).unwrap();
+    let lb = run_page(API, "chrome153_ubuntu24_intel_uhd630_x11_1080p.json", None).await;
+    let mut diffs = Vec::new();
+    for (g, vals) in chrome.as_object().unwrap() {
+        for (k, v) in vals.as_object().unwrap() {
+            if &lb[g][k] != v {
+                diffs.push(format!("{g}.{k}: chrome {v}, lightbrowser {}", lb[g][k]));
+            }
+        }
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
 }

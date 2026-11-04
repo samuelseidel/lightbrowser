@@ -336,6 +336,9 @@ fn load_uniforms(e: &mut Exec<'_>, sh: &Shader, d: &Draw<'_>, vs: bool) {
 
 /// Runs a draw; returns false if a shader ran out of its budget.
 pub fn draw(d: &Draw<'_>, t: &mut Target<'_>, budget: &mut u64) -> bool {
+    for img in t.colors.iter_mut().flatten() {
+        img.drawn = true;
+    }
     let p = d.prog;
     let vs = &p.vs;
     let fs = &p.fs;

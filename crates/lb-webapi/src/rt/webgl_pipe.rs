@@ -325,7 +325,8 @@ impl Gl {
             }
             match size {
                 None => size = Some((img.width, img.height)),
-                Some(s) if s != (img.width, img.height) && !self.webgl2 => {
+                // Chrome requires equal sizes in WebGL 2 too.
+                Some(s) if s != (img.width, img.height) => {
                     return FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
                 }
                 _ => {}
@@ -690,8 +691,22 @@ impl Gl {
         Some((id, r.prog.clone()?))
     }
 
+    /// Every enabled attribute array the program reads has a buffer.
+    fn attribs_bound(&self, p: &Program) -> bool {
+        p.attribs.iter().all(|a| {
+            (0..u32::from(a.ty.cols.max(1))).all(|c| {
+                self.attribs
+                    .get((a.location + c) as usize)
+                    .is_none_or(|at| {
+                        !at.enabled || at.buffer.is_some_and(|b| self.res.contains_key(&b))
+                    })
+            })
+        })
+    }
+
     /// Validates attribute buffers for vertices `0..=max_vertex` and
     /// `instances`.
+    #[allow(dead_code)]
     fn attribs_ok(&self, p: &Program, max_vertex: Option<u32>, instances: u32) -> bool {
         for a in &p.attribs {
             for c in 0..u32::from(a.ty.cols.max(1)) {
@@ -742,7 +757,10 @@ impl Gl {
             Indices::Seq(first, count) => (*count > 0).then(|| first + count - 1),
             Indices::List(l) => l.iter().filter(|v| Some(**v) != restart).max().copied(),
         };
-        if !self.attribs_ok(&prog, max_vertex, instances) {
+        // Chrome relies on robust buffer access: out-of-range vertex
+        // fetches read zero instead of failing the draw.
+        let _ = max_vertex;
+        if !self.attribs_bound(&prog) {
             self.set_error(INVALID_OPERATION);
             return;
         }
@@ -959,6 +977,12 @@ impl Gl {
                 return Err(INVALID_OPERATION);
             }
             let kind = img.format.kind;
+            if !self.webgl2
+                && ty != UNSIGNED_BYTE
+                && !(ty == FLOAT_T && self.ext_enabled("WEBGL_color_buffer_float"))
+            {
+                return Err(INVALID_ENUM);
+            }
             let ok = match (format, ty) {
                 (RGBA, UNSIGNED_BYTE) => matches!(kind, Kind::Unorm),
                 (RGBA, FLOAT_T) => matches!(kind, Kind::Float | Kind::Snorm),
@@ -991,7 +1015,9 @@ impl Gl {
                         .copy_from_slice(&up[(ih - 1 - yy) * iw * 4..(ih - yy) * iw * 4]);
                 }
                 let mut noised = top.clone();
-                if let Some(seed) = self.seed {
+                // Rendered pixels carry the readback noise; uploaded or
+                // cleared framebuffer contents read back exactly.
+                if let Some(seed) = self.seed.filter(|_| b.default || img.drawn) {
                     lb_paint::CanvasNoise::new(seed).apply(
                         &top,
                         iw as u32,
@@ -1588,13 +1614,13 @@ fn register_programs(reg: &mut Registry, rt: &Runtime) {
             })
             .unwrap_or_default();
         let result: Result<Program, String> = match (&vs, &fs) {
+            (Some((_, false, _)), _) => Err("Vertex shader is not compiled.\n".into()),
+            (_, Some((_, false, _))) => Err("Fragment shader is not compiled.\n".into()),
             (None, None) => Err("No compiled shaders.\n".into()),
             (None, _) | (_, None) => Err(
                 "The program must contain objects to form both a vertex and fragment shader.\n"
                     .into(),
             ),
-            (Some((_, false, _)), _) => Err("Vertex shader is not compiled.\n".into()),
-            (_, Some((_, false, _))) => Err("Fragment shader is not compiled.\n".into()),
             (Some((_, _, Some(v))), Some((_, _, Some(f)))) => lb_gl::program::link(
                 v.clone(),
                 f.clone(),

@@ -282,6 +282,17 @@ pub fn link(vs: Rc<Shader>, fs: Rc<Shader>, o: &LinkOptions) -> Result<Program, 
             }
         }
     }
+    // ANGLE lists bool uniforms first (a stable partition).
+    let (bools, rest): (Vec<Uniform>, Vec<Uniform>) = uniforms
+        .into_iter()
+        .partition(|u| u.ty.base == Base::S(Scalar::Bool));
+    let mut cells = 0;
+    let mut uniforms = Vec::new();
+    for u in bools.into_iter().chain(rest) {
+        let n = u.ty.comps() * u.size;
+        uniforms.push(Uniform { offset: cells, ..u });
+        cells += n;
+    }
     for (u, n) in samplers {
         uniforms.push(Uniform { offset: cells, ..u });
         cells += n;

@@ -1,0 +1,112 @@
+<!doctype html>
+<!-- WebGL API results (errors, queries, uniforms, framebuffers) compared
+     between LightBrowser and Chrome (api.mjs). Loopback only. -->
+<meta charset="utf-8">
+<script>
+const R = {};
+function sh(gl, t, s) { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); return x; }
+function prog(gl, vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl, gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl, gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p); return p;
+}
+const val = (v) => (v && typeof v === 'object' && 'length' in v) ? Array.from(v) : (v && typeof v === 'object') ? String(v) : v;
+function errs(gl) { const e = []; let x; while ((x = gl.getError()) !== 0 && e.length < 5) e.push(x); return e; }
+for (const kind of ['webgl', 'webgl2']) {
+  const c = document.createElement('canvas'); c.width = 32; c.height = 16;
+  const gl = c.getContext(kind);
+  const o = R[kind] = {};
+  // Uniform round trips.
+  const p = prog(gl,
+    (kind === 'webgl2' ? '#version 300 es\nin' : 'attribute') + ' vec4 a; uniform mat3 m; uniform vec2 v[3]; uniform int i; uniform bool b; void main(){ gl_Position = a + vec4(m[1], 1.0) + vec4(v[2], float(i), b ? 1.0 : 0.0); }',
+    (kind === 'webgl2' ? '#version 300 es\nprecision mediump float; out vec4 o; uniform sampler2D s; void main(){ o = texture(s, vec2(0.5)); }' : 'precision mediump float; uniform sampler2D s; void main(){ gl_FragColor = texture2D(s, vec2(0.5)); }'));
+  o.link = gl.getProgramParameter(p, gl.LINK_STATUS);
+  gl.useProgram(p);
+  const L = (n) => gl.getUniformLocation(p, n);
+  gl.uniformMatrix3fv(L('m'), false, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  gl.uniform2fv(L('v[1]'), [5, 6, 7, 8]);
+  gl.uniform1i(L('i'), 7); gl.uniform1f(L('b'), 2); gl.uniform1i(L('s'), 3);
+  o.uniforms = [val(gl.getUniform(p, L('m'))), val(gl.getUniform(p, L('v'))), val(gl.getUniform(p, L('v[1]'))), val(gl.getUniform(p, L('v[2]'))), gl.getUniform(p, L('i')), gl.getUniform(p, L('b')), gl.getUniform(p, L('s'))];
+  o.uerrs = errs(gl);
+  gl.uniform1f(L('i'), 1); o.wrongType = errs(gl);
+  gl.uniform2fv(L('m'), [1, 2]); o.wrongSize = errs(gl);
+  gl.uniform1i(L('s'), 99); o.badUnit = errs(gl);
+  o.active = []; for (let k = 0; k < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); k++) { const u = gl.getActiveUniform(p, k); o.active.push([u.name, u.size, u.type]); }
+  o.locNames = ['v', 'v[0]', 'v[2]', 'v[3]', 'm[0]', 'nope', 'gl_FragCoord'].map((n) => L(n) === null ? null : 'loc');
+  // Draw without enabled-buffer data errors.
+  const loc = gl.getAttribLocation(p, 'a');
+  gl.enableVertexAttribArray(loc);
+  gl.drawArrays(gl.TRIANGLES, 0, 3); o.noBuffer = errs(gl);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(8), gl.STATIC_DRAW);
+  gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3); o.tooShort = errs(gl);
+  gl.drawArrays(gl.TRIANGLES, 0, 2); o.ok = errs(gl);
+  gl.drawArrays(99, 0, 2); o.badMode = errs(gl);
+  gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_SHORT, 0); o.noElements = errs(gl);
+  // Textures.
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  o.texDefaults = [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER, gl.TEXTURE_WRAP_S].map((q) => gl.getTexParameter(gl.TEXTURE_2D, q));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, 1234); o.texParamErr = errs(gl);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGB, gl.UNSIGNED_BYTE, null); o.formatMismatch = errs(gl);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(15)); o.shortData = errs(gl);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255])); o.texOk = errs(gl);
+  gl.bindTexture(gl.TEXTURE_CUBE_MAP, t); o.retarget = errs(gl);
+  // Framebuffers.
+  const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  o.fbEmpty = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  o.fbTex = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  o.attType = gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE);
+  o.attObj = gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.FRAMEBUFFER_ATTACHMENT_OBJECT_NAME) === t;
+  const px = new Uint8Array(16); gl.readPixels(0, 0, 2, 2, gl.RGBA, gl.UNSIGNED_BYTE, px); o.fbRead = Array.from(px); o.fbReadErr = errs(gl);
+  const rb = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 4, 4);
+  o.rbParams = [gl.RENDERBUFFER_WIDTH, gl.RENDERBUFFER_HEIGHT, gl.RENDERBUFFER_INTERNAL_FORMAT, gl.RENDERBUFFER_DEPTH_SIZE].map((q) => gl.getRenderbufferParameter(gl.RENDERBUFFER, q));
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
+  o.fbMismatch = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  gl.clear(gl.COLOR_BUFFER_BIT); o.clearIncomplete = errs(gl);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  // Default framebuffer clear + readPixels formats.
+  gl.clearColor(0.25, 0.5, 0.75, 0.5); gl.clear(gl.COLOR_BUFFER_BIT);
+  const one = new Uint8Array(4); gl.readPixels(1, 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, one); o.cleared = Array.from(one);
+  gl.readPixels(0, 0, 1, 1, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(3)); o.rgbRead = errs(gl);
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, new Float32Array(4)); o.floatRead = errs(gl);
+  const out = new Uint8Array(8).fill(9); gl.readPixels(31, 15, 2, 1, gl.RGBA, gl.UNSIGNED_BYTE, out); o.edgeRead = Array.from(out);
+  // Shader / program logs.
+  const bad = sh(gl, gl.VERTEX_SHADER, 'void main(){ x = 1.0; }');
+  o.badLog = gl.getShaderInfoLog(bad);
+  const bp = gl.createProgram(); gl.attachShader(bp, bad); gl.linkProgram(bp); o.badLink = [gl.getProgramParameter(bp, gl.LINK_STATUS), gl.getProgramInfoLog(bp)];
+  gl.useProgram(bp); o.useBad = errs(gl);
+  o.params = [gl.BLEND_SRC_ALPHA, gl.STENCIL_BACK_FUNC, gl.DEPTH_FUNC, gl.CULL_FACE_MODE, gl.FRONT_FACE, gl.UNPACK_ALIGNMENT, gl.PACK_ALIGNMENT, gl.SAMPLES, gl.SAMPLE_BUFFERS, gl.DEPTH_BITS, gl.STENCIL_BITS, gl.ALPHA_BITS, gl.IMPLEMENTATION_COLOR_READ_FORMAT, gl.IMPLEMENTATION_COLOR_READ_TYPE].map((q) => val(gl.getParameter(q)));
+  gl.blendFunc(gl.ONE, gl.ZERO); o.blendAfter = [gl.BLEND_SRC_RGB, gl.BLEND_SRC_ALPHA, gl.BLEND_DST_RGB, gl.BLEND_DST_ALPHA].map((q) => gl.getParameter(q));
+  o.end = errs(gl);
+}
+// WebGL 2 extras.
+{
+  const gl = document.createElement('canvas').getContext('webgl2');
+  const o = R.webgl2x = {};
+  const p = prog(gl, '#version 300 es\nlayout(std140) uniform B { mat4 m; vec3 v; float f[2]; } b; in vec4 p; void main(){ gl_Position = b.m * p + vec4(b.v, b.f[1]); }',
+    '#version 300 es\nprecision mediump float; uniform U2 { vec4 c; }; layout(location = 1) out vec4 o1; layout(location = 0) out vec4 o0; void main(){ o0 = c; o1 = c; }');
+  o.link = [gl.getProgramParameter(p, gl.LINK_STATUS), gl.getProgramInfoLog(p)];
+  o.blocks = gl.getProgramParameter(p, gl.ACTIVE_UNIFORM_BLOCKS);
+  o.blockIdx = [gl.getUniformBlockIndex(p, 'B'), gl.getUniformBlockIndex(p, 'U2'), gl.getUniformBlockIndex(p, 'X')];
+  o.blockSize = [gl.getActiveUniformBlockParameter(p, 0, gl.UNIFORM_BLOCK_DATA_SIZE), gl.getActiveUniformBlockParameter(p, 1, gl.UNIFORM_BLOCK_DATA_SIZE)];
+  o.fragLoc = [gl.getFragDataLocation(p, 'o0'), gl.getFragDataLocation(p, 'o1'), gl.getFragDataLocation(p, 'x')];
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texStorage2D(gl.TEXTURE_2D, 3, gl.RGBA8, 8, 8);
+  o.immutable = [gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_IMMUTABLE_FORMAT), gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_IMMUTABLE_LEVELS)];
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 8, 8, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); o.respec = errs(gl);
+  const f = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, f);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 2, 2, 0, gl.RGBA, gl.FLOAT, null);
+  const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, f, 0);
+  o.floatNoExt = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  gl.getExtension('EXT_color_buffer_float');
+  o.floatExt = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  gl.clearColor(1.5, -2, 0.25, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  const fp = new Float32Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, fp); o.floatRead = Array.from(fp);
+  gl.clearBufferfv(gl.COLOR, 0, [0.5, 0.5, 0.5, 0.5]); gl.readPixels(1, 1, 1, 1, gl.RGBA, gl.FLOAT, fp); o.clearBuffer = Array.from(fp);
+  o.end = errs(gl);
+}
+window.OUT = R;
+</script>
