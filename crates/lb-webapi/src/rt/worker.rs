@@ -943,6 +943,35 @@ fn script_url(
 }
 
 /// The text of a `data:` URL.
+/// A `data:` URL's MIME type (as Chrome's data URL loader reports it)
+/// and body.
+pub(crate) fn decode_data_url_bytes(url: &Url) -> Option<(String, Vec<u8>)> {
+    let rest = url.as_str().strip_prefix("data:")?;
+    let rest = rest.split('#').next().unwrap_or(rest);
+    let (meta, body) = rest.split_once(',')?;
+    let bytes: Vec<u8> = percent_encoding::percent_decode_str(body).collect();
+    let meta = meta.trim();
+    let (mime, b64) = match meta.strip_suffix(";base64") {
+        Some(m) => (m.trim(), true),
+        None => (meta, false),
+    };
+    let mime = if mime.is_empty() || mime.starts_with(';') {
+        "text/plain;charset=US-ASCII".to_owned()
+    } else {
+        mime.to_owned()
+    };
+    let body = if b64 {
+        let s: String = String::from_utf8_lossy(&bytes)
+            .chars()
+            .filter(|c| !c.is_ascii_whitespace())
+            .collect();
+        super::window::base64_decode(&s)?
+    } else {
+        bytes
+    };
+    Some((mime, body))
+}
+
 fn decode_data_url(url: &Url) -> Option<String> {
     let rest = url.as_str().strip_prefix("data:")?;
     let (meta, body) = rest.split_once(',')?;

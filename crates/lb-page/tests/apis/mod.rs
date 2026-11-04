@@ -99,4 +99,6 @@ cases!(
     crypto_order,
     crypto_random,
     crypto_rsa,
+    xhr_blob,
+    xhr_sync,
 );

@@ -411,7 +411,7 @@ fn body_method(reg: &mut Registry, rt: &Runtime, iface: &'static str, name: &'st
             "blob" => {
                 let b = w.new_obj(Obj::Blob(Box::new(super::misc::BlobData {
                     bytes,
-                    type_: ct.unwrap_or_default().to_ascii_lowercase(),
+                    type_: mime_essence(&ct.unwrap_or_default()),
                 })));
                 let a = w.obj_arg(b);
                 cx.resolve_promise(r, a)
@@ -426,9 +426,111 @@ fn body_method(reg: &mut Registry, rt: &Runtime, iface: &'static str, name: &'st
     });
 }
 
+/// A `Content-Type`'s MIME type without parameters, lowercased (what
+/// Blink gives a body's `Blob`).
+fn mime_essence(ct: &str) -> String {
+    ct.split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// `blob:` and `data:` URLs: answered without the network.
+fn is_local(u: &Url) -> bool {
+    matches!(u.scheme(), "blob" | "data")
+}
+
+/// Whether a response is cross-origin for its requester (`blob:` and
+/// `data:` responses are basic, as Chrome's loaders make them).
+fn is_cross_origin(origin: &url::Origin, resp: &NetResponse) -> bool {
+    !is_local(&resp.url) && resp.url.origin() != *origin
+}
+
+/// The response of a `blob:` or `data:` URL as Chrome's blob and data URL
+/// loaders give it, or `Err(detail)` (empty: no detail). `None` for other
+/// schemes.
+pub(crate) fn local_response(
+    method: &str,
+    url: &Url,
+    headers: &[(String, String)],
+) -> Option<Result<NetResponse, String>> {
+    let ok = |status: u16, headers: Vec<(String, String)>, body: Vec<u8>| NetResponse {
+        status,
+        status_text: "OK".into(),
+        headers,
+        body: bytes::Bytes::from(body),
+        url: url.clone(),
+        redirected: false,
+    };
+    match url.scheme() {
+        "blob" => {
+            if method != "GET" {
+                return Some(Err(
+                    "'GET' is the only method allowed for 'blob:' URLs.".into()
+                ));
+            }
+            let Some((body, ty)) = super::worker::resolve_blob_url(url.as_str()) else {
+                return Some(Err(String::new()));
+            };
+            let range = headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("range"))
+                .and_then(|(_, v)| byte_range(v, body.len()));
+            Some(Ok(match range {
+                Some((a, b)) => ok(
+                    206,
+                    vec![
+                        ("Content-Length".into(), (b - a + 1).to_string()),
+                        (
+                            "Content-Range".into(),
+                            format!("bytes {a}-{b}/{}", body.len()),
+                        ),
+                        ("Content-Type".into(), ty),
+                    ],
+                    body[a..=b].to_vec(),
+                ),
+                None => ok(
+                    200,
+                    vec![
+                        ("Content-Length".into(), body.len().to_string()),
+                        ("Content-Type".into(), ty),
+                    ],
+                    body,
+                ),
+            }))
+        }
+        "data" => {
+            let Some((mime, body)) = super::worker::decode_data_url_bytes(url) else {
+                return Some(Err(String::new()));
+            };
+            Some(Ok(ok(200, vec![("Content-Type".into(), mime)], body)))
+        }
+        _ => None,
+    }
+}
+
+/// A single `bytes=a-b` / `bytes=a-` / `bytes=-n` range within `len`.
+fn byte_range(v: &str, len: usize) -> Option<(usize, usize)> {
+    let r = v.trim().strip_prefix("bytes=")?;
+    let (a, b) = r.split_once('-')?;
+    if len == 0 {
+        return None;
+    }
+    let (a, b) = match (a.trim(), b.trim()) {
+        ("", n) => {
+            let n: usize = n.parse().ok()?;
+            (len.saturating_sub(n), len - 1)
+        }
+        (a, "") => (a.parse().ok()?, len - 1),
+        (a, b) => (a.parse().ok()?, b.parse::<usize>().ok()?.min(len - 1)),
+    };
+    (a <= b && a < len).then_some((a, b))
+}
+
 /// CORS check for a cross-origin response.
 fn cors_ok(origin: &url::Origin, resp: &NetResponse) -> bool {
-    if resp.url.origin() == *origin {
+    if !is_cross_origin(origin, resp) {
         return true;
     }
     match resp.header("access-control-allow-origin") {
@@ -486,6 +588,13 @@ pub(crate) fn start_request(
     req: NetRequest,
     done: Box<dyn FnOnce(&mut dyn Js, &Rc<Window>, Result<NetResponse, String>)>,
 ) {
+    if let Some(r) = local_response(&req.method, &req.url, &req.headers) {
+        w.queue_task(
+            TaskSource::Networking,
+            Box::new(move |js, w| done(js, w, r)),
+        );
+        return;
+    }
     w.in_flight.set(w.in_flight.get() + 1);
     let fut = w.net_fetch(req);
     let weak = Rc::downgrade(w);
@@ -530,7 +639,7 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
             }),
         );
     }
-    if !matches!(url.scheme(), "http" | "https") {
+    if !matches!(url.scheme(), "http" | "https" | "blob" | "data") {
         return cx.reject_promise(r, HostError::type_error("Failed to fetch"));
     }
     let origin = w.url().origin();
@@ -557,7 +666,7 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
             };
             match result {
                 Ok(resp) if mode == "no-cors" || cors_ok(&origin, &resp) => {
-                    let cors = resp.url.origin() != origin;
+                    let cors = is_cross_origin(&origin, &resp);
                     let h = new_headers(
                         w,
                         HeadersData {
@@ -910,7 +1019,7 @@ fn xhr_complete(
     };
     match result {
         Ok(resp) if cors_ok(&origin, &resp) => {
-            let cors = resp.url.origin() != origin;
+            let cors = is_cross_origin(&origin, &resp);
             let len = resp.body.len() as f64;
             let total = resp
                 .header("content-length")
@@ -961,6 +1070,81 @@ fn xhr_complete(
             xhr_event(js, w, id, "loadend", 0.0, 0.0);
         }
     }
+}
+
+/// `send()` of a synchronous request: the fetch blocks this thread (on
+/// another thread's runtime, as `importScripts`), then `readystatechange`
+/// (DONE), `load` and `loadend` fire before `send()` returns; no
+/// `loadstart`, progress or upload events. A network error throws
+/// `NetworkError` without events, as in Chrome.
+fn xhr_send_sync(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Rc<Window>,
+    id: u32,
+    generation: u32,
+    req: NetRequest,
+    origin: url::Origin,
+) -> Result<(), HostError> {
+    if !w.is_worker() {
+        w.warn("[Deprecation] Synchronous XMLHttpRequest on the main thread is deprecated because of its detrimental effects to the end user's experience. For more help, check https://xhr.spec.whatwg.org/.");
+    }
+    let url = req.url.clone();
+    let result = match local_response(&req.method, &req.url, &req.headers) {
+        Some(r) => r,
+        None => match w.worker_host() {
+            Some(h) => h.fetch_sync(req).map_err(|_| String::new()),
+            None => Err(String::new()),
+        },
+    };
+    let resp = match result {
+        Ok(resp) if cors_ok(&origin, &resp) => resp,
+        other => {
+            let detail = match &other {
+                Err(d) if !d.is_empty() => format!(": {d}"),
+                _ => ".".into(),
+            };
+            with_xhr(w, id, |x| {
+                x.generation += 1;
+                x.ready_state = 4;
+                x.send_flag = false;
+                x.error = true;
+                x.status = 0;
+                x.body.clear();
+                x.resp_headers.clear();
+            });
+            return Err(w.rt.err(
+                "NetworkError",
+                format!(
+                    "Failed to execute 'send' on 'XMLHttpRequest': Failed to load '{url}'{detail}"
+                ),
+            ));
+        }
+    };
+    if with_xhr(w, id, |x| x.generation != generation).unwrap_or(true) {
+        return Ok(());
+    }
+    let cors = is_cross_origin(&origin, &resp);
+    let len = resp.body.len() as f64;
+    let total = resp
+        .header("content-length")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .unwrap_or(0.0);
+    with_xhr(w, id, |x| {
+        x.status = resp.status;
+        x.status_text = resp.status_text.clone();
+        x.resp_headers = visible_headers(&resp, cors).list;
+        x.response_url = resp.url.to_string();
+        x.body = Vec::from(resp.body.clone());
+        x.ready_state = 4;
+        x.send_flag = false;
+    });
+    xhr_rsc(cx, w, id);
+    if with_xhr(w, id, |x| x.generation != generation).unwrap_or(true) {
+        return Ok(());
+    }
+    xhr_event(cx, w, id, "load", len, total);
+    xhr_event(cx, w, id, "loadend", len, total);
+    Ok(())
 }
 
 fn xhr_text(x: &XhrState) -> String {
@@ -1702,6 +1886,16 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         } else {
             m
         };
+        if !is_async && !w.is_worker() {
+            let (timeout, rtype) =
+                with_xhr(w, id, |x| (x.timeout, x.response_type.clone())).unwrap_or_default();
+            if timeout > 0 {
+                return Err(w.rt.err("InvalidAccessError", "Failed to execute 'open' on 'XMLHttpRequest': Synchronous requests must not set a timeout."));
+            }
+            if !rtype.is_empty() {
+                return Err(w.rt.err("InvalidAccessError", "Failed to execute 'open' on 'XMLHttpRequest': Synchronous requests from a document must not set a response type."));
+            }
+        }
         let changed = with_xhr(w, id, |x| {
             x.generation += 1;
             x.method = method;
@@ -1814,9 +2008,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         let Some(url) = url else {
             return Err(illegal());
         };
-        if !is_async {
-            w.warn("Synchronous XMLHttpRequest is not supported; the request runs asynchronously.");
-        }
         if let Some((_, Some(ct))) = &body
             && !headers
                 .iter()
@@ -1834,6 +2025,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             initiator: Some(w.url()),
             mode: "cors",
         };
+        if !is_async {
+            return xhr_send_sync(cx, w, id, generation, req, origin);
+        }
         xhr_event(cx, w, id, "loadstart", 0.0, 0.0);
         if timeout > 0 {
             w.add_timer(
@@ -1956,7 +2150,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 .unwrap_or_default();
                 let b = w.new_obj(Obj::Blob(Box::new(super::misc::BlobData {
                     bytes,
-                    type_: ct.unwrap_or_default(),
+                    type_: mime_essence(&ct.unwrap_or_default()),
                 })));
                 cx.ret(w.obj_arg(b))
             }
@@ -1988,6 +2182,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         if with_xhr(w, id, |x| x.ready_state >= 3).unwrap_or(false) {
             return Err(w.rt.err("InvalidStateError", "Failed to set the 'responseType' property on 'XMLHttpRequest': The response type cannot be set if the object's state is LOADING or DONE."));
         }
+        if !w.is_worker() && with_xhr(w, id, |x| x.ready_state == 1 && !x.is_async).unwrap_or(false)
+        {
+            return Err(w.rt.err("InvalidAccessError", "Failed to set the 'responseType' property on 'XMLHttpRequest': The response type cannot be changed for synchronous requests made from a document."));
+        }
         with_xhr(w, id, |x| x.response_type = v);
         Ok(())
     });
@@ -1998,6 +2196,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     setter(reg, rt, "XMLHttpRequest", "timeout", |cx, w| {
         let id = this_xhr(cx, w)?;
         let v = cx.arg_u32(0)?;
+        if !w.is_worker() && with_xhr(w, id, |x| !x.is_async).unwrap_or(false) {
+            return Err(w.rt.err("InvalidAccessError", "Failed to set the 'timeout' property on 'XMLHttpRequest': Timeouts cannot be set for synchronous requests made from a document."));
+        }
         with_xhr(w, id, |x| x.timeout = v);
         Ok(())
     });
