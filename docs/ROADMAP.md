@@ -291,8 +291,8 @@ Known gaps after M4 (details in the sections below):
 - Workers did not exist (the `worker_mismatch` probe saw `Illegal
   constructor`); done 2026-11-04, see "Workers". Firefox has no
   JS engine yet (M4b).
-- WebGL runs no shaders and has no textures, framebuffers, blending or
-  depth; `decodeAudioData` rejects; no `AudioWorklet`; no
+- ~~WebGL runs no shaders and has no textures, framebuffers, blending or
+  depth~~ (done 2026-11-04: "Software WebGL", ADR 0030); `decodeAudioData` rejects; no `AudioWorklet`; no
   `ImageBitmap`/`createImageBitmap`; canvas filters are not applied.
 - Fonts: glyph shapes exist only for Latin-1 in six outline packs
   (sans/serif/mono, regular/bold); tables for persona fonts without a real
@@ -515,8 +515,8 @@ page (headless shell, SwiftShader; GPU limits come from the persona).
   foreign ones) do not fire. Still firing: `iframe_mismatch`,
   `header_order`, `no_interaction`, `favicon_missing`.
 
-Open: no shader execution, textures, render-to-texture, blending or depth;
-`preserveDrawingBuffer: false` is not cleared after compositing; extension
+Open: ~~no shader execution, textures, render-to-texture, blending or depth~~
+(done: "Software WebGL", ADR 0030); `preserveDrawingBuffer: false` is not cleared after compositing; extension
 prototypes keep a `constructor` property (Chrome's have none);
 `decodeAudioData` rejects (no codecs); no `audioprocess` events or
 `AudioWorklet`; panner and convolver pass audio through; `FontFace` `url()`
@@ -2566,7 +2566,8 @@ Notes on the verification itself:
   workers are never stopped when idle~~: done in "Workers as CDP targets"
   below (ADR 0029); ~~dynamic `import()`; synchronous
   XHR; `blob:` in `fetch()`~~ and ~~`crypto`, `WebSocket`~~: done in "Web
-  platform APIs" below (ADR 0025); shader execution in WebGL;
+  platform APIs" below (ADR 0025); ~~shader execution in WebGL~~: done in
+  "Software WebGL" below (ADR 0030);
   ~~no `indexedDB`~~: done in "Proxies and IndexedDB" below (ADR 0028); ~~`customElements`; shadow DOM~~: done in "Shadow DOM and
   custom elements" below (ADR 0026).
 - Frames: per-node state outside listeners, handlers, form values and

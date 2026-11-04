@@ -66,9 +66,15 @@ run you compare. After "Workers as CDP targets" (5294bae, binary 42.18 MB,
 evicted): 6 of 6 in two 5 x 50 runs (`fetch` peak RSS 21.86 / 21.75 vs
 23.21 / 23.22 MB, CDP wall 0.73 / 0.79 vs 0.81 / 0.84 s). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
-gaps in ADR 0003), shader execution in
-WebGL, the thin `fetch` peak RSS margin (above). Also open: named access on
-`window` (full list in ROADMAP "Close-out verification"). Workers as CDP
+gaps in ADR 0003), the thin `fetch` peak RSS margin (above). Also open: named access on
+`window` (full list in ROADMAP "Close-out verification"). Software WebGL
+(ADR 0030, ROADMAP "Software WebGL"): `lb-gl` compiles GLSL ES 1.00/3.00
+with ANGLE's checks and info logs (72 Chrome-recorded logs match), runs
+shaders on a 16-lane interpreter and rasterizes with clipping, 4x MSAA,
+depth, stencil, blending, textures and framebuffers; `lb-webapi`
+`rt/webgl_pipe.rs` wires it to WebGL 1/2 (88 Chrome-recorded API results
+match; 9 scenes within 0.1-1.7 mean abs difference of SwiftShader); the
+readback noise (`webgl_noise_seed`) applies to rendered pixels only. Workers as CDP
 targets (ADR 0029, ROADMAP "Workers as CDP targets and idle service
 workers"): a worker of an inspected context announces a target
 (`worker`, `shared_worker`, `service_worker`) before its script runs
@@ -175,9 +181,10 @@ See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use | M1 done; `site` (ADR 0018) |
 | `lb-dom` | Arena DOM, html5ever sink, selectors, shadow trees | Done (one arena per document; `import_node_mapped` for adoption across documents; `ParseStep::StyleSheet` pauses for style sheets; shadow roots, slots, flat tree and declarative roots in `shadow.rs`; custom element state and `is` values; `ParseStep::CustomElement` pauses) |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`), shadow DOM (`rt/shadow.rs`), custom elements (`rt/custom.rs`), `ElementInternals` and `FormData` (`rt/internals.rs`), Web Crypto (`rt/crypto/`), WebSocket (`rt/websocket.rs`), dynamic `import()` (`rt/modules.rs`), `blob:`/`data:` fetches and synchronous XHR (`rt/net.rs`), IndexedDB (`rt/idb/`, ADR 0028). WebGL runs no shaders |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`), shadow DOM (`rt/shadow.rs`), custom elements (`rt/custom.rs`), `ElementInternals` and `FormData` (`rt/internals.rs`), Web Crypto (`rt/crypto/`), WebSocket (`rt/websocket.rs`), dynamic `import()` (`rt/modules.rs`), `blob:`/`data:` fetches and synchronous XHR (`rt/net.rs`), IndexedDB (`rt/idb/`, ADR 0028), WebGL rendering through lb-gl (`rt/webgl_pipe.rs`, ADR 0030) |
 | `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; shadow tree scoping with `:host`/`::slotted`, flat-tree inheritance; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
+| `lb-gl` | Software WebGL (ADR 0030): GLSL ES 1.00/3.00 preprocessor, parser and checker (`glsl/`), inlining codegen, 16-lane interpreter (`exec.rs`), rasterizer (`raster.rs`), textures, images and formats, program linking | Done (no transform feedback, queries, compressed-texture decoding or translated shader source; one thread) |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
 | `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, worker threads (`worker.rs`), service worker registry (`sw.rs`, idle stop after 30 s) done; workers as CDP targets (`cdp/workers.rs`, ADR 0029); no popups |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
@@ -246,6 +253,11 @@ cargo test -p lb-page --test pages shadow
 # Image reuse within a document vs Chrome (5 cases, with request counts)
 cargo test -p lb-page --test pages images
 # re-record: crates/lb-page/tests/images/{serve.py,chrome.mjs}
+# WebGL (ADR 0030): info logs vs Chrome (72), interpreter and pipeline, then
+# pages vs Chrome (scenes close to SwiftShader, 88 API results equal, per-seed stability)
+cargo test -p lb-gl
+cargo test -p lb-page --test webgl
+# re-record / compare by hand (loopback): crates/lb-gl/tests/chrome/{record.mjs,scenes.mjs,api.mjs}
 # Style sheets vs Chrome (18 cases) and screenshots vs Chrome goldens
 cargo test -p lb-page --test pages stylesheets
 cargo test -p lb-page --test screenshot_golden -- --nocapture

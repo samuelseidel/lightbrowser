@@ -32,8 +32,9 @@ Lightpanda (a user-approved 1.1.0 nightly, loopback only, telemetry off) 5 of
 6 checks pass: CDP crawl wall time loses (0.80 vs 0.74 s), and `fetch` peak
 RSS passes or loses by about 0.5 MB depending on Lightpanda's own peak (see
 `bench/results/README.md`).
-Not done: Firefox (M4b, no SpiderMonkey backend yet), proxies, workers as
-CDP targets, dynamic `import()`, shader execution in WebGL, shadow DOM.
+Not done: Firefox (M4b, no SpiderMonkey backend yet). Proxies, workers as
+CDP targets, dynamic `import()`, shadow DOM and WebGL shader execution
+(software, ADR 0030) have landed since the numbers above.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Internal use only
