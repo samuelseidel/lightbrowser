@@ -12,27 +12,27 @@ Each milestone ends with something we can run and measure.
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
 | **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015), WP-C (scrollbars, fonts, aliases, emoji per OS) WP-D (OS-gated APIs, codecs, WebGPU, keyboard, WebGL backends, audio, window position, wheel and shortcuts per OS) and WP-E (`Accept-CH` / `Critical-CH` client hints) done: all 8 reference personas fp 0 and beh 0. See "M7 status" |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 40.39 MB against < 50 MB (raised from < 40 MB by user decision, ADR 0013 revision 4); `bench/` runner done; lazy interfaces (ADR 0016); Lightpanda compared (user-approved nightly, loopback only): 6 of 6 checks pass; service workers open. See "M6 status". |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 40.39 MB against < 50 MB (raised from < 40 MB by user decision, ADR 0013 revision 4); `bench/` runner done; lazy interfaces (ADR 0016); Lightpanda compared (user-approved nightly, loopback only): 5 of 6 checks pass (CDP wall time fails, see "Where we stand"); screenshots paint CSS backgrounds, radius and shadows (ADR 0020); service workers open. See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018) | M1 proxies; M2/M3/M4 leftovers in their status sections |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019) | M1 proxies; M2/M3/M4 leftovers in their status sections |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
-| M6 Performance | Snapshot, memory, binary size (40.51 MB, < 50 MB met), `bench/` runner, screenshots, lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018) | Service workers; CDP crawl wall time 0.82 vs Lightpanda 0.78 s since the corpus server stopped stalling reused connections (5 of 6 checks pass, see "Connection reuse") |
+| M6 Performance | Snapshot, memory, binary size (40.76 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018) | Service workers; CDP crawl wall time 0.82 vs Lightpanda 0.74 s (5 of 6 checks pass, see "Style sheets and screenshot decorations") |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
 | Budget | Result | Evidence |
 |---|---|---|
-| Idle RSS < 15 MB | Met: 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
-| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
+| Idle RSS < 15 MB | Met: 6.13 MB after "Style sheets and screenshot decorations"; 6.29 MB after "Connection reuse"; 6.17 MB (10.2 MB before ADR 0016) | `bench/run.py`, "M6 status: Lightpanda comparison" |
+| Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
 | Realm creation < 5 ms | Met: 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
+| Wall time, peak RSS and CPU <= Lightpanda | 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -1023,9 +1023,9 @@ PLAN M6 item 4, first half (ADR 0014). Chrome build.
   CDP clip scale, captureBeyondViewport, un-noised canvas pixels, 0-width
   error), lb-paint `page` and lb-layout `display` unit tests. Playwright
   20/20, WPT 2552/2788 unchanged.
-- Open: CSS background images and gradients (no `background-image`
-  longhand; loading them changes network traffic), border radius,
-  shadows, outlines, text decoration, transforms, filters, scrollbars,
+- Open: (CSS background images and gradients, border radius and box
+  shadows done 2026-11-04, ADR 0020, see "Style sheets and screenshot
+  decorations") outlines, text decoration, transforms, filters, scrollbars,
   `object-fit`, video frames, native control theming. Pixels follow our
   approximate inline layout, so they do not match Chrome exactly.
 
@@ -1115,7 +1115,7 @@ flight; medians of the two runs):
 
 Still open: stylesheets are fetched only after DOMContentLoaded, so a
 deferred script that measures layout sees unstyled boxes (Chrome blocks
-scripts on pending stylesheets); no HTTP keep-alive reuse yet (Chrome
+scripts on pending stylesheets; done 2026-11-04, ADR 0019); no HTTP keep-alive reuse yet (Chrome
 reuses its 6 connections; done 2026-11-04, ADR 0018).
 
 Refreshed run (`python3 bench/run.py`, 5 runs x 50 pages, release binary
@@ -2159,6 +2159,107 @@ PRIORITY frames when Chrome raises visible images. Chrome asked
 once per context (unchanged). Image and script `priority` values come from
 the header profile (`u=2, i` / `u=1`), where Chrome sent `i` / `u=2` on
 this page (it depends on position and viewport).
+
+## Style sheets and screenshot decorations (2026-11-04)
+
+Two M2/M6 leftovers, checked against local Chrome for Testing
+153.0.8010.12 on loopback pages. ADR 0019 and ADR 0020.
+
+**Style sheets block scripts as in Chrome** (`lb-webapi` `rt/sheets.rs`,
+`lb-dom` `ParseStep::StyleSheet`, `lb-page` `nav.rs`):
+
+- Links load when inserted (parser or script) or when `rel`/`href`
+  change; `@import`s of links and `<style>`s load in parallel, nested,
+  against the sheet URL. Before, sheets loaded only after
+  `DOMContentLoaded`, imports never, script-inserted links never.
+- Script-blocking sheets (parser-made, matching `media`, not alternate;
+  `<style>` while its imports load) hold parser-inserted classic scripts,
+  `defer` scripts and module scripts; when the last one loads, the script
+  (or the remaining deferred scripts and `DOMContentLoaded`) runs before
+  the sheet's `load` event and parsing resumes after it. A sheet made
+  after `<body>` exists stops the parser until it loaded. Print and other
+  non-matching sheets block nothing; `load` still waits for them.
+- Events: every `<style>` fires `load` (or `error` when an import fails),
+  links fire `error` on HTTP errors and failed imports, non-CSS responses
+  load empty. Ending parsing runs already queued tasks first, as Chrome.
+- CSSOM: `document.styleSheets`, `link.sheet`, `style.sheet`,
+  `CSSStyleSheet` (`href`, `ownerNode`, `media`, `title`, `disabled`,
+  `cssRules`/`rules`, `insertRule`, `deleteRule`, `addRule`,
+  `removeRule`, `ownerRule`, `parentStyleSheet`), `MediaList`,
+  `CSSRuleList`, `CSSStyleRule` (`selectorText`, live `style`),
+  `CSSImportRule` (`styleSheet`), grouping rules (`cssRules`,
+  `insertRule`), keyframes and layer names. Edits reach the cascade.
+- Tests: `lb-page` `tests/stylesheets/` (18 cases, Chrome's logs in
+  `chrome.json`, re-recorded with `serve.py` and `chrome.mjs`): event
+  order, `getComputedStyle` seen by scripts, `document.styleSheets`
+  details, CSSOM edits and errors, body sheets pausing the parser, timers
+  while blocked, `@import` (link and style, print media), 404 and
+  `text/plain` sheets, dynamic links. All 18 match Chrome line for line
+  (one compares the order of racing loads as a set). `lb-dom` streaming
+  test for the pause; `lb-css` `cssom` unit tests.
+
+**Screenshots paint backgrounds, radius and shadows** (`lb-css` `bg.rs`,
+`lb-webapi` `rt/bgimage.rs`, `lb-paint` `decor.rs`):
+
+- New computed properties: `background-image`, `-position-x/-y`,
+  `-size`, `-repeat`, `-attachment`, `-origin`, `-clip`, the four corner
+  radii and `box-shadow`, plus the `background`, `background-position`
+  and `border-radius` shorthands; gradients (linear, radial, repeating,
+  hints). `getComputedStyle` serializes them exactly as Chrome on the 9
+  test elements (`stylesheets` case `computed_bg`); its `length` grows
+  from 76 to 88 names (Chrome 477).
+- Background `url()` images of rendered elements load at
+  `DOMContentLoaded`, after each sheet and before a capture, and delay
+  `load` as in Chrome. Pages without `url(` in sheets or `style`
+  attributes skip the pass (the bench corpus has none).
+- Painted: image (PNG, JPEG, WebP, GIF first frame) and gradient layers
+  with size, position, repeat (`space`, `round` too), origin, clip,
+  `fixed`; the root's layers on the canvas; border radius for
+  backgrounds, borders and replaced content; outer and inset shadows
+  with blur and spread.
+- Golden test `lb-page` `screenshot_golden` against Chrome's screenshots
+  of 4 pages (48 boxes): mean max-channel difference 0.68 (images), 0.23
+  (gradients), 0.47 (radius and shadows), 0.05 (root background); at most
+  0.49% of pixels differ by more than 48 (edges, JPEG decoding, `space`
+  tile rounding).
+
+**Checks.** WPT 2556/2788 (unchanged); Playwright 20/20; `pages report`
+8 personas, 0 mismatch; T-010 fp 0 and `--input human` beh 0 (Windows
+reference persona, fresh serve each); firefox clippy and tests;
+`tools/surface_diff` (build `5ecad96` against this step, 3 personas,
+`fetch` and CDP): all six dumps identical (the dump lists descriptors
+and functions, which do not change; the new behaviour is in values:
+`document.styleSheets`, `sheet`, computed background values).
+
+**Bench** (`bench/results/2026-11-04-5490a8e.json`, 5x50, hot-symbol
+order regenerated for the final code): `fetch` wall 0.95 vs Lightpanda
+1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82
+vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s;
+idle RSS 6.13 MB; binary 40.76 MB; realm 1.30 / 1.10 ms. 5 of 6, as
+before. Corpus scripts now wait for their two style sheets and then lay
+out styled pages, as Chrome does; that costs code page-ins in `fetch`
+(+2 MB file-backed RSS on a corpus page before the hot-symbol order was
+regenerated, anon RSS unchanged). An intermediate run
+(`2026-11-04-cce236a.json`, eager sheet parsing, older symbol order)
+passed only 4 of 6 (`fetch` peak RSS 23.30 vs 23.18 MB); parsing linked
+sheets lazily and storing corner radii out of line (ComputedStyle 864 ->
+744 bytes) brought it back. Loading sheets during parsing did not close
+the CDP wall-time gap.
+
+Open:
+- CDP crawl wall time vs Lightpanda (0.82 vs 0.74 s).
+- Declarations keep their source text in `cssText` and `rule.style`
+  (Chrome normalizes values); inline `style` declarations still do not
+  expand shorthands (`el.style.backgroundImage` after `background:` is
+  empty, Chrome gives the longhand).
+- Not modelled: preload scanner and `<link rel=preload>`,
+  `blocking=render`, constructable sheets and `adoptedStyleSheets`,
+  `@import` added with `insertRule` (not fetched), `@layer` order.
+- Screenshots: SVG background images (transparent), `image-set()`,
+  conic gradients, `background-clip: text`, blend modes, outlines,
+  transforms, filters. The `Referer` of CSS images is the document, not
+  the style sheet. A capture waits (up to 5 s) for background images on
+  the CDP thread.
 
 ## Risks
 

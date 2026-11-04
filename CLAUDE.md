@@ -51,8 +51,17 @@ regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), workers and service workers, shader execution in
-WebGL, stylesheets blocking scripts, CSS background images in
-screenshots, CDP crawl wall time vs Lightpanda. Connections (ADR 0018):
+WebGL, CDP crawl wall time vs Lightpanda (0.82 vs 0.74 s in
+`bench/results/2026-11-04-5490a8e.json`, 5 of 6 checks; `fetch` peak
+RSS 22.7 vs 24.4 MB). Style sheets (ADR 0019): links and `@import`s load
+on insertion; parser-made sheets block parser, `defer` and module
+scripts, and sheets after `<body>` stop the parser, as in Chrome;
+`document.styleSheets` and the CSSOM (`insertRule`, rules, `MediaList`)
+work; 18 Chrome-recorded cases in `lb-page` `tests/stylesheets/`.
+Screenshots (ADR 0020): CSS background images (loaded like Chrome's,
+delaying `load`), gradients, size/position/repeat/origin/clip, layers,
+border radius and box shadows, within anti-aliasing of Chrome's
+screenshots (`lb-page` `screenshot_golden`). Connections (ADR 0018):
 one pool per browser context as Chrome's socket pools (6 per group,
 HTTP/1.1 keep-alive with 300 s idle timeout, one HTTP/2 session per group
 with Chrome's per-stream priority blocks, groups partitioned by top-level
@@ -78,12 +87,12 @@ and the status sections in `docs/ROADMAP.md`.
 | `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
 | `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints, connection pool (`pool.rs`, ADR 0018) | Done for Chrome; cookies shared across clones; Firefox headers generic; keep-alive, HTTP/2 sessions and TLS resumption per context (a `NetContext` without a pool still uses one connection per request); cache, proxies, HTTP/2 coalescing open |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use | M1 done; `site` (ADR 0018) |
-| `lb-dom` | Arena DOM, html5ever sink, selectors | Done (one arena per document; `import_node_mapped` for adoption across documents); no shadow DOM, form owner, custom elements |
+| `lb-dom` | Arena DOM, html5ever sink, selectors | Done (one arena per document; `import_node_mapped` for adoption across documents; `ParseStep::StyleSheet` pauses for style sheets); no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`) and the OS-gated surface (share, bluetooth, codecs, keyboard, gpu). WebGL runs no shaders; no workers, crypto or WebSocket |
-| `lb-css` | Lazy cascade | Done (~75 longhands; no pseudo-elements, animations) |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`) and CSS background images (`rt/bgimage.rs`). WebGL runs no shaders; no workers, crypto or WebSocket |
+| `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
-| `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014) | Done (no filters or shaping; screenshots lack background images, radius, shadows, transforms) |
+| `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
 | `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot` done; no workers or popups |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
@@ -123,6 +132,11 @@ cargo test -p lb-page --test connections
 # WPT subset (loopback) and the Playwright CDP smoke test
 cargo test -p lb-page --test wpt -- --nocapture
 cargo build -p lightbrowser && node --test tests/playwright/   # 20 tests; LIGHTBROWSER_BIN overrides
+# Style sheets vs Chrome (18 cases) and screenshots vs Chrome goldens
+cargo test -p lb-page --test pages stylesheets
+cargo test -p lb-page --test screenshot_golden -- --nocapture
+# re-record: crates/lb-page/tests/stylesheets/{serve.py,chrome.mjs},
+# crates/lb-page/tests/screenshots/chrome_shots.mjs (local Chrome, loopback)
 # Live surface vs persona (JSON on stdout, exit 1 on any mismatch)
 ./target/debug/lightbrowser fingerprint-report --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json
 cargo test -p lb-page --test pages report     # same check as a CI gate, all reference Chrome personas
