@@ -486,3 +486,63 @@ class WorkerNavigatorRule(unittest.TestCase):
             with self.subTest(os=name):
                 s = with_worker_navigator(os_session(name))
                 self.assertNotIn("worker_navigator_mismatch", fired(scoring.score_session(s)))
+
+
+def with_sw_navigator(s: dict, edit=None) -> dict:
+    """Add a `sw_navigator` probe (stock Chrome 153 shape: page and service
+    worker agree) to the first page; `edit(worker_values)` may change the
+    service worker side."""
+    with_worker_navigator(s)
+    pg = list(s["pages"].values())[0]
+    v = pg["probes"].pop("worker_navigator")["value"]
+    worker = json.loads(json.dumps(v["window"]))
+    if edit:
+        edit(worker)
+    pg["probes"]["sw_navigator"] = {"id": "sw_navigator", "cat": "automation", "weight": 0,
+                                    "suspicious": False, "value": {"window": v["window"], "worker": worker}}
+    return s
+
+
+class SwNavigatorRule(unittest.TestCase):
+    def detail(self, s):
+        return {f["id"]: f["detail"] for f in scoring.score_session(s)["fired"]}.get("sw_navigator_mismatch")
+
+    def test_in_catalogue_with_weight(self):
+        rule = next(r for r in scoring.RULES if r["id"] == "sw_navigator_mismatch")
+        self.assertEqual((rule["weight"], rule["cat"]), (45, "automation"))
+        probe = next(r for r in scoring.RULES if r["id"] == "sw_navigator")
+        self.assertEqual(probe["weight"], 0)
+
+    def test_agreeing_service_worker_is_quiet(self):
+        self.assertIsNone(self.detail(with_sw_navigator(os_session("linux"))))
+
+    def test_sessions_without_the_probe_are_quiet(self):
+        self.assertIsNone(self.detail(os_session("linux")))
+        for v in ({"supported": False}, {"timeout": True}, {"error": "no worker"}):
+            s = with_sw_navigator(os_session("linux"))
+            list(s["pages"].values())[0]["probes"]["sw_navigator"]["value"] = v
+            self.assertIsNone(self.detail(s))
+
+    def test_each_field_fires(self):
+        edits = {
+            "userAgent": lambda w: w.update(userAgent=w["userAgent"].replace("Linux", "Windows NT 10.0")),
+            "platform": lambda w: w.update(platform="Win32"),
+            "hardwareConcurrency": lambda w: w.update(hardwareConcurrency=4),
+            "deviceMemory": lambda w: w.update(deviceMemory=4),
+            "languages": lambda w: w.update(languages=["en-US"]),
+            "gpu": lambda w: w.update(gpu=False),
+            "uaData": lambda w: w["uaData"].update(platform="Windows"),
+            "high.platformVersion": lambda w: w["high"].update(platformVersion="10.0.0"),
+            "high.fullVersionList": lambda w: w["high"]["fullVersionList"].pop(),
+        }
+        for field, edit in edits.items():
+            with self.subTest(field=field):
+                d = self.detail(with_sw_navigator(os_session("linux"), edit))
+                self.assertIsNotNone(d)
+                self.assertIn(field, d)
+
+    def test_real_chrome_shapes_stay_quiet(self):
+        for name in ("linux", "windows", "mac"):
+            with self.subTest(os=name):
+                s = with_sw_navigator(os_session(name))
+                self.assertNotIn("sw_navigator_mismatch", fired(scoring.score_session(s)))

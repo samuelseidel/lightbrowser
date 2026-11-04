@@ -213,6 +213,8 @@ contradict the claimed browser or OS), `fingerprint` (device surfaces),
 | `worker_mismatch` | 45 | automation | A worker sees different navigator values: patching missed workers. |
 | `worker_navigator` | 0 | automation | Info only: navigator and UA-CH values in the page and in a dedicated worker. |
 | `worker_navigator_mismatch` | 45 | automation | A dedicated worker's `userAgent`, `appVersion`, `platform`, `hardwareConcurrency`, `deviceMemory`, `language(s)`, `gpu` presence, `userAgentData` or any high-entropy hint (`getHighEntropyValues`) differs from the page's: a persona patched into the page but not into workers. Stock Chromium passes (2026-11-04, see "Stock check"). |
+| `sw_navigator` | 0 | automation | Info only: navigator and UA-CH values in the page and in a service worker (registered for `/static/sw-probe/`, a scope no page is under, and unregistered afterwards; `sites/static/sw_nav.js`). |
+| `sw_navigator_mismatch` | 45 | automation | A service worker's `userAgent`, `appVersion`, `platform`, `hardwareConcurrency`, `deviceMemory`, `language(s)`, `gpu` presence, `userAgentData` or any high-entropy hint differs from the page's: a persona patched into pages and dedicated workers but not into service workers. Stock Chromium passes (2026-11-04, see "Stock check"). |
 | `webdriver_tamper` | 40 | automation | navigator.webdriver was deleted, moved or redefined. |
 | `extra_globals` | 30 | automation | The page window has globals a clean iframe does not: injected script. |
 | `property_order` | 30 | automation | navigator enumerates keys that are not on its prototype chain. |
@@ -363,6 +365,15 @@ Worker check (2026-11-04): `worker_navigator_mismatch` is quiet for stock
 Chromium 153 in T-001 (headless) and in T-010 over CDP (headed under
 `xvfb-run`): on every page the dedicated worker's values equal the page's.
 Its unit tests are in `test_scoring.py` (`WorkerNavigatorRule`).
+
+Service worker check (2026-11-04): `sw_navigator_mismatch` is quiet for
+stock Chromium 153 in T-001 (headless) and in T-010 over CDP (headed under
+`xvfb-run`): on every page the service worker's values equal the page's.
+The probe registers `/static/sw_nav.js` for `/static/sw-probe/` (no page is
+under it, so no page is controlled) and unregisters it; each page fetches
+the script once. Unit tests: `SwNavigatorRule`. LightBrowser
+(`chrome153_win10_rtx3060_1080p`): T-010 fp 0, `--input human` beh 0, the
+service worker's values equal the page's on every page.
 
 Stock check (2026-11-03): T-010 with stock Chrome 153 over CDP, headed
 under `xvfb-run` and `--headless=new`, fires no OS rule, also with the info

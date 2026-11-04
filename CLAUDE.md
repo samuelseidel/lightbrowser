@@ -164,7 +164,7 @@ node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
 # stop both servers afterwards
-python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (38)
+python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (43)
 # Linux ground truth from local Chrome (loopback, headed under xvfb-run): see tools/os_truth/README.md
 # Python SDK tests (run from sdk/python; scenarios need Playwright >= 1.63, else skipped)
 (cd sdk/python && python3 -m pytest tests)

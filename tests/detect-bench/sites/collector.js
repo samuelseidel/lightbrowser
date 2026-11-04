@@ -749,6 +749,35 @@
     wk.onerror = () => { clearTimeout(timer); done([{ error: 'worker error' }, false]); };
   }));
 
+  // The same values in a service worker (info only; scoring.py's
+  // sw_navigator_mismatch compares them). Registered for a scope no page
+  // is under (/static/sw-probe/), so nothing is controlled, and
+  // unregistered afterwards; the worker runs the page's navValues source.
+  probe('sw_navigator', 'automation', 0, () => new Promise((resolve) => {
+    const c = navigator.serviceWorker;
+    if (!c || !window.MessageChannel) { resolve([{ supported: false }, false]); return; }
+    let reg = null, finished = false;
+    const done = (v) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (reg) reg.unregister().catch(() => {});
+      resolve(v);
+    };
+    const timer = setTimeout(() => done([{ timeout: true }, false]), 2000);
+    c.register('/static/sw_nav.js', { scope: '/static/sw-probe/' }).then((r) => {
+      reg = r;
+      const w = r.installing || r.waiting || r.active;
+      if (!w) { done([{ error: 'no worker' }, false]); return; }
+      const ch = new MessageChannel();
+      ch.port1.onmessage = async (e) => {
+        const mine = await (0, eval)('(' + navValues + ')')();
+        done([{ window: mine, worker: e.data }, false]);
+      };
+      w.postMessage(navValues, [ch.port2]);
+    }, (e) => done([{ error: String(e && e.message || e).slice(0, 200) }, false]));
+  }));
+
   function lbStackSample() { return new Error('lb').stack || ''; }
 
   probe('stack_engine', 'consistency', 60, () => {
