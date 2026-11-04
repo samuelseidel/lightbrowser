@@ -148,3 +148,37 @@ cases!(
     cache, claim, clients, errors, fetch, lifecycle, messages, navigation, navupdate, scope,
     update,
 );
+
+/// Registrations belong to their browser context (in memory, ADR 0022): a
+/// second context of the same browser sees none and its page is not
+/// controlled, while a new page of the first context is.
+#[tokio::test]
+async fn registrations_are_per_context() {
+    let hits = Arc::new(Mutex::new(HashMap::new()));
+    let srv = serve_target(Arc::new(move |p: &str, t: &str| route(&hits, p, t))).await;
+    let b = browser();
+    let (c1, c2) = (context(false), context(false));
+    let page = open(&b, &c1, &srv.url("/lifecycle/"), WaitUntil::Load).await;
+    assert!(log_of(&page).await.ends_with("again"));
+    let probe = "new Promise(r => navigator.serviceWorker.getRegistrations().then(rs => \
+                 r(rs.length + ' ' + !!navigator.serviceWorker.controller)))";
+    let check = |page: lb_page::Page| async move {
+        page.evaluate(&format!("{probe}.then(v => window.R = v)"))
+            .await
+            .unwrap();
+        let t0 = Instant::now();
+        loop {
+            if let Ok(lb_js::JsValue::String(s)) = page.evaluate("window.R || ''").await
+                && !s.is_empty()
+            {
+                return s;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(5));
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let other = open(&b, &c2, &srv.url("/lifecycle/x.html"), WaitUntil::Load).await;
+    assert_eq!(check(other).await, "0 false");
+    let same = open(&b, &c1, &srv.url("/lifecycle/x.html"), WaitUntil::Load).await;
+    assert_eq!(check(same).await, "1 true");
+}
