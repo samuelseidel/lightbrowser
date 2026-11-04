@@ -47,7 +47,7 @@ cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
 
 `tests/playwright/` runs stock Playwright `connectOverCDP` against
 `lightbrowser serve` (the real V8 page host) with `viewport: null` in every
-context (ADR 0009). 22 tests (one for shadow DOM, one for proxies per context with `Fetch.authRequired`), all passing (debug and release binaries);
+context (ADR 0009). 24 tests (one for shadow DOM, one for proxies per context with `Fetch.authRequired`, two for workers as CDP targets), all passing (debug and release binaries);
 `harness.mjs` starts `serve` and a local site.
 
 | Spec | Covers |
@@ -58,6 +58,7 @@ context (ADR 0009). 22 tests (one for shadow DOM, one for proxies per context wi
 | `stealth.spec.mjs` | no added or suspicious main-world globals, `navigator.webdriver` false, trusted events |
 | `cdp.spec.mjs` | raw CDP: DOM, Accessibility, Emulation, console, page errors |
 | `frames.spec.mjs` | `frameLocator`, `page.frame`, frame attach/detach events, `LightBrowser.fingerprintReport` leaves no trace in the main world |
+| `workers.spec.mjs` | workers as CDP targets (ADR 0029): `page.workers()`, `worker.evaluate`, worker console/errors/requests, `close`, nested and frame workers, shared workers, `serviceworker`, `fromServiceWorker`, all compared with Chrome's results in `workers/chrome.json` (`workers/record.mjs` records either browser; `record_idle.mjs` the idle service worker stop); nothing added to the worker's scope |
 | `screenshot.spec.mjs` | `page.screenshot()`: viewport, element (also scrolled into view), full page, jpeg quality and clip, `omitBackground`, raw CDP clip scale and `captureBeyondViewport`, un-noised canvas pixels, the 0-width error (ADR 0014) |
 
 ```bash

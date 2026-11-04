@@ -497,6 +497,27 @@
   },
   {
    "on": "worker",
+   "ev": "Network.responseReceived",
+   "res": "Script /wk/inner.js sw=false"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.dataReceived"
+  },
+  {
+   "on": "worker",
+   "ev": "Inspector.workerScriptLoaded"
+  },
+  {
+   "on": "worker",
+   "send": "Runtime.evaluate"
+  },
+  {
+   "on": "worker",
+   "ev": "Network.loadingFinished"
+  },
+  {
+   "on": "worker",
    "ev": "attachedToTarget",
    "type": "worker",
    "waiting": true,
@@ -549,36 +570,15 @@
   },
   {
    "on": "worker",
-   "ev": "Network.responseReceived",
-   "res": "Script /wk/inner.js sw=false"
-  },
-  {
-   "on": "worker",
-   "ev": "Network.dataReceived"
-  },
-  {
-   "on": "worker",
-   "ev": "Inspector.workerScriptLoaded"
-  },
-  {
-   "on": "worker",
-   "send": "Runtime.evaluate"
-  },
-  {
-   "on": "worker",
-   "ev": "Network.loadingFinished"
-  },
-  {
-   "on": "worker",
-   "reply": "Runtime.callFunctionOn"
-  },
-  {
-   "on": "worker",
    "reply": "Runtime.evaluate"
   },
   {
    "on": "worker",
    "send": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "reply": "Runtime.callFunctionOn"
   },
   {
    "on": "worker",
@@ -616,6 +616,21 @@
   {
    "on": "worker",
    "reply": "Runtime.callFunctionOn"
+  },
+  {
+   "on": "worker",
+   "ev": "detachedFromTarget",
+   "type": "worker"
+  },
+  {
+   "on": "page",
+   "ev": "detachedFromTarget",
+   "type": "worker"
+  },
+  {
+   "on": "page",
+   "ev": "detachedFromTarget",
+   "type": "worker"
   },
   {
    "on": "browser",

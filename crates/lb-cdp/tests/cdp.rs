@@ -1353,6 +1353,35 @@ fn worker_targets() {
         )
         .await;
         assert_eq!(h.worker_session_count("W3"), Some(1));
+
+        // Closing the page detaches its workers first.
+        h.start_worker(
+            "W4",
+            info("worker", "http://127.0.0.1/w.js", "w4", Some(&page)),
+            "w4",
+            None,
+        );
+        let a = c.event("Target.attachedToTarget", sid).await;
+        let w4 = a["sessionId"].as_str().unwrap().to_string();
+        c.events.clear();
+        c.ok(
+            "Target.disposeBrowserContext",
+            json!({"browserContextId": ctx}),
+            None,
+        )
+        .await;
+        let order: Vec<(String, String)> = c
+            .events
+            .iter()
+            .filter(|m| m["method"] == "Target.detachedFromTarget")
+            .map(|m| {
+                (
+                    m["params"]["sessionId"].as_str().unwrap_or("").to_string(),
+                    m["params"]["targetId"].as_str().unwrap_or("").to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(order.first(), Some(&(w4, "W4".to_string())), "{order:?}");
     })
     .unwrap();
 }

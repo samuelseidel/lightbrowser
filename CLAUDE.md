@@ -11,7 +11,7 @@ first and do not contradict them. Current state (Chrome build): M1 (network),
 M2 (DOM + V8), M3 (layout + CDP), M4 (Chrome fingerprints), M5 (human input
 and Python SDK), most of M6 and M7 (OS personas) are done. `lightbrowser serve` runs real V8
 pages through `lb_page::CdpHost`; stock Playwright `connectOverCDP` passes
-22 tests (including screenshots, shadow DOM and proxies); the WPT subset
+24 tests (including screenshots, shadow DOM, proxies and workers); the WPT subset
 passes 11734/12465 (2566/2788 of the pre-shadow-DOM files, the same per
 file as the previous code here; 1249/1288 of the IndexedDB files). On our
 detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for all
@@ -59,12 +59,26 @@ independent re-run on a clean tree, `2026-11-03-02ca87f.json`, which also
 passes 6 of 6; binary 40.38 MB, idle RSS 7.1 MB; after the frames work
 `2026-11-03-cf3ac89.json`: 6 of 6, 21.9 vs 23.2 MB, binary 40.41 MB), so
 regenerate the hot-symbol list after code changes
-(`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
+(`tools/hot_symbols`). Peak RSS also depends on how the binary got into
+the page cache (a freshly written file maps more per fault, about +1 MB
+here): evict both browsers' binaries (`posix_fadvise(DONTNEED)`) before a
+run you compare. After "Workers as CDP targets" (5294bae, binary 42.18 MB,
+evicted): 6 of 6 in two 5 x 50 runs (`fetch` peak RSS 21.86 / 21.75 vs
+23.21 / 23.22 MB, CDP wall 0.73 / 0.79 vs 0.81 / 0.84 s). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
 gaps in ADR 0003), shader execution in
-WebGL, the thin `fetch` peak RSS margin (above). Also open: workers as CDP
-targets, idle service workers are never stopped, named access on
-`window` (full list in ROADMAP "Close-out verification"). Proxies (ADR
+WebGL, the thin `fetch` peak RSS margin (above). Also open: named access on
+`window` (full list in ROADMAP "Close-out verification"). Workers as CDP
+targets (ADR 0029, ROADMAP "Workers as CDP targets and idle service
+workers"): a worker of an inspected context announces a target
+(`worker`, `shared_worker`, `service_worker`) before its script runs
+(`lb-page` `cdp/workers.rs`), the server auto-attaches it and holds it
+for `waitForDebuggerOnStart` (`lb-cdp` `browser.rs`); Runtime commands run
+on the worker thread; console, errors, Network events and
+`Inspector.workerScriptLoaded`; page requests a service worker answered
+carry `fromServiceWorker`; idle service worker versions stop 30 s after
+their last event and restart on the next one (never while a CDP session
+is attached), as recorded in Chrome (`tests/playwright/workers/`). Proxies (ADR
 0027, ROADMAP "Proxies and IndexedDB"): `lb-net` `proxy.rs`, one `Proxy`
 per browser context (`Target.createBrowserContext` `proxyServer`/
 `proxyBypassList`, `--proxy`/`--proxy-bypass-list` for `serve` and
@@ -144,8 +158,7 @@ Cache API in `lb-webapi` `rt/sw.rs`); each version is a worker thread with
 requests and navigations, `Clients`, messages both ways, `caches`, update
 checks after navigations; 11 Chrome-recorded cases in `lb-page`
 `tests/service_workers/`; the bench rule `sw_navigator_mismatch` and 63
-worker checks (dedicated, shared, service) in `fingerprint-report`. Idle
-versions are not stopped and workers are not CDP targets.
+worker checks (dedicated, shared, service) in `fingerprint-report`.
 See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 
 ## Internal use and legal
@@ -166,7 +179,7 @@ See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 | `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; shadow tree scoping with `:host`/`::slotted`, flat-tree inheritance; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
-| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, worker threads (`worker.rs`), service worker registry (`sw.rs`) done; no popups; workers are not CDP targets |
+| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, worker threads (`worker.rs`), service worker registry (`sw.rs`, idle stop after 30 s) done; workers as CDP targets (`cdp/workers.rs`, ADR 0029); no popups |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
 | `sdk/python` | `lightbrowser` package: launcher, `Persona`, sync/async Playwright wrappers with `human_*` and `verify_fingerprint`, scenarios T-001..T-007 | Done; needs Python Playwright >= 1.63 |
@@ -204,7 +217,13 @@ cargo test -p lb-page --test connections
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
 # WPT subset (loopback) and the Playwright CDP smoke test
 cargo test -p lb-page --test wpt -- --nocapture
-cargo build -p lightbrowser && node --test tests/playwright/   # 22 tests; LIGHTBROWSER_BIN overrides
+cargo build -p lightbrowser && node --test tests/playwright/   # 24 tests; LIGHTBROWSER_BIN overrides
+# Workers as CDP targets vs Chrome: record the CDP traffic of either browser, compare (loopback)
+node tests/playwright/workers/record.mjs chrome > /tmp/c.json; node tests/playwright/workers/record.mjs lightbrowser > /tmp/l.json
+node tests/playwright/workers/record.mjs compare /tmp/c.json /tmp/l.json
+node tests/playwright/workers/record_idle.mjs chrome   # idle service worker stop, ~4 min
+cargo test -p lb-cdp --test cdp worker_targets
+cargo test -p lb-page --test pages service_workers::idle_version_stops_and_restarts
 # Workers vs Chrome (10 cases + dedicated/shared/service worker global surface vs the capture)
 cargo test -p lb-page --test pages workers
 # Service workers and the Cache API vs Chrome (11 cases, with reloads)
