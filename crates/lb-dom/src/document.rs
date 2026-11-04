@@ -78,6 +78,8 @@ pub struct Document {
     /// Every shadow root made in this arena (connected or not), in
     /// creation order.
     pub(crate) shadow_roots: Vec<NodeId>,
+    /// `ElementInternals.states` (`:state()`), by element.
+    pub(crate) custom_states: HashMap<NodeId, Vec<String>>,
 }
 
 impl Default for Document {
@@ -155,6 +157,7 @@ impl Document {
             manual_slots: HashMap::new(),
             manual_slot_of: HashMap::new(),
             shadow_roots: Vec::new(),
+            custom_states: HashMap::new(),
         };
         doc.nodes.push(Node::new(NodeData::Document));
         doc
@@ -174,6 +177,7 @@ impl Document {
             manual_slots: HashMap::new(),
             manual_slot_of: HashMap::new(),
             shadow_roots: Vec::new(),
+            custom_states: HashMap::new(),
         }
     }
 
@@ -1232,6 +1236,17 @@ impl Document {
             e.custom = state;
             self.render_extra += 1;
         }
+    }
+
+    /// Custom states of element `id` (`:state()`).
+    pub fn custom_states(&self, id: NodeId) -> &[String] {
+        self.custom_states.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Replace the custom states of element `id`.
+    pub fn set_custom_states(&mut self, id: NodeId, states: Vec<String>) {
+        self.custom_states.insert(id, states);
+        self.render_extra += 1;
     }
 
     /// The `is` value of element `id`.

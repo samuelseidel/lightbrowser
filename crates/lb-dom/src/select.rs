@@ -151,6 +151,8 @@ pub enum PseudoClass {
     Named(NamedPseudoClass),
     Lang(Box<str>),
     Dir(Box<str>),
+    /// `:state(name)` (custom element states).
+    State(Box<str>),
 }
 
 impl ToCss for PseudoClass {
@@ -168,6 +170,11 @@ impl ToCss for PseudoClass {
             PseudoClass::Dir(d) => {
                 dest.write_str(":dir(")?;
                 serialize_identifier(d, dest)?;
+                dest.write_char(')')
+            }
+            PseudoClass::State(n) => {
+                dest.write_str(":state(")?;
+                serialize_identifier(n, dest)?;
                 dest.write_char(')')
             }
         }
@@ -334,6 +341,10 @@ impl<'i> selectors::parser::Parser<'i> for SelectorParser {
             "dir" => {
                 let v = parser.expect_ident()?.as_ref().to_ascii_lowercase();
                 Ok(PseudoClass::Dir(v.into()))
+            },
+            "state" => {
+                let v = parser.expect_ident()?.as_ref().to_owned();
+                Ok(PseudoClass::State(v.into()))
             },
             _ => unsupported(),
         }
@@ -758,6 +769,9 @@ impl<'a> Element for ElementRef<'a> {
         let n = match pc {
             PseudoClass::Lang(l) => return self.lang_matches(l),
             PseudoClass::Dir(d) => return self.dir_matches(d),
+            PseudoClass::State(n) => {
+                return self.doc.custom_states(self.id).iter().any(|s| **s == **n);
+            }
             PseudoClass::Named(n) => *n,
         };
         match n {
@@ -799,6 +813,9 @@ impl<'a> Element for ElementRef<'a> {
                     && self.value_is_empty()
             }
             P::Valid | P::Invalid => {
+                if self.has_flag(NodeFlags::FORM_ASSOCIATED) {
+                    return self.has_flag(NodeFlags::CUSTOM_INVALID) == (n == P::Invalid);
+                }
                 let candidate =
                     self.input_type().is_some() || self.is_html_named(&local_name!("textarea"));
                 if !candidate {
@@ -864,8 +881,11 @@ impl<'a> Element for ElementRef<'a> {
             .any(|c| case_sensitivity.eq(c.as_bytes(), name.0.as_bytes()))
     }
 
-    fn has_custom_state(&self, _name: &CssAtom) -> bool {
-        false
+    fn has_custom_state(&self, name: &CssAtom) -> bool {
+        self.doc
+            .custom_states(self.id)
+            .iter()
+            .any(|s| *s == *name.0)
     }
 
     fn imported_part(&self, _name: &CssAtom) -> Option<CssAtom> {

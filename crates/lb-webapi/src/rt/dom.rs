@@ -2401,10 +2401,13 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "HTMLFormElement", "reset", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;
         let ids: Vec<NodeId> = w.doc_slot(slot, |d| d.descendants(n).collect());
-        let mut vals = w.values.borrow_mut();
-        for i in ids {
-            vals.remove(&(slot, i));
+        {
+            let mut vals = w.values.borrow_mut();
+            for i in ids {
+                vals.remove(&(slot, i));
+            }
         }
+        super::internals::form_reset(cx, w, slot, n);
         Ok(())
     });
     // <script>

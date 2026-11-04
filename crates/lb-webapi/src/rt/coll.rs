@@ -140,18 +140,21 @@ fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
                     html && q.local == local_name!("a") && d.has_attribute(n, "name")
                 }
                 Filter::FormControls => {
-                    html && matches!(
-                        &*q.local,
-                        "button"
-                            | "fieldset"
-                            | "input"
-                            | "object"
-                            | "output"
-                            | "select"
-                            | "textarea"
-                    ) && !(q.local == local_name!("input")
-                        && d.get_attribute(n, "type")
-                            .is_some_and(|t| t.eq_ignore_ascii_case("image")))
+                    d.flags(n).contains(lb_dom::NodeFlags::FORM_ASSOCIATED)
+                        || html
+                            && matches!(
+                                &*q.local,
+                                "button"
+                                    | "fieldset"
+                                    | "input"
+                                    | "object"
+                                    | "output"
+                                    | "select"
+                                    | "textarea"
+                            )
+                            && !(q.local == local_name!("input")
+                                && d.get_attribute(n, "type")
+                                    .is_some_and(|t| t.eq_ignore_ascii_case("image")))
                 }
             }
         })

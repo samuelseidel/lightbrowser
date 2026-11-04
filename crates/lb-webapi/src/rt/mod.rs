@@ -821,6 +821,8 @@ pub struct Window {
     pub(crate) slot_state: RefCell<shadow::SlotState>,
     /// Custom element registries, reactions and internals.
     pub(crate) ce: RefCell<custom::CeState>,
+    /// `ElementInternals` and form-associated custom element state.
+    pub(crate) internals: RefCell<internals::InternalsState>,
     /// Loads that delay the `load` event (scripts, stylesheets).
     pub pending_loads: Cell<u32>,
     /// Requests in flight (for `networkidle`).
@@ -933,6 +935,7 @@ impl Window {
             mo_queued: Cell::new(false),
             slot_state: RefCell::new(shadow::SlotState::default()),
             ce: RefCell::new(custom::CeState::default()),
+            internals: RefCell::new(internals::InternalsState::default()),
             pending_loads: Cell::new(0),
             in_flight: Cell::new(0),
             current_script: Cell::new(None),
@@ -1699,6 +1702,8 @@ pub(crate) enum Obj {
     CustomStateSet(u32, NodeId),
     /// `ValidityState` of a form-associated custom element.
     InternalsValidity(u32, NodeId),
+    /// `FormData` entries (string values).
+    FormData(Vec<(String, String)>),
     /// `new EventTarget()`.
     EventTarget,
     NodeList(coll::NodeListSrc),
@@ -1797,6 +1802,7 @@ impl Obj {
             Obj::ElementInternals(..) => "ElementInternals",
             Obj::CustomStateSet(..) => "CustomStateSet",
             Obj::InternalsValidity(..) => "ValidityState",
+            Obj::FormData(_) => "FormData",
             Obj::EventTarget => "EventTarget",
             Obj::NodeList(_) => "NodeList",
             Obj::Collection(c) => c.iface,

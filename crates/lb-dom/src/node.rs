@@ -52,6 +52,11 @@ bitflags! {
         const STYLE_DIRTY = 1 << 4;
         /// A `<template>`'s content fragment.
         const TEMPLATE_CONTENTS = 1 << 5;
+        /// A form-associated custom element.
+        const FORM_ASSOCIATED = 1 << 6;
+        /// A form-associated custom element whose validity is not valid
+        /// (`:invalid`).
+        const CUSTOM_INVALID = 1 << 7;
         /// `:hover`.
         const HOVER = 1 << 8;
         /// `:active`.

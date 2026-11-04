@@ -386,6 +386,80 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
 
 /// Submit a form as a GET navigation (POST bodies are not sent yet; the
 /// navigation becomes a GET with a console warning).
+/// The form data set of `form` (submittable controls in tree order, with
+/// form-associated custom elements' values), as name/value pairs.
+pub(crate) fn form_entries(
+    w: &Window,
+    d: &lb_dom::Document,
+    form: NodeId,
+) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for c in d.descendants(form) {
+        if d.flags(c).contains(NodeFlags::FORM_ASSOCIATED) {
+            pairs.extend(super::internals::submission_entries(w, d, c));
+            continue;
+        }
+        let Some(name) = d.get_attribute(c, "name").filter(|n| !n.is_empty()) else {
+            continue;
+        };
+        if d.has_attribute(c, "disabled") {
+            continue;
+        }
+        let local = d.local_name(c).map(|l| l.to_string()).unwrap_or_default();
+        let value = match local.as_str() {
+            "input" => {
+                let t = super::dom::input_type(d, c);
+                if matches!(t.as_str(), "checkbox" | "radio")
+                    && !super::dom::checked(d, c, "checked")
+                {
+                    continue;
+                }
+                if matches!(t.as_str(), "submit" | "button" | "reset" | "image" | "file") {
+                    continue;
+                }
+                w.values.borrow().get(&(0, c)).cloned().unwrap_or_else(|| {
+                    d.get_attribute(c, "value")
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| {
+                            if matches!(t.as_str(), "checkbox" | "radio") {
+                                "on".into()
+                            } else {
+                                String::new()
+                            }
+                        })
+                })
+            }
+            "textarea" => w
+                .values
+                .borrow()
+                .get(&(0, c))
+                .cloned()
+                .unwrap_or_else(|| d.text_content(c).unwrap_or_default()),
+            "select" => {
+                let opts: Vec<NodeId> = d
+                    .descendants(c)
+                    .filter(|&o| d.is_html_element_named(o, &local_name!("option")))
+                    .collect();
+                let sel = opts
+                    .iter()
+                    .copied()
+                    .find(|&o| super::dom::checked(d, o, "selected"))
+                    .or(opts.first().copied());
+                match sel {
+                    Some(o) => d
+                        .get_attribute(o, "value")
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| d.text_content(o).unwrap_or_default().trim().to_owned()),
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+        pairs.push((name.to_owned(), value));
+    }
+    pairs
+}
+
 pub(crate) fn submit_form(w: &Window, form: NodeId) {
     let (action, method, pairs) = w.with_doc(|d| {
         let action = d
@@ -396,68 +470,7 @@ pub(crate) fn submit_form(w: &Window, form: NodeId) {
             .get_attribute(form, "method")
             .unwrap_or("get")
             .to_ascii_lowercase();
-        let mut pairs = Vec::new();
-        for c in d.descendants(form) {
-            let Some(name) = d.get_attribute(c, "name").filter(|n| !n.is_empty()) else {
-                continue;
-            };
-            if d.has_attribute(c, "disabled") {
-                continue;
-            }
-            let local = d.local_name(c).map(|l| l.to_string()).unwrap_or_default();
-            let value = match local.as_str() {
-                "input" => {
-                    let t = super::dom::input_type(d, c);
-                    if matches!(t.as_str(), "checkbox" | "radio")
-                        && !super::dom::checked(d, c, "checked")
-                    {
-                        continue;
-                    }
-                    if matches!(t.as_str(), "submit" | "button" | "reset" | "image" | "file") {
-                        continue;
-                    }
-                    w.values.borrow().get(&(0, c)).cloned().unwrap_or_else(|| {
-                        d.get_attribute(c, "value")
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| {
-                                if matches!(t.as_str(), "checkbox" | "radio") {
-                                    "on".into()
-                                } else {
-                                    String::new()
-                                }
-                            })
-                    })
-                }
-                "textarea" => w
-                    .values
-                    .borrow()
-                    .get(&(0, c))
-                    .cloned()
-                    .unwrap_or_else(|| d.text_content(c).unwrap_or_default()),
-                "select" => {
-                    let opts: Vec<NodeId> = d
-                        .descendants(c)
-                        .filter(|&o| d.is_html_element_named(o, &local_name!("option")))
-                        .collect();
-                    let sel = opts
-                        .iter()
-                        .copied()
-                        .find(|&o| super::dom::checked(d, o, "selected"))
-                        .or(opts.first().copied());
-                    match sel {
-                        Some(o) => d
-                            .get_attribute(o, "value")
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| {
-                                d.text_content(o).unwrap_or_default().trim().to_owned()
-                            }),
-                        None => continue,
-                    }
-                }
-                _ => continue,
-            };
-            pairs.push((name.to_owned(), value));
-        }
+        let pairs = form_entries(w, d, form);
         (action, method, pairs)
     });
     let base = match action {

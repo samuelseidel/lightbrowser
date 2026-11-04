@@ -48,6 +48,8 @@ pub(crate) struct CeDef {
     pub form_associated_cb: Option<Handle>,
     pub form_reset: Option<Handle>,
     pub form_disabled: Option<Handle>,
+    /// Never called: no form state restoration (session history).
+    #[allow(dead_code)]
     pub form_state_restore: Option<Handle>,
     pub form_associated: bool,
     pub disable_internals: bool,
@@ -91,8 +93,6 @@ pub(crate) struct CeState {
     element_queue: Vec<(u32, NodeId)>,
     /// Main-document nodes below this id were already looked at.
     watermark: usize,
-    /// `ElementInternals` objects by element.
-    pub internals: HashMap<(u32, NodeId), u32>,
 }
 
 impl CeState {
@@ -137,9 +137,21 @@ fn def_of(w: &Window, slot: u32, n: NodeId) -> Option<usize> {
     lookup(w, &local, is.as_deref())
 }
 
-/// The `is` value of element `n` (customized built-ins), if any.
-pub(crate) fn is_value(w: &Window, slot: u32, n: NodeId) -> Option<String> {
-    w.doc_slot(slot, |d| d.is_value(n).map(str::to_owned))
+/// What `attachInternals` needs from an element's definition.
+pub(crate) struct DefInfo {
+    pub form_associated: bool,
+    pub disable_internals: bool,
+}
+
+/// The definition of element `n`, if it has one.
+pub(crate) fn definition_of(w: &Window, slot: u32, n: NodeId) -> Option<DefInfo> {
+    let i = def_of(w, slot, n)?;
+    let st = w.ce.borrow();
+    let d = &st.regs[0].defs[i];
+    Some(DefInfo {
+        form_associated: d.form_associated,
+        disable_internals: d.disable_internals,
+    })
 }
 
 /// True if `n`'s definition disables shadow roots (`disabledFeatures`).
@@ -157,7 +169,7 @@ fn enqueue(w: &Window, key: (u32, NodeId), r: Reaction) {
 
 /// Enqueue a lifecycle callback reaction if `n` is custom and its
 /// definition has that callback.
-fn enqueue_callback(w: &Window, slot: u32, n: NodeId, r: Reaction) {
+pub(crate) fn enqueue_callback(w: &Window, slot: u32, n: NodeId, r: Reaction) {
     if w.doc_slot(slot, |d| d.custom_state(n)) != CustomState::Custom {
         return;
     }
@@ -246,7 +258,7 @@ fn upgrade(js: &mut dyn Js, w: &Rc<Window>, slot: u32, n: NodeId) {
     if connected {
         enqueue_callback(w, slot, n, Reaction::Connected);
     }
-    w.doc_slot_mut(slot, |d| d.set_custom_state(n, CustomState::Failed));
+    w.doc_slot_mut(slot, |d| d.set_custom_state(n, CustomState::Precustomized));
     let ctor_h = {
         let mut st = w.ce.borrow_mut();
         let def = &mut st.regs[0].defs[i];
@@ -684,6 +696,9 @@ fn html_ctor(
                 n
             });
             advance_watermark(w);
+            if w.ce.borrow().regs[0].defs[i].form_associated {
+                super::internals::upgraded(cx, w, 0, n);
+            }
             cx.init_this(w.node_ref(0, n))
         }
         Some(None) => Err(HostError::type_error(format!(
