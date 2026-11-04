@@ -145,6 +145,10 @@ pub enum Op {
         key: Option<Key>,
         add: bool,
         index_keys: Vec<(String, Vec<Key>)>,
+        /// Indexes whose key needs the generated primary key: `None` is
+        /// the key itself (index on the store's key path), `Some(parts)`
+        /// an array key path with the primary key at the `None` parts.
+        pk_indexes: Vec<(String, Option<Vec<Option<Key>>>)>,
     },
     Get {
         store: String,
@@ -305,6 +309,10 @@ struct Entry {
     phase: Option<Phase>,
     /// Unfinished transactions in creation order.
     txns: Vec<u64>,
+    /// The database is being created by a running upgrade.
+    creating: bool,
+    /// Version before a running upgrade (what `databases()` reports).
+    upgrading_from: Option<u64>,
 }
 
 enum Snapshot {
@@ -393,7 +401,11 @@ impl IdbBackend {
             .get(origin)
             .map(|m| {
                 m.iter()
-                    .filter_map(|(n, e)| e.db.as_ref().map(|d| (n.clone(), d.version)))
+                    .filter(|(_, e)| !e.creating)
+                    .filter_map(|(n, e)| {
+                        e.db.as_ref()
+                            .map(|d| (n.clone(), e.upgrading_from.unwrap_or(d.version)))
+                    })
                     .filter(|(_, v)| *v > 0)
                     .collect()
             })
@@ -786,7 +798,9 @@ fn start_upgrade(st: &mut State, origin: &str, name: &str, req: u32, sink: Sink,
         .expect("entry");
     e.queue.pop_front();
     let before = e.db.clone();
+    e.creating = before.is_none();
     let old = before.as_ref().map_or(0, |d| d.version);
+    e.upgrading_from = Some(old);
     let db = e.db.get_or_insert_with(|| Database {
         version: 0,
         stores: BTreeMap::new(),
@@ -855,6 +869,11 @@ fn try_start(st: &mut State, origin: &str, name: &str) {
         }
     }
     for id in startable {
+        // A transaction finished above may have started (and finished)
+        // this one already.
+        if st.txns.get(&id).is_none_or(|t| t.started) {
+            continue;
+        }
         let snapshot = {
             let t = &st.txns[&id];
             (t.mode == Mode::ReadWrite).then(|| {
@@ -871,7 +890,9 @@ fn try_start(st: &mut State, origin: &str, name: &str) {
                 )
             })
         };
-        let t = st.txns.get_mut(&id).expect("txn");
+        let Some(t) = st.txns.get_mut(&id) else {
+            continue;
+        };
         t.started = true;
         t.snapshot = snapshot;
         let queue: Vec<(u32, Op)> = t.queue.drain(..).collect();
@@ -918,6 +939,8 @@ fn finish(st: &mut State, txn: u64, commit: bool) {
                 _ => u32::MAX,
             };
             e.phase = None;
+            e.creating = false;
+            e.upgrading_from = None;
             if commit {
                 (t.sink)(Ev::Complete { txn });
                 let meta = e.db.as_ref().map(|d| meta_of(&n, d)).unwrap_or_default();
@@ -970,7 +993,9 @@ fn error(name: &'static str, message: impl Into<String>) -> OpResult {
 }
 
 fn run_op(st: &mut State, txn: u64, req: u32, op: Op) {
-    let sink = st.txns[&txn].sink.clone();
+    let Some(sink) = st.txns.get(&txn).map(|t| t.sink.clone()) else {
+        return;
+    };
     let (result, inject) = match with_db_mut(st, txn) {
         Some(db) => exec(db, op),
         None => (error("UnknownError", "The database was deleted."), None),
@@ -1054,7 +1079,8 @@ fn exec(db: &mut Database, op: Op) -> (OpResult, Option<String>) {
             value,
             key,
             add,
-            index_keys,
+            mut index_keys,
+            pk_indexes,
         } => {
             let Some(s) = db.stores.get_mut(&store) else {
                 return (
@@ -1062,13 +1088,15 @@ fn exec(db: &mut Database, op: Op) -> (OpResult, Option<String>) {
                     None,
                 );
             };
+            // The generator only moves when the put succeeds (Chrome).
+            let mut next_current = s.current;
             let key = match key {
                 Some(k) => {
                     if let Key::Number(n) = k
                         && s.meta.auto_increment
                         && n >= s.current
                     {
-                        s.current = if n >= MAX_GENERATED {
+                        next_current = if n >= MAX_GENERATED {
                             f64::INFINITY
                         } else {
                             n.floor() + 1.0
@@ -1083,11 +1111,23 @@ fn exec(db: &mut Database, op: Op) -> (OpResult, Option<String>) {
                             None,
                         );
                     }
-                    let k = Key::Number(s.current);
-                    s.current += 1.0;
-                    k
+                    next_current = s.current + 1.0;
+                    Key::Number(s.current)
                 }
             };
+            for (name, parts) in pk_indexes {
+                let k = match parts {
+                    None => key.clone(),
+                    Some(parts) => Key::Array(
+                        parts
+                            .into_iter()
+                            .map(|p| p.unwrap_or_else(|| key.clone()))
+                            .collect(),
+                    ),
+                };
+                index_keys.retain(|(n, _)| *n != name);
+                index_keys.push((name, vec![k]));
+            }
             if add && s.records.contains_key(&key) {
                 return (
                     error("ConstraintError", "Key already exists in the object store."),
@@ -1146,6 +1186,7 @@ fn exec(db: &mut Database, op: Op) -> (OpResult, Option<String>) {
                     index_keys: map,
                 },
             );
+            s.current = next_current;
             (OpResult::Key(key), None)
         }
         Op::Get {

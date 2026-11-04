@@ -353,11 +353,26 @@ async fn event_loop(engine: &mut Engine, w: &Rc<Window>, notify: &Notify) {
         return;
     };
     let mut next_frame = 0.0f64;
+    // See the page loop: due timers are not starved by endless tasks.
+    let mut streak = 0u32;
     loop {
         if control.is_done() {
             return;
         }
+        if streak >= 50 && !w.clock.is_virtual() {
+            streak = 0;
+            let mut js = EngineJs {
+                engine: &mut *engine,
+                realm,
+            };
+            if w.run_due_timer(&mut js) {
+                js.engine.perform_microtask_checkpoint();
+                tokio::task::yield_now().await;
+                continue;
+            }
+        }
         if let Some(task) = w.take_task() {
+            streak += 1;
             let mut js = EngineJs {
                 engine: &mut *engine,
                 realm,
@@ -367,6 +382,7 @@ async fn event_loop(engine: &mut Engine, w: &Rc<Window>, notify: &Notify) {
             tokio::task::yield_now().await;
             continue;
         }
+        streak = 0;
         let ran = {
             let mut js = EngineJs {
                 engine: &mut *engine,

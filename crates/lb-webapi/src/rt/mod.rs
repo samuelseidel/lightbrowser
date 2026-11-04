@@ -170,6 +170,8 @@ pub trait Js {
     fn get(&mut self, obj: Handle, key: &str) -> Option<Handle>;
     /// `obj[key] = v`; false if that threw.
     fn set(&mut self, obj: Handle, key: &str, v: Arg) -> bool;
+    /// `CreateDataProperty(obj, key, v)`; false if it failed or threw.
+    fn define(&mut self, obj: Handle, key: &str, v: Arg) -> bool;
     fn kind(&mut self, h: Handle) -> ValueKind;
     fn value(&mut self, h: Handle) -> JsValue;
     fn release(&mut self, h: Handle);
@@ -221,6 +223,9 @@ impl Js for CallCtx<'_, '_, '_> {
     }
     fn set(&mut self, obj: Handle, key: &str, v: Arg) -> bool {
         self.set_property(obj, key, v).is_ok()
+    }
+    fn define(&mut self, obj: Handle, key: &str, v: Arg) -> bool {
+        self.define_data_property(obj, key, v).unwrap_or(false)
     }
     fn kind(&mut self, h: Handle) -> ValueKind {
         self.handle_kind(h)
@@ -297,6 +302,11 @@ impl Js for EngineJs<'_> {
     }
     fn set(&mut self, obj: Handle, key: &str, v: Arg) -> bool {
         self.engine.set_property(self.realm, obj, key, v).is_ok()
+    }
+    fn define(&mut self, obj: Handle, key: &str, v: Arg) -> bool {
+        self.engine
+            .define_data_property(self.realm, obj, key, v)
+            .unwrap_or(false)
     }
     fn kind(&mut self, h: Handle) -> ValueKind {
         self.engine

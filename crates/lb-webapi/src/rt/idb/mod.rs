@@ -97,10 +97,17 @@ pub(crate) struct Tx {
     closed_in_upgrade: bool,
     /// Building an index failed: abort instead of committing.
     doomed: Option<Arg>,
+    /// Every store object of this transaction (deleted ones too).
+    objs: Vec<u32>,
 }
 
 pub(crate) struct StoreObj {
     tx: u32,
+    /// Name when the version change transaction started (`None`: created
+    /// in it); used to revert on abort.
+    orig: Option<String>,
+    /// Every index object of this store (deleted ones too).
+    all_indexes: Vec<u32>,
     meta: StoreMeta,
     deleted: bool,
     indexes: HashMap<String, u32>,
@@ -109,6 +116,9 @@ pub(crate) struct StoreObj {
 
 pub(crate) struct IndexObj {
     store: u32,
+    /// Name when the version change transaction started (`None`: created
+    /// in it).
+    orig: Option<String>,
     meta: IndexMeta,
     deleted: bool,
     key_path: Option<Handle>,
@@ -311,8 +321,13 @@ fn enforce_u32(
     Ok(Some(n as u32))
 }
 
+/// Sort names as JS does (UTF-16 code units).
+fn sort_names(names: &mut [String]) {
+    names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
+}
+
 fn list_arg(w: &Window, mut names: Vec<String>) -> Arg {
-    names.sort();
+    sort_names(&mut names);
     names.dedup();
     w.obj_arg(new_idb(w, IdbObj::StringList(names)))
 }
@@ -598,10 +613,8 @@ fn abort_tx(w: &Rc<Window>, tx: u32, error: Option<Arg>) {
         // The connection's view goes back to the old version at once.
         let old = with_tx(w, tx, |t| t.old_meta.clone()).flatten();
         if let Some(old) = old {
-            with_db(w, db, |d| {
-                d.meta = old;
-                d.upgrade = None;
-            });
+            revert_objects(w, tx, &old);
+            with_db(w, db, |d| d.meta = old);
         }
     }
     let error = error.map(|e| {
@@ -611,6 +624,44 @@ fn abort_tx(w: &Rc<Window>, tx: u32, error: Option<Arg>) {
     let _ = w.inbox().send(Box::new(move |js, w| {
         fire_abort(js, w, tx, error);
     }));
+}
+
+/// Store and index objects of an aborted upgrade go back to the old
+/// schema: created ones are deleted, deleted ones come back, names revert.
+fn revert_objects(w: &Window, tx: u32, old: &DbMeta) {
+    let objs = with_tx(w, tx, |t| t.objs.clone()).unwrap_or_default();
+    for so in objs {
+        let Some((orig, indexes)) = with_store(w, so, |s| (s.orig.clone(), s.all_indexes.clone()))
+        else {
+            continue;
+        };
+        let old_store = orig
+            .as_ref()
+            .and_then(|n| old.stores.iter().find(|s| s.name == *n).cloned());
+        with_store(w, so, |s| match &old_store {
+            Some(m) => {
+                s.deleted = false;
+                s.meta = m.clone();
+            }
+            None => s.deleted = true,
+        });
+        for ix in indexes {
+            with_index(w, ix, |x| {
+                let old_ix = old_store.as_ref().and_then(|m| {
+                    x.orig
+                        .as_ref()
+                        .and_then(|n| m.indexes.iter().find(|i| i.name == *n).cloned())
+                });
+                match old_ix {
+                    Some(m) => {
+                        x.deleted = false;
+                        x.meta = m;
+                    }
+                    None => x.deleted = true,
+                }
+            });
+        }
+    }
 }
 
 fn fire_abort(js: &mut dyn Js, w: &Rc<Window>, tx: u32, error: Option<Arg>) {
@@ -633,6 +684,12 @@ fn fire_abort(js: &mut dyn Js, w: &Rc<Window>, tx: u32, error: Option<Arg>) {
         });
         fire_event(js, w, HostRef::new(K_OBJ, req), "error", true, true);
     }
+    let db = with_tx(w, tx, |t| t.db).unwrap_or(0);
+    with_db(w, db, |d| {
+        if d.upgrade == Some(tx) {
+            d.upgrade = None;
+        }
+    });
     fire_event(js, w, HostRef::new(K_OBJ, tx), "abort", true, false);
     // A version change transaction: the open request fails and the
     // connection is closed.
@@ -679,7 +736,10 @@ fn with_active<R>(
                 x.state = TxState::Inactive;
             }
         });
-        if w.uncaught.get() != before && tx_state(w, t) != TxState::Finished {
+        // After an explicit commit() an exception no longer aborts.
+        if w.uncaught.get() != before
+            && !matches!(tx_state(w, t), TxState::Finished | TxState::Committing)
+        {
             let e = dom_exception(w, "AbortError", "Uncaught exception in event handler.");
             abort_tx(w, t, Some(e));
         }
@@ -689,12 +749,17 @@ fn with_active<R>(
 
 /// After a request's event: commit when nothing is left.
 fn after_request(w: &Rc<Window>, tx: u32) {
-    let commit = with_tx(w, tx, |t| {
-        t.state == TxState::Inactive && t.pending.is_empty()
+    let (commit, explicit) = with_tx(w, tx, |t| {
+        (
+            t.state == TxState::Inactive && t.pending.is_empty(),
+            t.state == TxState::Committing && t.pending.is_empty(),
+        )
     })
-    .unwrap_or(false);
+    .unwrap_or((false, false));
     if commit {
         start_commit(w, tx);
+    } else if explicit && let (Some(id), Some(b)) = (with_tx(w, tx, |t| t.id), w.idb_backend()) {
+        b.commit(id);
     }
 }
 
@@ -796,6 +861,7 @@ fn on_event(js: &mut dyn Js, w: &Rc<Window>, ev: Ev) {
                     old_meta: Some(old_meta),
                     closed_in_upgrade: false,
                     doomed: None,
+                    objs: Vec::new(),
                 })),
             );
             w.idb.txns.borrow_mut().insert(txn, tx);
@@ -843,8 +909,16 @@ fn on_event(js: &mut dyn Js, w: &Rc<Window>, ev: Ev) {
                     db
                 }
             };
-            // An upgrade's connection closed by the page: `error` fired.
+            // An upgrade's connection the page closed: the request fails.
             if existing.is_some() && with_db(w, db, |d| d.close_pending).unwrap_or(false) {
+                let e = js.make(dom_exception(w, "AbortError", "The connection was closed."));
+                with_req(w, req, |r| {
+                    r.done = true;
+                    r.result = ResultVal::Undefined;
+                    r.error = e;
+                    r.tx = None;
+                });
+                fire_event(js, w, HostRef::new(K_OBJ, req), "error", true, true);
                 return;
             }
             with_req(w, req, |r| {
@@ -1278,12 +1352,12 @@ fn register_database(reg: &mut Registry, rt: &Runtime) {
             (d.conn, d.upgrade)
         })
         .unwrap_or((0, None));
+        // During an upgrade the transaction still commits; the open
+        // request then fails (spec, WPT `close-in-upgradeneeded`).
         if let Some(tx) = upgrade
             && tx_state(w, tx) != TxState::Finished
         {
             with_tx(w, tx, |t| t.closed_in_upgrade = true);
-            let e = dom_exception(w, "AbortError", "The connection was closed.");
-            abort_tx(w, tx, Some(e));
         }
         if let Some(b) = w.idb_backend() {
             b.close(conn);
@@ -1311,15 +1385,7 @@ fn register_database(reg: &mut Registry, rt: &Runtime) {
             match m.as_str() {
                 "readonly" => Mode::ReadOnly,
                 "readwrite" => Mode::ReadWrite,
-                "versionchange" => {
-                    return Err(exec_err(
-                        w,
-                        "TypeError",
-                        "transaction",
-                        "IDBDatabase",
-                        "The mode provided ('versionchange') is not one of 'readonly' or 'readwrite'.",
-                    ));
-                }
+                "versionchange" => Mode::VersionChange,
                 other => {
                     return Err(exec_err(
                         w,
@@ -1406,6 +1472,15 @@ fn register_database(reg: &mut Registry, rt: &Runtime) {
                 "The storeNames parameter was empty.",
             ));
         }
+        if mode == Mode::VersionChange {
+            return Err(exec_err(
+                w,
+                "TypeError",
+                "transaction",
+                "IDBDatabase",
+                "The mode provided ('versionchange') is not one of 'readonly' or 'readwrite'.",
+            ));
+        }
         let b = backend(w)?;
         let txn = b.transaction(conn, scope.clone(), mode, sink_of(w));
         let tx = new_idb(
@@ -1424,6 +1499,7 @@ fn register_database(reg: &mut Registry, rt: &Runtime) {
                 old_meta: None,
                 closed_in_upgrade: false,
                 doomed: None,
+                objs: Vec::new(),
             })),
         );
         w.idb.txns.borrow_mut().insert(txn, tx);
@@ -1496,7 +1572,9 @@ fn register_database(reg: &mut Registry, rt: &Runtime) {
         let _ = backend(w)?.schema(txn, Schema::CreateStore(smeta.clone()));
         with_db(w, id, |d| {
             d.meta.stores.push(smeta.clone());
-            d.meta.stores.sort_by(|a, b| a.name.cmp(&b.name));
+            d.meta
+                .stores
+                .sort_by(|a, b| a.name.encode_utf16().cmp(b.name.encode_utf16()));
         });
         with_tx(w, tx, |t| {
             if !t.scope.contains(&name) {
@@ -1550,17 +1628,31 @@ fn store_obj(w: &Window, tx: u32, meta: &StoreMeta) -> u32 {
     if let Some(id) = with_tx(w, tx, |t| t.stores.get(&meta.name).copied()).flatten() {
         return id;
     }
+    let orig = with_tx(w, tx, |t| match &t.old_meta {
+        Some(old) => old
+            .stores
+            .iter()
+            .any(|s| s.name == meta.name)
+            .then(|| meta.name.clone()),
+        None => Some(meta.name.clone()),
+    })
+    .flatten();
     let id = new_idb(
         w,
         IdbObj::Store(Box::new(StoreObj {
             tx,
+            orig,
+            all_indexes: Vec::new(),
             meta: meta.clone(),
             deleted: false,
             indexes: HashMap::new(),
             key_path: None,
         })),
     );
-    with_tx(w, tx, |t| t.stores.insert(meta.name.clone(), id));
+    with_tx(w, tx, |t| {
+        t.stores.insert(meta.name.clone(), id);
+        t.objs.push(id);
+    });
     id
 }
 
@@ -1667,14 +1759,16 @@ fn register_transaction(reg: &mut Registry, rt: &Runtime) {
             }
             TxState::Active => {}
         }
-        // Requests already placed still fire; then `complete`.
+        // Requests already placed still fire (an error among them aborts);
+        // the backend commits after the last one.
         let (txn, pending) = with_tx(w, id, |t| {
             t.state = TxState::Committing;
             (t.id, t.pending.len())
         })
         .unwrap_or((0, 0));
-        let _ = pending;
-        backend(w)?.commit(txn);
+        if pending == 0 {
+            backend(w)?.commit(txn);
+        }
         cx.ret(Arg::Undefined)
     });
 }
@@ -1725,6 +1819,19 @@ fn store_indexes(w: &Window, so: u32) -> Vec<IndexMeta> {
     .unwrap_or_default()
 }
 
+/// Run `f` (a structured clone, which may run getters) with transaction
+/// `tx` inactive, as the spec requires.
+fn inactive_during<R>(w: &Window, tx: u32, f: impl FnOnce() -> R) -> R {
+    with_tx(w, tx, |t| t.state = TxState::Inactive);
+    let r = f();
+    with_tx(w, tx, |t| {
+        if t.state == TxState::Inactive {
+            t.state = TxState::Active;
+        }
+    });
+    r
+}
+
 /// `put`/`add` on a store (also `IDBCursor.update` with `key` given).
 fn put_impl(
     cx: &mut CallCtx<'_, '_, '_>,
@@ -1761,13 +1868,13 @@ fn put_impl(
         None
     };
     let vh = cx.arg_handle(0);
-    let value = clone_value(cx, w, vh, op, iface);
+    let value = inactive_during(w, tx, || clone_value(cx, w, vh, op, iface));
     cx.release(vh);
     let value = value?;
     let clone = clone_in_realm(cx, w, &value)?;
     let r = put_keys(cx, w, so, &meta, &clone, explicit, op);
     cx.release(clone);
-    let (key, index_keys) = r?;
+    let (key, index_keys, pk_indexes) = r?;
     place(
         w,
         tx,
@@ -1778,9 +1885,16 @@ fn put_impl(
             key,
             add,
             index_keys,
+            pk_indexes,
         },
     )
 }
+
+type PutKeys = (
+    Option<Key>,
+    Vec<(String, Vec<Key>)>,
+    Vec<(String, Option<Vec<Option<Key>>>)>,
+);
 
 /// The primary key (`None`: generated) and index keys of a value.
 fn put_keys(
@@ -1791,7 +1905,7 @@ fn put_keys(
     clone: &Handle,
     explicit: Option<Key>,
     op: &str,
-) -> Result<(Option<Key>, Vec<(String, Vec<Key>)>), HostError> {
+) -> Result<PutKeys, HostError> {
     let iface = "IDBObjectStore";
     let key = match (&meta.key_path, explicit) {
         (_, Some(k)) => Some(k),
@@ -1834,11 +1948,44 @@ fn put_keys(
         (None, None) => None,
     };
     let mut index_keys = Vec::new();
+    let mut pk_indexes = Vec::new();
     for ix in store_indexes(w, so) {
+        if key.is_none()
+            && let Some(KeyPath::String(p)) = &meta.key_path
+        {
+            match &ix.key_path {
+                KeyPath::String(ip) if ip == p => {
+                    pk_indexes.push((ix.name.clone(), None));
+                    continue;
+                }
+                KeyPath::Array(ps) if ps.contains(p) => {
+                    let mut parts = Vec::new();
+                    let mut ok = true;
+                    for q in ps {
+                        if q == p {
+                            parts.push(None);
+                            continue;
+                        }
+                        match key::eval_key(cx, *clone, &KeyPath::String(q.clone()))? {
+                            Ok(Some(k)) => parts.push(Some(k)),
+                            _ => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if ok {
+                        pk_indexes.push((ix.name.clone(), Some(parts)));
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+        }
         let ks = key::index_keys(cx, *clone, &ix.key_path, ix.multi_entry)?;
         index_keys.push((ix.name.clone(), ks));
     }
-    Ok((key, index_keys))
+    Ok((key, index_keys, pk_indexes))
 }
 
 fn source_store_name(w: &Window, so: u32) -> String {
@@ -1859,8 +2006,12 @@ fn get_all_args(
         && key_range_of(w, cx.arg_host(0)).is_none()
     {
         let h = cx.arg_handle(0);
-        let is_key = key::to_key(cx, h)?.is_some();
-        if !is_key {
+        // Dates, arrays and binary are keys (valid or not), never options.
+        let key_like = cx.handle_date(h).is_some()
+            || cx.handle_is_array(h)
+            || cx.is_array_buffer(h)
+            || cx.handle_view_kind(h).is_some();
+        if !key_like {
             let q = cx.get_property(h, "query")?;
             let range = if matches!(cx.handle_kind(q), ValueKind::Undefined | ValueKind::Null) {
                 Range::all()
@@ -2057,7 +2208,9 @@ fn register_store(reg: &mut Registry, rt: &Runtime) {
                     s.name = name.clone();
                 }
             }
-            d.meta.stores.sort_by(|a, b| a.name.cmp(&b.name));
+            d.meta
+                .stores
+                .sort_by(|a, b| a.name.encode_utf16().cmp(b.name.encode_utf16()));
         });
         with_tx(w, tx, |t| {
             for s in &mut t.scope {
@@ -2346,7 +2499,8 @@ fn register_store(reg: &mut Registry, rt: &Runtime) {
         with_db(w, db, |d| {
             if let Some(s) = d.meta.stores.iter_mut().find(|s| s.name == store_name) {
                 s.indexes.push(meta.clone());
-                s.indexes.sort_by(|a, b| a.name.cmp(&b.name));
+                s.indexes
+                    .sort_by(|a, b| a.name.encode_utf16().cmp(b.name.encode_utf16()));
             }
         });
         let i = index_obj(w, id, meta);
@@ -2415,16 +2569,32 @@ fn register_store(reg: &mut Registry, rt: &Runtime) {
 
 fn index_obj(w: &Window, store: u32, meta: IndexMeta) -> u32 {
     let name = meta.name.clone();
+    let (tx, sorig) = with_store(w, store, |s| (s.tx, s.orig.clone())).unwrap_or((0, None));
+    let orig = with_tx(w, tx, |t| match &t.old_meta {
+        Some(old) => sorig.as_ref().and_then(|sn| {
+            old.stores
+                .iter()
+                .find(|s| s.name == *sn)
+                .filter(|s| s.indexes.iter().any(|i| i.name == name))
+                .map(|_| name.clone())
+        }),
+        None => Some(name.clone()),
+    })
+    .flatten();
     let i = new_idb(
         w,
         IdbObj::Index(Box::new(IndexObj {
             store,
+            orig,
             meta,
             deleted: false,
             key_path: None,
         })),
     );
-    with_store(w, store, |s| s.indexes.insert(name, i));
+    with_store(w, store, |s| {
+        s.indexes.insert(name, i);
+        s.all_indexes.push(i);
+    });
     i
 }
 
@@ -2510,7 +2680,8 @@ fn register_index(reg: &mut Registry, rt: &Runtime) {
                         i.name = name.clone();
                     }
                 }
-                s.indexes.sort_by(|a, b| a.name.cmp(&b.name));
+                s.indexes
+                    .sort_by(|a, b| a.name.encode_utf16().cmp(b.name.encode_utf16()));
             }
         });
         with_store(w, store, |s| {
@@ -2872,7 +3043,7 @@ fn register_cursor(reg: &mut Registry, rt: &Runtime) {
         let pk = pos.map(|p| p.1).ok_or_else(illegal)?;
         let meta = with_store(w, store, |s| s.meta.clone()).ok_or_else(illegal)?;
         let vh = cx.arg_handle(0);
-        let value = clone_value(cx, w, vh, op, "IDBCursor");
+        let value = inactive_during(w, tx, || clone_value(cx, w, vh, op, "IDBCursor"));
         cx.release(vh);
         let value = value?;
         let clone = clone_in_realm(cx, w, &value)?;
@@ -2905,6 +3076,7 @@ fn register_cursor(reg: &mut Registry, rt: &Runtime) {
                 key: Some(pk),
                 add: false,
                 index_keys,
+                pk_indexes: Vec::new(),
             },
         )?;
         cx.ret(w.obj_arg(r))

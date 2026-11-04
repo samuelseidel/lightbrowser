@@ -1811,6 +1811,33 @@ impl Engine {
         })
     }
 
+    /// `CreateDataProperty(object, key, value)`: an own data property,
+    /// bypassing setters on the prototype chain (IndexedDB key injection).
+    pub fn define_data_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+        value: Arg,
+    ) -> Result<bool, JsError> {
+        self.run(realm, |scope, state| {
+            v8::tc_scope!(let tc, scope);
+            let v = load_handle(tc, state, object)?;
+            let Ok(o) = v8::Local::<v8::Object>::try_from(v) else {
+                return Ok(false);
+            };
+            let val = match arg_to_v8(tc, state, realm, &value) {
+                Ok(v) => v,
+                Err(_) => return Err(caught(tc, state)),
+            };
+            let k = v8_str(tc, key);
+            match o.create_data_property(tc, k.into(), val) {
+                Some(b) => Ok(b),
+                None => Err(caught(tc, state)),
+            }
+        })
+    }
+
     /// Queue a held function as a microtask of its realm.
     pub fn enqueue_microtask(&mut self, realm: RealmId, func: Handle) -> Result<(), JsError> {
         self.run(realm, |scope, state| {
@@ -3123,6 +3150,24 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
             o.set(self.scope, k.into(), val).ok_or(HostError::Thrown)?;
         }
         Ok(())
+    }
+
+    /// `CreateDataProperty(obj, key, value)` on a held object.
+    pub fn define_data_property(
+        &mut self,
+        obj: Handle,
+        key: &str,
+        value: Arg,
+    ) -> Result<bool, HostError> {
+        let v =
+            load_handle(self.scope, &self.state, obj).map_err(|e| HostError::Error(e.message))?;
+        let Ok(o) = v8::Local::<v8::Object>::try_from(v) else {
+            return Ok(false);
+        };
+        let val = arg_to_v8(self.scope, &self.state, self.realm, &value)?;
+        let k = v8_str(self.scope, key);
+        o.create_data_property(self.scope, k.into(), val)
+            .ok_or(HostError::Thrown)
     }
 
     /// Materialize an [`Arg`] (e.g. [`Arg::Construct`], [`Arg::Json`]) as a

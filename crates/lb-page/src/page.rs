@@ -181,6 +181,12 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
     let mut next_frame = 0.0f64;
     let mut gc_done = false;
     let mut quiet_since: Option<f64> = None;
+    // Tasks run before timers, but a page that keeps queueing tasks (an
+    // IndexedDB request loop, a postMessage ping-pong) must not starve
+    // its due timers: after this many tasks in a row a due timer goes
+    // first (real clock only).
+    const TASK_STREAK: u32 = 50;
+    let mut streak = 0u32;
     loop {
         if page.closed.get() {
             return;
@@ -192,7 +198,27 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
         // Every window of the page: the top-level one, then its frames.
         let wins = crate::frames::tree(&w);
         let mut did = false;
-        for x in &wins {
+        if streak >= TASK_STREAK && !w.clock.is_virtual() {
+            streak = 0;
+            for x in &wins {
+                let realm = x.realm();
+                let ran = ws
+                    .with_engine(|engine| {
+                        let mut js = EngineJs { engine, realm };
+                        let ran = x.run_due_timer(&mut js);
+                        if ran {
+                            js.engine.perform_microtask_checkpoint();
+                        }
+                        ran
+                    })
+                    .unwrap_or(false);
+                if ran {
+                    did = true;
+                    break;
+                }
+            }
+        }
+        for x in wins.iter().filter(|_| !did) {
             if let Some(task) = x.take_task() {
                 let realm = x.realm();
                 ws.with_engine(|engine| {
@@ -201,10 +227,12 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
                     js.engine.perform_microtask_checkpoint();
                 });
                 did = true;
+                streak += 1;
                 break;
             }
         }
         if !did {
+            streak = 0;
             for x in &wins {
                 let realm = x.realm();
                 let ran = ws

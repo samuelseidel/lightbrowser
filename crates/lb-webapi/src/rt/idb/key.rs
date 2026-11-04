@@ -454,5 +454,5 @@ pub fn inject(js: &mut dyn super::super::Js, value: Handle, path: &str, key: &Ke
 }
 
 fn set(js: &mut dyn super::super::Js, obj: Handle, name: &str, v: Arg) -> bool {
-    js.set(obj, name, v)
+    js.define(obj, name, v)
 }
