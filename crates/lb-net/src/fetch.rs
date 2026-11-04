@@ -143,7 +143,7 @@ pub struct NetContext {
     /// flag records the `danger_accept_invalid_certs` it was built with.
     connector: Option<(bool, Arc<TlsConnector>)>,
     /// DNS resolver (system configuration) and TCP connect.
-    dialer: Arc<Dialer>,
+    pub(crate) dialer: Arc<Dialer>,
 }
 
 impl NetContext {
@@ -182,7 +182,7 @@ impl NetContext {
     }
 
     /// A copy for a task on the network thread (same jar, hints, pool).
-    fn detached(&self) -> NetContext {
+    pub(crate) fn detached(&self) -> NetContext {
         NetContext {
             persona: Arc::clone(&self.persona),
             profile: Arc::clone(&self.profile),
@@ -198,7 +198,7 @@ impl NetContext {
     }
 
     /// The cached TLS connector for this context, built on first use.
-    fn tls_connector(&mut self) -> Result<Arc<TlsConnector>, NetError> {
+    pub(crate) fn tls_connector(&mut self) -> Result<Arc<TlsConnector>, NetError> {
         if let Some((flag, c)) = &self.connector
             && *flag == self.danger_accept_invalid_certs
         {

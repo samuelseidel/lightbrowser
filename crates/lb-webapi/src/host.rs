@@ -106,6 +106,55 @@ pub trait NetHost {
     fn cookie_string(&self, url: &Url) -> String;
     /// `document.cookie` setter.
     fn set_cookie_string(&self, url: &Url, cookie: &str);
+    /// Open a WebSocket connection (ADR 0025). `None`: this host has no
+    /// network for it (the page fails the connection).
+    fn websocket(&self, open: WsOpen) -> Option<WsChannels> {
+        let _ = open;
+        None
+    }
+}
+
+/// A WebSocket the page opens.
+#[derive(Debug, Clone)]
+pub struct WsOpen {
+    pub url: Url,
+    pub protocols: Vec<String>,
+    /// `Origin` header: the document's origin.
+    pub origin: String,
+}
+
+/// From the page to a WebSocket connection.
+#[derive(Debug, Clone)]
+pub enum WsCommand {
+    Text(String),
+    Binary(Vec<u8>),
+    Close(Option<u16>, String),
+}
+
+/// From a WebSocket connection to the page.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WsEvent {
+    Open {
+        protocol: String,
+        extensions: String,
+    },
+    Text(String),
+    Binary(Vec<u8>),
+    /// Bytes of queued messages that went on the wire.
+    Flushed(usize),
+    /// The connection failed (Chrome's console detail); `Closed` follows.
+    Failed(String),
+    Closed {
+        code: u16,
+        reason: String,
+        clean: bool,
+    },
+}
+
+/// The two ends a page holds of a WebSocket connection.
+pub struct WsChannels {
+    pub commands: tokio::sync::mpsc::UnboundedSender<WsCommand>,
+    pub events: tokio::sync::mpsc::UnboundedReceiver<WsEvent>,
 }
 
 /// One `localStorage` / `sessionStorage` area: insertion-ordered pairs,

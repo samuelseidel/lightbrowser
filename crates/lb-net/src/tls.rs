@@ -260,7 +260,7 @@ impl TlsConnector {
         tcp: TcpStream,
         key: Option<&SessionKey>,
     ) -> Result<(tokio_boring::SslStream<TcpStream>, HttpVersion), NetError> {
-        let mut config = self.configure()?;
+        let mut config = self.configure(false)?;
         if let (Some((cache, index)), Some(key)) = (&self.sessions, key) {
             if let Some(session) = cache.lookup(key) {
                 // SAFETY: `session` is a valid session made by this
@@ -281,21 +281,41 @@ impl TlsConnector {
         Ok((stream, version))
     }
 
+    /// A handshake whose ALPN offers `http/1.1` alone (Chrome's WebSocket
+    /// connections), otherwise the profile's ClientHello. As captured from
+    /// Chrome 153 on loopback (`wss:`), such a ClientHello also lacks ALPS
+    /// (17613, only for `h2`) and `server_padding` (4832).
+    pub async fn connect_http1_only(
+        &self,
+        host: &str,
+        tcp: TcpStream,
+    ) -> Result<(tokio_boring::SslStream<TcpStream>, HttpVersion), NetError> {
+        let mut config = self.configure(true)?;
+        config.set_alpn_protos(b"\x08http/1.1")?;
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        let stream = tokio_boring::connect(config, host, tcp)
+            .await
+            .map_err(|e| NetError::Tls(format!("handshake with {host}: {e}")))?;
+        Ok((stream, HttpVersion::Http1))
+    }
+
     /// Per-connection settings that BoringSSL only exposes on `SSL`.
-    fn configure(&self) -> Result<ConnectConfiguration, NetError> {
+    /// `h1_only`: a connection that offers `http/1.1` alone (no ALPS, no
+    /// `server_padding`).
+    fn configure(&self, h1_only: bool) -> Result<ConnectConfiguration, NetError> {
         let mut config = self.connector.configure()?;
         if self.danger_accept_invalid_certs {
             config.set_verify(SslVerifyMode::NONE);
             config.set_verify_hostname(false);
         }
         config.set_enable_ech_grease(self.profile.ech_grease);
-        if let Some(n) = self.server_padding {
+        if let Some(n) = self.server_padding.filter(|_| !h1_only) {
             let ssl = ForeignTypeRef::as_ptr(&*config);
             // SAFETY: `ssl` is a valid, live SSL owned by `config`. The call
             // only stores the integer. `boring` 5.x does not wrap it.
             unsafe { boring_sys::SSL_set_server_padding_request(ssl, n) };
         }
-        if !self.alps.is_empty() {
+        if !self.alps.is_empty() && !h1_only {
             let ssl = ForeignTypeRef::as_ptr(&*config);
             // SAFETY: `ssl` is a valid, live SSL owned by `config` for the
             // whole block. BoringSSL copies `proto` and `settings` before

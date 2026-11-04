@@ -67,6 +67,12 @@ pub enum EventExtra {
     Ui {
         detail: i32,
     },
+    /// `CloseEvent` (WebSocket).
+    Close {
+        code: u16,
+        reason: String,
+        was_clean: bool,
+    },
 }
 
 /// One event object.
@@ -855,6 +861,30 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         let id = w.new_obj(Obj::Event(Box::new(e)));
         cx.init_this(HostRef::new(K_OBJ, id))
     });
+    ctor(reg, rt, "CloseEvent", |cx, w| {
+        need_args(cx, 1, "construct", "CloseEvent").map_err(|_| {
+            HostError::type_error(
+                "Failed to construct 'CloseEvent': 1 argument required, but only 0 present.",
+            )
+        })?;
+        let type_ = cx.arg_string(0)?;
+        let d = Dict::arg(cx, 1);
+        let mut e = EventData::new(
+            "CloseEvent",
+            &type_,
+            d.bool(cx, "bubbles")?,
+            d.bool(cx, "cancelable")?,
+        );
+        e.extra = EventExtra::Close {
+            was_clean: d.bool(cx, "wasClean")?,
+            code: d.number(cx, "code")?.unwrap_or(0.0) as u16,
+            reason: d.string(cx, "reason")?.unwrap_or_default(),
+        };
+        d.release(cx);
+        e.time = coarse_now(w);
+        let id = w.new_obj(Obj::Event(Box::new(e)));
+        cx.init_this(HostRef::new(K_OBJ, id))
+    });
     ctor(reg, rt, "MessageEvent", |cx, w| {
         let type_ = cx.arg_string(0)?;
         let d = Dict::arg(cx, 1);
@@ -1087,6 +1117,21 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         EventExtra::Message { data: Some(h), .. } => Arg::Handle(h),
         _ => Arg::Null,
     }));
+    extra_get!("CloseEvent", "code", |cx, x| cx.ret(match x {
+        EventExtra::Close { code, .. } => u32::from(code),
+        _ => 0,
+    }));
+    extra_get!("CloseEvent", "reason", |cx, x| cx.ret(match x {
+        EventExtra::Close { reason, .. } => reason,
+        _ => String::new(),
+    }));
+    extra_get!("CloseEvent", "wasClean", |cx, x| cx.ret(matches!(
+        x,
+        EventExtra::Close {
+            was_clean: true,
+            ..
+        }
+    )));
     extra_get!("MessageEvent", "origin", |cx, x| cx.ret(match x {
         EventExtra::Message { origin, .. } => origin,
         _ => String::new(),

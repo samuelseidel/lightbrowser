@@ -48,6 +48,9 @@ impl lb_webapi::host::NetHost for PageNet {
     fn set_cookie_string(&self, url: &Url, cookie: &str) {
         self.ctx.cookies().set_document_cookie(url, cookie);
     }
+    fn websocket(&self, open: lb_webapi::host::WsOpen) -> Option<lb_webapi::host::WsChannels> {
+        crate::context::open_websocket(&self.ctx, open)
+    }
 }
 
 /// A navigation request through the controlling service worker's `fetch`

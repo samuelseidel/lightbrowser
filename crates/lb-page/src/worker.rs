@@ -119,6 +119,9 @@ impl lb_webapi::host::NetHost for WorkerNet {
             c.cookies().set_document_cookie(url, cookie);
         }
     }
+    fn websocket(&self, open: lb_webapi::host::WsOpen) -> Option<lb_webapi::host::WsChannels> {
+        crate::context::open_websocket(&self.ctx.upgrade()?, open)
+    }
 }
 
 /// Start the thread of one worker.

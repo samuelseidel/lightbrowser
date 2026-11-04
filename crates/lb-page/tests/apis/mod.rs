@@ -104,6 +104,8 @@ cases!(
     crypto_rsa,
     import_page,
     import_worker,
+    ws_api,
+    ws_basic,
     xhr_blob,
     xhr_sync,
 );

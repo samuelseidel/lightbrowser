@@ -76,6 +76,7 @@ mod table;
 mod tags;
 mod webgl;
 mod webgl_ext;
+mod websocket;
 mod window;
 pub mod worker;
 
@@ -463,6 +464,7 @@ impl Runtime {
         worker::register(reg, &rt);
         sw::register(reg, &rt);
         crypto::register(reg, &rt);
+        websocket::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -1743,6 +1745,8 @@ pub(crate) enum Obj {
     Css(Box<sheets::CssObj>),
     /// `Crypto`, `SubtleCrypto` and `CryptoKey`.
     Crypto(Box<crypto::CryptoObj>),
+    /// `WebSocket`.
+    WebSocket(Box<websocket::WsState>),
     /// `CSSStyleRule.style`: the declarations of a rule.
     RuleStyle {
         sheet: u32,
@@ -1797,6 +1801,7 @@ impl Obj {
             Obj::Sw(x) => x.iface_name(),
             Obj::Css(c) => c.iface_name(),
             Obj::Crypto(c) => c.iface_name(),
+            Obj::WebSocket(_) => "WebSocket",
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
         }
     }

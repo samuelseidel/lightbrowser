@@ -33,6 +33,7 @@ pub mod headers;
 pub mod pool;
 pub mod profile;
 pub mod tls;
+pub mod websocket;
 
 pub use client_hints::{ClientHintsStore, UaHint};
 pub use error::NetError;

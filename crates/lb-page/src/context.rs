@@ -232,7 +232,7 @@ impl BrowserContext {
         &self.0.local_storage
     }
 
-    fn take_net(&self) -> Result<NetContext, PageError> {
+    pub(crate) fn take_net(&self) -> Result<NetContext, PageError> {
         let pooled = self.0.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
         let mut net = match pooled {
             Some(n) => n,
@@ -256,7 +256,7 @@ impl BrowserContext {
         Ok(net)
     }
 
-    fn put_back(&self, mut net: NetContext) {
+    pub(crate) fn put_back(&self, mut net: NetContext) {
         net.cookies = self.0.cookies.clone();
         net.client_hints = self.0.client_hints.clone();
         let mut pool = self.0.pool.lock().unwrap_or_else(|e| e.into_inner());
@@ -433,4 +433,70 @@ mod tests {
         let scripted = NetRequest::get(u("p"), Destination::Document, Some(init));
         assert!(!request_meta(&scripted, None).user_activated);
     }
+}
+
+/// Open a WebSocket in `ctx` (lb-net's client on the network thread) and
+/// bridge its channels to the page's types (ADR 0025).
+pub(crate) fn open_websocket(
+    ctx: &BrowserContext,
+    open: lb_webapi::host::WsOpen,
+) -> Option<lb_webapi::host::WsChannels> {
+    use lb_net::websocket::{WsCommand as NC, WsConnect, WsEvent as NE};
+    use lb_webapi::host::{WsChannels, WsCommand, WsEvent};
+    let mut net = ctx.take_net().ok()?;
+    let (tx, mut rx) = net.websocket(WsConnect {
+        url: open.url,
+        protocols: open.protocols,
+        origin: open.origin,
+    });
+    ctx.put_back(net);
+    let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel::<WsCommand>();
+    let (etx, erx) = tokio::sync::mpsc::unbounded_channel::<WsEvent>();
+    // The page's commands; when the page drops its sender, so does this
+    // task, and the connection closes (1001, as on unload).
+    tokio::task::spawn_local(async move {
+        while let Some(c) = prx.recv().await {
+            let c = match c {
+                WsCommand::Text(s) => NC::Text(s),
+                WsCommand::Binary(b) => NC::Binary(b),
+                WsCommand::Close(code, reason) => NC::Close(code, reason),
+            };
+            if tx.send(c).is_err() {
+                break;
+            }
+        }
+    });
+    tokio::task::spawn_local(async move {
+        while let Some(e) = rx.recv().await {
+            let e = match e {
+                NE::Open {
+                    protocol,
+                    extensions,
+                } => WsEvent::Open {
+                    protocol,
+                    extensions,
+                },
+                NE::Text(s) => WsEvent::Text(s),
+                NE::Binary(b) => WsEvent::Binary(b),
+                NE::Flushed(n) => WsEvent::Flushed(n),
+                NE::Failed(m) => WsEvent::Failed(m),
+                NE::Closed {
+                    code,
+                    reason,
+                    clean,
+                } => WsEvent::Closed {
+                    code,
+                    reason,
+                    clean,
+                },
+            };
+            if etx.send(e).is_err() {
+                break;
+            }
+        }
+    });
+    Some(WsChannels {
+        commands: ptx,
+        events: erx,
+    })
 }
