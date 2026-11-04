@@ -350,9 +350,68 @@ impl<'i> selectors::parser::Parser<'i> for SelectorParser {
     }
 }
 
-/// A parsed, reusable selector list.
+/// A parsed, reusable selector list, with what each selector's
+/// rightmost compound requires (a quick pre-check before matching).
 #[derive(Clone, Debug)]
-pub struct SelectorList(selectors::SelectorList<LbSelectorImpl>);
+pub struct SelectorList(selectors::SelectorList<LbSelectorImpl>, Box<[Need]>);
+
+/// What one selector's rightmost compound requires of an element: an ID,
+/// a class or a type name, or nothing known. Matching is ASCII
+/// case-insensitive here (a superset of quirks and no-quirks matching),
+/// and a type matches either spelling, so the check never rejects an
+/// element the full match would accept.
+#[derive(Clone, Debug)]
+enum Need {
+    Any,
+    /// A pseudo-element selector: never matched by the cascade or queries.
+    Never,
+    Id(CssAtom),
+    Class(CssAtom),
+    Tag(CssAtom, CssAtom),
+}
+
+impl Need {
+    fn of(s: &selectors::parser::Selector<LbSelectorImpl>) -> Need {
+        use selectors::parser::Component;
+        if s.has_pseudo_element() {
+            return Need::Never;
+        }
+        let (mut class, mut tag) = (None, None);
+        for c in s.iter() {
+            match c {
+                Component::ID(id) => return Need::Id(id.clone()),
+                Component::Class(c) if class.is_none() => class = Some(c.clone()),
+                Component::LocalName(l) if tag.is_none() => {
+                    tag = Some((l.name.clone(), l.lower_name.clone()));
+                }
+                _ => {}
+            }
+        }
+        match (class, tag) {
+            (Some(c), _) => Need::Class(c),
+            (None, Some((n, l))) => Need::Tag(n, l),
+            (None, None) => Need::Any,
+        }
+    }
+
+    fn may_match(&self, e: &ElementFacts<'_>) -> bool {
+        match self {
+            Need::Any => true,
+            Need::Never => false,
+            Need::Id(id) => e.id.is_some_and(|v| v.eq_ignore_ascii_case(&id.0)),
+            Need::Class(c) => e.classes.iter().any(|v| v.eq_ignore_ascii_case(&c.0)),
+            Need::Tag(name, lower) => *e.local == name.0 || *e.local == lower.0,
+        }
+    }
+}
+
+/// An element's ID, classes and local name, for [`SelectorList`]'s
+/// pre-check.
+pub struct ElementFacts<'a> {
+    id: Option<&'a str>,
+    classes: Vec<&'a str>,
+    local: &'a LocalName,
+}
 
 impl SelectorList {
     /// Parse a selector list; errors map to `SyntaxError`.
@@ -365,7 +424,14 @@ impl SelectorList {
         parser
             .expect_exhausted()
             .map_err(|_| DomError::Syntax(format!("'{text}' is not a valid selector")))?;
-        Ok(SelectorList(list))
+        let needs = list.slice().iter().map(Need::of).collect();
+        Ok(SelectorList(list, needs))
+    }
+
+    /// False when no selector of the list can match the element (a quick
+    /// pre-check; true does not mean it matches).
+    pub fn may_match(&self, e: &ElementFacts<'_>) -> bool {
+        self.1.iter().any(|n| n.may_match(e))
     }
 }
 
@@ -859,19 +925,50 @@ impl Document {
     /// `id`, or `None` if none match. Selectors with a pseudo-element are
     /// skipped. Used by the style cascade.
     pub fn match_specificity(&self, id: NodeId, list: &SelectorList) -> Option<u32> {
+        self.match_specificities(id, [((), list)])
+            .pop()
+            .map(|(_, s)| s)
+    }
+
+    /// [`Document::match_specificity`] for many lists against one element,
+    /// with one matching context: `(tag, specificity)` of each list that
+    /// matches, in order. Lists whose pre-check rules the element out are
+    /// not matched.
+    pub fn match_specificities<'l, T>(
+        &self,
+        id: NodeId,
+        lists: impl IntoIterator<Item = (T, &'l SelectorList)>,
+    ) -> Vec<(T, u32)> {
         if !self.is_element(id) {
-            return None;
+            return Vec::new();
         }
+        let facts = self.element_facts(id);
         self.with_context(None, |ctx| {
             let el = ElementRef::new(self, id);
-            list.0
-                .slice()
-                .iter()
-                .filter(|s| !s.has_pseudo_element())
-                .filter(|s| selectors::matching::matches_selector(s, 0, None, el, ctx))
-                .map(|s| s.specificity())
-                .max()
+            lists
+                .into_iter()
+                .filter(|(_, list)| list.may_match(&facts))
+                .filter_map(|(tag, list)| {
+                    list.0
+                        .slice()
+                        .iter()
+                        .filter(|s| !s.has_pseudo_element())
+                        .filter(|s| selectors::matching::matches_selector(s, 0, None, el, ctx))
+                        .map(|s| s.specificity())
+                        .max()
+                        .map(|spec| (tag, spec))
+                })
+                .collect()
         })
+    }
+
+    /// Element `id`'s facts for [`SelectorList::may_match`].
+    pub fn element_facts(&self, id: NodeId) -> ElementFacts<'_> {
+        ElementFacts {
+            id: self.get_attribute(id, "id"),
+            classes: self.classes(id).collect(),
+            local: self.local_name(id).expect("an element"),
+        }
     }
 
     /// First matching descendant of `scope` in tree order.

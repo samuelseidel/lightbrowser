@@ -24,7 +24,7 @@ pub use document::{Children, Descendants, Document, DomError};
 pub use mutation::{Mutation, MutationHook};
 pub use node::{Doctype, ElementData, NodeFlags, NodeId, NodeType, ProcessingInstruction};
 pub use parser::{HtmlParser, ParseStep, ParserOptions};
-pub use select::{ElementRef, SelectorList};
+pub use select::{ElementFacts, ElementRef, SelectorList};
 pub use serialize::SerializeNode;
 
 /// Interned names and helpers from html5ever, re-exported so callers use

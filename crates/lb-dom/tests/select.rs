@@ -195,3 +195,73 @@ fn reusable_selector_list() {
         doc.get_element_by_id("l1")
     );
 }
+
+/// The cascade's batched matching (with its ID / class / type pre-check)
+/// agrees with plain matching of each selector, for every element, in
+/// no-quirks and quirks documents (quirks: ASCII case-insensitive IDs and
+/// classes), SVG camel-case names, pseudo-elements and `:is()`.
+#[test]
+fn batched_specificities_agree() {
+    use lb_dom::SelectorList;
+    let texts = [
+        "#l1",
+        "#L1",
+        ".a",
+        ".A",
+        ".b",
+        "li.b",
+        "LI",
+        "li",
+        "rect",
+        "RECT",
+        "foreignObject",
+        "foreignobject",
+        "*",
+        "ul > li:first-child",
+        ":is(.a,#p2)",
+        "p::before",
+        "p::before, #p1",
+        "div p",
+        "#d1 *",
+        "[lang|=en]",
+        "a:not([href])",
+        ".x, .y, li#l2.B",
+        "body p:nth-child(3)",
+        "#fo, svg *",
+    ];
+    let lists: Vec<SelectorList> = texts
+        .iter()
+        .map(|s| SelectorList::parse(s).unwrap_or_else(|e| panic!("{s}: {e}")))
+        .collect();
+    let svg = "<svg><foreignObject id=fo></foreignObject></svg>";
+    for html in [
+        format!("{LIST}{svg}"),
+        format!("{}{svg}", LIST.trim_start_matches("<!DOCTYPE html>")),
+    ] {
+        let doc = Document::parse_html(&html);
+        let mut matched = 0;
+        for n in doc.descendants(Document::DOCUMENT) {
+            if !doc.is_element(n) {
+                continue;
+            }
+            // Reference: each selector of each list on its own, no pre-check.
+            let want: Vec<(usize, u32)> = texts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| {
+                    t.split(", ")
+                        .filter(|p| !p.contains("::"))
+                        .map(|p| SelectorList::parse(p).unwrap())
+                        .filter(|l| doc.matches_list(n, l, None))
+                        .filter_map(|l| l.specificities().next())
+                        .max()
+                        .map(|s| (i, s))
+                })
+                .collect();
+            let got = doc.match_specificities(n, lists.iter().enumerate());
+            assert_eq!(got, want, "{:?}", doc.element_id(n));
+            matched += got.len();
+        }
+        assert!(matched > 20);
+    }
+}

@@ -531,11 +531,12 @@ impl StyleEngine {
     ) -> ComputedStyle {
         // Matching blocks: (rank, specificity, order, block).
         let mut matched: Vec<(u8, u32, u32, Rc<DeclarationBlock>)> = Vec::new();
-        for (order, rule) in self.active.iter().enumerate() {
+        let lists = self.active.iter().enumerate().map(|(order, rule)| {
             let r = &rule.sheet.rules[rule.index as usize];
-            if let Some(spec) = doc.match_specificity(id, &r.selectors) {
-                matched.push((rule.rank, spec, order as u32, r.block.clone()));
-            }
+            ((order, rule.rank, &r.block), &r.selectors)
+        });
+        for ((order, rank, block), spec) in doc.match_specificities(id, lists) {
+            matched.push((rank, spec, order as u32, block.clone()));
         }
         if let Some(h) = presentational_hints(doc, id) {
             matched.push((RANK_HINT, 0, 0, Rc::new(h)));
