@@ -97,7 +97,7 @@ and the status sections in `docs/ROADMAP.md`.
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
 | `sdk/python` | `lightbrowser` package: launcher, `Persona`, sync/async Playwright wrappers with `human_*` and `verify_fingerprint`, scenarios T-001..T-007 | Done; needs Python Playwright >= 1.63 |
-| `bench/` | Crawl benchmark (generated 50-page corpus, loopback only) vs headless Chromium and Lightpanda; results in `bench/results/` | Runner done; Lightpanda compared (6 of 6 checks pass, see ROADMAP) |
+| `bench/` | Crawl benchmark (generated 50-page corpus, loopback only) vs headless Chromium and Lightpanda; results in `bench/results/` | Runner done; Lightpanda compared (5 of 6 checks pass: CDP wall time fails, see ROADMAP) |
 | `bin/lightbrowser` | CLI; picks family by feature; `fetch`, `validate`, `serve`, `fingerprint-report` | All done for chrome; the firefox build's `serve` uses `MockHost` and `fingerprint-report` needs the JS engine |
 
 ## Commands
