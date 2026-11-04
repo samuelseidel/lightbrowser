@@ -173,7 +173,9 @@ async fn probe_service_worker(page: &Rc<PageState>, url: &url::Url) -> Value {
     let (etx, erx) = tokio::sync::oneshot::channel();
     let start = WorkerStart {
         kind: WorkerKind::Service,
-        url: url.join("/__lb_probe_sw.js").unwrap_or_else(|_| url.clone()),
+        url: url
+            .join("/__lb_probe_sw.js")
+            .unwrap_or_else(|_| url.clone()),
         source: Some(String::new()),
         module: false,
         name: String::new(),
@@ -211,7 +213,9 @@ async fn probe_service_worker(page: &Rc<PageState>, url: &url::Url) -> Value {
     let r = tokio::time::timeout(Duration::from_secs(5), run).await;
     control.terminate();
     match r {
-        Ok(Ok(s)) => serde_json::from_str(&s).unwrap_or_else(|e| json!({ "__error": e.to_string() })),
+        Ok(Ok(s)) => {
+            serde_json::from_str(&s).unwrap_or_else(|e| json!({ "__error": e.to_string() }))
+        }
         Ok(Err(e)) => json!({ "__error": e }),
         Err(_) => json!({ "__error": "service worker timeout" }),
     }
