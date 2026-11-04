@@ -19,6 +19,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use url::Url;
 
+use crate::error::NetError;
 use crate::fetch::NetContext;
 
 /// What a page asks for.
@@ -212,9 +213,18 @@ async fn handshake(
         .ok_or_else(|| "Invalid URL".to_owned())?
         .to_owned();
     let port = url.port_or_known_default().unwrap_or(80);
-    let tcp =
-        ctx.dialer.connect(&host, port).await.map_err(|_| {
-            "Error in connection establishment: net::ERR_CONNECTION_REFUSED".to_owned()
+    // Through the context's proxy: `ws:` and `wss:` both use a `CONNECT`
+    // tunnel (or SOCKS5), as Chrome does.
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    let tcp = ctx
+        .connect_tcp(url, bare, port)
+        .await
+        .map_err(|e| match e {
+            NetError::Proxy(m) => format!("Error in connection establishment: {m}"),
+            NetError::ProxyAuth(_) => {
+                "Error in connection establishment: net::ERR_PROXY_AUTH_REQUESTED".to_owned()
+            }
+            _ => "Error in connection establishment: net::ERR_CONNECTION_REFUSED".to_owned(),
         })?;
     let mut stream: Box<dyn Io> = match tls {
         Some(c) if url.scheme() == "wss" => {

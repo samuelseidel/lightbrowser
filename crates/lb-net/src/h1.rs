@@ -89,7 +89,22 @@ pub async fn send_on<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut out = request_head(req)?;
+    send_on_form(io, req, max_body, false).await
+}
+
+/// [`send_on`], with the request target in absolute form
+/// (`GET http://host/path`) when `absolute`: a forward request to an HTTP
+/// proxy (ADR 0027).
+pub(crate) async fn send_on_form<S>(
+    io: &mut S,
+    req: &Request,
+    max_body: usize,
+    absolute: bool,
+) -> Result<(RawResponse, bool), SendError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut out = request_head(req, absolute)?;
     out.extend_from_slice(&req.body);
     let stale = |e: std::io::Error| SendError {
         error: NetError::Connect(e),
@@ -101,12 +116,16 @@ where
 }
 
 /// Request line and headers, ending with the blank line.
-fn request_head(req: &Request) -> Result<Vec<u8>, NetError> {
+fn request_head(req: &Request, absolute: bool) -> Result<Vec<u8>, NetError> {
     let url = &req.url;
     let host = url
         .host_str()
         .ok_or_else(|| NetError::Http(format!("no host in {url}")))?;
-    let path = &url[url::Position::BeforePath..url::Position::AfterQuery];
+    let path = if absolute {
+        &url[..url::Position::AfterQuery]
+    } else {
+        &url[url::Position::BeforePath..url::Position::AfterQuery]
+    };
     let path = if path.is_empty() { "/" } else { path };
 
     let mut headers = req.headers.clone();

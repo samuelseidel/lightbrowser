@@ -24,6 +24,57 @@ use crate::client_hints::UaHint;
 use crate::error::NetError;
 use crate::headers::OrderedHeaders;
 
+/// Whether `url` is a potentially trustworthy destination (Chrome's
+/// `network::IsUrlPotentiallyTrustworthy`): `https:`/`wss:`, or `http:`/
+/// `ws:` to `localhost`, `*.localhost` or a loopback address.
+pub fn potentially_trustworthy(url: &Url) -> bool {
+    match url.scheme() {
+        "https" | "wss" => true,
+        "http" | "ws" => match url.host() {
+            Some(Host::Domain(d)) => {
+                let d = d.to_ascii_lowercase();
+                d == "localhost" || d.ends_with(".localhost")
+            }
+            Some(Host::Ipv4(a)) => a.is_loopback(),
+            Some(Host::Ipv6(a)) => a.is_loopback(),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+/// Chrome's headers to a destination that is not potentially trustworthy
+/// (recorded from Chrome for Testing 153 for every request kind,
+/// `tests/proxy/insecure_serve.py`): no `sec-ch-*` client hints and no
+/// `Sec-Fetch-*`, `Accept-Encoding: gzip, deflate` (no `br`/`zstd`), and
+/// `Accept-Language` right after `Accept-Encoding`. A page's own
+/// `Accept-Language` stays where it is.
+fn insecure_destination(out: &mut OrderedHeaders, overrides: &[(String, String)]) {
+    out.retain(|(n, _)| {
+        let l = n.to_ascii_lowercase();
+        !l.starts_with("sec-ch-") && !l.starts_with("sec-fetch-")
+    });
+    let page_lang = overrides.iter().any(|(n, _)| n == "accept-language");
+    let Some(ae) = out
+        .iter()
+        .position(|(n, _)| n.eq_ignore_ascii_case("accept-encoding"))
+    else {
+        return;
+    };
+    out[ae].1 = "gzip, deflate".into();
+    if page_lang {
+        return;
+    }
+    if let Some(al) = out
+        .iter()
+        .position(|(n, _)| n.eq_ignore_ascii_case("accept-language"))
+        && al < ae
+    {
+        let h = out.remove(al);
+        out.insert(ae, h);
+    }
+}
+
 /// The built-in Chrome 153 profile (`profiles/headers/chrome_153.json`).
 pub const CHROME_153_JSON: &str = include_str!("../../../profiles/headers/chrome_153.json");
 
@@ -542,6 +593,9 @@ impl HeaderProfile {
                 push(&n.to_ascii_lowercase(), v.clone(), Some(n));
             }
         }
+        if !potentially_trustworthy(input.url) {
+            insecure_destination(&mut out, &overrides);
+        }
         out
     }
 
@@ -763,6 +817,55 @@ mod tests {
         })
     }
 
+    /// Every request kind to a non-trustworthy `http:` origin equals
+    /// Chrome 153's recording (`captures/chrome_153_linux_insecure.jsonl`):
+    /// names, order and values (the recording's headless User-Agent aside).
+    #[test]
+    fn insecure_destination_matches_chrome() {
+        let text =
+            include_str!("../../../profiles/headers/captures/chrome_153_linux_insecure.jsonl");
+        let base = "http://insecure.test:18520/";
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            let path = v["line"].as_str().unwrap().split(' ').nth(1).unwrap();
+            let (kind, init) = match path {
+                "/" => (RequestKind::Document, None),
+                "/frame.html" => (RequestKind::Iframe, Some(base)),
+                "/script.js" => (RequestKind::Script, Some(base)),
+                "/module.js" => (RequestKind::ModuleScript, Some(base)),
+                "/style.css" => (RequestKind::Style, Some(base)),
+                "/img.png" => (RequestKind::Image, Some(base)),
+                "/favicon.ico" => (RequestKind::Favicon, Some(base)),
+                "/font.woff2" => (RequestKind::Font, Some(base)),
+                "/api" => (RequestKind::Fetch, Some(base)),
+                other => panic!("{other}"),
+            };
+            let h = build(
+                kind,
+                HttpVersion::Http1,
+                init,
+                &format!("http://insecure.test:18520{path}"),
+                Method::GET,
+                0,
+                None,
+                &[],
+            );
+            let want: Vec<(String, String)> = v["headers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| (p[0].as_str().unwrap().into(), p[1].as_str().unwrap().into()))
+                .filter(|(n, _)| n != "User-Agent")
+                .collect();
+            let got: Vec<(String, String)> =
+                h.into_iter().filter(|(n, _)| n != "User-Agent").collect();
+            assert_eq!(got, want, "{path}");
+        }
+        assert!(potentially_trustworthy(&url("http://a.localhost/")));
+        assert!(potentially_trustworthy(&url("http://[::1]/")));
+        assert!(!potentially_trustworthy(&url("http://10.0.0.1/")));
+    }
+
     #[test]
     fn builtin_profile_parses() {
         let p = profile();
@@ -950,11 +1053,13 @@ mod tests {
 
     #[test]
     fn page_headers_keep_case_on_h1_and_unseen_ones_follow_user_agent() {
+        // A trustworthy destination (https): `http://a.test` gets no client
+        // hints (see `insecure_destination_matches_chrome`).
         let h = build(
             RequestKind::Fetch,
             HttpVersion::Http1,
-            Some("http://a.test/p"),
-            "http://a.test/api",
+            Some("https://a.test/p"),
+            "https://a.test/api",
             Method::GET,
             0,
             None,

@@ -57,6 +57,7 @@ use crate::HttpVersion;
 use crate::error::NetError;
 use crate::header_profile::{RequestKind, RequestMeta};
 use crate::profile::ClientHelloProfile;
+use crate::proxy::Proxy;
 use crate::tls::{SessionCache, SessionKey, TlsConnector};
 
 /// Chrome's limit of sockets per group (`kMaxSocketsPerGroup`).
@@ -404,6 +405,11 @@ struct State {
 pub(crate) struct ConnectParams {
     pub(crate) profile: Arc<ClientHelloProfile>,
     pub(crate) insecure: bool,
+    /// The context's proxy (ADR 0027) when it applies to this group's
+    /// destination.
+    pub(crate) proxy: Option<Arc<Proxy>>,
+    /// `User-Agent` for `CONNECT` requests.
+    pub(crate) user_agent: Arc<str>,
 }
 
 struct Inner {
@@ -616,7 +622,17 @@ impl ConnectionPool {
         } else {
             None
         };
-        let tcp = self.inner.dialer.connect(host, key.port).await?;
+        let tcp = match &params.proxy {
+            // Forward requests: the connection goes to the proxy itself.
+            Some(p) if p.kind == crate::proxy::ProxyKind::Http && !key.https => {
+                p.dial(&self.inner.dialer).await?
+            }
+            Some(p) => {
+                p.tunnel(&self.inner.dialer, host, key.port, &params.user_agent)
+                    .await?
+            }
+            None => self.inner.dialer.connect(host, key.port).await?,
+        };
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         match connector {
             None => Ok((

@@ -19,6 +19,7 @@ use crate::header_profile::{BuildInput, HeaderProfile, RequestKind, RequestMeta,
 use crate::headers::{self, OrderedHeaders};
 use crate::pool::{ConnectParams, ConnectionPool, Dialer, GroupKey, Lease};
 use crate::profile::ClientHelloProfile;
+use crate::proxy::{self, Proxy};
 use crate::tls::TlsConnector;
 use crate::{decompress, h1, h2};
 
@@ -139,6 +140,10 @@ pub struct NetContext {
     /// context. `None`: every hop opens and closes its own connection, and
     /// no TLS session is resumed.
     pub pool: Option<ConnectionPool>,
+    /// The browser context's proxy (ADR 0027): `CONNECT`/SOCKS5 tunnels and
+    /// forward requests, with Chrome's bypass rules. Shared by the contexts
+    /// of one browser context (it caches the proxy credentials).
+    pub proxy: Option<Arc<Proxy>>,
     /// Lazily built, then reused for every https request of this context. The
     /// flag records the `danger_accept_invalid_certs` it was built with.
     connector: Option<(bool, Arc<TlsConnector>)>,
@@ -176,6 +181,7 @@ impl NetContext {
             max_body: 32 << 20,
             danger_accept_invalid_certs: false,
             pool: None,
+            proxy: None,
             connector: None,
             dialer: Arc::new(Dialer::default()),
         })
@@ -192,8 +198,31 @@ impl NetContext {
             max_body: self.max_body,
             danger_accept_invalid_certs: self.danger_accept_invalid_certs,
             pool: self.pool.clone(),
+            proxy: self.proxy.clone(),
             connector: self.connector.clone(),
             dialer: Arc::clone(&self.dialer),
+        }
+    }
+
+    /// The proxy for requests to `url`, unless a bypass rule applies.
+    pub fn proxy_for(&self, url: &Url) -> Option<Arc<Proxy>> {
+        self.proxy.as_ref().filter(|p| p.applies_to(url)).cloned()
+    }
+
+    /// TCP to `host:port` for `url`: direct, or a tunnel through the proxy
+    /// (`CONNECT` or SOCKS5).
+    pub(crate) async fn connect_tcp(
+        &self,
+        url: &Url,
+        host: &str,
+        port: u16,
+    ) -> Result<tokio::net::TcpStream, NetError> {
+        match self.proxy_for(url) {
+            Some(p) => {
+                p.tunnel(&self.dialer, host, port, &self.persona.user_agent)
+                    .await
+            }
+            None => self.dialer.connect(host, port).await,
         }
     }
 
@@ -372,8 +401,35 @@ fn needs_restart(ctx: &NetContext, url: &Url, headers: &OrderedHeaders, sent: &[
         .any(|h| asked.contains(h) && !sent.contains(h))
 }
 
-/// One hop: send `req`, store cookies, decode the body.
+/// One hop: send `req`, store cookies, decode the body. A forward
+/// request's `407` is answered with the proxy's configured credentials
+/// once (Chrome sends the request again with `Proxy-Authorization`).
 async fn fetch_once(
+    ctx: &mut NetContext,
+    req: &Request,
+    hop: usize,
+    site: Site,
+    hints: &[UaHint],
+    restart: bool,
+) -> Result<Hop, NetError> {
+    loop {
+        let h = fetch_once_inner(ctx, req, hop, site, hints, restart).await?;
+        if h.status.as_u16() == 407
+            && let Some(p) = ctx.proxy_for(&req.url).filter(|p| p.forwards(&req.url))
+        {
+            let sent = h
+                .sent
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("proxy-authorization"));
+            if proxy::forward_challenge(&p, &h.headers, sent)? {
+                continue;
+            }
+        }
+        return Ok(h);
+    }
+}
+
+async fn fetch_once_inner(
     ctx: &mut NetContext,
     req: &Request,
     hop: usize,
@@ -404,6 +460,9 @@ async fn fetch_once(
     let persona = Arc::clone(&ctx.persona);
     let header_profile = ctx.header_profile.clone();
     let meta = req.meta.clone().unwrap_or_default();
+    let proxy = ctx.proxy_for(&req.url);
+    // An HTTP proxy gets `http:` requests in absolute form.
+    let forward = proxy.as_ref().filter(|p| p.forwards(&req.url)).cloned();
     let wire = |version: HttpVersion| {
         let input = BuildInput {
             persona: &persona,
@@ -419,10 +478,13 @@ async fn fetch_once(
             hints,
             restart,
         };
-        let headers = match &header_profile {
+        let mut headers = match &header_profile {
             Some(p) => p.build(&input),
             None => headers::generic_request_headers(&input),
         };
+        if let Some(p) = &forward {
+            headers = proxy::forward_headers(headers, p);
+        }
         Request {
             method: req.method.clone(),
             url: req.url.clone(),
@@ -447,19 +509,36 @@ async fn fetch_once(
         let params = ConnectParams {
             profile: Arc::clone(&ctx.profile),
             insecure: ctx.danger_accept_invalid_certs,
+            proxy,
+            user_agent: Arc::from(ctx.persona.user_agent.as_str()),
         };
-        pooled_exchange(&pool, &key, urgency, &params, &wire, ctx.max_body).await?
+        pooled_exchange(
+            &pool,
+            &key,
+            urgency,
+            &params,
+            &wire,
+            ctx.max_body,
+            forward.is_some(),
+        )
+        .await?
     } else {
         let connector = if https {
             Some(ctx.tls_connector()?)
         } else {
             None
         };
-        let tcp = ctx.dialer.connect(bare_host, port).await?;
+        let mut tcp = match &forward {
+            Some(p) => p.dial(&ctx.dialer).await?,
+            None => ctx.connect_tcp(&req.url, bare_host, port).await?,
+        };
         let (raw, sent) = match connector {
             None => {
                 let wire = wire(HttpVersion::Http1);
-                let raw = h1::send_with_limit(tcp, &wire, ctx.max_body).await?;
+                let raw = h1::send_on_form(&mut tcp, &wire, ctx.max_body, forward.is_some())
+                    .await
+                    .map_err(|e| e.error)?
+                    .0;
                 (raw, wire.headers)
             }
             Some(connector) => {
@@ -515,6 +594,7 @@ async fn pooled_exchange(
     params: &ConnectParams,
     wire: &(dyn Fn(HttpVersion) -> Request + Sync),
     max_body: usize,
+    absolute: bool,
 ) -> Result<(RawResponse, OrderedHeaders, Option<u64>, bool), NetError> {
     let mut retried = false;
     loop {
@@ -522,7 +602,7 @@ async fn pooled_exchange(
             Lease::H1 { mut conn, reused } => {
                 let req = wire(HttpVersion::Http1);
                 let mut guard = SocketGuard::new(pool, key, params, false);
-                match h1::send_on(&mut conn.stream, &req, max_body).await {
+                match h1::send_on_form(&mut conn.stream, &req, max_body, absolute).await {
                     Ok((raw, reusable)) => {
                         guard.defuse();
                         let id = conn.id;

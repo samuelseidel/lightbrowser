@@ -24,6 +24,12 @@ pub enum NetError {
     },
     #[error("profile: {0}")]
     Profile(String),
+    /// A proxy failure, as Chrome's `net::ERR_*` text.
+    #[error("{0}")]
+    Proxy(String),
+    /// The proxy asked for credentials we do not have (`407`).
+    #[error("net::ERR_PROXY_AUTH_REQUESTED: proxy {} asks for credentials", .0.origin)]
+    ProxyAuth(crate::proxy::ProxyChallenge),
     #[error("persona family {persona} does not match TLS profile {profile}")]
     FamilyMismatch { persona: String, profile: String },
 }
