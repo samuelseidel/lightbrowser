@@ -75,6 +75,9 @@ pub struct Document {
     /// Manual slot assignment (`slot.assign()`): slot → nodes, node → slot.
     pub(crate) manual_slots: HashMap<NodeId, Vec<NodeId>>,
     pub(crate) manual_slot_of: HashMap<NodeId, NodeId>,
+    /// Every shadow root made in this arena (connected or not), in
+    /// creation order.
+    pub(crate) shadow_roots: Vec<NodeId>,
 }
 
 impl Default for Document {
@@ -137,6 +140,7 @@ impl Document {
             hook: None,
             manual_slots: HashMap::new(),
             manual_slot_of: HashMap::new(),
+            shadow_roots: Vec::new(),
         };
         doc.nodes.push(Node::new(NodeData::Document));
         doc
@@ -155,6 +159,7 @@ impl Document {
             hook: None,
             manual_slots: HashMap::new(),
             manual_slot_of: HashMap::new(),
+            shadow_roots: Vec::new(),
         }
     }
 
@@ -1306,6 +1311,7 @@ impl Document {
                 let host = ids[parent];
                 d.host = host;
                 let sr = self.push(NodeData::ShadowRoot(d));
+                self.shadow_roots.push(sr);
                 if let Some(e) = self.element_mut(host) {
                     e.shadow_root = Some(sr);
                 }

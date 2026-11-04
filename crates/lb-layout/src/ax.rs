@@ -210,7 +210,7 @@ impl AxBuilder<'_> {
         if matches!(local.as_str(), "script" | "style" | "template" | "head") {
             return;
         }
-        let kids: Vec<NodeId> = self.doc.children(el).collect();
+        let kids: Vec<NodeId> = self.doc.flat_children(el);
         for c in kids {
             match self.doc.node_type(c) {
                 NodeType::Element => self.walk(c, id, hidden),
@@ -584,7 +584,7 @@ impl AxBuilder<'_> {
     /// names of embedded controls, skipping hidden nodes.
     fn text_alternative(&mut self, el: NodeId, visited: &mut HashSet<NodeId>) -> String {
         let mut out = String::new();
-        let kids: Vec<NodeId> = self.doc.children(el).collect();
+        let kids: Vec<NodeId> = self.doc.flat_children(el);
         for c in kids {
             match self.doc.node_type(c) {
                 NodeType::Text => out.push_str(self.doc.character_data(c).unwrap_or("")),

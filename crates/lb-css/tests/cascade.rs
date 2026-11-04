@@ -273,3 +273,41 @@ fn persona_font_defaults_and_system_fonts() {
         );
     }
 }
+
+#[test]
+fn shadow_tree_style_scoping() {
+    let doc = Document::parse_html(
+        r#"<style>
+            span { color: rgb(1, 0, 0) }
+            #h { color: rgb(0, 0, 9); width: 7px }
+        </style>
+        <div id=h><span id=a slot=s>A</span><span id=b>B</span><i id=u slot=none>U</i></div>
+        <div id=h2><template shadowrootmode=open><style>
+            :host { color: rgb(0, 2, 0); width: 3px; height: 4px }
+            ::slotted(span) { background-color: rgb(5, 5, 5); color: rgb(9, 9, 9) }
+            span { color: rgb(0, 0, 3) }
+            p { font-size: 30px }
+        </style><p id=p><slot></slot></p></template><span id=c>C</span></div>"#,
+    );
+    let mut e = StyleEngine::new(MediaEnv::default());
+    // Outer sheets do not reach into the shadow tree; inner ones do not leak.
+    let h2 = by_id(&doc, "h2");
+    let sr = doc.shadow_root(h2).expect("declarative root");
+    let p = doc.query_selector(sr, "p").unwrap().unwrap();
+    assert_eq!(e.property_value(&doc, p, "font-size"), "30px");
+    // `:host` applies to the host.
+    assert_eq!(val(&mut e, &doc, "h2", "width"), "3px");
+    assert_eq!(val(&mut e, &doc, "h2", "color"), "rgb(0, 2, 0)");
+    // The slotted span: the outer `span` rule beats `::slotted` for color
+    // (outer context wins), `::slotted` still sets the background.
+    assert_eq!(val(&mut e, &doc, "c", "color"), "rgb(1, 0, 0)");
+    assert_eq!(val(&mut e, &doc, "c", "background-color"), "rgb(5, 5, 5)");
+    // Inheritance follows the flat tree: the slotted span's parent is the
+    // slot inside <p>, so it inherits the 30px font size.
+    assert_eq!(val(&mut e, &doc, "c", "font-size"), "30px");
+    // Slots are display: contents.
+    let slot = doc.query_selector(sr, "slot").unwrap().unwrap();
+    assert_eq!(e.property_value(&doc, slot, "display"), "contents");
+    // An outer rule on the host beats :host.
+    assert_eq!(val(&mut e, &doc, "h", "width"), "7px");
+}

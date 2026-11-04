@@ -252,7 +252,7 @@ impl<'a> Builder<'a> {
     /// Items for the children of `el` (`css` is its style, for text).
     fn children(&mut self, el: NodeId, css: &Rc<ComputedStyle>, mode: Mode) -> Vec<Item> {
         let mut items = Vec::new();
-        let kids: Vec<NodeId> = self.doc.children(el).collect();
+        let kids: Vec<NodeId> = self.doc.flat_children(el);
         for c in kids {
             match self.doc.node_type(c) {
                 NodeType::Text => {

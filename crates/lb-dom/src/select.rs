@@ -23,6 +23,18 @@ use selectors::{Element, OpaqueElement};
 use crate::document::{Document, DomError};
 use crate::node::{NodeFlags, NodeId, NodeType};
 
+/// How an element relates to the tree whose style rules are matched.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TreeMatch {
+    /// The element is in the tree (`Some(host)` for a shadow tree).
+    Own(Option<NodeId>),
+    /// The element is the tree's host: only `:host` rules apply.
+    Host(NodeId),
+    /// The element is slotted into a slot of the tree hosted by this
+    /// host: only `::slotted()` rules apply.
+    Slotted(NodeId),
+}
+
 /// Selector implementation marker for `selectors`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LbSelectorImpl;
@@ -675,11 +687,18 @@ impl<'a> Element for ElementRef<'a> {
     }
 
     fn parent_node_is_shadow_root(&self) -> bool {
-        false
+        self.doc
+            .parent(self.id)
+            .is_some_and(|p| self.doc.is_shadow_root(p))
     }
 
     fn containing_shadow_host(&self) -> Option<Self> {
-        None
+        let sr = self.doc.containing_shadow_root(self.id)?;
+        self.wrap(self.doc.shadow_host(sr))
+    }
+
+    fn assigned_slot(&self) -> Option<Self> {
+        self.wrap(self.doc.find_slot(self.id, false))
     }
 
     fn is_pseudo_element(&self) -> bool {
@@ -959,6 +978,57 @@ impl Document {
                         .map(|spec| (tag, spec))
                 })
                 .collect()
+        })
+    }
+
+    /// [`Document::match_specificities`] for style rules of a shadow tree
+    /// (or the document) against element `id`, by how the element relates
+    /// to that tree ([`TreeMatch`]).
+    pub fn match_specificities_in<'l, T>(
+        &self,
+        id: NodeId,
+        how: TreeMatch,
+        lists: impl IntoIterator<Item = (T, &'l SelectorList)>,
+    ) -> Vec<(T, u32)> {
+        let (host, featureless, slotted) = match how {
+            TreeMatch::Own(h) => (h, false, false),
+            TreeMatch::Host(h) => (Some(h), true, false),
+            TreeMatch::Slotted(h) => (Some(h), false, true),
+        };
+        if host.is_none() {
+            return self.match_specificities(id, lists);
+        }
+        if !self.is_element(id) {
+            return Vec::new();
+        }
+        self.with_context(None, |ctx| {
+            let el = ElementRef::new(self, id);
+            let host_el = host.map(|h| ElementRef::new(self, h));
+            ctx.with_shadow_host(host_el, |ctx| {
+                ctx.with_featureless(featureless, |ctx| {
+                    lists
+                        .into_iter()
+                        .filter_map(|(tag, list)| {
+                            list.0
+                                .slice()
+                                .iter()
+                                .filter(|s| {
+                                    if slotted {
+                                        s.is_slotted()
+                                    } else {
+                                        !s.has_pseudo_element() && !s.is_slotted()
+                                    }
+                                })
+                                .filter(|s| {
+                                    selectors::matching::matches_selector(s, 0, None, el, ctx)
+                                })
+                                .map(|s| s.specificity())
+                                .max()
+                                .map(|spec| (tag, spec))
+                        })
+                        .collect()
+                })
+            })
         })
     }
 

@@ -14,6 +14,7 @@ datalist, param, source, track, noembed, noframes, [hidden] { display: none }
 input[type=hidden i] { display: none !important }
 dialog:not([open]) { display: none }
 li { display: list-item; text-align: match-parent }
+slot { display: contents }
 body { margin: 8px }
 p, blockquote, figure, dl, multicol { margin: 1em 0 }
 blockquote, figure { margin-left: 40px; margin-right: 40px }

@@ -31,9 +31,12 @@ pub struct StyleStats {
 
 /// Cascade rank of a declaration source, normal declarations.
 const RANK_UA: u8 = 0;
-const RANK_HINT: u8 = 1;
-const RANK_AUTHOR: u8 = 2;
-const RANK_INLINE: u8 = 3;
+/// `:host` and `::slotted()` rules of an inner shadow tree: for normal
+/// declarations the outer tree's author rules win (cascade context).
+const RANK_INNER: u8 = 1;
+const RANK_HINT: u8 = 2;
+const RANK_AUTHOR: u8 = 3;
+const RANK_INLINE: u8 = 4;
 
 struct ActiveRule {
     sheet: Rc<Stylesheet>,
@@ -88,6 +91,8 @@ pub struct StyleEngine {
     disabled: HashSet<NodeId>,
     doc_sheets: Vec<DocSheet>,
     active: Vec<ActiveRule>,
+    /// Author rules of each connected shadow root that has style sheets.
+    scoped: HashMap<NodeId, Vec<ActiveRule>>,
     cache: Vec<Option<Rc<ComputedStyle>>>,
     key: Option<(u64, u64)>,
     epoch: u64,
@@ -138,6 +143,7 @@ impl StyleEngine {
             disabled: HashSet::new(),
             doc_sheets: Vec::new(),
             active: Vec::new(),
+            scoped: HashMap::new(),
             cache: Vec::new(),
             key: None,
             epoch: 0,
@@ -306,21 +312,16 @@ impl StyleEngine {
             .collect()
     }
 
-    fn refresh(&mut self, doc: &Document) {
-        let key = self.style_key(doc);
-        if self.key == Some(key) {
-            return;
-        }
-        self.key = Some(key);
-        self.stats.rebuilds += 1;
-        self.cache.clear();
-        self.cache.resize(doc.node_count(), None);
-
-        // Document sheets in tree order; reuse parses whose text is unchanged.
-        let mut old: HashMap<NodeId, DocSheet> =
-            self.doc_sheets.drain(..).map(|s| (s.node, s)).collect();
-        let mut author: Vec<(Rc<SheetTree>, Option<String>)> = Vec::new();
-        for n in doc.descendants(Document::DOCUMENT) {
+    /// `<style>` and loaded `<link>` sheets of the tree rooted at `root`
+    /// (the document or a shadow root), in tree order.
+    fn collect_sheets(
+        &mut self,
+        doc: &Document,
+        root: NodeId,
+        old: &mut HashMap<NodeId, DocSheet>,
+        author: &mut Vec<(Rc<SheetTree>, Option<String>)>,
+    ) {
+        for n in doc.descendants(root) {
             if doc.is_html_element_named(n, &local_name!("style")) {
                 let ty = doc.get_attribute(n, "type").unwrap_or("");
                 if !(ty.is_empty() || ty.eq_ignore_ascii_case("text/css")) {
@@ -362,6 +363,34 @@ impl StyleEngine {
                     tree.clone(),
                     doc.get_attribute(n, "media").map(str::to_owned),
                 ));
+            }
+        }
+    }
+
+    fn refresh(&mut self, doc: &Document) {
+        let key = self.style_key(doc);
+        if self.key == Some(key) {
+            return;
+        }
+        self.key = Some(key);
+        self.stats.rebuilds += 1;
+        self.cache.clear();
+        self.cache.resize(doc.node_count(), None);
+
+        // Document sheets in tree order; reuse parses whose text is unchanged.
+        let mut old: HashMap<NodeId, DocSheet> =
+            self.doc_sheets.drain(..).map(|s| (s.node, s)).collect();
+        let mut author: Vec<(Rc<SheetTree>, Option<String>)> = Vec::new();
+        self.collect_sheets(doc, Document::DOCUMENT, &mut old, &mut author);
+        let mut scoped_sheets: Vec<(NodeId, Vec<(Rc<SheetTree>, Option<String>)>)> = Vec::new();
+        for &sr in doc.shadow_roots() {
+            if !doc.is_connected(sr) {
+                continue;
+            }
+            let mut list = Vec::new();
+            self.collect_sheets(doc, sr, &mut old, &mut list);
+            if !list.is_empty() {
+                scoped_sheets.push((sr, list));
             }
         }
         for (_, s) in &self.extra {
@@ -413,6 +442,19 @@ impl StyleEngine {
                 continue;
             }
             push_tree(&mut self.active, tree, RANK_AUTHOR, env, 0);
+        }
+        self.scoped.clear();
+        for (sr, sheets) in scoped_sheets {
+            let mut rules = Vec::new();
+            for (tree, media) in &sheets {
+                if let Some(m) = media
+                    && !MediaQueryList::parse(m).matches(env)
+                {
+                    continue;
+                }
+                push_tree(&mut rules, tree, RANK_AUTHOR, env, 0);
+            }
+            self.scoped.insert(sr, rules);
         }
     }
 
@@ -482,26 +524,23 @@ impl StyleEngine {
         }
         // Compute uncached ancestors top-down.
         let mut chain = vec![id];
-        let mut cur = doc.parent_element(id);
+        let mut cur = style_parent(doc, id);
         while let Some(p) = cur {
             if self.cache[p.index()].is_some() {
                 break;
             }
             chain.push(p);
-            cur = doc.parent_element(p);
+            cur = style_parent(doc, p);
         }
         let root = doc.document_element();
         let mut root_font = root.and_then(|r| self.cache[r.index()].as_ref().map(|s| s.font_size));
         for &n in chain.iter().rev() {
-            let parent = doc
-                .parent_element(n)
-                .and_then(|p| self.cache[p.index()].clone());
-            let parent_display = doc
-                .ancestors(n)
-                .filter(|&a| doc.is_element(a))
-                .filter_map(|a| self.cache[a.index()].as_ref())
-                .map(|s| s.display)
-                .find(|d| *d != crate::values::Display::Contents);
+            let parent = style_parent(doc, n).and_then(|p| self.cache[p.index()].clone());
+            let parent_display =
+                std::iter::successors(style_parent(doc, n), |&a| style_parent(doc, a))
+                    .filter_map(|a| self.cache[a.index()].as_ref())
+                    .map(|s| s.display)
+                    .find(|d| *d != crate::values::Display::Contents);
             let is_root = Some(n) == root;
             let style = self.compute_one(
                 doc,
@@ -531,12 +570,61 @@ impl StyleEngine {
     ) -> ComputedStyle {
         // Matching blocks: (rank, specificity, order, block).
         let mut matched: Vec<(u8, u32, u32, Rc<DeclarationBlock>)> = Vec::new();
-        let lists = self.active.iter().enumerate().map(|(order, rule)| {
-            let r = &rule.sheet.rules[rule.index as usize];
-            ((order, rule.rank, &r.block), &r.selectors)
-        });
-        for ((order, rank, block), spec) in doc.match_specificities(id, lists) {
-            matched.push((rank, spec, order as u32, block.clone()));
+        let scope = if doc.shadow_roots().is_empty() {
+            None
+        } else {
+            doc.containing_shadow_root(id)
+        };
+        match scope {
+            None => {
+                let lists = self.active.iter().enumerate().map(|(order, rule)| {
+                    let r = &rule.sheet.rules[rule.index as usize];
+                    ((order, rule.rank, &r.block), &r.selectors)
+                });
+                for ((order, rank, block), spec) in doc.match_specificities(id, lists) {
+                    matched.push((rank, spec, order as u32, block.clone()));
+                }
+            }
+            Some(sr) => {
+                // UA rules, then the shadow tree's own author rules.
+                let ua = self.active.iter().filter(|r| r.rank == RANK_UA);
+                let own = self.scoped.get(&sr).into_iter().flatten();
+                let lists = ua.chain(own).enumerate().map(|(order, rule)| {
+                    let r = &rule.sheet.rules[rule.index as usize];
+                    ((order, rule.rank, &r.block), &r.selectors)
+                });
+                let how = lb_dom::TreeMatch::Own(doc.shadow_host(sr));
+                for ((order, rank, block), spec) in doc.match_specificities_in(id, how, lists) {
+                    matched.push((rank, spec, order as u32, block.clone()));
+                }
+            }
+        }
+        if !self.scoped.is_empty() {
+            // `:host` rules of the element's own shadow tree.
+            if let Some(sr) = doc.shadow_root(id)
+                && let Some(rules) = self.scoped.get(&sr)
+            {
+                self.match_inner(doc, id, lb_dom::TreeMatch::Host(id), rules, &mut matched);
+            }
+            // `::slotted()` rules of the trees the element is slotted into.
+            let mut slot = doc.find_slot(id, false);
+            let mut depth = 0;
+            while let Some(sl) = slot
+                && depth < 32
+            {
+                let sr = doc.root(sl);
+                if let (Some(host), Some(rules)) = (doc.shadow_host(sr), self.scoped.get(&sr)) {
+                    self.match_inner(
+                        doc,
+                        id,
+                        lb_dom::TreeMatch::Slotted(host),
+                        rules,
+                        &mut matched,
+                    );
+                }
+                slot = doc.find_slot(sl, false);
+                depth += 1;
+            }
         }
         if let Some(h) = presentational_hints(doc, id) {
             matched.push((RANK_HINT, 0, 0, Rc::new(h)));
@@ -556,9 +644,10 @@ impl StyleEngine {
             }
             customs.extend(block.customs.iter().filter(|c| !c.important));
         }
-        // Important: author < inline < UA.
+        // Important: author < inline < inner shadow tree < UA.
         let imp_rank = |rank: u8| match rank {
-            RANK_UA => 2,
+            RANK_UA => 3,
+            RANK_INNER => 2,
             RANK_INLINE => 1,
             _ => 0,
         };
@@ -581,6 +670,25 @@ impl StyleEngine {
         compute(&cascaded, &customs, parent, parent_display, &ctx)
     }
 
+    /// Match an inner shadow tree's rules against `id` (as its host or as
+    /// a slotted element) at [`RANK_INNER`].
+    fn match_inner(
+        &self,
+        doc: &Document,
+        id: NodeId,
+        how: lb_dom::TreeMatch,
+        rules: &[ActiveRule],
+        matched: &mut Vec<(u8, u32, u32, Rc<DeclarationBlock>)>,
+    ) {
+        let lists = rules.iter().enumerate().map(|(order, rule)| {
+            let r = &rule.sheet.rules[rule.index as usize];
+            ((order, &r.block), &r.selectors)
+        });
+        for ((order, block), spec) in doc.match_specificities_in(id, how, lists) {
+            matched.push((RANK_INNER, spec, order as u32, block.clone()));
+        }
+    }
+
     /// A style resolved for an element, serialized like
     /// `getComputedStyle(el).getPropertyValue(name)`. Layout-dependent
     /// values (`width` in px) need `lb-layout`; this returns the computed
@@ -590,6 +698,19 @@ impl StyleEngine {
             .and_then(|s| crate::serialize::computed_value(&s, name))
             .unwrap_or_default()
     }
+}
+
+/// The element a style inherits from: the parent element in the flat tree
+/// (a slotted element's slot, a shadow tree child's host). Children of a
+/// host that are not slotted are not in the flat tree; they inherit from
+/// their light-tree parent.
+pub fn style_parent(doc: &Document, n: NodeId) -> Option<NodeId> {
+    if doc.shadow_roots().is_empty() {
+        return doc.parent_element(n);
+    }
+    doc.flat_parent(n)
+        .filter(|&p| doc.is_element(p))
+        .or_else(|| doc.parent_element(n))
 }
 
 fn is_stylesheet_link(doc: &Document, n: NodeId) -> bool {
@@ -697,8 +818,7 @@ fn presentational_hints(doc: &Document, id: NodeId) -> Option<DeclarationBlock> 
 /// True if any ancestor-or-self of `id` has `display: none`. Helper for
 /// visibility checks.
 pub fn in_display_none(engine: &mut StyleEngine, doc: &Document, id: NodeId) -> bool {
-    std::iter::once(id)
-        .chain(doc.ancestors(id))
+    std::iter::successors(Some(id), |&n| style_parent(doc, n))
         .filter(|&n| doc.node_type(n) == NodeType::Element)
         .any(|n| {
             engine

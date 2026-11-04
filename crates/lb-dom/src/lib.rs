@@ -25,7 +25,7 @@ pub use document::{Children, Descendants, Document, DomError};
 pub use mutation::{Mutation, MutationHook};
 pub use node::{Doctype, ElementData, NodeFlags, NodeId, NodeType, ProcessingInstruction};
 pub use parser::{HtmlParser, ParseStep, ParserOptions};
-pub use select::{ElementFacts, ElementRef, SelectorList};
+pub use select::{ElementFacts, ElementRef, SelectorList, TreeMatch};
 pub use serialize::{SerializeNode, ShadowSerialization};
 pub use shadow::{
     AttachShadowError, ShadowRootData, ShadowRootInit, ShadowRootMode, SlotAssignment,

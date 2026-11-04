@@ -124,6 +124,11 @@ pub fn is_valid_custom_element_name(name: &str) -> bool {
 }
 
 impl Document {
+    /// Every shadow root of this arena (connected or not), oldest first.
+    pub fn shadow_roots(&self) -> &[NodeId] {
+        &self.shadow_roots
+    }
+
     /// True if `id` is a shadow root.
     #[inline]
     pub fn is_shadow_root(&self, id: NodeId) -> bool {
@@ -245,6 +250,7 @@ impl Document {
         if let Some(e) = self.element_mut(host) {
             e.shadow_root = Some(sr);
         }
+        self.shadow_roots.push(sr);
         self.bump_generation();
         sr
     }

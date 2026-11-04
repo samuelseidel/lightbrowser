@@ -32,7 +32,7 @@ mod ua;
 mod values;
 
 pub use computed::{ComputedStyle, CustomMap, Defaults, Transform};
-pub use engine::{SheetId, SheetTree, StyleEngine, StyleStats, in_display_none};
+pub use engine::{SheetId, SheetTree, StyleEngine, StyleStats, in_display_none, style_parent};
 pub use media::{MediaEnv, MediaQueryList, MediaQueryResult, OsKind, PointerKind, match_media};
 pub use props::{
     CustomDeclaration, Decl, Declaration, DeclarationBlock, FamilyName, FontSizeSpec,
