@@ -498,11 +498,11 @@ pub(crate) fn dispatch(js: &mut dyn Js, w: &Rc<Window>, target: HostRef, ev: u32
     }
     // Bubble: targets (non-capture listeners), then ancestors if bubbling.
     let bubbles = with_ev(w, ev, |e| e.bubbles).unwrap_or(false);
-    for i in 0..path.len() {
+    for (i, entry) in path.iter().enumerate() {
         if stopped(w) {
             break;
         }
-        let phase = if path[i].target.is_some() {
+        let phase = if entry.target.is_some() {
             2
         } else if bubbles {
             3
@@ -510,7 +510,7 @@ pub(crate) fn dispatch(js: &mut dyn Js, w: &Rc<Window>, target: HostRef, ev: u32
             continue;
         };
         enter(w, i, phase);
-        invoke(js, w, path[i].item, ev, false);
+        invoke(js, w, entry.item, ev, false);
     }
     // After dispatch the target is the last shadow-adjusted one, unless it
     // (or the related target) is inside a shadow tree ("clear targets").

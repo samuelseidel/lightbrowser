@@ -692,7 +692,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
 
     // FormData
     ctor(reg, rt, "FormData", |cx, w| {
-        let list = if cx.len() > 0 && cx.arg_kind(0) != ValueKind::Undefined {
+        let list = if !cx.is_empty() && cx.arg_kind(0) != ValueKind::Undefined {
             let form = cx
                 .arg_host(0)
                 .and_then(|h| w.decode_node(h))
@@ -718,20 +718,18 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let k = cx.arg_string(0)?;
             let v = cx.arg_string(1)?;
             edit_form_data(w, id, |list| {
-                if set {
-                    if let Some(i) = list.iter().position(|(x, _)| *x == k) {
-                        list[i].1 = v;
-                        let mut seen = false;
-                        list.retain(|(x, _)| {
-                            if *x != k {
-                                return true;
-                            }
-                            let keep = !seen;
-                            seen = true;
-                            keep
-                        });
-                        return;
-                    }
+                if set && let Some(i) = list.iter().position(|(x, _)| *x == k) {
+                    list[i].1 = v;
+                    let mut seen = false;
+                    list.retain(|(x, _)| {
+                        if *x != k {
+                            return true;
+                        }
+                        let keep = !seen;
+                        seen = true;
+                        keep
+                    });
+                    return;
                 }
                 list.push((k, v));
             });

@@ -203,7 +203,7 @@ fn runtime_dom_input_and_cookies() {
         let node = h.request_node("T", &oid).unwrap();
         let bm = h.box_model("T", &NodeRef::Backend(node)).unwrap();
         assert_eq!((bm.width, bm.height), (100.0, 40.0));
-        let doc = h.get_document("T", -1).unwrap();
+        let doc = h.get_document("T", -1, false).unwrap();
         assert_eq!(doc.node_name, "#document");
         let q = h.query_selector("T", doc.node_id, "#i").unwrap().unwrap();
         assert!(h.box_model("T", &NodeRef::Backend(q)).is_ok());

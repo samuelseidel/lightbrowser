@@ -63,6 +63,9 @@ impl SheetTree {
     }
 }
 
+/// An author sheet tree with its owner's `media` attribute.
+type AuthorSheet = (Rc<SheetTree>, Option<String>);
+
 struct DocSheet {
     node: NodeId,
     text: String,
@@ -319,7 +322,7 @@ impl StyleEngine {
         doc: &Document,
         root: NodeId,
         old: &mut HashMap<NodeId, DocSheet>,
-        author: &mut Vec<(Rc<SheetTree>, Option<String>)>,
+        author: &mut Vec<AuthorSheet>,
     ) {
         for n in doc.descendants(root) {
             if doc.is_html_element_named(n, &local_name!("style")) {
@@ -380,9 +383,9 @@ impl StyleEngine {
         // Document sheets in tree order; reuse parses whose text is unchanged.
         let mut old: HashMap<NodeId, DocSheet> =
             self.doc_sheets.drain(..).map(|s| (s.node, s)).collect();
-        let mut author: Vec<(Rc<SheetTree>, Option<String>)> = Vec::new();
+        let mut author: Vec<AuthorSheet> = Vec::new();
         self.collect_sheets(doc, Document::DOCUMENT, &mut old, &mut author);
-        let mut scoped_sheets: Vec<(NodeId, Vec<(Rc<SheetTree>, Option<String>)>)> = Vec::new();
+        let mut scoped_sheets: Vec<(NodeId, Vec<AuthorSheet>)> = Vec::new();
         for &sr in doc.shadow_roots() {
             if !doc.is_connected(sr) {
                 continue;
