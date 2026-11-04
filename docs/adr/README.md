@@ -27,6 +27,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0019](0019-style-sheet-loading-and-cssom.md) | Style sheets load as Chrome loads them: script- and parser-blocking sheets, `@import`, CSSOM | Accepted (2026-11-04) |
 | [0020](0020-css-background-images-and-box-decorations.md) | CSS background images load like Chrome's; screenshots paint backgrounds, radius and shadows | Accepted (2026-11-04) |
 | [0021](0021-workers.md) | Dedicated and shared workers on their own threads and isolates; worker globals from a Chrome capture; V8 structured clone, message ports | Accepted (2026-11-04) |
+| [0022](0022-service-workers.md) | Service workers and the Cache API, in memory per context: registry and jobs in the page layer, versions as workers, fetch interception, clients | Accepted (2026-11-04) |
 
 ## Adding an ADR
 

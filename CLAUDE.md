@@ -50,7 +50,7 @@ passes 6 of 6; binary 40.38 MB, idle RSS 7.1 MB; after the frames work
 regenerate the hot-symbol list after code changes
 (`tools/hot_symbols`). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
-gaps in ADR 0003), service workers, shader execution in
+gaps in ADR 0003), shader execution in
 WebGL, CDP crawl wall time vs Lightpanda (0.84 vs 0.75 s in
 `bench/results/2026-11-04-67c904b.json` after the worker work, 5 of 6
 checks; `fetch` peak RSS 23.85 vs 24.40 MB, which failed in a first run
@@ -83,7 +83,16 @@ from the page's `Arc<Persona>`; `postMessage`/`structuredClone` use V8's
 serializer with `ArrayBuffer` and `MessagePort` transfer; `importScripts`,
 `fetch`/XHR with the context's cookies, `blob:`/`data:`/module workers;
 10 Chrome-recorded cases in `lb-page` `tests/workers/`; the bench rule
-`worker_navigator_mismatch` and 42 worker checks in `fingerprint-report`.
+`worker_navigator_mismatch`. Service workers (ADR 0022): in memory per
+browser context (registry and jobs in `lb-page` `sw.rs`, bindings and the
+Cache API in `lb-webapi` `rt/sw.rs`); each version is a worker thread with
+`ServiceWorkerGlobalScope` from the capture; lifecycle and event order,
+`skipWaiting`/`claim`, fetch interception of a controlled window's
+requests and navigations, `Clients`, messages both ways, `caches`, update
+checks after navigations; 11 Chrome-recorded cases in `lb-page`
+`tests/service_workers/`; the bench rule `sw_navigator_mismatch` and 63
+worker checks (dedicated, shared, service) in `fingerprint-report`. Idle
+versions are not stopped and workers are not CDP targets.
 See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 
 ## Internal use and legal
@@ -100,11 +109,11 @@ See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use | M1 done; `site` (ADR 0018) |
 | `lb-dom` | Arena DOM, html5ever sink, selectors | Done (one arena per document; `import_node_mapped` for adoption across documents; `ParseStep::StyleSheet` pauses for style sheets); no shadow DOM, form owner, custom elements |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`) and workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`). WebGL runs no shaders; no crypto or WebSocket |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`). WebGL runs no shaders; no crypto or WebSocket |
 | `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
-| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, worker threads (`worker.rs`) done; no service workers or popups; workers are not CDP targets |
+| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, worker threads (`worker.rs`), service worker registry (`sw.rs`) done; no popups; workers are not CDP targets |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
 | `sdk/python` | `lightbrowser` package: launcher, `Persona`, sync/async Playwright wrappers with `human_*` and `verify_fingerprint`, scenarios T-001..T-007 | Done; needs Python Playwright >= 1.63 |
@@ -143,8 +152,11 @@ cargo test -p lb-page --test connections
 # WPT subset (loopback) and the Playwright CDP smoke test
 cargo test -p lb-page --test wpt -- --nocapture
 cargo build -p lightbrowser && node --test tests/playwright/   # 20 tests; LIGHTBROWSER_BIN overrides
-# Workers vs Chrome (10 cases + worker global surface vs the capture)
+# Workers vs Chrome (10 cases + dedicated/shared/service worker global surface vs the capture)
 cargo test -p lb-page --test pages workers
+# Service workers and the Cache API vs Chrome (11 cases, with reloads)
+cargo test -p lb-page --test pages service_workers
+# re-record: crates/lb-page/tests/service_workers/{serve.py,chrome.mjs} (fresh serve.py per recording)
 # re-record: crates/lb-page/tests/workers/{serve.py,chrome.mjs};
 # worker surface fixture: node tools/dump_worker_surface.js tests/fixtures/chromium_153_worker_surface.json
 # Style sheets vs Chrome (18 cases) and screenshots vs Chrome goldens

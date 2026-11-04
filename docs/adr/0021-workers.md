@@ -68,7 +68,7 @@ workers, shared workers, `structuredClone`.
   42 worker values; the bench gains `worker_navigator_mismatch`.
 - No change to start-up, realm creation or idle memory: no worker, no
   thread. A worker costs a thread and an isolate (a few MB).
-- Not modelled: service workers, nested workers' CDP targets (workers are
+- Not modelled: service workers (since added by ADR 0022), nested workers' CDP targets (workers are
   not CDP targets), dynamic `import()`, `OffscreenCanvas` transfer,
   synchronous XHR, worker script request headers (sent as a script
   request), `blob:` URLs in `fetch()`, `Atomics.wait` across workers

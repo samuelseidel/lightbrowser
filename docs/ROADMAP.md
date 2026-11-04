@@ -12,17 +12,17 @@ Each milestone ends with something we can run and measure.
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
 | **M5 Behavior + SDK** | Vendored behavior crate, `LightBrowser.human*`, Python SDK | `page.human_click` produces realistic event streams in the detection engine (`tests/detect-bench`, T-010 with `--expect 'beh<=30'`). Chrome: `LightBrowser.human*` and the Python SDK (`sdk/python`) done. Both reference personas pass on their own seeds (beh 0); seed sweeps pass 20/20 (Windows) and 19/20 (macOS). See "M5 status" |
 | **M7 OS personas** | Consistent desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu/Fedora, X11/Wayland) Chrome personas: persona model and rules, rendering, web APIs, input and client hints per OS. Mobile and Firefox out of scope | Every reference persona: `fingerprint-report` 0 mismatch, T-010 `fp<=30` and `--input human` `beh<=30` with every OS rule of the bench at full weight; adversarial personas fire their rule. WP-A (Linux ground truth, OS bench rules), WP-B (persona model, rules R17-R26, catalog, generator, 8 reference and 11 adversarial personas, ADR 0015), WP-C (scrollbars, fonts, aliases, emoji per OS) WP-D (OS-gated APIs, codecs, WebGPU, keyboard, WebGL backends, audio, window position, wheel and shortcuts per OS) and WP-E (`Accept-CH` / `Critical-CH` client hints) done: all 8 reference personas fp 0 and beh 0. See "M7 status" |
-| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 40.39 MB against < 50 MB (raised from < 40 MB by user decision, ADR 0013 revision 4); `bench/` runner done; lazy interfaces (ADR 0016); Lightpanda compared (user-approved nightly, loopback only): 5 of 6 checks pass (CDP wall time fails, see "Where we stand"); screenshots paint CSS backgrounds, radius and shadows (ADR 0020); service workers open. See "M6 status". |
+| **M6 Performance** | `bench/` vs Lightpanda and headless Chrome, memory tuning, optional screenshots, service workers | Meets the budgets in ARCHITECTURE.md. Results published in `bench/results/`. Snapshot, memory tuning, binary size and screenshots (ADR 0014) done for Chrome; binary 40.39 MB against < 50 MB (raised from < 40 MB by user decision, ADR 0013 revision 4); `bench/` runner done; lazy interfaces (ADR 0016); Lightpanda compared (user-approved nightly, loopback only): 5 of 6 checks pass (CDP wall time fails, see "Where we stand"); screenshots paint CSS backgrounds, radius and shadows (ADR 0020); service workers and the Cache API in memory per context (ADR 0022, "Service workers"). See "M6 status". |
 
 **Where we stand (Chrome build, 2026-11-03).**
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021) | M1 proxies; M2/M3/M4 leftovers in their status sections; service workers, dynamic `import()` |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022) | M1 proxies; M2/M3/M4 leftovers in their status sections; dynamic `import()`; idle service workers are not stopped |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
-| M6 Performance | Snapshot, memory, binary size (40.95 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018) | Service workers; CDP crawl wall time 0.84 vs Lightpanda 0.75 s (5 of 6 checks pass, see "Workers") |
+| M6 Performance | Snapshot, memory, binary size (40.95 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018); service workers (ADR 0022) | CDP crawl wall time 0.84 vs Lightpanda 0.75 s (5 of 6 checks pass, see "Workers") |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
@@ -2380,7 +2380,7 @@ recorded it, so most of the rise is the machine, not the code. No worker
 runs on the corpus pages.
 
 Open:
-- Service workers; workers are not CDP targets (no `Target.attachedToTarget`
+- Service workers (done since, see "Service workers"); workers are not CDP targets (no `Target.attachedToTarget`
   for them; Playwright's `page.workers()` stays empty).
 - Dynamic `import()` (pages and workers); `OffscreenCanvas` transfer;
   synchronous XHR; `Atomics.wait` across workers (no `SharedArrayBuffer`).
@@ -2390,6 +2390,111 @@ Open:
 - `fetch` errors inside workers name `Window` in their message.
 - Shared workers live until their context closes (Chrome ends them when
   the last client document goes).
+
+## Service workers (2026-11-04)
+
+Service workers and the Cache API, in memory per browser context, checked
+against local Chrome for Testing 153.0.8010.12 on loopback pages. ADR
+0022.
+
+**Registry and jobs** (`lb-page` `sw.rs`): registrations, versions, listed
+windows and `caches` live in the context; nothing touches disk and a new
+context starts empty. Jobs run one at a time: fetch the script (2xx,
+JavaScript MIME type, maximum scope or `Service-Worker-Allowed`, sent
+with `Service-Worker: script`), compare it byte for byte with the newest
+version, run a new version, Install (`installing`, the job's promise,
+`updatefound`, `install` with `waitUntil`, `waiting`/`installed`, or
+`redundant` when a `waitUntil` promise rejects), Try Activate (waits while
+the old version controls a client, unless `skipWaiting()`), Activate
+(`active`, `activating`, `controllerchange` for the old version's clients,
+`ready`, `activate`, `activated`). `unregister()` clears at once or when
+the last controlled client goes. A controlled navigation schedules an
+update check 1.5 s later (Chrome measured 1.5-2 s; dropped when the
+version is no longer the newest).
+
+**Windows** (`lb-webapi` `rt/sw.rs`): `navigator.serviceWorker`
+(`register`, `getRegistration(s)`, `ready`, `controller`,
+`oncontrollerchange`, `onmessage`, `startMessages`), one
+`ServiceWorkerRegistration` per registration and one `ServiceWorker` per
+version in each window, updated by tasks the registry sends in Chrome's
+order. `register()` checks and error texts as Chrome (protocol, origin,
+`%2f`/`%5c`, `updateViaCache` enum; job failures: bad status, MIME type,
+max scope, script evaluation failed).
+
+**Versions** run as workers (ADR 0021): own thread and isolate,
+`ServiceWorkerGlobalScope` from the capture
+(`tools/dump_worker_surface.js` now dumps it too: 318 own properties, 265
+interface objects; `lb-webidl-gen` emits it in `WORKER_SCOPES`),
+`WorkerNavigator` and UA client hints from the page's `Arc<Persona>`.
+`InstallEvent`, `ExtendableEvent`, `FetchEvent` (`request`, `clientId`,
+`resultingClientId`, `respondWith`, `handled`, `preloadResponse`),
+`ExtendableMessageEvent`, `skipWaiting`, `clients` (`get`, `matchAll`,
+`claim`, `openWindow` refused), `WindowClient` (`postMessage`, frame type,
+visibility, focus), `registration`, `serviceWorker`.
+
+**Fetch**: `Window::net_fetch` sends a controlled window's `fetch`, XHR,
+script, style sheet, image and CSS image requests to the version's `fetch`
+event once it is `activated`; top-level and frame navigations go through
+it in `nav.rs` / `frames.rs` (request `mode` `navigate`, `cache`
+`no-cache` on a reload, `clientId` of the replaced same-origin document,
+`resultingClientId` of the new one). No `respondWith`: network; a
+response: used as is, redirects followed through the worker; rejection or
+`Response.error()`: network error. Versions without a fetch handler are
+skipped. `Page::reload` (and CDP `Page.reload`) marks the navigation as a
+reload.
+
+**Cache API**: `caches` on windows and worker scopes, per context and
+origin: `open`/`has`/`delete`/`keys`/`match` (`cacheName`), `Cache`
+`match`/`matchAll`/`add`/`addAll`/`put`/`delete`/`keys` with
+`ignoreSearch`, `ignoreMethod`, `ignoreVary`, `Vary`, Chrome's ordering
+and error texts (`Request method 'POST' is unsupported`, `Vary header
+contains *`, `Response body is already used`, `Request failed`).
+
+**Tests**: `lb-page` `tests/service_workers/` (11 cases, Chrome's logs in
+`chrome.json`, re-recorded with `serve.py` and `chrome.mjs`; a load that
+ends with `again` is followed by a reload): lifecycle, claim, fetch,
+messages, cache, scope, update, navupdate, clients, errors, navigation.
+All 11 match Chrome line for line. `workers::surface_matches_chrome` now
+compares the service worker global with the capture too: equal (same
+engine built-in exceptions as the window). The test server sends real
+reason phrases (`200 OK`) instead of `X`, as `statusText` is compared.
+`lb-webidl-gen`'s `every_fixture_interface_reproduced` failed since
+worker-only interfaces entered the table (ADR 0021); it now checks them
+against the worker fixture.
+
+**Report and bench**: `fingerprint-report` probes a service worker started
+outside the registry (never visible to the page): 21 more checks (63
+worker checks in all), 0 mismatches for every reference persona. New info
+probe `sw_navigator` and rule `sw_navigator_mismatch` (45, automation):
+the probe registers `/static/sw_nav.js` for `/static/sw-probe/` (no page
+is under it), compares the worker's navigator and UA-CH with the page's
+and unregisters. 5 unit tests (`SwNavigatorRule`; the bench's Python
+tests now total 43); existing rules, weights and probes unchanged. Stock
+Chromium 153 passes (T-001 headless, T-010 headed under `xvfb-run`).
+
+**Context lifetime**: worker threads (dedicated, shared, service) now
+hold their context weakly; a context whose pages and CDP entry are gone
+drops and ends its workers (a running shared worker used to keep its
+context alive).
+
+**Checks.** BENCH_PLACEHOLDER
+
+Open:
+- Idle versions are not stopped (Chrome stops a version after 30 s idle
+  and restarts it on the next event, which resets its globals).
+- Dedicated and shared workers are not service worker clients (not
+  controlled, not in `matchAll({type: 'worker'})`).
+- Service workers are not CDP targets, and requests a worker answers are
+  not reported to CDP (Chrome reports them with `fromServiceWorker`).
+- Not modelled: navigation preload (the manager is always off), Push,
+  Background Sync, Notifications, `importScripts` limits after install,
+  update checks of imported scripts, `Location.reload()` as a reload, the
+  exact request headers of the script fetch (`Sec-Fetch-Dest:
+  serviceworker` not captured; sent as a script request plus
+  `Service-Worker: script`).
+- Windows are listed for `Clients.matchAll({includeUncontrolled})` only
+  when their origin had a registration at creation, they are controlled,
+  or they touched `navigator.serviceWorker`.
 
 ## Risks
 
