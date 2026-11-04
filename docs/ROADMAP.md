@@ -6,7 +6,7 @@ Each milestone ends with something we can run and measure.
 |---|---|---|
 | **M0 Foundations** | Architecture docs, ADRs, workspace skeleton, CI, SFC32 port | `cargo build/test/clippy` green for both families ✅ |
 | **M1 Network** | `lb-net`: BoringSSL ClientHello profiles, h1 + forked h2, cookies, decompression, proxy. `lightbrowser fetch <url>` | JA3/JA4 and Akamai H2 hash match real Chrome on our local TLS/H2 echo server ✅ (Chrome). Proxies moved to M2. |
-| **M2 DOM + V8** | Arena DOM, html5ever sink, selectors, WebIDL codegen (Chromium set), V8 backend + snapshot, event loop, timers, fetch/XHR | `fetch --dump html` prints the DOM *after* scripts run. A WPT DOM subset passes. ✅ (Chrome; 2540/2788 WPT subtests at M2, 2556 now) |
+| **M2 DOM + V8** | Arena DOM, html5ever sink, selectors, WebIDL codegen (Chromium set), V8 backend + snapshot, event loop, timers, fetch/XHR | `fetch --dump html` prints the DOM *after* scripts run. A WPT DOM subset passes. ✅ (Chrome; 2540/2788 WPT subtests at M2, 2568/2788 of those files now; 10480/11177 with the shadow-dom and custom-elements files added in "Shadow DOM and custom elements") |
 | **M3 Layout + CDP core** | Lazy cascade, taffy layout, hit-testing, AX tree, CDP server with the domains in ARCHITECTURE.md | Playwright `connectOverCDP`: goto, evaluate, click, fill, getByRole, content all pass ✅ (Chrome; real V8 page host, 16 Playwright tests, see "M3 status") |
 | **M4 Chrome fingerprints** | Persona v2, vendored consistency crate + Chrome rules, navigator/UA-CH, screen, canvas, WebGL, audio, fonts, Intl/timezone, WebRTC, permissions | Our detection engine (`tests/detect-bench`, ADR 0007) scores the Chrome personas as consistent: `run.js --scenario T-010 --cdp <ws> --expect 'fp<=30'`. Same seed gives the same fingerprint. ✅ (Chrome; fp 0 for both reference personas; surfaces and gaps in "M4 status: summary") |
 | **M4b Firefox family** | SpiderMonkey backend (`mozjs`), Gecko IDL set, Firefox TLS/H2/header profiles | Existing Firefox 128 personas pass the same checks as on GeckoPhantom |
@@ -18,7 +18,7 @@ Each milestone ends with something we can run and measure.
 
 | Milestone | Chrome | Open |
 |---|---|---|
-| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022) | M1 proxies; M2/M3/M4 leftovers in their status sections; idle service workers are not stopped (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
+| M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022); shadow DOM (slots, retargeting, scoped style, flat tree, declarative roots) and custom elements (reactions, parser construction, built-ins, `ElementInternals`) (2026-11-04, ADR 0026) | M1 proxies; M2/M3/M4 leftovers in their status sections; idle service workers are not stopped (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word; POST forms are submitted as GET (see "M5 status") |
 | M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's. See "M7 status: WP-E" |
@@ -2563,7 +2563,8 @@ Notes on the verification itself:
   workers are never stopped when idle; ~~dynamic `import()`; synchronous
   XHR; `blob:` in `fetch()`~~ and ~~`crypto`, `WebSocket`~~: done in "Web
   platform APIs" below (ADR 0025); shader execution in WebGL; no
-  `customElements`, `indexedDB`; shadow DOM.
+  `indexedDB`; ~~`customElements`; shadow DOM~~: done in "Shadow DOM and
+  custom elements" below (ADR 0026).
 - Frames: per-node state outside listeners, handlers, form values and
   selections is not carried over on adoption; a navigating frame's
   WindowProxy is not modelled (ADR 0017).
@@ -2703,6 +2704,58 @@ import maps and JSON/CSS modules; module scripts inserted by script; the
 cookie jar orders cookies of one path by hash, not creation time
 (pre-existing, `cookie_store`; seen in the WebSocket cookie case);
 top-level `about:blank` counts as a secure context (Chrome: not secure).
+
+## Shadow DOM and custom elements (2026-11-04)
+
+Closes the shadow DOM and `customElements` items of "What is still open
+after this run" (ADR 0026). Behaviour was recorded in local Chrome for
+Testing 153.0.8010.12 on loopback pages (`lb-page` `tests/shadow/`,
+`serve.py` + `chrome.mjs`; the Rust test runs the same `serve.py`): 9
+cases, all equal.
+
+| Area | What | Chrome-recorded cases |
+|---|---|---|
+| Shadow roots | `attachShadow` (modes, `delegatesFocus`, `slotAssignment`, `clonable`, `serializable`; Chrome's errors and host list), `ShadowRoot` members, `getRootNode({composed})`, `isConnected`, `querySelector`/`getElementById` boundaries, `innerHTML`, `getHTML`, `setHTMLUnsafe`, `Document.parseHTMLUnsafe`, cloning and adoption, `compareDocumentPosition` | `shadow_attach` |
+| Slots | Named and manual assignment, `assignedNodes`/`assignedElements` (`flatten`), `assignedSlot` (open only), `slot.assign()`, `slotchange` order and timing (after mutation observers), nested slots | `shadow_slots` |
+| Events | Path with retargeting, `composedPath()` with closed roots, `composed`, non-bubbling events at hosts, `relatedTarget` retargeting, synthetic click and focus events, `activeElement`/`:focus` on hosts, `delegatesFocus`, `elementFromPoint` retargeting | `shadow_events` |
+| Style and layout | Shadow tree sheets scoped, `:host`, `:host()`, `::slotted()` at the inner cascade context, inheritance and boxes along the flat tree, slots `display: contents`, unslotted children without style, `offsetParent` | `shadow_style` |
+| Declarative shadow DOM | `<template shadowrootmode>` (attributes, closed, repeats, invalid hosts, nested, `document.write`), not from `innerHTML`/`DOMParser`, claiming by `attachShadow`, scripts inside (no `currentScript`) | `shadow_dsd` |
+| Custom elements | `define` checks and texts, `get`/`getName`/`whenDefined`/`upgrade`, upgrades on define, lifecycle callbacks and their order (attributes, tree, adoption across documents, `innerHTML`), `new`, constructor failures (`HTMLUnknownElement`), `:defined` | `ce_basic` |
+| Parser | Synchronous construction of parsed elements (no attributes, children or parent in the constructor), `document.write`, templates, foster parenting, `importNode`, `DOMParser` | `ce_parser` |
+| Customized built-ins | `extends`, `is` (parser, `createElement`, `createElementNS`, clone, `innerHTML`), serialization of the `is` value, `disabledFeatures`, wrong base classes | `ce_builtin` |
+| Form-associated | `attachInternals` errors, `ElementInternals` (form, validity, `setFormValue`, `setValidity`, labels, states, role/ARIA, `shadowRoot`), `FormData`, owner/disabled/reset callbacks, `:state()` | `ce_form` |
+
+Also: CDP `DOM.getDocument`/`describeNode` list `shadowRoots` (open and
+closed, `shadowRootType`; children with `pierce`), `assignedSlot` and
+`distributedNodes`, as Chrome does. A Playwright test fills and clicks
+inside an open shadow root (selectors pierce open roots, closed ones stay
+closed). HTML element constructors called without `new` now give
+Chrome's "Please use the 'new' operator" text. `DOMString?` namespace
+arguments (`getAttributeNS(null, ...)`) treat `null` as null (they read
+`"null"` before). `:focus-within` is now set along the focused element's
+ancestors.
+
+WPT: 160 `shadow-dom` and `custom-elements` testharness files (no
+iframes, testdriver, crash or tentative tests; WPT 095dcead) were added to
+the subset. Their subtests: 7912/8389 pass (6908 of them in
+`declarative/gethtml.html`; 1004/1481 in the other files). The earlier
+files: 2568/2788 (2556 before; the null-namespace fix). Whole subset:
+10480/11177, 117/243 files fully pass, 18 harness errors or timeouts.
+Most remaining failures need named access on `window` (`window[id]`,
+not implemented), iframes or attribute/`Range`/`NamedNodeMap` APIs that
+are stubs.
+
+CHECKS_PLACEHOLDER
+
+Open: scoped registries beyond `new CustomElementRegistry()`;
+constructable style sheets (`adoptedStyleSheets` is an empty array);
+`::part`, `:host-context()`; user-agent shadow roots (`<input>`,
+`<details>`); form state restoration; `FormData` file entries; named
+access on `window`; `innerText` is still text-based (not the flat
+tree's rendering); `[CEReactions]` are approximated by running reactions
+when an operation's mutations are processed (attribute reflection
+setters, `Range`, `NamedNodeMap` and `DOMTokenList` reactions follow
+only where those APIs mutate through the DOM).
 
 ## Risks
 
