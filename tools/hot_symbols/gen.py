@@ -208,8 +208,11 @@ def main() -> int:
             for url in urls + urls:
                 pg = ctx.new_page()
                 pg.goto(url, wait_until="load", timeout=600000)
-                pg.evaluate("document.title")
-                pg.content()
+                try:
+                    pg.evaluate("document.title")
+                    pg.content()
+                except Exception as e:  # a test page that navigates itself
+                    print(f"note: {url}: {e}".splitlines()[0], file=sys.stderr)
                 pg.close()
             # A quiet browser's memory-reducing GC.
             time.sleep(8)
