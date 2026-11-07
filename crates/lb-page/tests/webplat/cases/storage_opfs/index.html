@@ -1,0 +1,75 @@
+<!doctype html><!--LOG--><script>
+// The origin private file system: navigator.storage.getDirectory() and
+// the handles it gives (directory and file handles, getFile, a writable
+// stream). The surface a page uses to keep files; no sync access handles
+// (workers only) and no pickers.
+async function names(dir) {
+  var out = [];
+  for await (var e of dir.entries()) out.push(e[0] + ':' + e[1].kind);
+  return out.sort().join(',');
+}
+(async function () {
+  var root = await navigator.storage.getDirectory();
+  log('tag: ' + Object.prototype.toString.call(root) + ' name=[' + root.name + '] kind=' + root.kind);
+  log('proto FileSystemHandle: ' + Object.getOwnPropertyNames(FileSystemHandle.prototype).sort().join());
+  log('proto FileSystemDirectoryHandle: ' + Object.getOwnPropertyNames(FileSystemDirectoryHandle.prototype).sort().join());
+  log('proto FileSystemFileHandle: ' + Object.getOwnPropertyNames(FileSystemFileHandle.prototype).sort().join());
+  log('proto FileSystemWritableFileStream: ' + Object.getOwnPropertyNames(FileSystemWritableFileStream.prototype).sort().join());
+  log('chain: ' + (root instanceof FileSystemDirectoryHandle) + ' ' + (root instanceof FileSystemHandle) + ' ' + (root instanceof FileSystemFileHandle));
+  var root2 = await navigator.storage.getDirectory();
+  log('same object: ' + (root === root2) + ' isSameEntry: ' + await root.isSameEntry(root2));
+  log('empty: [' + await names(root) + ']');
+  await a('missing file', function () { return root.getFileHandle('a.txt'); });
+  await a('missing dir', function () { return root.getDirectoryHandle('d'); });
+  await a('bad name', function () { return root.getFileHandle('a/b', { create: true }); });
+  await a('dot name', function () { return root.getFileHandle('..', { create: true }); });
+  await a('empty name', function () { return root.getFileHandle('', { create: true }); });
+  await a('remove missing', function () { return root.removeEntry('nothing'); });
+  var fh = await root.getFileHandle('a.txt', { create: true });
+  log('file handle: ' + Object.prototype.toString.call(fh) + ' name=' + fh.name + ' kind=' + fh.kind);
+  var f = await fh.getFile();
+  log('empty file: ' + Object.prototype.toString.call(f) + ' size=' + f.size + ' type=[' + f.type + '] name=' + f.name + ' lastModified>0=' + (f.lastModified > 0) + ' text=[' + await f.text() + ']');
+  var w = await fh.createWritable();
+  log('writable: ' + Object.prototype.toString.call(w) + ' locked=' + w.locked);
+  await w.write('hello');
+  await w.write({ type: 'write', position: 5, data: ' world' });
+  await w.write(new Uint8Array([33, 33]));
+  var before = await (await fh.getFile()).text();
+  await w.close();
+  var f2 = await fh.getFile();
+  log('before close: [' + before + '] after: [' + await f2.text() + '] size=' + f2.size + ' earlier snapshot size=' + f.size);
+  w = await fh.createWritable({ keepExistingData: true });
+  await w.seek(2);
+  await w.write('XY');
+  await w.truncate(8);
+  await w.close();
+  log('edited: [' + await (await fh.getFile()).text() + ']');
+  w = await fh.createWritable();
+  await w.write('abc');
+  await w.abort();
+  log('after abort: [' + await (await fh.getFile()).text() + ']');
+  await a('write after close', function () { return w.write('x'); });
+  var dh = await root.getDirectoryHandle('d', { create: true });
+  var dh2 = await root.getDirectoryHandle('d');
+  log('dir: ' + dh.name + ' ' + dh.kind + ' same=' + await dh.isSameEntry(dh2) + ' differs=' + !(await dh.isSameEntry(fh)));
+  var nested = await dh.getFileHandle('b.txt', { create: true });
+  var nw = await nested.createWritable();
+  await nw.write(new Blob(['from a blob']));
+  await nw.close();
+  log('nested: [' + await (await nested.getFile()).text() + ']');
+  log('root: [' + await names(root) + '] d: [' + await names(dh) + ']');
+  log('keys: ' + JSON.stringify(await (async function () { var k = []; for await (var n of root.keys()) k.push(n); return k.sort(); })()));
+  log('values: ' + JSON.stringify(await (async function () { var k = []; for await (var n of root.values()) k.push(n.kind + ':' + n.name); return k.sort(); })()));
+  log('resolve: ' + JSON.stringify(await root.resolve(nested)) + ' self=' + JSON.stringify(await root.resolve(root)) + ' none=' + JSON.stringify(await dh.resolve(fh)));
+  await a('kind mismatch', function () { return root.getDirectoryHandle('a.txt'); });
+  await a('kind mismatch 2', function () { return root.getFileHandle('d'); });
+  await a('remove non-empty', function () { return root.removeEntry('d'); });
+  await a('remove recursive', function () { return root.removeEntry('d', { recursive: true }); });
+  await a('stale handle', function () { return nested.getFile(); });
+  await a('remove file', function () { return root.removeEntry('a.txt'); });
+  log('end: [' + await names(root) + ']');
+  await a('after reload check set', async function () { var h = await root.getFileHandle('keep.txt', { create: true }); var w = await h.createWritable(); await w.write('kept'); await w.close(); return 'ok'; });
+  sessionStorage.setItem('prev', L.join('\n'));
+  location.href = 'again.html';
+})();
+</script>

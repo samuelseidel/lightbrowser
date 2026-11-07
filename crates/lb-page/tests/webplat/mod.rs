@@ -297,6 +297,14 @@ cases!(
     pointer_raw,
 );
 
+// navigator.storage (the quota policy needs no disk: the numbers are
+// compared as relations, see the cases).
+cases!(
+    false;
+    storage_shape,
+    storage_usage,
+);
+
 // The 10 s window runs on the virtual clock: the page's `setTimeout`s
 // jump (Chrome waited for them).
 cases!(true; history_window);

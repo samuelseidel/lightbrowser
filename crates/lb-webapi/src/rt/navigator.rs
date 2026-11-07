@@ -55,6 +55,8 @@ pub(crate) enum NavObj {
     DeviceInfo(Box<DeviceInfo>),
     Speech,
     Voice(u16),
+    /// `navigator.storage`.
+    Storage,
     Orientation,
     /// WebRTC objects (`rtc`).
     Rtc(Box<super::rtc::RtcObj>),
@@ -102,6 +104,7 @@ impl NavObj {
             }
             NavObj::Speech => "SpeechSynthesis",
             NavObj::Voice(_) => "SpeechSynthesisVoice",
+            NavObj::Storage => "StorageManager",
             NavObj::Orientation => "ScreenOrientation",
             NavObj::Rtc(r) => r.iface_name(),
             NavObj::Timing => "PerformanceTiming",
@@ -1442,6 +1445,136 @@ fn register_speech(reg: &mut Registry, rt: &Runtime) {
 }
 
 // ---------------------------------------------------------------------------
+// Storage manager
+// ---------------------------------------------------------------------------
+
+const GIB: u64 = 1 << 30;
+
+/// The disk `navigator.storage.estimate()` is computed for: 256 GiB, a
+/// typical desktop disk (the recording machine's was 246 GB; Chrome 153
+/// reports the same quota for any disk of 10 GiB or more, see
+/// [`reported_quota`], so the value only matters below that). It is not a
+/// persona field.
+pub(crate) const STORAGE_DISK_BYTES: u64 = 256 * GIB;
+
+/// The quota Chrome 153 reports to pages (`CalculateReportedQuota` in
+/// `quota_manager_impl.cc`, with `report_static_storage_quota_` on):
+/// usage plus 10 GiB when the disk has 10 GiB or more (or in a private
+/// window), else usage plus the disk size rounded up to a whole GiB. The
+/// real, much larger per-origin quota is not shown to pages.
+pub(crate) fn reported_quota(disk_bytes: u64, usage: u64) -> u64 {
+    if disk_bytes >= 10 * GIB {
+        usage + 10 * GIB
+    } else {
+        usage + disk_bytes.div_ceil(GIB) * GIB
+    }
+}
+
+/// Bytes of each storage system `navigator.storage.estimate()` counts for
+/// the origin of `w`, as `(usageDetails key, bytes)`. Chrome 153 counts
+/// IndexedDB, the Cache API, service worker registrations and the file
+/// system; `localStorage`, `sessionStorage` and cookies do not move the
+/// number (recorded). A key is listed only when its system holds something.
+fn storage_breakdown(w: &Window) -> Vec<(&'static str, u64)> {
+    let origin = w.origin_string();
+    let mut v = vec![
+        ("caches", super::sw::caches_usage(w)),
+        ("indexedDB", w.idb_backend().map_or(0, |b| b.usage(&origin))),
+    ];
+    v.retain(|(_, n)| *n > 0);
+    v.sort_by_key(|(k, _)| *k);
+    v
+}
+
+/// Start a `StorageManager` promise method: the promise, with `this`
+/// checked (a bad `this` rejects, as in Chrome) and, for the methods that
+/// need one, an origin that is not opaque. `false` when it is rejected.
+fn storage_begin(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    name: &str,
+    needs_origin: bool,
+) -> Result<(lb_js::Resolver, bool), HostError> {
+    let r = cx.ret_new_promise()?;
+    if this_nav(cx, w, |o| matches!(o, NavObj::Storage).then_some(())).is_err() {
+        cx.reject_promise(r, illegal())?;
+        return Ok((r, false));
+    }
+    if needs_origin && w.origin_string() == "null" {
+        cx.reject_promise(
+            r,
+            HostError::type_error(format!(
+                "Failed to execute '{name}' on 'StorageManager': The operation is not supported in this context."
+            )),
+        )?;
+        return Ok((r, false));
+    }
+    Ok((r, true))
+}
+
+fn register_storage(reg: &mut Registry, rt: &Runtime) {
+    getter(reg, rt, "Navigator", "storage", |cx, w| {
+        this_obj(cx)?;
+        cx.ret(single(w, "nav:storage", 0, || NavObj::Storage))
+    });
+    method(reg, rt, "StorageManager", "estimate", |cx, w| {
+        let (r, ok) = storage_begin(cx, w, "estimate", true)?;
+        if !ok {
+            return Ok(());
+        }
+        let parts = storage_breakdown(w);
+        let usage: u64 = parts.iter().map(|(_, n)| n).sum();
+        let details: Vec<String> = parts
+            .iter()
+            .map(|(k, n)| format!("\"{k}\":{n}"))
+            .collect();
+        cx.resolve_promise(
+            r,
+            Arg::Json(format!(
+                "{{\"quota\":{},\"usage\":{usage},\"usageDetails\":{{{}}}}}",
+                reported_quota(STORAGE_DISK_BYTES, usage),
+                details.join(",")
+            )),
+        )
+    });
+    // `persist()` asks for the permission and `persisted()` reads it. The
+    // state is the persona's `persistent-storage` (`prompt` unless set, as
+    // in Chrome 153 headless): the answer is true only for `granted`, and
+    // asking changes nothing (headless Chrome does not prompt).
+    for name in ["persist", "persisted"] {
+        method(reg, rt, "StorageManager", name, move |cx, w| {
+            let (r, ok) = storage_begin(cx, w, name, true)?;
+            if !ok {
+                return Ok(());
+            }
+            let granted = persona_state(w, "persistent-storage", "prompt") == "granted";
+            cx.resolve_promise(r, Arg::Bool(granted))
+        });
+    }
+    method(reg, rt, "StorageManager", "getDirectory", |cx, w| {
+        let (r, ok) = storage_begin(cx, w, "getDirectory", false)?;
+        if !ok {
+            return Ok(());
+        }
+        if w.origin_string() == "null" {
+            return cx.reject_promise(
+                r,
+                w.rt.err(
+                    "SecurityError",
+                    "Storage directory access is denied because the context is sandboxed and lacks the 'allow-same-origin' flag.",
+                ),
+            );
+        }
+        // No origin private file system yet (ADR 0047): rejected as Chrome
+        // does when it denies the origin its storage directory.
+        cx.reject_promise(
+            r,
+            w.rt.err("SecurityError", "Storage directory access is denied."),
+        )
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Screen orientation, performance.memory
 // ---------------------------------------------------------------------------
 
@@ -1800,6 +1933,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_battery(reg, rt);
     register_media(reg, rt);
     register_speech(reg, rt);
+    register_storage(reg, rt);
     register_screen_extras(reg, rt);
     register_timing(reg, rt);
     register_keyboard(reg, rt);

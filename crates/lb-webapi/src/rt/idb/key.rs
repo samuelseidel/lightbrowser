@@ -19,6 +19,18 @@ pub enum Key {
 }
 
 impl Key {
+    /// Bytes the key takes in storage: 8 for a number or date, 2 for each
+    /// UTF-16 unit, 1 for each byte, the sum of the members of an array
+    /// (plus 1 for each member as a separator).
+    pub fn stored_size(&self) -> u64 {
+        match self {
+            Key::Number(_) | Key::Date(_) => 8,
+            Key::String(s) => 2 * s.len() as u64,
+            Key::Binary(b) => b.len() as u64,
+            Key::Array(a) => a.iter().map(|k| 1 + k.stored_size()).sum(),
+        }
+    }
+
     fn rank(&self) -> u8 {
         match self {
             Key::Number(_) => 0,

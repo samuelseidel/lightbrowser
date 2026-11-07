@@ -5,8 +5,12 @@
 // get those steps first (CDP commands, Playwright mouse/keyboard calls,
 // waits, evaluations). Usage: node chrome.mjs BASE case...
 // Chrome runs without Playwright's --disable-ipc-flooding-protection,
-// which switches the history rate limit off.
+// which switches the history rate limit off. A case with an (empty) file
+// `persistent` runs in a profile directory of its own, as a regular
+// Chrome profile (newContext() is off the record: quota and storage
+// differ).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib/node_modules/playwright/index.mjs');
@@ -20,7 +24,10 @@ const b = await chromium.launch({
 console.error(b.version());
 const out = {};
 for (const c of cases) {
-  const ctx = await b.newContext();
+  const dir = fs.existsSync(path.join(here, 'cases', c, 'persistent')) ? fs.mkdtempSync(path.join(os.tmpdir(), 'webplat-')) : null;
+  const ctx = dir
+    ? await chromium.launchPersistentContext(dir, { executablePath: process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'], ignoreDefaultArgs: ['--disable-ipc-flooding-protection'] })
+    : await b.newContext();
   const p = await ctx.newPage();
   const cdp = await ctx.newCDPSession(p);
   const browserLog = [];
@@ -42,6 +49,7 @@ for (const c of cases) {
   out[c] = await p.evaluate(() => (typeof L == 'undefined' ? '(no log on ' + location.href + ')' : L.join('\n')));
   out[c + '.console'] = browserLog.join('\n');
   await ctx.close();
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
 }
 await b.close();
 console.log(JSON.stringify(out, null, 1));

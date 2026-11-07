@@ -412,6 +412,41 @@ impl IdbBackend {
             .unwrap_or_default()
     }
 
+    /// Bytes the databases of `origin` hold, as `navigator.storage.estimate()`
+    /// reports them: for each record its key and its value (the structured
+    /// clone's bytes, the array buffers and the blobs), and the keys of
+    /// its indexes. Database, store and index names count too. Only what is
+    /// stored: nothing for the engine's own structures.
+    pub fn usage(&self, origin: &str) -> u64 {
+        let st = self.lock();
+        let Some(dbs) = st.origins.get(origin) else {
+            return 0;
+        };
+        let mut bytes = 0u64;
+        for (name, e) in dbs {
+            let Some(db) = e.db.as_ref().filter(|_| !e.creating) else {
+                continue;
+            };
+            bytes += name.len() as u64;
+            for (sname, store) in &db.stores {
+                bytes += sname.len() as u64;
+                for (key, rec) in &store.records {
+                    bytes += key.stored_size();
+                    bytes += rec.value.data.len() as u64;
+                    bytes += rec.value.buffers.iter().map(|b| b.len() as u64).sum::<u64>();
+                    bytes += rec.value.blobs.iter().map(|(b, t)| (b.len() + t.len()) as u64).sum::<u64>();
+                    bytes += rec
+                        .index_keys
+                        .values()
+                        .flatten()
+                        .map(Key::stored_size)
+                        .sum::<u64>();
+                }
+            }
+        }
+        bytes
+    }
+
     /// `indexedDB.open(name, version)`.
     pub fn open(&self, origin: &str, name: &str, version: Option<u64>, req: u32, sink: Sink) {
         let mut st = self.lock();
