@@ -20,12 +20,17 @@
 //! example):
 //! - `create_page` reports the `about:blank` main-world realm
 //!   (`ExecutionContextCreated`) and its frame (`FrameNavigated`).
-//! - A navigation commit sends, in order: `ExecutionContextDestroyed` for
-//!   each old realm, `ExecutionContextsCleared`, `FrameNavigated` (with the
-//!   loader id `navigate` returned), `ExecutionContextCreated` for the main
-//!   world and for every world named in `add_script_to_evaluate_on_new_document`,
-//!   then `Lifecycle` `init`, `DOMContentLoaded`, `load`, and
-//!   `FrameStoppedLoading`. The document request uses the loader id as its
+//! - A navigation sends `FrameStartedNavigating`, `FrameStartedLoading`;
+//!   its commit (Chrome 153's order, ADR 0045) `ExecutionContextsCleared`,
+//!   `Lifecycle` `init`, `ExecutionContextsCleared`, `FrameNavigated` (with
+//!   the loader id `navigate` returned), `ExecutionContextCreated` for the
+//!   main world and for every world named in
+//!   `add_script_to_evaluate_on_new_document`, then `Lifecycle`
+//!   `DOMContentLoaded`, `load`, and `FrameStoppedLoading`. A navigation
+//!   inside the document (`pushState`, a fragment, a history traversal)
+//!   sends `FrameStartedLoading`, `NavigatedWithinDocument`,
+//!   `FrameStoppedLoading` (`FrameStartedNavigating` first when the
+//!   browser started it). The document request uses the loader id as its
 //!   request id and `resourceType` `Document`, so `page.goto` gets a response.
 //! - Object ids must identify their realm: `call_function_on` with an object
 //!   runs in that object's realm.
@@ -197,9 +202,23 @@ pub enum PageEvent {
     FrameNavigated {
         frame: Frame,
     },
+    /// A navigation to another URL of the same document: `fragment`,
+    /// `historyApi` or `other`.
     NavigatedWithinDocument {
         frame_id: FrameId,
         url: String,
+        navigation_type: String,
+    },
+    /// A navigation started (`Page.frameStartedNavigating`, Chrome 153),
+    /// before `FrameStartedLoading`. `navigation_type`: `reload`,
+    /// `reloadBypassingCache`, `restore`, `restoreWithPost`,
+    /// `historySameDocument`, `historyDifferentDocument`, `sameDocument`,
+    /// `differentDocument`.
+    FrameStartedNavigating {
+        frame_id: FrameId,
+        loader_id: LoaderId,
+        url: String,
+        navigation_type: String,
     },
     /// `init`, `DOMContentLoaded`, `load`, `networkAlmostIdle`,
     /// `networkIdle`, ... The server also sends
@@ -382,6 +401,61 @@ pub trait PageHost {
     async fn navigate(&self, target_id: &str, req: NavigateRequest) -> HostResult<NavigateResult>;
 
     async fn reload(&self, target_id: &str, ignore_cache: bool) -> HostResult<()>;
+
+    /// `Page.getNavigationHistory`: the session history of the page.
+    fn navigation_history(&self, _target_id: &str) -> HostResult<NavigationHistory> {
+        Err(HostError::unsupported("Page.getNavigationHistory"))
+    }
+
+    /// `Page.navigateToHistoryEntry`: go to the entry with this id (it
+    /// exists; the server checked). Resolves when the new document has
+    /// committed, or at once for an entry of the same document.
+    async fn navigate_to_history_entry(&self, _target_id: &str, _entry_id: i64) -> HostResult<()> {
+        Err(HostError::unsupported("Page.navigateToHistoryEntry"))
+    }
+
+    /// `Page.resetNavigationHistory`: only the current entry stays.
+    fn reset_navigation_history(&self, _target_id: &str) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `Emulation.setScriptExecutionDisabled`: the page's own scripts stop
+    /// running (CDP evaluation still works).
+    fn set_script_execution_disabled(&self, _target_id: &str, _disabled: bool) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `Network.emulateNetworkConditions` (offline only has an effect).
+    fn set_network_conditions(
+        &self,
+        _target_id: &str,
+        _conditions: NetworkConditions,
+    ) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `Network.setBlockedURLs`: URL patterns (`*` wildcards) whose
+    /// requests fail with `net::ERR_BLOCKED_BY_CLIENT`; `block: false`
+    /// entries match and let the request through.
+    fn set_blocked_urls(&self, _target_id: &str, _patterns: Vec<(String, bool)>) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `Network.setBypassServiceWorker`.
+    fn set_bypass_service_worker(&self, _target_id: &str, _bypass: bool) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `DOM.getFrameOwner`: the backend node of the `<iframe>` (or
+    /// `<frame>`, `<object>`, `<embed>`) element that holds a child frame.
+    fn frame_owner(&self, _target_id: &str, _frame_id: &str) -> HostResult<BackendNodeId> {
+        Err(HostError::unsupported("DOM.getFrameOwner"))
+    }
+
+    /// `Runtime.getHeapUsage`: `(used, total)` bytes of the page's JS heap.
+    fn heap_usage(&self, _target_id: &str) -> HostResult<(f64, f64)> {
+        Ok((0.0, 0.0))
+    }
 
     fn frame_tree(&self, target_id: &str) -> HostResult<FrameTree>;
 

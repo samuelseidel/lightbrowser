@@ -95,6 +95,14 @@ pub(crate) struct AgentState {
     pub intercept_drags: bool,
     /// `Emulation.setEmulatedMedia`, kept for the page's next documents.
     pub media: lb_css::MediaOverrides,
+    /// `Emulation.setScriptExecutionDisabled`.
+    pub scripts_disabled: bool,
+    /// `Network.emulateNetworkConditions` with `offline`.
+    pub offline: bool,
+    /// `Network.setBlockedURLs`: `(pattern, block)`.
+    pub blocked: Vec<(String, bool)>,
+    /// `Network.setBypassServiceWorker`.
+    pub bypass_sw: bool,
 }
 
 /// Responses kept for `Network.getResponseBody`.
@@ -228,13 +236,36 @@ impl Agent {
 
     // ---- navigation ----
 
-    /// A navigation started; returns its loader id.
-    pub(crate) fn nav_started(&self, seq: u64) -> String {
+    /// A navigation to `url` started; returns its loader id.
+    pub(crate) fn nav_started(&self, seq: u64, url: &url::Url, navigation_type: &str) -> String {
         let loader = loader_id(self.page_id, seq);
+        self.emit(PageEvent::FrameStartedNavigating {
+            frame_id: self.target.clone(),
+            loader_id: loader.clone(),
+            url: url.to_string(),
+            navigation_type: navigation_type.into(),
+        });
         self.emit(PageEvent::FrameStartedLoading {
             frame_id: self.target.clone(),
         });
         loader
+    }
+
+    /// A navigation the browser started inside the current document
+    /// (`Page.navigate` to a fragment, a history traversal); the loading
+    /// events follow from the history change.
+    pub(crate) fn nav_started_same_document(&self, url: &url::Url, navigation_type: &str) {
+        self.emit(PageEvent::FrameStartedNavigating {
+            frame_id: self.target.clone(),
+            loader_id: self.st.borrow().loader.clone(),
+            url: url.to_string(),
+            navigation_type: navigation_type.into(),
+        });
+    }
+
+    /// The document's URL changed without a load.
+    pub(crate) fn same_document(&self, url: &url::Url) {
+        self.frame.lock().unwrap_or_else(|e| e.into_inner()).url = url.to_string();
     }
 
     pub(crate) fn nav_failed(&self) {
@@ -289,13 +320,22 @@ impl Agent {
             f.loader = loader.clone();
             f.title = String::new();
         }
-        for id in old {
-            self.emit(PageEvent::ExecutionContextDestroyed { context_id: id });
-        }
+        // Chrome's order at a main-frame commit: the contexts are cleared
+        // (no `executionContextDestroyed`), `init`, cleared again, then the
+        // frame and its new context.
+        let _ = old;
+        self.emit(PageEvent::ExecutionContextsCleared);
+        self.emit(PageEvent::Lifecycle {
+            frame_id: self.target.clone(),
+            loader_id: loader.clone(),
+            name: "init".into(),
+            timestamp: self.mono(),
+        });
         self.emit(PageEvent::ExecutionContextsCleared);
         self.emit(PageEvent::FrameNavigated {
             frame: Frame::new(self.target.clone(), None, loader.clone(), url.as_str()),
         });
+        w.set_scripts_disabled(self.st.borrow().scripts_disabled);
         let viewport = self.st.borrow().viewport;
         if let Some((vw, vh)) = viewport {
             w.with_layout_engine(|l, _| l.set_viewport(vw as f32, vh as f32));
@@ -755,6 +795,10 @@ impl Agent {
     }
 
     pub(crate) fn object(&self, id: &str) -> HostResult<ObjEntry> {
+        // Ids are `page.context.n`: anything else is no id at all.
+        if id.split('.').count() != 3 || id.split('.').any(|p| p.parse::<u64>().is_err()) {
+            return Err(HostError::new("Invalid remote object id"));
+        }
         self.st
             .borrow()
             .objects

@@ -512,9 +512,88 @@ pub(crate) fn form_entries(
     pairs
 }
 
+/// Add (or replace) a same-document history entry: in the page's session
+/// history when the window has one, else in the window's own list.
+fn record_entry(
+    w: &Rc<Window>,
+    url: &Url,
+    state: Option<String>,
+    replace: bool,
+    fragment: Option<&str>,
+) {
+    let host = w.session.borrow().clone();
+    if let Some(host) = host {
+        host.record(url, state, replace, fragment);
+        return;
+    }
+    let mut h = w.history.borrow_mut();
+    let entry = HistEntry {
+        url: url.clone(),
+        state,
+    };
+    let idx = h.index;
+    if replace {
+        h.entries[idx] = entry;
+    } else {
+        h.entries.truncate(idx + 1);
+        h.entries.push(entry);
+        h.index += 1;
+    }
+}
+
+/// A same-document traversal: the window's URL becomes `url`, `popstate`
+/// fires with `state`, and `hashchange` follows when only the fragment
+/// changed.
+pub(crate) fn apply_traversal(js: &mut dyn Js, w: &Rc<Window>, url: Url, state: Option<String>) {
+    let old = w.url();
+    w.set_url(url.clone());
+    fire_event_with(
+        js,
+        w,
+        WINDOW_REF,
+        "PopStateEvent",
+        "popstate",
+        false,
+        false,
+        EventExtra::PopState(state),
+    );
+    let (mut a, mut b) = (old.clone(), url.clone());
+    a.set_fragment(None);
+    b.set_fragment(None);
+    if a == b && old.fragment() != url.fragment() {
+        fire_event_with(
+            js,
+            w,
+            WINDOW_REF,
+            "HashChangeEvent",
+            "hashchange",
+            false,
+            false,
+            EventExtra::HashChange {
+                old: old.to_string(),
+                new: url.to_string(),
+            },
+        );
+    }
+}
+
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
 pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
+    navigate_to_as(js, w, url, replace, None);
+}
+
+/// [`navigate_to`], for the browser when `browser` holds the transition
+/// type of the entry (CDP `Page.navigate`): a fragment navigation to the
+/// URL the document is on adds an entry then; from a script it replaces
+/// the current one, as in Chrome.
+pub(crate) fn navigate_to_as(
+    js: &mut dyn Js,
+    w: &Rc<Window>,
+    url: Url,
+    replace: bool,
+    browser: Option<&str>,
+) {
     let cur = w.url();
     let same_doc = url.fragment().is_some() && {
         let (mut a, mut b) = (cur.clone(), url.clone());
@@ -525,28 +604,25 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
     if same_doc {
         let old = cur.to_string();
         let new = url.to_string();
-        {
-            let mut h = w.history.borrow_mut();
-            let idx = h.index;
-            if replace {
-                h.entries[idx] = HistEntry {
-                    url: url.clone(),
-                    state: None,
-                };
-            } else {
-                h.entries.truncate(idx + 1);
-                h.entries.push(HistEntry {
-                    url: url.clone(),
-                    state: None,
-                });
-                h.index += 1;
-            }
-        }
+        let replace = replace || (browser.is_none() && old == new);
+        record_entry(w, &url, None, replace, Some(browser.unwrap_or("link")));
         w.set_url(url);
-        if old != new {
-            w.queue_task(
-                TaskSource::DomManipulation,
-                Box::new(move |js, w| {
+        // Chrome fires `popstate` (state null) for a fragment navigation,
+        // then `hashchange` when the URL changed.
+        w.queue_task(
+            TaskSource::DomManipulation,
+            Box::new(move |js, w| {
+                fire_event_with(
+                    js,
+                    w,
+                    WINDOW_REF,
+                    "PopStateEvent",
+                    "popstate",
+                    false,
+                    false,
+                    EventExtra::PopState(None),
+                );
+                if old != new {
                     fire_event_with(
                         js,
                         w,
@@ -557,9 +633,9 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
                         false,
                         EventExtra::HashChange { old, new },
                     );
-                }),
-            );
-        }
+                }
+            }),
+        );
         let _ = js;
         return;
     }
@@ -1034,6 +1110,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                     Some(u)
                 };
                 match target {
+                    // Blink: setting `hash` to the fragment it has does
+                    // not navigate.
+                    Some(u) if prop == "hash" && u == w.url() => Ok(()),
                     Some(u) => {
                         navigate_to(cx, w, u, false);
                         Ok(())
@@ -1074,14 +1153,21 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     // History
     getter(reg, rt, "History", "length", |cx, w| {
         not_fully_active(w, "length")?;
+        if let Some(host) = w.session.borrow().clone() {
+            return cx.ret(host.length());
+        }
         let h = w.history.borrow();
         cx.ret(h.before + h.entries.len() as u32)
     });
     getter(reg, rt, "History", "state", |cx, w| {
         not_fully_active(w, "state")?;
-        let s = {
-            let h = w.history.borrow();
-            h.entries[h.index].state.clone()
+        let host = w.session.borrow().clone();
+        let s = match host {
+            Some(host) => host.state(),
+            None => {
+                let h = w.history.borrow();
+                h.entries[h.index].state.clone()
+            }
         };
         cx.ret(s.map_or(Arg::Null, Arg::Json))
     });
@@ -1119,21 +1205,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 }
                 _ => w.url(),
             };
-            {
-                let mut h = w.history.borrow_mut();
-                let entry = HistEntry {
-                    url: url.clone(),
-                    state,
-                };
-                let idx = h.index;
-                if replace {
-                    h.entries[idx] = entry;
-                } else {
-                    h.entries.truncate(idx + 1);
-                    h.entries.push(entry);
-                    h.index += 1;
-                }
-            }
+            record_entry(w, &url, state, replace, None);
             w.set_url(url);
             Ok(())
         });
@@ -1145,6 +1217,11 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             } else {
                 delta
             };
+            if w.session.borrow().is_some() {
+                // The page's session history decides (and may load).
+                w.request_traversal(delta);
+                return Ok(());
+            }
             if delta == 0 {
                 if name == "go" {
                     w.request_navigation(NavRequest::get(w.url(), true));
@@ -1160,41 +1237,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             w.queue_task(
                 TaskSource::DomManipulation,
                 Box::new(move |js, w| {
-                    let (old, url, state) = {
+                    let (url, state) = {
                         let mut h = w.history.borrow_mut();
-                        let old = h.entries[h.index].url.clone();
                         h.index = t;
-                        (old, h.entries[t].url.clone(), h.entries[t].state.clone())
+                        (h.entries[t].url.clone(), h.entries[t].state.clone())
                     };
-                    w.set_url(url.clone());
-                    fire_event_with(
-                        js,
-                        w,
-                        WINDOW_REF,
-                        "PopStateEvent",
-                        "popstate",
-                        false,
-                        false,
-                        EventExtra::PopState(state),
-                    );
-                    let (mut a, mut b) = (old.clone(), url.clone());
-                    a.set_fragment(None);
-                    b.set_fragment(None);
-                    if a == b && old.fragment() != url.fragment() {
-                        fire_event_with(
-                            js,
-                            w,
-                            WINDOW_REF,
-                            "HashChangeEvent",
-                            "hashchange",
-                            false,
-                            false,
-                            EventExtra::HashChange {
-                                old: old.to_string(),
-                                new: url.to_string(),
-                            },
-                        );
-                    }
+                    apply_traversal(js, w, url, state);
                 }),
             );
             Ok(())

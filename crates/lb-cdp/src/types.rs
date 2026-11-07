@@ -268,7 +268,34 @@ pub struct Frame {
     pub mime_type: String,
     pub secure_context_type: String,
     pub cross_origin_isolated_context_type: String,
+    #[serde(rename = "gatedAPIFeatures")]
     pub gated_api_features: Vec<String>,
+    #[serde(default)]
+    pub ad_frame_status: AdFrameStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_origin_details: Option<SecurityOriginDetails>,
+}
+
+/// `Page.AdFrameStatus`: LightBrowser never marks ad frames.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdFrameStatus {
+    pub ad_frame_type: String,
+}
+
+impl Default for AdFrameStatus {
+    fn default() -> Self {
+        AdFrameStatus {
+            ad_frame_type: "none".into(),
+        }
+    }
+}
+
+/// `Page.SecurityOriginDetails`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityOriginDetails {
+    pub is_localhost: bool,
 }
 
 impl Frame {
@@ -323,6 +350,13 @@ impl Frame {
             secure_context_type: secure.into(),
             cross_origin_isolated_context_type: "NotIsolated".into(),
             gated_api_features: Vec::new(),
+            ad_frame_status: AdFrameStatus::default(),
+            security_origin_details: Some(SecurityOriginDetails {
+                is_localhost: parsed.as_ref().is_some_and(|u| {
+                    matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+                        || u.host_str().is_some_and(|h| h.ends_with(".localhost"))
+                }),
+            }),
         }
     }
 }
@@ -346,6 +380,48 @@ pub struct NavigateResult {
     /// Set when the navigation failed, e.g. `net::ERR_CONNECTION_REFUSED`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_text: Option<String>,
+    /// Always false: LightBrowser does not download.
+    pub is_download: bool,
+}
+
+/// `Page.NavigationEntry`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationEntry {
+    pub id: i64,
+    pub url: String,
+    #[serde(rename = "userTypedURL")]
+    pub user_typed_url: String,
+    pub title: String,
+    pub transition_type: String,
+}
+
+/// Result of `Page.getNavigationHistory`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationHistory {
+    pub current_index: i64,
+    pub entries: Vec<NavigationEntry>,
+}
+
+/// `Network.emulateNetworkConditions`: `-1` throughput is unlimited.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NetworkConditions {
+    pub offline: bool,
+    pub latency: f64,
+    pub download_throughput: f64,
+    pub upload_throughput: f64,
+}
+
+impl Default for NetworkConditions {
+    fn default() -> Self {
+        NetworkConditions {
+            offline: false,
+            latency: 0.0,
+            download_throughput: -1.0,
+            upload_throughput: -1.0,
+        }
+    }
 }
 
 /// `DOM.Node`. `node_id` equals `backend_node_id` in LightBrowser.
@@ -463,6 +539,7 @@ pub struct Cookie {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_site: Option<String>,
     pub priority: String,
+    #[serde(skip_serializing, default)]
     pub same_party: bool,
     pub source_scheme: String,
     pub source_port: i64,

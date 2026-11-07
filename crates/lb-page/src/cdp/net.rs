@@ -112,6 +112,21 @@ fn glob(pattern: &str, text: &str) -> bool {
     pi == p.len()
 }
 
+/// Whether `pattern` (`*` wildcards) matches `url` as Chrome's
+/// `Network.setBlockedURLs` does for a fully written pattern: a pattern
+/// without `?` leaves the query open and one without `#` the fragment, as
+/// in a URLPattern constructor string.
+fn blocked_matches(pattern: &str, url: &url::Url) -> bool {
+    let mut u = url.clone();
+    if !pattern.contains('#') {
+        u.set_fragment(None);
+    }
+    if !pattern.contains('?') {
+        u.set_query(None);
+    }
+    glob(pattern, u.as_str())
+}
+
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| -> Option<u32> {
         Some(match c {
@@ -290,6 +305,7 @@ pub(crate) async fn page_fetch(
         .window()
         .map(|w| w.url().to_string())
         .unwrap_or_else(|| req.url.to_string());
+    let (doc_url_hops, req_hops) = (doc_url.clone(), req.clone());
     agent.emit(PageEvent::RequestWillBeSent(Box::new(RequestWillBeSent {
         request_id: id.clone(),
         loader_id: loader.clone(),
@@ -402,12 +418,67 @@ pub(crate) async fn page_fetch(
             }
         }
     }
+    let mut hops: Vec<lb_net::RedirectHop> = Vec::new();
     let r = match fulfilled {
         Some(r) => Ok(r),
-        None => fetch_answering_auth(&agent, page, req, top_frame, rtype, interception).await,
+        None => {
+            // Network emulation applies after interception, as in Chrome.
+            let (offline, blocked) = {
+                let st = agent.st.borrow();
+                let hit = st
+                    .blocked
+                    .iter()
+                    .find(|(p, _)| blocked_matches(p, &req.url))
+                    .is_some_and(|(_, block)| *block);
+                (st.offline, hit)
+            };
+            if blocked {
+                Err("net::ERR_BLOCKED_BY_CLIENT".to_string())
+            } else if offline && !matches!(req.url.scheme(), "data" | "blob" | "about") {
+                Err("net::ERR_INTERNET_DISCONNECTED".to_string())
+            } else {
+                fetch_answering_auth(&agent, page, req, top_frame, rtype, interception)
+                    .await
+                    .map(|(r, h)| {
+                        hops = h;
+                        r
+                    })
+            }
+        }
     };
     match &r {
         Ok(resp) => {
+            // Each redirect the network stack followed: the same request
+            // id, now for the next URL, with the redirect's response.
+            for h in &hops {
+                let mut next = req_hops.clone();
+                next.url = h.target.clone();
+                agent.emit(PageEvent::RequestWillBeSent(Box::new(RequestWillBeSent {
+                    request_id: id.clone(),
+                    loader_id: loader.clone(),
+                    document_url: if rtype == "Document" {
+                        h.target.to_string()
+                    } else {
+                        doc_url_hops.clone()
+                    },
+                    request: cdp_request(&agent, page, &next),
+                    timestamp: agent.mono(),
+                    wall_time: wall_secs(),
+                    initiator: serde_json::json!({ "type": "other" }),
+                    redirect_has_extra_info: false,
+                    redirect_response: Some(cdp_response(&NetResponse {
+                        status: h.status.as_u16(),
+                        status_text: h.status.canonical_reason().unwrap_or("").to_owned(),
+                        headers: h.response_headers.clone(),
+                        body: bytes::Bytes::new(),
+                        url: h.url.clone(),
+                        redirected: false,
+                    })),
+                    resource_type: rtype.into(),
+                    frame_id: Some(frame.clone()),
+                    has_user_gesture: false,
+                })));
+            }
             agent.emit(PageEvent::ResponseReceived(Box::new(ResponseReceived {
                 request_id: id.clone(),
                 loader_id: loader,
@@ -599,7 +670,7 @@ async fn fetch_answering_auth(
     top_frame: Option<url::Url>,
     rtype: &str,
     interception: Option<String>,
-) -> Result<NetResponse, String> {
+) -> Result<(NetResponse, Vec<lb_net::RedirectHop>), String> {
     const DENIED: &str = "net::ERR_INVALID_AUTH_CREDENTIALS";
     let iid = interception.unwrap_or_else(|| {
         format!(

@@ -13,7 +13,7 @@ use url::Url;
 
 use crate::HttpVersion;
 use crate::header_profile::{
-    BuildInput, HeaderProfile, RequestKind, RequestMeta, Site, referrer_for, title_case,
+    BuildInput, HeaderProfile, RequestKind, RequestMeta, Site, title_case,
 };
 
 /// `(name, value)` pairs in wire order. Names are lowercase for HTTP/2 and
@@ -222,7 +222,7 @@ pub fn generic_request_headers(input: &BuildInput<'_>) -> OrderedHeaders {
         base.retain(|(n, _)| n != "sec-fetch-user");
     }
     let mut out = merge_headers(base, input.caller);
-    if let Some(r) = referrer_for(meta.initiator.as_ref(), input.url) {
+    if let Some(r) = crate::header_profile::referer_header(meta, input.url) {
         out.push(("referer".into(), r));
     }
     if let Some(i) = &meta.initiator {

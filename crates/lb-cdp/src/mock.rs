@@ -316,6 +316,7 @@ impl MockHost {
             frame_id: target.to_string(),
             loader_id: Some(loader.clone()),
             error_text: None,
+            is_download: false,
         };
         let blank = url == "about:blank" || url.starts_with("about:");
         if !blank && !is_loopback_url(url) {
@@ -900,7 +901,7 @@ impl PageHost for MockHost {
         if let Some(f) = &req.frame_id
             && f != target_id
         {
-            return Err(HostError::new("No frame for given id found"));
+            return Err(HostError::new("No frame with given id found"));
         }
         self.start_navigation(target_id, &req.url)
     }

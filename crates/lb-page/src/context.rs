@@ -406,10 +406,10 @@ impl BrowserContext {
         &self,
         req: NetRequest,
         top_frame: Option<Url>,
-    ) -> Result<NetResponse, Result<lb_net::ProxyChallenge, String>> {
+    ) -> Result<(NetResponse, Vec<RedirectHop>), Result<lb_net::ProxyChallenge, String>> {
         self.fetch_raw(req, None, top_frame)
             .await
-            .map(|(r, _)| r)
+            .map(|(r, t)| (r, t.redirects))
             .map_err(|e| match e {
                 Ok(lb_net::NetError::ProxyAuth(ch)) => Ok(ch),
                 Ok(e) => Err(e.to_string()),
@@ -528,6 +528,13 @@ fn request_meta(req: &NetRequest, kind: Option<RequestKind>) -> RequestMeta {
     let mut meta = RequestMeta::new(kind, req.initiator.clone());
     meta.mode = req.mode.to_owned();
     meta.user_activated |= req.user_activated;
+    meta.referrer =
+        req.referrer
+            .as_ref()
+            .map(|(url, policy)| lb_net::header_profile::ReferrerOverride {
+                url: url.clone(),
+                policy: policy.clone(),
+            });
     meta.form_post = matches!(kind, RequestKind::Document | RequestKind::Iframe)
         && req.method.eq_ignore_ascii_case("POST");
     meta

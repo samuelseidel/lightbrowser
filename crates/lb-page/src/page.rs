@@ -66,7 +66,8 @@ pub(crate) struct PageState {
     /// does not jump while this is set.
     pub loading: Cell<bool>,
     idle_since: Cell<Option<f64>>,
-    history_len: Cell<u32>,
+    /// The session history (`history.length`, `Page.getNavigationHistory`).
+    pub(crate) history: RefCell<crate::session::Session>,
     /// Notified after each event loop turn that ran something (CDP waits
     /// for promises on it).
     pub turn: Rc<Notify>,
@@ -91,7 +92,10 @@ impl PageState {
         if let Some(o) = obs {
             o.lifecycle(name, loader, &url);
         }
-        if let Some(a) = self.agent() {
+        // `init` went to the agent at commit, in Chrome's order.
+        if name != "init"
+            && let Some(a) = self.agent()
+        {
             a.lifecycle(self, name, loader);
         }
     }
@@ -107,14 +111,6 @@ impl PageState {
 
     pub(crate) fn session_area(&self, url: &Url) -> StorageArea {
         self.session.area(&url.origin().ascii_serialization())
-    }
-
-    pub(crate) fn history_len(&self) -> u32 {
-        self.history_len.get()
-    }
-
-    pub(crate) fn add_history(&self, n: u32) {
-        self.history_len.set(self.history_len.get() + n);
     }
 
     /// Tear down the current document: realm and arena go in one step.
@@ -335,6 +331,10 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             });
             did = true;
         }
+        if let Some(delta) = w.take_traversal() {
+            crate::session::traverse(&ws, &page, delta);
+            did = true;
+        }
         for x in wins.iter().skip(1) {
             if let Some(nav) = x.take_nav_request() {
                 crate::frames::navigate_from_script(&ws, &page, x, nav);
@@ -516,7 +516,7 @@ impl Page {
                     closed: Cell::new(false),
                     loading: Cell::new(false),
                     idle_since: Cell::new(None),
-                    history_len: Cell::new(u32::from(skip_blank)),
+                    history: RefCell::new(crate::session::Session::new(skip_blank)),
                     turn: Rc::new(Notify::new()),
                     cdp: RefCell::new(None),
                     reloading: Cell::new(false),
@@ -640,15 +640,74 @@ impl Page {
         rx.await.map_err(|_| PageError::Aborted)?
     }
 
+    /// `Page.navigate`: a navigation with a referrer and transition type.
+    /// `Ok(None)` when it only changed the fragment (the document stays).
+    pub(crate) async fn navigate_cdp(
+        &self,
+        url: Url,
+        referrer: Option<(Url, Option<String>)>,
+        transition: Option<String>,
+    ) -> Result<Option<NavResult>, PageError> {
+        let (tx, rx) = oneshot::channel();
+        let same = self
+            .call(move |ws, page| async move {
+                if let Some(w) = page.window() {
+                    let cur = w.url();
+                    let (mut a, mut b) = (cur.clone(), url.clone());
+                    a.set_fragment(None);
+                    b.set_fragment(None);
+                    if url.fragment().is_some() && a == b {
+                        if let Some(agent) = page.agent() {
+                            agent.nav_started_same_document(&url, "sameDocument");
+                        }
+                        let realm = w.realm();
+                        let transition = transition.clone().unwrap_or_else(|| "typed".into());
+                        ws.with_engine(|engine| {
+                            let mut js = EngineJs { engine, realm };
+                            w.navigate_fragment(&mut js, url, &transition);
+                            js.engine.perform_microtask_checkpoint();
+                        });
+                        return Ok(true);
+                    }
+                }
+                tokio::task::spawn_local(async move {
+                    let mut target = crate::nav::Target::typed(url);
+                    target.referrer = referrer;
+                    if let Some(t) = transition {
+                        target.transition = t;
+                    }
+                    let r = crate::nav::navigate_committed(ws, page, target, tx).await;
+                    let _ = r;
+                });
+                Ok(false)
+            })
+            .await?;
+        if same {
+            return Ok(None);
+        }
+        rx.await.map_err(|_| PageError::Aborted)?.map(Some)
+    }
+
+    /// The loader (navigation sequence) of the last navigation attempt,
+    /// also when it failed.
+    pub(crate) fn last_loader(&self) -> u64 {
+        self.life.borrow().loader
+    }
+
     /// Reload the current document (a navigation to its URL marked as a
     /// reload); resolves at commit like [`Page::navigate`].
     pub async fn reload(&self) -> Result<NavResult, PageError> {
+        self.reload_with(false).await
+    }
+
+    /// Reload; `bypass_cache` is `Page.reload`'s `ignoreCache`.
+    pub(crate) async fn reload_with(&self, bypass_cache: bool) -> Result<NavResult, PageError> {
         let (tx, rx) = oneshot::channel();
         self.call(move |ws, page| async move {
             let url = page.window().map(|w| w.url()).ok_or(PageError::Closed)?;
             page.reloading.set(true);
             tokio::task::spawn_local(async move {
-                let target = crate::nav::Target::typed(url);
+                let target = crate::nav::Target::reload(url, bypass_cache);
                 let r = crate::nav::navigate_committed(ws, page, target, tx).await;
                 let _ = r;
             });
