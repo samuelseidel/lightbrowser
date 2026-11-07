@@ -2408,8 +2408,11 @@ fn observe(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostError
         cx.release(h);
         let mut kinds: Vec<Kind> = Vec::new();
         for n in names {
-            if supported.contains(&n.as_str())
-                && let Some(k) = Kind::of_type(&n)
+            if !supported.contains(&n.as_str()) {
+                w.warn(format!(
+                    "The entry type '{n}' does not exist or isn't supported."
+                ));
+            } else if let Some(k) = Kind::of_type(&n)
                 && !kinds.contains(&k)
             {
                 kinds.push(k);
@@ -2432,6 +2435,9 @@ fn observe(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostError
         let kinds: Vec<Kind> = if supported.contains(&name.as_str()) {
             Kind::of_type(&name).into_iter().collect()
         } else {
+            w.warn(format!(
+                "The entry type '{name}' does not exist or isn't supported."
+            ));
             Vec::new()
         };
         (kinds, ObserveMode::Type, buffered)
@@ -2533,5 +2539,44 @@ impl Window {
         };
         p.started = started;
         finish(self, p, Ok(resp));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The header `serve.py` sends with `st=1` and the entries Chrome 153
+    /// made of it (`res_sizes` in `crates/lb-page/tests/perf/chrome.json`).
+    #[test]
+    fn server_timing_as_chrome_reads_it() {
+        let h = vec![(
+            "Server-Timing".to_owned(),
+            "db;dur=53.2;desc=\"Database\", cache;desc=hit".to_owned(),
+        )];
+        let m = parse_server_timing(&h);
+        assert_eq!(m.len(), 2);
+        assert_eq!((m[0].name.as_str(), m[0].duration), ("db", 53.2));
+        assert_eq!(m[0].description, "Database");
+        assert_eq!((m[1].name.as_str(), m[1].duration), ("cache", 0.0));
+        assert_eq!(m[1].description, "hit");
+        assert_eq!(
+            server_json(&m),
+            r#"[{"name":"db","duration":53.2,"description":"Database"},{"name":"cache","duration":0.0,"description":"hit"}]"#
+        );
+    }
+
+    /// `Timing-Allow-Origin: *` admits any origin, a list admits its
+    /// members (the cases of `res_redirect`).
+    #[test]
+    fn timing_allow_origin_values() {
+        let o = "http://127.0.0.1:19281";
+        assert!(tao_allows(&["*".into()], o));
+        assert!(tao_allows(
+            &["http://a.test, http://127.0.0.1:19281".into()],
+            o
+        ));
+        assert!(!tao_allows(&["http://a.test".into()], o));
+        assert!(!tao_allows(&[], o));
     }
 }
