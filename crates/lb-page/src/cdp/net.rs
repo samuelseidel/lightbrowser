@@ -107,6 +107,21 @@ fn glob(pattern: &str, text: &str) -> bool {
     pi == p.len()
 }
 
+/// Whether `pattern` (`*` wildcards) matches `url` as Chrome's
+/// `Network.setBlockedURLs` does for a fully written pattern: a pattern
+/// without `?` leaves the query open and one without `#` the fragment, as
+/// in a URLPattern constructor string.
+fn blocked_matches(pattern: &str, url: &url::Url) -> bool {
+    let mut u = url.clone();
+    if !pattern.contains('#') {
+        u.set_fragment(None);
+    }
+    if !pattern.contains('?') {
+        u.set_query(None);
+    }
+    glob(pattern, u.as_str())
+}
+
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| -> Option<u32> {
         Some(match c {
@@ -406,7 +421,7 @@ pub(crate) async fn page_fetch(
                 let hit = st
                     .blocked
                     .iter()
-                    .find(|(p, _)| glob(p, req.url.as_str()))
+                    .find(|(p, _)| blocked_matches(p, &req.url))
                     .is_some_and(|(_, block)| *block);
                 (st.offline, hit)
             };

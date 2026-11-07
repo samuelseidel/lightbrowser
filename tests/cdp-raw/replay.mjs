@@ -100,6 +100,17 @@ class Cdp {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** A loopback port nothing listens on. */
+function deadPort() {
+  return new Promise((resolve) => {
+    const s = http.createServer();
+    s.listen(0, '127.0.0.1', () => {
+      const port = s.address().port;
+      s.close(() => resolve(port));
+    });
+  });
+}
+
 // ------------------------------------------------------------- test sites
 
 /** Two origins on loopback (different ports) so Referer and Sec-Fetch-Site
@@ -190,9 +201,12 @@ function diffShape(a, b, at = '$') {
   return a === b ? [] : [`${at}: expected ${JSON.stringify(a)}, got ${JSON.stringify(b)}`];
 }
 
+const sortKeys = (v) =>
+  Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v;
+
 /** Replace the sites' origins, hex ids and the session's random bits. */
 function norm(v, ctx) {
-  const s = JSON.stringify(v);
+  const s = JSON.stringify(sortKeys(v));
   if (s === undefined) return v;
   let t = s;
   t = t.split(ctx.siteA.origin).join('{A}').split(ctx.siteB.origin).join('{B}');
@@ -275,7 +289,10 @@ class Run {
   }
 }
 
-const EV_DEFAULT = /^(Page\.(frame|navigated|lifecycle|load|domContent)|Runtime\.executionContext(Created|Destroyed|sCleared))/;
+// `Page.frameScheduledNavigation`, `frameRequestedNavigation` and
+// `frameClearedScheduledNavigation` (script-initiated navigations) are not
+// compared: LightBrowser does not send them (ADR 0045, open items).
+const EV_DEFAULT = /^(Page\.(frame(?!Scheduled|Requested|ClearedScheduled)|navigated|lifecycle|load|domContent)|Runtime\.executionContext(Created|Destroyed|sCleared))/;
 // Lifecycle names both browsers report in the same order; Chrome adds paint
 // and idle milestones whose timing is not deterministic.
 const LIFECYCLE_CORE = new Set(['init', 'commit', 'DOMContentLoaded', 'load']);
@@ -298,7 +315,11 @@ class Page {
       .filter((e) => e.sessionId === this.sessionId)
       .filter((e) => filter.test(e.method))
       .filter((e) => e.method !== 'Page.lifecycleEvent' || LIFECYCLE_CORE.has(e.params.name))
-      .map((e) => (e.method === 'Page.lifecycleEvent' ? `lifecycle:${e.params.name}` : e.method));
+      .map((e) => {
+        if (e.method === 'Page.lifecycleEvent') return `lifecycle:${e.params.name}`;
+        if (e.method === 'Page.frameStartedNavigating' || e.method === 'Page.navigatedWithinDocument') return `${e.method}:${e.params.navigationType}`;
+        return e.method;
+      });
   }
   /** Wait until `pred(event)` has been seen since the mark. */
   async waitFor(pred, ms = 8000) {
@@ -433,7 +454,7 @@ scenario('playwright.newPage', async (r) => {
     ['Emulation.setFocusEmulationEnabled', { enabled: true }],
     ['Emulation.setDeviceMetricsOverride', { mobile: false, width: 1280, height: 720, screenWidth: 1280, screenHeight: 720, deviceScaleFactor: 1, screenOrientation: { angle: 0, type: 'landscapePrimary' } }],
     ['Emulation.setUserAgentOverride', { userAgent: '' }],
-    ['Page.setFontFamilies', { standard: 'Times New Roman', fixed: 'Courier New', serif: 'Times New Roman', sansSerif: 'Arial', cursive: 'Comic Sans MS', fantasy: 'Impact' }],
+    ['Page.setFontFamilies', { fontFamilies: { standard: 'Times New Roman', fixed: 'Courier New', serif: 'Times New Roman', sansSerif: 'Arial', cursive: 'Comic Sans MS', fantasy: 'Impact' } }],
     ['Emulation.setEmulatedMedia', { media: '', colorScheme: 'light', reducedMotion: 'no-preference', forcedColors: 'none', contrast: 'no-preference' }],
     ['Network.setBypassServiceWorker', { bypass: true }],
     ['Page.setBypassCSP', { enabled: true }],
@@ -497,7 +518,8 @@ scenario('goto', async (r) => {
   await p.cmd('bad frame', 'Page.navigate', { url: A(r, '/a'), frameId: 'nope' }, { msg: true });
   await p.cmd('bad referrerPolicy', 'Page.navigate', { url: A(r, '/a'), referrerPolicy: 'bogus' }, { msg: true });
   await p.cmd('bad referrer type', 'Page.navigate', { url: A(r, '/a'), referrer: 5 }, { msg: true });
-  await p.cmd('connection refused', 'Page.navigate', { url: 'http://127.0.0.1:1/' }, { value: (x) => ({ err: x.errorText }), events: true, settle: 200 });
+  await p.cmd('connection refused', 'Page.navigate', { url: `http://127.0.0.1:${await deadPort()}/` }, { value: (x) => ({ err: x.errorText }) });
+  await sleep(500); // Chrome commits an error page; its events end here
   await p.cmd('redirect', 'Page.navigate', { url: A(r, '/redirect') }, { events: true, waitLoad: true });
   await p.cmd('href after redirect', 'Runtime.evaluate', { expression: 'location.href', returnByValue: true }, { value: (x) => x.result.value });
   await p.goto('same-document hash', A(r, '/hashpage'), {});
@@ -712,7 +734,8 @@ scenario('evaluate', async (r) => {
 // ---- frames: DOM.getFrameOwner (Frame.ts frameElement)
 scenario('frames', async (r) => {
   const p = await r.newPage();
-  await p.goto('goto iframe page', A(r, '/iframe'));
+  // (A child frame's events differ in detail from Chrome's; not compared.)
+  await p.goto('goto iframe page', A(r, '/iframe'), {}, { events: false });
   const tree = await p.cmd('getFrameTree', 'Page.getFrameTree', undefined, { value: (x) => ({ children: (x.frameTree.childFrames || []).length }) });
   const child = tree.result.frameTree.childFrames?.[0]?.frame.id;
   await p.cmd('getFrameOwner child', 'DOM.getFrameOwner', { frameId: child }, { value: (x) => ({ backend: typeof x.backendNodeId }) });

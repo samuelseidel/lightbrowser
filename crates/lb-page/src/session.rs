@@ -42,6 +42,8 @@ pub(crate) enum NavKind {
     New,
     /// The current entry loads again.
     Reload,
+    /// `Page.reload` with `ignoreCache`.
+    ReloadBypassingCache,
     /// A traversal to the entry with this id.
     History(i64),
 }
@@ -51,6 +53,11 @@ pub(crate) struct Session {
     pub entries: Vec<Entry>,
     pub current: usize,
     next_id: i64,
+    /// The live document's title as of the last [`Session::sync_title`]:
+    /// the current entry takes a new title when the document's changes,
+    /// not when the entry is left (a traversal inside a document does not
+    /// change it).
+    seen_title: String,
 }
 
 impl Session {
@@ -82,8 +89,21 @@ impl Session {
         self.entries.get(self.current)
     }
 
+    /// The document's title is `live`: if it changed, the current entry
+    /// has it.
+    pub(crate) fn sync_title(&mut self, live: &str) {
+        if live != self.seen_title {
+            self.seen_title = live.to_string();
+            if let Some(e) = self.entries.get_mut(self.current) {
+                e.title = live.to_string();
+            }
+        }
+    }
+
     /// A new document committed at `url` (after redirects).
     pub(crate) fn commit(&mut self, kind: &NavKind, c: Commit<'_>) {
+        // The new document brings its own title.
+        self.seen_title.clear();
         match kind {
             NavKind::New => {
                 let same_url = c.requested_same_as_current(self);
@@ -105,13 +125,18 @@ impl Session {
                     );
                 }
             }
-            NavKind::Reload => {
+            NavKind::Reload | NavKind::ReloadBypassingCache => {
+                // `history.go(0)` keeps the entry's transition (no value).
+                let transition = if c.transition.is_empty() { "typed" } else { c.transition };
                 if let Some(e) = self.entries.get_mut(self.current) {
                     e.url = c.url.clone();
-                    e.transition = "reload".into();
+                    if !c.transition.is_empty() {
+                        e.transition = c.transition.to_string();
+                    }
+                    e.title = String::new();
                     e.doc = c.doc;
                 } else {
-                    self.push(c.url.clone(), c.user_typed.to_string(), "reload".into(), c.doc);
+                    self.push(c.url.clone(), c.user_typed.to_string(), transition.into(), c.doc);
                 }
             }
             NavKind::History(id) => {
@@ -119,6 +144,7 @@ impl Session {
                     self.current = i;
                     let e = &mut self.entries[i];
                     e.url = c.url.clone();
+                    e.title = String::new();
                     e.doc = c.doc;
                 }
             }
@@ -136,13 +162,15 @@ impl Session {
             cur.state = state;
             return;
         }
-        cur.title = title.to_string();
         let (user_typed, doc) = (cur.user_typed.clone(), cur.doc);
         self.entries.truncate(self.current + 1);
         self.push(url.clone(), user_typed, "link".into(), doc);
         let e = &mut self.entries[self.current];
         e.state = state;
+        // The new entry starts with the document's title; its own title
+        // changes from here on belong to it.
         e.title = title.to_string();
+        self.seen_title = title.to_string();
     }
 
     /// The index `delta` entries from the current one.
@@ -188,28 +216,19 @@ impl PageState {
         self.window().map(|w| w.with_doc(|d| d.title()))
     }
 
-    /// The current entry keeps the title of the document that is going
-    /// away.
+    /// The current entry takes the live document's title if it changed;
+    /// called before the history is read or changes.
     pub(crate) fn session_leave(&self) {
         if let Some(t) = self.live_title() {
-            let mut s = self.history.borrow_mut();
-            let i = s.current;
-            if let Some(e) = s.entries.get_mut(i) {
-                e.title = t;
-            }
+            self.history.borrow_mut().sync_title(&t);
         }
     }
 
-    /// `Page.getNavigationHistory`: the current index and the entries,
-    /// the current one with its live title.
+    /// `Page.getNavigationHistory`: the current index and the entries.
     pub(crate) fn session_snapshot(&self) -> (usize, Vec<Entry>) {
-        let live = self.live_title();
+        self.session_leave();
         let s = self.history.borrow();
-        let mut entries = s.entries.clone();
-        if let (Some(t), Some(e)) = (live, entries.get_mut(s.current)) {
-            e.title = t;
-        }
-        (s.current, entries)
+        (s.current, s.entries.clone())
     }
 }
 
@@ -233,6 +252,7 @@ impl SessionHost for PageSession {
 
     fn record(&self, url: &Url, state: Option<String>, replace: bool, fragment: bool) {
         let Some(p) = self.page.upgrade() else { return };
+        p.session_leave();
         let title = p.live_title().unwrap_or_default();
         let agent = p.agent();
         if let Some(a) = &agent {
@@ -274,7 +294,8 @@ pub(crate) fn traverse(ws: &Rc<WorkerState>, page: &Rc<PageState>, delta: i32) -
         page.reloading.set(true);
         let (ws, page) = (ws.clone(), page.clone());
         tokio::task::spawn_local(async move {
-            let target = crate::nav::Target::reload(url);
+            let mut target = crate::nav::Target::reload(url, false);
+            target.transition = String::new();
             let _ = crate::nav::navigate(ws, page, target).await;
         });
         return true;
@@ -315,7 +336,7 @@ pub(crate) fn traverse_to(
             s.entries[i].url.clone(),
             s.entries[i].state.clone(),
             cur_doc == Some(s.entries[i].doc) && page.window().is_some(),
-            if fragment_only { "fragment" } else { "historyApi" },
+            "fragment",
         )
     };
     if same_doc && let Some(w) = page.window() {

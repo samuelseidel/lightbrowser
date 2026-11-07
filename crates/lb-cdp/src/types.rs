@@ -268,7 +268,34 @@ pub struct Frame {
     pub mime_type: String,
     pub secure_context_type: String,
     pub cross_origin_isolated_context_type: String,
+    #[serde(rename = "gatedAPIFeatures")]
     pub gated_api_features: Vec<String>,
+    #[serde(default)]
+    pub ad_frame_status: AdFrameStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_origin_details: Option<SecurityOriginDetails>,
+}
+
+/// `Page.AdFrameStatus`: LightBrowser never marks ad frames.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdFrameStatus {
+    pub ad_frame_type: String,
+}
+
+impl Default for AdFrameStatus {
+    fn default() -> Self {
+        AdFrameStatus {
+            ad_frame_type: "none".into(),
+        }
+    }
+}
+
+/// `Page.SecurityOriginDetails`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityOriginDetails {
+    pub is_localhost: bool,
 }
 
 impl Frame {
@@ -323,6 +350,13 @@ impl Frame {
             secure_context_type: secure.into(),
             cross_origin_isolated_context_type: "NotIsolated".into(),
             gated_api_features: Vec::new(),
+            ad_frame_status: AdFrameStatus::default(),
+            security_origin_details: Some(SecurityOriginDetails {
+                is_localhost: parsed.as_ref().is_some_and(|u| {
+                    matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+                        || u.host_str().is_some_and(|h| h.ends_with(".localhost"))
+                }),
+            }),
         }
     }
 }
@@ -505,6 +539,7 @@ pub struct Cookie {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_site: Option<String>,
     pub priority: String,
+    #[serde(skip_serializing, default)]
     pub same_party: bool,
     pub source_scheme: String,
     pub source_port: i64,

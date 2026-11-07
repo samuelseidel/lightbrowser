@@ -1010,7 +1010,20 @@ fn to_value<T: serde::Serialize>(v: &T) -> Value {
 }
 
 fn host_err(e: HostError) -> CdpError {
-    CdpError::server(e.0)
+    // Texts Chrome answers with `-32602` (a bad id or enum value the
+    // client sent), not the `-32000` of a failed command.
+    const BAD_PARAMS: &[&str] = &[
+        "Invalid InterceptionId.",
+        "Unknown permission type",
+        "No frame for given id found",
+        "Unknown errorReason",
+        "No entry with passed id",
+    ];
+    if BAD_PARAMS.iter().any(|p| e.0.starts_with(p)) {
+        CdpError::new(protocol::code::INVALID_PARAMS, e.0)
+    } else {
+        CdpError::server(e.0)
+    }
 }
 
 /// One command being handled.
@@ -1260,7 +1273,7 @@ pub(crate) async fn dispatch<H: PageHost + 'static>(
         "Fetch" => fetch_domain(&c),
         "Emulation" => emulation_domain(&c),
         "Accessibility" => accessibility_domain(&c),
-        "Security" | "Log" | "Performance" | "Audits" => misc_domain(&c),
+        "Security" | "Log" | "Performance" | "Audits" | "WebMCP" => misc_domain(&c),
         "IO" => io_domain(&c),
         "LightBrowser" => lightbrowser_domain(&c).await,
         _ => Err(CdpError::method_not_found(&cmd.method)),
@@ -1553,7 +1566,10 @@ async fn target_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, 
         "Target.attachToTarget" => {
             let id = str_param(c.p, "targetId")?;
             if sh.state.borrow().target(id).is_none() {
-                return Err(CdpError::server("No target with given id found"));
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "No target with given id found",
+                ));
             }
             if c.p.get("flatten").and_then(Value::as_bool) == Some(false) {
                 return Err(CdpError::server(
@@ -1609,7 +1625,14 @@ async fn target_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, 
             Ok(json!({}))
         }
         "Target.closeTarget" => {
-            sh.close_target(str_param(c.p, "targetId")?)?;
+            let id = str_param(c.p, "targetId")?;
+            if sh.state.borrow().target(id).is_none() {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "No target found for targetId",
+                ));
+            }
+            sh.close_target(id)?;
             Ok(json!({ "success": true }))
         }
         "Target.activateTarget" => {
@@ -1704,6 +1727,18 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
             Ok(json!({}))
         }
         "Page.stopLoading" | "Page.bringToFront" => Ok(json!({})),
+        // No Content-Security-Policy is enforced, so bypassing it changes
+        // nothing; font families are the persona's (ADR 0045).
+        "Page.setBypassCSP" => {
+            req_bool(c.p, "enabled")?;
+            Ok(json!({}))
+        }
+        "Page.setFontFamilies" => {
+            if !c.p.get("fontFamilies").is_some_and(Value::is_object) {
+                return Err(CdpError::invalid_params("fontFamilies: object expected"));
+            }
+            Ok(json!({}))
+        }
         "Page.setInterceptFileChooserDialog" => {
             req_bool(c.p, "enabled")?;
             Ok(json!({}))
@@ -1819,6 +1854,14 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
             Ok(json!({}))
         }
         "Page.captureScreenshot" => {
+            if let Some(f) = opt_str(c.p, "format")?
+                && !matches!(f, "png" | "jpeg" | "webp")
+            {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "Invalid image format",
+                ));
+            }
             let data = host.capture_screenshot(&t, c.p).map_err(host_err)?;
             Ok(json!({ "data": data }))
         }
@@ -2340,6 +2383,18 @@ fn fetch_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpErro
     let host = &c.sh.host;
     match c.method {
         "Fetch.enable" => {
+            if let Some(list) = c.p.get("patterns").and_then(Value::as_array) {
+                for p in list {
+                    if let Some(stage) = p.get("requestStage").and_then(Value::as_str)
+                        && !matches!(stage, "Request" | "Response")
+                    {
+                        return Err(CdpError::new(
+                            protocol::code::INVALID_PARAMS,
+                            format!("Unsupported request stage '{stage}'"),
+                        ));
+                    }
+                }
+            }
             let patterns: Vec<RequestPattern> = match c.p.get("patterns") {
                 Some(v) => serde_json::from_value(v.clone())
                     .map_err(|e| CdpError::invalid_params(e.to_string()))?,
@@ -2381,10 +2436,33 @@ fn fetch_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpErro
             Ok(json!({}))
         }
         "Fetch.failRequest" => {
+            let reason = str_param(c.p, "errorReason")?;
+            if !matches!(
+                reason,
+                "Failed"
+                    | "Aborted"
+                    | "TimedOut"
+                    | "AccessDenied"
+                    | "ConnectionClosed"
+                    | "ConnectionReset"
+                    | "ConnectionRefused"
+                    | "ConnectionAborted"
+                    | "ConnectionFailed"
+                    | "NameNotResolved"
+                    | "InternetDisconnected"
+                    | "AddressUnreachable"
+                    | "BlockedByClient"
+                    | "BlockedByResponse"
+            ) {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "Unknown errorReason",
+                ));
+            }
             host.fail_request(
                 &t,
                 str_param(c.p, "requestId")?,
-                str_param(c.p, "errorReason")?,
+                reason,
             )
             .map_err(host_err)?;
             Ok(json!({}))
@@ -2584,10 +2662,12 @@ fn misc_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError
                 .map_err(host_err)?;
             Ok(json!({}))
         }
-        "Security.enable" | "Log.enable" | "Performance.enable" | "Audits.enable" => {
+        "Security.enable" | "Log.enable" | "Performance.enable" | "Audits.enable"
+        | "WebMCP.enable" => {
             c.enable(c.method.split('.').next().unwrap_or(""), true)
         }
-        "Security.disable" | "Log.disable" | "Performance.disable" | "Audits.disable" => {
+        "Security.disable" | "Log.disable" | "Performance.disable" | "Audits.disable"
+        | "WebMCP.disable" => {
             c.enable(c.method.split('.').next().unwrap_or(""), false)
         }
         "Log.clear" => Ok(json!({})),

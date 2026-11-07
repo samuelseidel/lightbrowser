@@ -649,14 +649,14 @@ impl PageHost for CdpHost {
         .map_err(page_err)
     }
 
-    async fn reload(&self, target_id: &str, _ignore_cache: bool) -> HostResult<()> {
+    async fn reload(&self, target_id: &str, ignore_cache: bool) -> HostResult<()> {
         let page = self
             .pages
             .borrow()
             .get(target_id)
             .map(|p| p.page.clone())
             .ok_or_else(|| HostError::new("No target with given id found"))?;
-        match page.reload().await {
+        match page.reload_with(ignore_cache).await {
             Ok(_) | Err(PageError::Net(_)) | Err(PageError::Aborted) => Ok(()),
             Err(e) => Err(page_err(e)),
         }

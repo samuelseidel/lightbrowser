@@ -697,12 +697,17 @@ impl Page {
     /// Reload the current document (a navigation to its URL marked as a
     /// reload); resolves at commit like [`Page::navigate`].
     pub async fn reload(&self) -> Result<NavResult, PageError> {
+        self.reload_with(false).await
+    }
+
+    /// Reload; `bypass_cache` is `Page.reload`'s `ignoreCache`.
+    pub(crate) async fn reload_with(&self, bypass_cache: bool) -> Result<NavResult, PageError> {
         let (tx, rx) = oneshot::channel();
         self.call(move |ws, page| async move {
             let url = page.window().map(|w| w.url()).ok_or(PageError::Closed)?;
             page.reloading.set(true);
             tokio::task::spawn_local(async move {
-                let target = crate::nav::Target::reload(url);
+                let target = crate::nav::Target::reload(url, bypass_cache);
                 let r = crate::nav::navigate_committed(ws, page, target, tx).await;
                 let _ = r;
             });

@@ -137,9 +137,13 @@ impl Target {
 
     /// The current document loads again (`Page.reload`, `location.reload()`,
     /// `history.go(0)`).
-    pub(crate) fn reload(url: Url) -> Target {
+    pub(crate) fn reload(url: Url, bypass_cache: bool) -> Target {
         Target {
-            kind: NavKind::Reload,
+            kind: if bypass_cache {
+                NavKind::ReloadBypassingCache
+            } else {
+                NavKind::Reload
+            },
             transition: "reload".into(),
             ..Target::typed(url)
         }
@@ -235,6 +239,7 @@ pub(crate) async fn navigate_committed(
     let loader = agent.as_ref().map(|a| {
         let nav_type = match &kind {
             NavKind::Reload => "reload",
+            NavKind::ReloadBypassingCache => "reloadBypassingCache",
             NavKind::History(_) => "historyDifferentDocument",
             NavKind::New => "differentDocument",
         };
@@ -327,7 +332,7 @@ pub(crate) async fn navigate_committed(
             .history
             .borrow()
             .current_entry()
-            .filter(|_| kind == NavKind::Reload)
+            .filter(|_| matches!(kind, NavKind::Reload | NavKind::ReloadBypassingCache))
             .map_or_else(|| url.to_string(), |e| e.user_typed.clone());
         page.history.borrow_mut().commit(
             &kind,

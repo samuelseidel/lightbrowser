@@ -52,6 +52,8 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "removeScriptToEvaluateOnNewDocument",
             "setLifecycleEventsEnabled",
             "setInterceptFileChooserDialog",
+            "setBypassCSP",
+            "setFontFamilies",
             "handleJavaScriptDialog",
             "bringToFront",
             "close",
@@ -170,6 +172,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
     ),
     ("Log", &["enable", "disable", "clear"]),
     ("Audits", &["enable", "disable"]),
+    ("WebMCP", &["enable", "disable"]),
     ("IO", &["read", "close"]),
     ("Performance", &["enable", "disable"]),
     (
