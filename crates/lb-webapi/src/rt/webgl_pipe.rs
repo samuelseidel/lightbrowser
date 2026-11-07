@@ -207,7 +207,7 @@ impl Gl {
         let Some(c) = &self.color else {
             let a = if self.attrs.alpha { 0 } else { 255 };
             let mut v = vec![0u8; w * h * 4];
-            for p in v.chunks_exact_mut(4) {
+            for p in v.as_chunks_mut::<4>().0.iter_mut() {
                 p[3] = a;
             }
             return v;
@@ -249,7 +249,7 @@ impl Gl {
         let mut bmp = lb_paint::Bitmap::new(self.width, self.height);
         bmp.data.copy_from_slice(fb);
         if self.attrs.premultiplied_alpha {
-            for px in bmp.data.chunks_exact_mut(4) {
+            for px in bmp.data.as_chunks_mut::<4>().0.iter_mut() {
                 let a = u32::from(px[3]);
                 if a != 0 && a != 255 {
                     for c in &mut px[..3] {
@@ -259,7 +259,7 @@ impl Gl {
             }
         }
         if !self.attrs.alpha {
-            for px in bmp.data.chunks_exact_mut(4) {
+            for px in bmp.data.as_chunks_mut::<4>().0.iter_mut() {
                 px[3] = 255;
             }
         }
@@ -1487,27 +1487,39 @@ fn arg_numbers(cx: &mut CallCtx<'_, '_, '_>, i: usize) -> Option<Vec<f64>> {
             let b = cx.arg_bytes(i)?;
             Some(match k {
                 ViewKind::Float32 => b
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|c| f64::from(f32::from_ne_bytes([c[0], c[1], c[2], c[3]])))
                     .collect(),
                 ViewKind::Int32 => b
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|c| f64::from(i32::from_ne_bytes([c[0], c[1], c[2], c[3]])))
                     .collect(),
                 ViewKind::Uint32 => b
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|c| f64::from(u32::from_ne_bytes([c[0], c[1], c[2], c[3]])))
                     .collect(),
                 ViewKind::Float64 => b
-                    .chunks_exact(8)
-                    .map(|c| f64::from_ne_bytes(c.try_into().unwrap_or([0; 8])))
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| f64::from_ne_bytes(*c))
                     .collect(),
                 ViewKind::Int16 => b
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| f64::from(i16::from_ne_bytes([c[0], c[1]])))
                     .collect(),
                 ViewKind::Uint16 => b
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| f64::from(u16::from_ne_bytes([c[0], c[1]])))
                     .collect(),
                 ViewKind::Int8 => b.iter().map(|x| f64::from(*x as i8)).collect(),

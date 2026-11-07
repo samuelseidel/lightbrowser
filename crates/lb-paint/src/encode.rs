@@ -49,7 +49,9 @@ pub fn encode(bmp: &Bitmap, mime: &str, quality: Option<f64>) -> Vec<u8> {
             let q = ((q * 100.0).round() as u8).clamp(1, 100);
             let rgb: Vec<u8> = bmp
                 .data
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|p| {
                     let a = u16::from(p[3]);
                     [0, 1, 2].map(|c| ((u16::from(p[c]) * a + 127) / 255) as u8)

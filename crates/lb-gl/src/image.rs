@@ -261,7 +261,7 @@ impl Image {
         if format.kind == Kind::Unorm && format.channels < 4 {
             // Missing alpha reads as 1.
             if let Data::U8(d) = &mut img.data {
-                for px in d.chunks_exact_mut(4) {
+                for px in d.as_chunks_mut::<4>().0.iter_mut() {
                     px[3] = 255;
                 }
             }

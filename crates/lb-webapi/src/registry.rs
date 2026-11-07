@@ -48,11 +48,11 @@ pub struct KeyHasher(u64);
 
 impl Hasher for KeyHasher {
     fn write(&mut self, bytes: &[u8]) {
-        let mut chunks = bytes.chunks_exact(8);
-        for c in &mut chunks {
-            self.add(u64::from_le_bytes(c.try_into().expect("8 bytes")));
+        let (chunks, rest) = bytes.as_chunks::<8>();
+        for c in chunks {
+            self.add(u64::from_le_bytes(*c));
         }
-        for &b in chunks.remainder() {
+        for &b in rest {
             self.add(u64::from(b));
         }
     }

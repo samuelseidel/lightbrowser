@@ -178,11 +178,11 @@ fn build_options(
 
 /// Ones-complement sum of `data` as big-endian 16-bit words.
 fn sum16(data: &[u8], mut acc: u32) -> u32 {
-    let mut chunks = data.chunks_exact(2);
-    for c in &mut chunks {
-        acc += u32::from(u16::from_be_bytes([c[0], c[1]]));
+    let (chunks, rest) = data.as_chunks::<2>();
+    for c in chunks {
+        acc += u32::from(u16::from_be_bytes(*c));
     }
-    if let [last] = chunks.remainder() {
+    if let [last] = rest {
         acc += u32::from(*last) << 8;
     }
     acc

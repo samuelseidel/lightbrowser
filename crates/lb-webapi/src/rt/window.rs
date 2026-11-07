@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use lb_dom::{Document, NodeFlags, NodeId};
+use lb_dom::{Document, NodeFlags, NodeId, local_name};
 use lb_js::{Arg, CallCtx, HostError, HostRef, JsError, JsValue, RealmId, ScriptOrigin, ValueKind};
 use url::Url;
 

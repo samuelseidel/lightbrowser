@@ -65,7 +65,9 @@ impl Frame {
 
 /// SETTINGS payload as `(id, value)` in wire order.
 pub fn parse_settings(p: &[u8]) -> Vec<(u16, u32)> {
-    p.chunks_exact(6)
+    p.as_chunks::<6>()
+        .0
+        .iter()
         .map(|c| {
             (
                 u16::from_be_bytes([c[0], c[1]]),

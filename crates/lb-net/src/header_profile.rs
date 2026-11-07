@@ -996,6 +996,8 @@ mod tests {
             caller: &caller,
             hop: 0,
             site: Site::between(Some(&init), &target),
+            hints: &[],
+            restart: false,
         });
         assert_eq!(
             names(&h),
@@ -1043,6 +1045,8 @@ mod tests {
             caller: &Vec::new(),
             hop: 1,
             site: Site::SameOrigin,
+            hints: &[],
+            restart: false,
         });
         let n = names(&h);
         assert_eq!(n[0], "cache-control");
