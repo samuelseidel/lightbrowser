@@ -1,0 +1,4 @@
+http://{HOST}/card	Card title Card description
+http://{HOST}/img	
+http://{HOST}/empty	
+http://{HOST}/space	

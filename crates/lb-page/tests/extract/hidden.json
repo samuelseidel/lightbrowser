@@ -1,0 +1,24 @@
+{
+  "url": "http://{HOST}/hidden.html",
+  "final_url": "http://{HOST}/hidden.html",
+  "status": 200,
+  "title": "Hidden",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Hidden"
+    }
+  ],
+  "links": [
+    {
+      "url": "http://{HOST}/hidden-link",
+      "text": "hidden link",
+      "rel": ""
+    }
+  ],
+  "text": "Hidden\nVisible one\nInline none\nClass none\nGhost text visible child\nBefore hidden inlineafter\nghost para\nClosed dialog Open dialog\nPrint only\nhidden link\nLast visible",
+  "markdown": "# Hidden\n\nVisible one\n\nvisible child\n\nBefore after\n\nOpen dialog\n\nLast visible\n"
+}

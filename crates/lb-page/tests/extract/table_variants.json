@@ -1,0 +1,18 @@
+{
+  "url": "http://{HOST}/table_variants.html",
+  "final_url": "http://{HOST}/table_variants.html",
+  "status": 200,
+  "title": "Table variants",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Table variants"
+    }
+  ],
+  "links": [],
+  "text": "Table variants\nSales 2026\na\tb\nc\td\nsum\te\nH1\tH2\nx\ty\nonly",
+  "markdown": "# Table variants\n\nSales **2026**\n\n|  |  |\n| --- | --- |\n| a | b |\n| c | d |\n| sum | e |\n\n| H1 | H2 |\n| --- | --- |\n| x | y |\n\n|  |\n| --- |\n| only |\n"
+}
