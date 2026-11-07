@@ -1955,7 +1955,7 @@ impl Geo<'_> {
                 let close = k == "polygon";
                 let (nums, _) = number_list(attr(self.d, n, "points").unwrap_or(""));
                 let mut p = Path::default();
-                for (i, xy) in nums.chunks_exact(2).enumerate() {
+                for (i, xy) in nums.as_chunks::<2>().0.iter().enumerate() {
                     if i == 0 {
                         p.move_to([xy[0], xy[1]]);
                     } else {
