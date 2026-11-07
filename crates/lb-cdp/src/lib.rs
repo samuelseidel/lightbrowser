@@ -6,6 +6,8 @@
 //!   WebSocket at `/devtools/browser/<id>`. Flat sessions (`sessionId` on
 //!   every message), as Playwright uses after
 //!   `Target.setAutoAttach({flatten: true})`.
+//! - [`InProcess`]: the same protocol over channels inside this process, no
+//!   listener (`lightbrowser mcp`, ADR 0041).
 //! - [`PageHost`]: the trait the browser implements (pages, realms, DOM,
 //!   input, network). The server keeps all protocol state: targets,
 //!   sessions, enabled domains, execution contexts, event routing.
@@ -64,4 +66,4 @@ pub use host::{
     PageMetrics, Rgba, ViewportOverride,
 };
 pub use protocol::CdpError;
-pub use server::{Server, ServerConfig, block_on_local};
+pub use server::{InProcess, Server, ServerConfig, block_on_local};

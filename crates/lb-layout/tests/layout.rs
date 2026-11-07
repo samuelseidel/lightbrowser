@@ -242,6 +242,47 @@ fn form_controls_get_chrome_sizes() {
     assert!(c.x > t.right() && b.x > c.right());
 }
 
+/// The page chooses the nesting depth: building the tree must not use stack
+/// per level (the old recursive walk overflowed a worker thread at about
+/// 1500 levels in a debug build; a test thread has a 2 MiB stack too).
+#[test]
+fn accessibility_tree_of_a_deeply_nested_page() {
+    let depth = 5000;
+    let html = format!(
+        "<title>deep</title>{}<button id=deep>x</button>{}<p id=after>tail</p>",
+        "<div role=group>".repeat(depth),
+        "</div>".repeat(depth)
+    );
+    let doc = Document::parse_html(&html);
+    let mut e = engine();
+    let ax = e.accessibility_tree(&doc);
+    assert_eq!(ax.query(Some("group"), None).len(), depth);
+    let b = ax.query(Some("button"), Some("x"));
+    assert_eq!(b.len(), 1);
+    assert_eq!(b[0].dom, Some(id(&doc, "deep")));
+    // Document order survives the explicit stack: the button is the last
+    // node inside the groups, then the paragraph follows.
+    let last_group = ax.query(Some("group"), None).last().unwrap().id;
+    assert_eq!(ax.nodes[last_group].children.len(), 1);
+    assert_eq!(ax.query(Some("paragraph"), None).len(), 1);
+}
+
+/// A button inside thousands of nested elements gets a name from content
+/// without recursing without bound.
+#[test]
+fn accessibility_name_from_deep_content_is_bounded() {
+    let depth = 3000;
+    let html = format!(
+        "<button id=b>{}text{}</button>",
+        "<span>".repeat(depth),
+        "</span>".repeat(depth)
+    );
+    let doc = Document::parse_html(&html);
+    let mut e = engine();
+    let ax = e.accessibility_tree(&doc);
+    assert_eq!(ax.query(Some("button"), None).len(), 1);
+}
+
 #[test]
 fn accessibility_tree_of_a_small_form() {
     let doc = Document::parse_html(

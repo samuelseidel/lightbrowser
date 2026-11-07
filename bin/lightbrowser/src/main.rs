@@ -10,6 +10,8 @@ use std::sync::Arc;
 use lb_net::ClientHelloProfile;
 use lb_persona::{Persona, PersonaProfile};
 
+mod mcp;
+
 const USAGE: &str = "\
 lightbrowser - headless browser for detection testing
 
@@ -21,6 +23,16 @@ USAGE:
                     [--egress open|loopback|allowlist] [--allow-host H]...
                                             CDP server on 127.0.0.1 for Playwright
                                             connectOverCDP
+  lightbrowser mcp [--allow-host GLOB]... [--persona FILE] [--profiles-dir DIR]
+                  [--insecure] [--proxy URL] [--proxy-bypass-list LIST]
+                  [--timeout SECS]
+                                            Model Context Protocol server on
+                                            stdin/stdout (JSON-RPC lines) so an
+                                            AI agent can drive the browser;
+                                            listens on nothing. Only loopback,
+                                            localhost, *.localhost and *.test
+                                            are visited unless --allow-host adds
+                                            hosts (repeatable). See ADR 0041.
   lightbrowser fetch <url> [OPTIONS]
   lightbrowser tcp-shim [--queue N] [--tcp-dir DIR] [--no-rules]   (Linux, root)
   lightbrowser validate <persona.json>...   check v1/v2 personas against the
@@ -961,6 +973,27 @@ fn main() -> ExitCode {
                 }
             };
             match run_serve(&parsed) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        Some("mcp") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            let parsed = match mcp::parse_args(&args[1..]) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("error: {e}\n");
+                    eprint!("{USAGE}");
+                    return ExitCode::from(2);
+                }
+            };
+            match mcp::run(&parsed) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("error: {e}");

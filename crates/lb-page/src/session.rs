@@ -308,13 +308,9 @@ impl SessionHost for PageSession {
                 frame_id: a.target.clone(),
             });
         }
-        p.history.borrow_mut().record(
-            url,
-            state,
-            replace,
-            fragment.unwrap_or("link"),
-            &title,
-        );
+        p.history
+            .borrow_mut()
+            .record(url, state, replace, fragment.unwrap_or("link"), &title);
         p.update_life(|l| l.url = url.to_string());
         if let Some(a) = &agent {
             a.same_document(url);

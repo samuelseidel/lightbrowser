@@ -67,6 +67,7 @@ impl AxTree {
             doc,
             styles,
             nodes: Vec::new(),
+            name_depth: 0,
         };
         let root = b.push(AxNode {
             id: 0,
@@ -132,7 +133,13 @@ struct AxBuilder<'a> {
     doc: &'a Document,
     styles: &'a mut StyleEngine,
     nodes: Vec<AxNode>,
+    /// Nesting of `text_alternative` calls (name from content).
+    name_depth: usize,
 }
+
+/// Deepest name-from-content nesting that still contributes text; a page
+/// can nest elements without limit and the name computation recurses.
+const MAX_NAME_DEPTH: usize = 256;
 
 fn collapse_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -174,66 +181,82 @@ impl AxBuilder<'_> {
         }
     }
 
+    /// Builds the nodes of `el`'s subtree in document order. Iterative, with
+    /// an explicit stack: the page chooses the nesting depth, and a
+    /// recursive walk over a few thousand nested elements overflowed the
+    /// worker thread's stack.
     fn walk(&mut self, el: NodeId, parent: usize, parent_hidden: bool) {
-        let hidden = parent_hidden || self.is_hidden(el);
-        let role = self.role(el);
-        let ignored = hidden
-            || matches!(role.as_str(), "generic" | "none" | "presentation")
-                && self.attr(el, "aria-label").is_none()
-                && !self.focusable(el);
-        let name = if hidden {
-            String::new()
-        } else {
-            self.name(el, &role)
-        };
-        let description = if hidden {
-            String::new()
-        } else {
-            self.description(el, &name)
-        };
-        let states = self.states(el, &role);
-        let value = self.value(el, &role);
-        let id = self.push(AxNode {
-            id: 0,
-            dom: Some(el),
-            role,
-            name,
-            description,
-            value,
-            states,
-            ignored,
-            hidden,
-            parent: Some(parent),
-            children: Vec::new(),
-        });
-        let local = self.local(el);
-        if matches!(local.as_str(), "script" | "style" | "template" | "head") {
-            return;
+        enum Item {
+            Element(NodeId, usize, bool),
+            Text(NodeId, usize, bool),
         }
-        let kids: Vec<NodeId> = self.doc.flat_children(el);
-        for c in kids {
-            match self.doc.node_type(c) {
-                NodeType::Element => self.walk(c, id, hidden),
-                NodeType::Text => {
+        let mut stack = vec![Item::Element(el, parent, parent_hidden)];
+        while let Some(item) = stack.pop() {
+            let (el, parent, parent_hidden) = match item {
+                Item::Text(c, parent, hidden) => {
                     let text = collapse_ws(self.doc.character_data(c).unwrap_or(""));
-                    if text.is_empty() {
-                        continue;
+                    if !text.is_empty() {
+                        self.push(AxNode {
+                            id: 0,
+                            dom: Some(c),
+                            role: "StaticText".into(),
+                            name: text,
+                            description: String::new(),
+                            value: None,
+                            states: AxStates::default(),
+                            ignored: hidden,
+                            hidden,
+                            parent: Some(parent),
+                            children: Vec::new(),
+                        });
                     }
-                    self.push(AxNode {
-                        id: 0,
-                        dom: Some(c),
-                        role: "StaticText".into(),
-                        name: text,
-                        description: String::new(),
-                        value: None,
-                        states: AxStates::default(),
-                        ignored: hidden,
-                        hidden,
-                        parent: Some(id),
-                        children: Vec::new(),
-                    });
+                    continue;
                 }
-                _ => {}
+                Item::Element(el, parent, hidden) => (el, parent, hidden),
+            };
+            let hidden = parent_hidden || self.is_hidden(el);
+            let role = self.role(el);
+            let ignored = hidden
+                || matches!(role.as_str(), "generic" | "none" | "presentation")
+                    && self.attr(el, "aria-label").is_none()
+                    && !self.focusable(el);
+            let name = if hidden {
+                String::new()
+            } else {
+                self.name(el, &role)
+            };
+            let description = if hidden {
+                String::new()
+            } else {
+                self.description(el, &name)
+            };
+            let states = self.states(el, &role);
+            let value = self.value(el, &role);
+            let id = self.push(AxNode {
+                id: 0,
+                dom: Some(el),
+                role,
+                name,
+                description,
+                value,
+                states,
+                ignored,
+                hidden,
+                parent: Some(parent),
+                children: Vec::new(),
+            });
+            let local = self.local(el);
+            if matches!(local.as_str(), "script" | "style" | "template" | "head") {
+                continue;
+            }
+            let kids: Vec<NodeId> = self.doc.flat_children(el);
+            // Reversed, so the first child is popped first.
+            for c in kids.into_iter().rev() {
+                match self.doc.node_type(c) {
+                    NodeType::Element => stack.push(Item::Element(c, id, hidden)),
+                    NodeType::Text => stack.push(Item::Text(c, id, hidden)),
+                    _ => {}
+                }
             }
         }
     }
@@ -583,6 +606,16 @@ impl AxBuilder<'_> {
     /// Text alternative of a subtree (accname 2F): text nodes and the
     /// names of embedded controls, skipping hidden nodes.
     fn text_alternative(&mut self, el: NodeId, visited: &mut HashSet<NodeId>) -> String {
+        if self.name_depth >= MAX_NAME_DEPTH {
+            return String::new();
+        }
+        self.name_depth += 1;
+        let out = self.text_alternative_inner(el, visited);
+        self.name_depth -= 1;
+        out
+    }
+
+    fn text_alternative_inner(&mut self, el: NodeId, visited: &mut HashSet<NodeId>) -> String {
         let mut out = String::new();
         let kids: Vec<NodeId> = self.doc.flat_children(el);
         for c in kids {
