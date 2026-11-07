@@ -51,6 +51,8 @@ pub enum EventExtra {
     PageTransition {
         persisted: bool,
     },
+    /// `SpeechSynthesisEvent` and `SpeechSynthesisErrorEvent`.
+    Speech(Box<super::speech::SpeechData>),
     /// `BeforeUnloadEvent.returnValue` (a non-empty string cancels).
     BeforeUnload(String),
     /// `MouseEvent`, `PointerEvent`, `WheelEvent` (see `input`).

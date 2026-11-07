@@ -76,6 +76,7 @@ pub mod script;
 mod serializer;
 mod shadow;
 mod sheets;
+mod speech;
 mod style;
 pub mod sw;
 mod table;
@@ -502,6 +503,7 @@ impl Runtime {
         crypto::register(reg, &rt);
         websocket::register(reg, &rt);
         idb::register(reg, &rt);
+        speech::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -1014,6 +1016,7 @@ pub struct Window {
     ready_state: Cell<ReadyState>,
     pub(crate) history: RefCell<History>,
     nav_limiter: NavLimiter,
+    pub(crate) speech: RefCell<speech::SpeechState>,
     pub(crate) observers: RefCell<Vec<u32>>,
     pub(crate) mo_queued: Cell<bool>,
     /// Slot assignments of the main document's shadow trees as last seen
@@ -1147,6 +1150,7 @@ impl Window {
                 scroll_restoration: "auto".into(),
             }),
             nav_limiter: NavLimiter::default(),
+            speech: RefCell::new(speech::SpeechState::default()),
             observers: RefCell::new(Vec::new()),
             mo_queued: Cell::new(false),
             slot_state: RefCell::new(shadow::SlotState::default()),
@@ -2160,6 +2164,8 @@ pub(crate) enum Obj {
     },
     /// `InputDeviceCapabilities` (`firesTouchEvents`).
     InputDevice(bool),
+    /// `SpeechSynthesisUtterance`.
+    Utterance(Box<speech::UtteranceData>),
 }
 
 impl Obj {
@@ -2223,6 +2229,7 @@ impl Obj {
             Obj::Idb(x) => x.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
             Obj::InputDevice(_) => "InputDeviceCapabilities",
+            Obj::Utterance(_) => "SpeechSynthesisUtterance",
         }
     }
 }

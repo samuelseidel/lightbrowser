@@ -109,14 +109,21 @@ async fn run_plain(case: &str, virtual_time: bool) -> (String, String) {
     (log, console)
 }
 
-fn host() -> CdpHost {
+/// The host of a `steps.json` case: the reference Windows persona; for
+/// `no_voices` the same persona with an empty voice list (the Chrome that
+/// recorded the cases has no voice installed).
+fn host(virtual_time: bool, no_voices: bool) -> CdpHost {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles");
-    let p = PersonaProfile::from_path_checked(
+    let mut p = PersonaProfile::from_path_checked(
         root.join("reference/chrome/chrome153_win10_rtx3060_1080p.json"),
     )
     .expect("reference persona");
+    if no_voices {
+        p.speech_voices.clear();
+    }
     let mut opts = CdpHostOptions::new(Arc::new(p), root.join("tls"));
     opts.workers = 1;
+    opts.virtual_time = virtual_time;
     CdpHost::new(opts).expect("host")
 }
 
@@ -200,9 +207,14 @@ fn expand_playwright(steps: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
 
 /// Load the case, send its `steps.json` the way chrome.mjs does, and read
 /// the log.
-async fn run_steps(case: &str, steps: &str) -> (String, String) {
+async fn run_steps(
+    case: &str,
+    steps: &str,
+    virtual_time: bool,
+    no_voices: bool,
+) -> (String, String) {
     let srv = PyServer::start();
-    let h = host();
+    let h = host(virtual_time, no_voices);
     h.create_context("C", ContextOptions::default()).unwrap();
     h.create_page("C", "T").await.unwrap();
     h.navigate(
@@ -249,7 +261,8 @@ async fn run_steps(case: &str, steps: &str) -> (String, String) {
 async fn run(case: &str, virtual_time: bool) {
     let steps = dir().join("cases").join(case).join("steps.json");
     let (log, console) = if steps.exists() {
-        run_steps(case, &std::fs::read_to_string(&steps).unwrap()).await
+        let steps = std::fs::read_to_string(&steps).unwrap();
+        run_steps(case, &steps, virtual_time, case == "speech_none").await
     } else {
         run_plain(case, virtual_time).await
     };
@@ -295,6 +308,7 @@ cases!(
     pointer_plain,
     pointer_pw,
     pointer_raw,
+    speech_none,
 );
 
 // navigator.storage (the quota policy needs no disk: the numbers are
@@ -308,3 +322,16 @@ cases!(
 // The 10 s window runs on the virtual clock: the page's `setTimeout`s
 // jump (Chrome waited for them).
 cases!(true; history_window);
+
+/// The persona's voices (no Chrome to record: the machine that recorded
+/// the other cases has no voice; the expected log follows the model in
+/// `speech.rs`, Blink's event order and 400 ms a word at rate 1).
+#[tokio::test]
+async fn speech_voices() {
+    let case = "speech_voices";
+    let cdir = dir().join("cases").join(case);
+    let steps = std::fs::read_to_string(cdir.join("steps.json")).unwrap();
+    let (log, _) = run_steps(case, &steps, true, false).await;
+    let want = std::fs::read_to_string(cdir.join("expected.txt")).unwrap();
+    assert_eq!(log, want.trim_end(), "{case} log:\n{log}");
+}

@@ -1379,6 +1379,20 @@ fn register_media(reg: &mut Registry, rt: &Runtime) {
 // Speech synthesis
 // ---------------------------------------------------------------------------
 
+/// The `SpeechSynthesisVoice` object of persona voice `i` (the one
+/// `getVoices()` lists).
+pub(crate) fn voice_arg(w: &Window, i: u16) -> Arg {
+    single(w, "nav:voice", u32::from(i), || NavObj::Voice(i))
+}
+
+/// The persona voice index of a `SpeechSynthesisVoice` object.
+pub(crate) fn voice_index(w: &Window, id: u32) -> Option<u16> {
+    nav(w, id, |o| match o {
+        NavObj::Voice(i) => Some(*i),
+        _ => None,
+    })
+}
+
 fn voice_count(w: &Window) -> usize {
     profile(w).map_or(0, |p| p.speech_voices.len())
 }
@@ -1394,21 +1408,47 @@ fn register_speech(reg: &mut Registry, rt: &Runtime) {
             .collect();
         cx.ret(Arg::Array(list))
     });
-    for name in ["pending", "speaking", "paused"] {
-        getter(reg, rt, "SpeechSynthesis", name, |cx, w| {
-            check(cx, w)?;
-            cx.ret(false)
-        });
-    }
-    for name in ["cancel", "pause", "resume"] {
-        method(reg, rt, "SpeechSynthesis", name, |cx, w| {
-            check(cx, w)?;
-            Ok(())
-        });
-    }
+    getter(reg, rt, "SpeechSynthesis", "pending", |cx, w| {
+        check(cx, w)?;
+        cx.ret(super::speech::pending(w))
+    });
+    getter(reg, rt, "SpeechSynthesis", "speaking", |cx, w| {
+        check(cx, w)?;
+        cx.ret(super::speech::speaking(w))
+    });
+    getter(reg, rt, "SpeechSynthesis", "paused", |cx, w| {
+        check(cx, w)?;
+        cx.ret(super::speech::paused(w))
+    });
+    method(reg, rt, "SpeechSynthesis", "cancel", |cx, w| {
+        check(cx, w)?;
+        super::speech::cancel(w);
+        Ok(())
+    });
+    method(reg, rt, "SpeechSynthesis", "pause", |cx, w| {
+        check(cx, w)?;
+        super::speech::pause(w);
+        Ok(())
+    });
+    method(reg, rt, "SpeechSynthesis", "resume", |cx, w| {
+        check(cx, w)?;
+        super::speech::resume(w);
+        Ok(())
+    });
     method(reg, rt, "SpeechSynthesis", "speak", |cx, w| {
         check(cx, w)?;
-        need_args(cx, 1, "speak", "SpeechSynthesis")
+        need_args(cx, 1, "speak", "SpeechSynthesis")?;
+        let utt = cx
+            .arg_host(0)
+            .filter(|h| h.kind == super::K_OBJ)
+            .filter(|h| w.with_obj(h.id, |o| matches!(o, Obj::Utterance(_))) == Some(true));
+        let Some(utt) = utt else {
+            return Err(HostError::type_error(
+                "Failed to execute 'speak' on 'SpeechSynthesis': parameter 1 is not of type 'SpeechSynthesisUtterance'.",
+            ));
+        };
+        super::speech::speak(cx, w, utt.id);
+        Ok(())
     });
     fn voice(
         cx: &mut CallCtx<'_, '_, '_>,
@@ -2505,5 +2545,21 @@ mod tests {
             brands_json(&b),
             r#"[{"brand":"Google Chrome","version":"153"},{"brand":"Not_A Brand","version":"8"}]"#
         );
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+
+    /// Chrome's `CalculateReportedQuota` (`quota_manager_impl.cc`): a disk
+    /// below 10 GiB cannot be had on the recording machine, so the
+    /// small-disk branch is checked against the source, not a recording.
+    #[test]
+    fn reported_quota_formula() {
+        assert_eq!(reported_quota(256 * GIB, 0), 10 * GIB);
+        assert_eq!(reported_quota(10 * GIB, 5), 10 * GIB + 5);
+        assert_eq!(reported_quota(8 * GIB + 1, 7), 9 * GIB + 7);
+        assert_eq!(reported_quota(4 * GIB, 0), 4 * GIB);
     }
 }
