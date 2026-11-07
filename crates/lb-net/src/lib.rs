@@ -22,12 +22,15 @@
 //!   HTTP/2 sessions, TLS resumption; ADR 0018)
 //! - [`proxy`]: HTTP `CONNECT`, forward and SOCKS5 proxies per browser
 //!   context with Chrome's bypass rules (ADR 0027)
+//! - [`egress`]: the opt-in policy of which destinations a context may
+//!   connect to (ADR 0044)
 //! - [`fetch`]: the pipeline that ties the above together
 
 pub mod client_hints;
 pub mod cookies;
 mod cxx_runtime;
 pub mod decompress;
+pub mod egress;
 pub mod error;
 pub mod fetch;
 pub mod h1;
@@ -42,6 +45,7 @@ pub mod tls;
 pub mod websocket;
 
 pub use client_hints::{ClientHintsStore, UaHint};
+pub use egress::{Blocked, EgressMode, EgressPolicy};
 pub use error::NetError;
 pub use fetch::{RedirectHop, Request, Response, fetch};
 pub use header_profile::{HeaderProfile, RequestKind, RequestMeta};

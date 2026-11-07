@@ -44,6 +44,7 @@ def plan_launch(
     workers: int | None,
     extra_args: Sequence[str],
     validate: bool,
+    egress: "str | Sequence[str] | None" = "loopback",
 ) -> LaunchPlan:
     """Resolve binary and persona and build the `serve` command line.
 
@@ -67,7 +68,7 @@ def plan_launch(
             path = p.write_to(tmpdir.name)
     cmd = build_serve_args(
         exe, persona_path=path, port=port, insecure=insecure, profiles_dir=profiles_dir,
-        workers=workers, extra_args=extra_args,
+        workers=workers, egress=egress, extra_args=extra_args,
     )
     return LaunchPlan(cmd=cmd, persona=p, tmpdir=tmpdir)
 

@@ -101,6 +101,59 @@ def find_binary(explicit: str | os.PathLike[str] | None = None, family: str | No
     )
 
 
+_EGRESS_WORDS = {"open", "loopback", "allowlist"}
+_EGRESS_FLAGS = ("--egress", "--allow-host")
+
+
+def _reject_egress_flags(extra_args: Sequence[str]) -> None:
+    """`extra_args` must not carry the egress flags: they would follow the
+    `egress` setting on the command line and could lift it."""
+    for a in extra_args:
+        a = str(a)
+        if a in _EGRESS_FLAGS or any(a.startswith(f + "=") for f in _EGRESS_FLAGS):
+            raise ValueError(
+                f"{a.split('=')[0]} in extra_args would override the egress setting; "
+                "use the egress parameter"
+            )
+
+
+def egress_args(egress: str | Sequence[str] | None = "loopback") -> list[str]:
+    """The `serve` flags for an egress setting (ADR 0044).
+
+    - `"loopback"` (the default) or `None`: `--egress loopback`. The browser
+      connects to 127.0.0.0/8, `::1`, `localhost` and `*.localhost` only, and
+      a refused request fails as `net::ERR_BLOCKED_BY_CLIENT` without leaving
+      the machine.
+    - `"open"`: no flags; the binary's default, no restriction.
+    - a list of allowed hosts (name globs such as `*.lab.test`, IPs, CIDR
+      blocks, or a name pinned to addresses, `*.lab.test@10.0.0.0/8`):
+      loopback plus those, as `--egress loopback --allow-host H`... The
+      words `open`, `loopback` and `allowlist` are not hosts: a list that
+      holds one is an error (pass `egress="open"` to lift the restriction).
+    """
+    if egress is None or egress == "loopback":
+        return ["--egress", "loopback"]
+    if egress == "open":
+        return []
+    if isinstance(egress, str):
+        raise ValueError(
+            f"egress must be 'loopback', 'open' or a list of allowed hosts, not {egress!r}"
+        )
+    hosts = list(egress)
+    for h in hosts:
+        if not isinstance(h, str) or not h.strip() or any(c.isspace() for c in h):
+            raise ValueError(f"bad allowed host: {h!r}")
+        if h.strip().lower() in _EGRESS_WORDS:
+            raise ValueError(
+                f"{h!r} is an egress mode, not a host; pass egress={h.strip().lower()!r} "
+                "on its own (a list adds allowed hosts to loopback)"
+            )
+    cmd = ["--egress", "loopback"]
+    for h in hosts:
+        cmd += ["--allow-host", h]
+    return cmd
+
+
 def build_serve_args(
     binary: str,
     *,
@@ -109,9 +162,14 @@ def build_serve_args(
     insecure: bool = False,
     profiles_dir: str | os.PathLike[str] | None = None,
     workers: int | None = None,
+    egress: str | Sequence[str] | None = "loopback",
     extra_args: Sequence[str] = (),
 ) -> list[str]:
-    """The command line for `lightbrowser serve`. The server always binds 127.0.0.1."""
+    """The command line for `lightbrowser serve`. The server always binds 127.0.0.1.
+
+    `egress` defaults to loopback only (see `egress_args`); pass `"open"` or a
+    list of allowed hosts to change it.
+    """
     if not 0 <= int(port) <= 65535:
         raise ValueError(f"port out of range: {port}")
     cmd = [str(binary), "serve", "--port", str(int(port))]
@@ -125,6 +183,8 @@ def build_serve_args(
         if workers < 1:
             raise ValueError("workers must be >= 1")
         cmd += ["--workers", str(int(workers))]
+    _reject_egress_flags(extra_args)
+    cmd += egress_args(egress)
     cmd += [str(a) for a in extra_args]
     return cmd
 

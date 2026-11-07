@@ -220,6 +220,9 @@ async fn handshake(
         .connect_tcp(url, bare, port)
         .await
         .map_err(|e| match e {
+            NetError::Blocked(_) => {
+                "Error in connection establishment: net::ERR_BLOCKED_BY_CLIENT".to_owned()
+            }
             NetError::Proxy(m) => format!("Error in connection establishment: {m}"),
             NetError::ProxyAuth(_) => {
                 "Error in connection establishment: net::ERR_INVALID_AUTH_CREDENTIALS".to_owned()

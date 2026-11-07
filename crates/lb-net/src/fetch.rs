@@ -14,6 +14,7 @@ use url::Url;
 use crate::HttpVersion;
 use crate::client_hints::{self, ClientHintsStore, UaHint};
 use crate::cookies::CookieJar;
+use crate::egress::EgressPolicy;
 use crate::error::NetError;
 use crate::header_profile::{BuildInput, HeaderProfile, RequestKind, RequestMeta, Site};
 use crate::headers::{self, OrderedHeaders};
@@ -149,6 +150,10 @@ pub struct NetContext {
     /// the wire. Set it with [`NetContext::with_tcp_profile`]. It shapes
     /// direct connections only; a proxy hop uses the host's stack.
     pub tcp_profile: Option<Arc<TcpProfile>>,
+    /// Which destinations this context may connect to (ADR 0044). The
+    /// default is open (no checks). It is checked per hop before the pool
+    /// and DNS, and again per resolved address in the dialer.
+    pub egress: Arc<EgressPolicy>,
     /// Lazily built, then reused for every https request of this context. The
     /// flag records the `danger_accept_invalid_certs` it was built with.
     connector: Option<(bool, Arc<TlsConnector>)>,
@@ -188,9 +193,23 @@ impl NetContext {
             pool: None,
             proxy: None,
             tcp_profile: None,
+            egress: Arc::new(EgressPolicy::open()),
             connector: None,
             dialer: Arc::new(Dialer::default()),
         })
+    }
+
+    /// Restrict this context's destinations with `policy` (ADR 0044).
+    pub fn with_egress(mut self, policy: Arc<EgressPolicy>) -> Self {
+        self.egress = policy;
+        self
+    }
+
+    /// Answer name lookups of this context's own connections (the ones
+    /// made without a pool) from `hook` first. For tests.
+    #[doc(hidden)]
+    pub fn set_resolve_hook(&self, hook: Option<Arc<crate::pool::ResolveHook>>) {
+        self.dialer.set_hook(hook);
     }
 
     /// Shape the SYN of every direct connection from this context with `tcp`.
@@ -238,6 +257,7 @@ impl NetContext {
             pool: self.pool.clone(),
             proxy: self.proxy.clone(),
             tcp_profile: self.tcp_profile.clone(),
+            egress: Arc::clone(&self.egress),
             connector: self.connector.clone(),
             dialer: Arc::clone(&self.dialer),
         }
@@ -258,12 +278,18 @@ impl NetContext {
     ) -> Result<tokio::net::TcpStream, NetError> {
         match self.proxy_for(url) {
             Some(p) => {
-                p.tunnel(&self.dialer, host, port, &self.persona.user_agent)
-                    .await
+                p.tunnel(
+                    &self.dialer,
+                    &self.egress,
+                    host,
+                    port,
+                    &self.persona.user_agent,
+                )
+                .await
             }
             None => {
                 let tcp = self.tcp_profile.as_deref();
-                self.dialer.connect(host, port, tcp).await
+                self.dialer.connect(host, port, tcp, &self.egress).await
             }
         }
     }
@@ -495,6 +521,16 @@ async fn fetch_once_inner(
         .unwrap_or(if https { 443 } else { 80 });
     // `host_str` brackets IPv6 literals; resolution wants them bare.
     let bare_host = host.trim_start_matches('[').trim_end_matches(']');
+    // Egress policy (ADR 0044): first thing per hop, so a refused host
+    // costs no header work, no pool entry and no DNS query. Redirects come
+    // through here too. The dialer checks every resolved address again.
+    // Through a proxy the proxy resolves the name, so only a name an allow
+    // entry vouches for goes (`check_remote_name`).
+    if ctx.proxy_for(&req.url).is_some() {
+        ctx.egress.check_remote_name(bare_host)?;
+    } else {
+        ctx.egress.check_name(bare_host)?;
+    }
 
     // Final headers for this hop. The set depends on the HTTP version
     // (ALPN), so it is built once the version is known.
@@ -554,6 +590,7 @@ async fn fetch_once_inner(
             proxy,
             user_agent: Arc::from(ctx.persona.user_agent.as_str()),
             tcp_profile: ctx.tcp_profile.clone(),
+            egress: Arc::clone(&ctx.egress),
         };
         pooled_exchange(
             &pool,
@@ -572,7 +609,7 @@ async fn fetch_once_inner(
             None
         };
         let mut tcp = match &forward {
-            Some(p) => p.dial(&ctx.dialer).await?,
+            Some(p) => p.dial(&ctx.dialer, &ctx.egress).await?,
             None => ctx.connect_tcp(&req.url, bare_host, port).await?,
         };
         let (raw, sent) = match connector {

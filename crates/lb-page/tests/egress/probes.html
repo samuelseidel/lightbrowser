@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>egress probes</title></head><body>
+<script>
+// Every subresource surface a page has, aimed at a host the test blocks
+// (Chrome: Network.setBlockedURLs; LightBrowser: egress policy). Results land
+// in window.R as text; R.done is set when all have settled.
+var U = 'http://blocked.test:8099/x';
+var R = {};
+var N = 8;
+window.R = R;
+function done(k, v) {
+  R[k] = v;
+  if (Object.keys(R).length >= N) R.done = true;
+}
+fetch(U).then(function () { done('fetch', 'resolved'); },
+  function (e) { done('fetch', e.name + ': ' + e.message); });
+var x = new XMLHttpRequest();
+x.open('GET', U);
+x.onerror = function () { done('xhr', 'error status=' + x.status + ' readyState=' + x.readyState); };
+x.onload = function () { done('xhr', 'load'); };
+x.send();
+var events = [];
+var ws = new WebSocket('ws://blocked.test:8099/');
+ws.onerror = function () { events.push('error'); };
+ws.onclose = function (e) { events.push('close ' + e.code + ' clean=' + e.wasClean); done('ws', events.join(', ')); };
+var img = new Image();
+img.onerror = function () { done('img', 'error'); };
+img.onload = function () { done('img', 'load'); };
+img.src = U + '.png';
+var s = document.createElement('script');
+s.src = U + '.js';
+s.onerror = function () { done('script', 'error'); };
+s.onload = function () { done('script', 'load'); };
+document.head.appendChild(s);
+var w = new Worker(URL.createObjectURL(new Blob([
+  "fetch('http://blocked.test:8099/w').then(function(){postMessage('resolved')}, function(e){postMessage(e.name + ': ' + e.message)})"
+])));
+w.onmessage = function (e) { done('worker', e.data); };
+</script>
+<!-- Module scripts the parser inserts: async ones run when fetched, the
+     others after parsing; a failed fetch fires error either way. -->
+<script type="module" async src="http://blocked.test:8099/m-async.js"
+  onerror="done('module_async', 'error')" onload="done('module_async', 'load')"></script>
+<script type="module" src="http://blocked.test:8099/m-defer.js"
+  onerror="done('module_defer', 'error')" onload="done('module_defer', 'load')"></script>
+</body></html>

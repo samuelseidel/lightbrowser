@@ -24,6 +24,7 @@ from lightbrowser.expect import Expectation
 from lightbrowser.launcher import (
     ServerProcess,
     build_serve_args,
+    egress_args,
     find_binary,
     parse_devtools_line,
 )
@@ -113,7 +114,8 @@ def test_parse_devtools_line():
 
 
 def test_build_serve_args_minimal():
-    assert build_serve_args("/x/lb") == ["/x/lb", "serve", "--port", "0"]
+    # Loopback only unless the caller says otherwise (ADR 0044).
+    assert build_serve_args("/x/lb") == ["/x/lb", "serve", "--port", "0", "--egress", "loopback"]
 
 
 def test_build_serve_args_full(tmp_path):
@@ -124,7 +126,60 @@ def test_build_serve_args_full(tmp_path):
     assert cmd == [
         "lb", "serve", "--port", "9333", "--persona", str(tmp_path / "p.json"),
         "--profiles-dir", str(tmp_path / "tls"), "--insecure", "--workers", "3",
-        "--remote-allow-origins", "*",
+        "--egress", "loopback", "--remote-allow-origins", "*",
+    ]
+
+
+def test_egress_args():
+    assert egress_args() == ["--egress", "loopback"]
+    assert egress_args(None) == ["--egress", "loopback"]
+    assert egress_args("loopback") == ["--egress", "loopback"]
+    assert egress_args("open") == []
+    assert egress_args([]) == ["--egress", "loopback"]
+    assert egress_args(["10.0.0.5", "*.lab.test", "192.168.0.0/16"]) == [
+        "--egress", "loopback",
+        "--allow-host", "10.0.0.5", "--allow-host", "*.lab.test", "--allow-host", "192.168.0.0/16",
+    ]
+    assert egress_args(("[fd00::1]",)) == ["--egress", "loopback", "--allow-host", "[fd00::1]"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["everything", "allowlist", ["a b"], [""], [None], ["  "], ["open"], ["Loopback"], ["a.test", "allowlist"]],
+)
+def test_egress_args_rejects_bad_values(bad):
+    with pytest.raises(ValueError):
+        egress_args(bad)
+
+
+def test_build_serve_args_egress_override():
+    cmd = build_serve_args("lb", egress="open")
+    assert "--egress" not in cmd
+    cmd = build_serve_args("lb", egress=["a.test"], extra_args=["--proxy", "http://127.0.0.1:3128"])
+    assert cmd[-6:] == ["--egress", "loopback", "--allow-host", "a.test", "--proxy", "http://127.0.0.1:3128"]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [["--egress", "open"], ["--egress=open"], ["--allow-host", "a.test"], ["--allow-host=a.test"]],
+)
+def test_extra_args_cannot_override_egress(extra):
+    # The flags come after the egress setting on the command line, where the
+    # binary would let them win.
+    with pytest.raises(ValueError, match="egress"):
+        build_serve_args("lb", extra_args=extra)
+    with pytest.raises(ValueError, match="egress"):
+        build_serve_args("lb", egress="open", extra_args=extra)
+
+
+def test_extra_args_still_pass_other_flags():
+    cmd = build_serve_args("lb", extra_args=["--proxy", "http://127.0.0.1:3128", "--egress-note"])
+    assert cmd[-3:] == ["--proxy", "http://127.0.0.1:3128", "--egress-note"]
+
+
+def test_egress_args_pinned_names():
+    assert egress_args(["*.lab.test@10.0.0.0/8,192.168.1.5"]) == [
+        "--egress", "loopback", "--allow-host", "*.lab.test@10.0.0.0/8,192.168.1.5",
     ]
 
 

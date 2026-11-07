@@ -45,6 +45,10 @@ pub enum NetError {
          start `lightbrowser tcp-shim` first (without it the host's own SYN would be sent)"
     )]
     TcpShimMissing(String),
+    /// The egress policy refused the destination (ADR 0044). The text
+    /// starts with Chrome's code for a request the client blocked.
+    #[error("net::ERR_BLOCKED_BY_CLIENT: {0}")]
+    Blocked(#[from] crate::egress::Blocked),
 }
 
 impl From<boring::error::ErrorStack> for NetError {
