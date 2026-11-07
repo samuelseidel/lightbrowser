@@ -29,9 +29,11 @@ against.
 | `run.js` | Scenario runner (Node + Playwright). |
 | `test_scoring.py`, `test_server.py` | Unit tests, using `fixtures/`. |
 | `test_rules_wave2.py`, `test_server_wave2.py` | Tests of the wave-2 rules, signed agents, clusters and the STUN responder (ADR 0043). |
+| `test_hardening_r2.py` | Round-2 tests: hostile header and beacon values, a parked pointer, bounded searches, WebRTC on `::1` (ADR 0043). |
 | `fixtures/T-*.json` | Sessions recorded by `run.js --save-fixtures`. |
 | `fixtures/synthetic-human-trace.json` | Synthetic human-like trace for T-020 (curved paths, minimum-jerk speed, varied timing). Not a real person. |
 | `fixtures/chrome153_{browse,t010,referer_case}.json` | Sessions recorded from stock Chrome 153 (`--headless=new`, Linux, over CDP, loopback) with the wave-2 server and collector: normal browsing, the T-010 flow, and a driver-set Referer. The must-not-fire ground truth for the wave-2 rules. Probes of pages after the first are trimmed to the ones the rules read. |
+| `fixtures/chrome153_{ipv6,parked_pointer}.json` | Two more stock Chrome 153 recordings (round 2): the T-010 flow with the bench and STUN responder on `::1` (Chrome writes the reflexive address as `[::1]`), and five pages with one real click each at one parked pointer position. |
 | `fixtures/lb_human_traces.json` | Input traces of two LightBrowser `--input human` T-010 runs (model-generated, not people). |
 | `fixtures/os_{linux,windows,mac}_chrome.json` | Real-Chrome-shaped sessions for the OS rules, made by `tools/os_truth/bench_fixtures.py`. Linux is a captured stock Chrome 153 session (headed, loopback); Windows 10 and macOS 15 are not captured (values from the M7 surface reference; see each file's `provenance`). |
 
@@ -89,7 +91,7 @@ has one more document) and sends them on every later request.
 | `GET /shop` (`/`), `/news`, `/login`, `/search?q=` | Test pages. The first document without a valid `lb_sid` cookie starts a session. |
 | `POST /api/report` | Collector beacon. Rejected unless `sid` is a session the server issued. |
 | `GET /api/results` | All sessions with score, verdict and fired rule ids. |
-| `GET /api/score/<sid>` | Score, verdict, fired rules with details, per-category scores, server signals. |
+| `GET /api/score/<sid>` | Score, verdict, fired rules with details, per-category scores, server signals. A rule that cannot read the session's data (a beacon is arbitrary JSON) is listed in `check_errors` and the rest still score; a session nothing can score is `verdict: unscorable` with the error class in `error`, and does not affect other sessions. |
 | `GET /api/session/<sid>` | Full raw record (this is what fixtures are). |
 | `GET /api/trace/<sid>` | Input-event trace per page, the format T-020 replays. |
 | `GET /api/clusters` | Sessions grouped by a hash of their stable device probes and by pointer-stroke shape; groups of two or more, with `fires` set for a fingerprint group at the fleet threshold. |
@@ -278,7 +280,7 @@ contradict the claimed browser or OS), `fingerprint` (device surfaces),
 | `beh_wheel_pattern` | 20 | behavior | One huge wheel delta, or a perfectly regular wheel stream. |
 | `page_dwell_short` | 15 | behavior | Left a page within 1.5 s of navigation after clicking. |
 | `beh_path_repeat` | 30 | behavior | Two or more strokes of 40 px or more whose normalised shapes (resampled, scale and rotation normalised) are within 0.8 px RMS of each other, and 12 % of the smaller bend: a stored path played again. Straight strokes carry no shape and are not compared. |
-| `beh_click_offset_repeat` | 30 | behavior | 4 or more clicks on different targets with the same offset inside the target (within 1 px, from the top-left corner or from the centre) that is not the centre. |
+| `beh_click_offset_repeat` | 30 | behavior | 4 or more clicks on different targets (different element and different pointer position: a parked pointer on the same button of successive pages is one) with the same offset inside the target (within 1 px, from the top-left corner or from the centre) that is not the centre. |
 | `beh_counts` | 0 | behavior | Info only: event counts and page dwell. |
 | `no_beacon` | 95 | server | The page loaded but no beacon came back: no JavaScript ran. |
 | `ua_headless_header` | 95 | server | User-Agent header says HeadlessChrome. |
@@ -460,7 +462,11 @@ it, and `verified: false`: the bench has no key directory and checks no
 signature. Anything malformed (a broken Structured Field, a missing header, a
 label with no signature, a signature that is not base64, a URL that is not
 http(s)) is not accepted: the verdict is unchanged and `agent_rejected` lists
-the reasons.
+the reasons. Numbers are ASCII digits only (`created` and `expires` must also be
+times between 1970 and the year 9999). Recognition is not trust: nothing is
+verified, so any client can send three well-formed headers and get the verdict
+`declared_agent`. Read `score_verdict` and `score` (both are kept) for what the
+session looks like; do not key a fleet or threshold decision on `verdict` alone.
 
 ### Fleet reuse (`fleet_fingerprint_reuse`, `/api/clusters`)
 
@@ -501,8 +507,24 @@ are models, not recordings: re-check with real traces.
 targets at least 10 x 10 px). It looks for clicks on at least 4 different
 targets (page, element id or tag, index among that tag) whose offsets agree
 within 1 px, measured from the target's top-left corner or from its centre; a
-group at the exact centre is `beh_click_center`'s. Playwright's centre clicks
+group at the exact centre is `beh_click_center`'s. Targets count by pointer position too: the same
+button on successive pages (pagination, "Add to cart", "Back") clicked without
+moving the mouse is one position, not several targets (recorded from stock
+Chrome: `chrome153_parked_pointer.json`, five URLs, one click position, silent).
+Playwright's centre clicks
 and the LightBrowser human runs (7 clicks on 7 targets each) are quiet.
+
+Limits, found by trying to evade `beh_path_repeat` on our own traces (this is
+coverage, not a false positive): a copy of a stroke replayed exactly, rounded,
+shifted, scaled or rotated fires; a copy with 0.6 px Gaussian jitter, with every
+second event dropped, trimmed by 10 % at an end, mirrored or reversed does not,
+because the arc-length resampling of a noisy polyline moves the RMS above 0.8 px
+(0.3 px of jitter is borderline). The threshold is set by the closest independent
+pair we have (1.5 px), so loosening it for these would eat into that margin on
+data that is not from people. Use `/api/clusters` stroke shape groups with the
+same caveat. Work is bounded: at most the first 300 informative strokes of a
+session are paired, and at most the first 120 qualifying clicks are grouped, so a
+long or hostile trace cannot stall the server.
 
 ### Worker measurement (`worker_measure_mismatch`)
 
@@ -549,13 +571,16 @@ candidates, a host candidate whose address is an mDNS name (`<uuid>.local`)
 and a server-reflexive candidate at the address the responder saw (127.0.0.1,
 the same port as the host candidate, related address 0.0.0.0); the first
 candidate comes 3-56 ms in; the responder answers exactly one Binding request
-per page (`/api/stun`). The rule is at weight 0 (info, listed in
+per page (`/api/stun`). On the IPv6 loopback address (`--host ::1`) Chrome writes
+the addresses with brackets (`[::1]`, related `[::]`); the rule compares them
+without (`chrome153_ipv6.json`, recorded; silent). The rule is at weight 0 (info, listed in
 `info_fired`) until LightBrowser gathers server-reflexive candidates; the
 comparison and its tests are in place.
 
 ### Wave 2 check (2026-11-07, rtx-dev)
 
-- `python3 -m unittest discover -s tests/detect-bench`: 136 tests (43 before).
+- `python3 -m unittest discover -s tests/detect-bench`: 136 tests (43 before);
+  round 2 adds `test_hardening_r2.py` (see "Round 2" below).
 - `node run.js --scenario T-001,T-003` on the headless shell: T-001 100 (fp
   100, beh 92.3), T-003 100 (fp 100, beh 90.1), as before.
 - Stock Chrome 153 (headless=new over CDP) fires none of the seven rules
@@ -572,6 +597,26 @@ comparison and its tests are in place.
   server-reflexive candidate although the STUN responder is on loopback":
   LightBrowser gathers an mDNS host candidate and no server-reflexive one).
   Detected fonts 11-14 per persona against ceilings of 18-22.
+
+### Round 2 (2026-11-07): what independent checks found
+
+- `sigagent.py`: `str.isdigit()` is true for U+00B2, U+00B3 and U+00B9 (latin-1
+  header bytes 0xB2, 0xB3, 0xB9), and `int()` raises a plain `ValueError` on them, which
+  escaped the `SFError` handlers and made `/api/score` and `/api/results` fail
+  for every session. Digits are now ASCII only, `parse()` never raises, and `created` and
+  `expires` must be plausible times.
+- `fleet_parts` raised on a hostile `os_surface` probe (`detected: {"Arial": 5}`), and the
+  fleet index is built over every retained session, so one beacon broke scoring of all of
+  them (a regression against the base). Parts are read defensively, a session that still
+  cannot be read has no parts, each rule's check is isolated (`check_errors`), and the server
+  lists a session nothing can score as `unscorable`.
+- `beh_click_offset_repeat` fired on a person paging through the shop with the pointer on the
+  same "Next" link (one target per URL). Targets are now counted by pointer position as well.
+- `webrtc_candidates` compared `[::1]` with `::1` and fired on stock Chrome on the IPv6
+  loopback; brackets are ignored (recorded fixture).
+- The stroke pairing and the click grouping are bounded (see "Limits" above).
+- Not changed: a replay with sub-pixel noise is not caught by `beh_path_repeat` (limit above);
+  the verdict `declared_agent` on unverified headers is the brief (see "Signed agents").
 
 ## What LightBrowser needs from this bench
 

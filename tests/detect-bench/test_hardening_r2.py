@@ -237,6 +237,20 @@ class ParkedPointer(unittest.TestCase):
         self.assertIsNone(rule_detail("beh_click_offset_repeat", s))
         self.assertNotIn("beh_click_offset_repeat", fired(scoring.score_session(s)))
 
+    def test_stock_chrome_with_a_parked_pointer_recorded_on_rtx_dev(self):
+        # chrome153_parked_pointer.json: five typed navigations to /shop?page=N, one real
+        # click at the same screen position on the nav "News" link of each page.
+        s = load("chrome153_parked_pointer")
+        clicks = [(pg["url"], e["x"], e["y"], e["cx"], e["cy"], e["tg"], e["ti"]) for pg in s["pages"].values()
+                  for e in pg["trace"] if e["type"] == "click" and e["tr"]]
+        self.assertEqual(len(clicks), 5)
+        self.assertEqual(len({c[0] for c in clicks}), 5)   # five URLs ...
+        self.assertEqual(len({c[1:] for c in clicks}), 1)  # ... one pointer position, one link, one offset
+        self.assertNotEqual(clicks[0][3:5], (0, 0))        # and not the centre
+        self.assertIsNone(rule_detail("beh_click_offset_repeat", s))
+        self.assertIsNone(scoring.click_offset_groups(s))
+        self.assertNotIn("beh_click_offset_repeat", fired(scoring.score_session(s)))
+
     def test_distinct_pointer_positions_still_fire(self):
         pages = [[corner("a", 13.4, 4.1, 92, 34, ti=5, x=612.0 + 40 * i, y=288.0)] for i in range(5)]
         self.assertIsNotNone(rule_detail("beh_click_offset_repeat", trace_session(pages)))

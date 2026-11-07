@@ -71,6 +71,30 @@ and `T-0xx` fixtures and three new sessions recorded from stock Chrome 153
 info rule is visible without being scored), `agent_declared` and an optional
 `fleet` index; its other results are unchanged.
 
+## Round 2 revision
+
+Independent checks of the first implementation found five real faults and two limits. Fixed:
+
+- Structured Fields numbers use ASCII digits only (latin-1 superscripts made `int()` raise a
+  `ValueError` that broke scoring for all sessions); `sigagent.parse` never raises; `created`
+  and `expires` must be times from 1970 to the year 9999.
+- Fleet parts read hostile probe values defensively; a session whose parts cannot be read has
+  none. `score_session` isolates each rule's check (`check_errors`), and the server reports a
+  session it cannot score as `unscorable` instead of failing `/api/results`, `/api/score` and
+  `/api/clusters` for everyone. Trace events and probe values of the wrong type are ignored by the
+  new checks.
+- `beh_click_offset_repeat` counts targets by pointer position as well as by element, so a
+  parked pointer on the same button of successive pages is one target (stock Chrome recording).
+- `webrtc_candidates` strips the brackets Chrome puts around IPv6 addresses (stock Chrome on
+  `::1` recording).
+- Stroke pairing is capped at the first 300 informative strokes and click grouping at the first
+  120 qualifying clicks.
+
+Left as they were, documented in the README: `beh_path_repeat` misses a replay that adds
+sub-pixel noise or drops events (the threshold is set by the closest independent pair, 1.5 px,
+from data that is not people); and `declared_agent` recognises three well-formed headers without
+verifying them, so consumers must read `score_verdict` and `score`, not `verdict` alone.
+
 ## Consequences
 
 - The three T-0xx reference scores are unchanged (T-001 100, T-003 100 with
