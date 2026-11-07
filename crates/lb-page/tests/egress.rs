@@ -30,10 +30,7 @@ use lb_net::EgressPolicy;
 use lb_page::{PageError, WaitUntil};
 
 fn recording() -> serde_json::Value {
-    let path = format!(
-        "{}/tests/egress/chrome.json",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let path = format!("{}/tests/egress/chrome.json", env!("CARGO_MANIFEST_DIR"));
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -85,17 +82,28 @@ async fn every_surface_fails_as_chrome_reports_a_blocked_request() {
         .unwrap();
     wait_for(&page, "window.R.done === true").await;
     let got: serde_json::Value = serde_json::from_str(
-        &eval_str(&page, "var r = Object.assign({}, window.R); delete r.done; JSON.stringify(r)").await,
+        &eval_str(
+            &page,
+            "var r = Object.assign({}, window.R); delete r.done; JSON.stringify(r)",
+        )
+        .await,
     )
     .unwrap();
     assert_eq!(got, recording()["probes"], "got {got:#}");
     // The page and nothing else reached the server, and no name was looked
     // up for the refused host.
     assert_eq!(
-        s.requests().iter().filter(|r| r.1 != "/favicon.ico").count(),
+        s.requests()
+            .iter()
+            .filter(|r| r.1 != "/favicon.ico")
+            .count(),
         1
     );
-    assert!(calls.lock().unwrap().is_empty(), "{:?}", calls.lock().unwrap());
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "{:?}",
+        calls.lock().unwrap()
+    );
 }
 
 #[tokio::test]
@@ -103,10 +111,20 @@ async fn a_blocked_navigation_carries_chrome_s_error_code() {
     let (ctx, calls) = policed(EgressPolicy::loopback());
     let b = browser();
     let page = b.new_page(&ctx).await.unwrap();
-    let want = recording()["navigate"]["errorText"].as_str().unwrap().to_owned();
+    let want = recording()["navigate"]["errorText"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert_eq!(want, "net::ERR_BLOCKED_BY_CLIENT");
-    for url in ["http://blocked.test:8099/", "https://blocked.test/", "http://10.1.2.3:8080/"] {
-        match page.goto(url, WaitUntil::Load, Duration::from_secs(20)).await {
+    for url in [
+        "http://blocked.test:8099/",
+        "https://blocked.test/",
+        "http://10.1.2.3:8080/",
+    ] {
+        match page
+            .goto(url, WaitUntil::Load, Duration::from_secs(20))
+            .await
+        {
             Err(PageError::Net(e)) => assert!(e.starts_with(&want), "{url}: {e}"),
             other => panic!("{url}: {other:?}"),
         }
@@ -132,7 +150,8 @@ async fn allowed_hosts_load_and_the_default_context_is_open() {
     ));
     let page = b.new_page(&ctx).await.unwrap();
     assert!(matches!(
-        page.goto(&s.url("/"), WaitUntil::Load, Duration::from_secs(20)).await,
+        page.goto(&s.url("/"), WaitUntil::Load, Duration::from_secs(20))
+            .await,
         Err(PageError::Net(_))
     ));
     // No policy: open, as before.
@@ -147,9 +166,7 @@ async fn a_refused_favicon_is_not_requested() {
     let b = browser();
     let s = serve(vec![(
         "/",
-        Resource::html(
-            "<link rel=icon href=\"http://blocked.test:8099/i.png\"><body>x</body>",
-        ),
+        Resource::html("<link rel=icon href=\"http://blocked.test:8099/i.png\"><body>x</body>"),
     )])
     .await;
     let (ctx, calls) = policed(EgressPolicy::loopback());
@@ -158,7 +175,11 @@ async fn a_refused_favicon_is_not_requested() {
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(calls.lock().unwrap().is_empty(), "{:?}", calls.lock().unwrap());
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "{:?}",
+        calls.lock().unwrap()
+    );
     // And one that is allowed is requested.
     let s2 = serve(vec![("/", Resource::html("<body>y</body>"))]).await;
     let page = b.new_page(&ctx).await.unwrap();

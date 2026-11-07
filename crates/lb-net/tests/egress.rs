@@ -182,9 +182,7 @@ fn hosts(c: &NetContext, map: &[(&str, IpAddr)]) -> Arc<Mutex<Vec<String>>> {
     let calls2 = calls.clone();
     let hook: Arc<lb_net::pool::ResolveHook> = Arc::new(move |host: &str| {
         calls2.lock().unwrap().push(host.to_owned());
-        map.iter()
-            .find(|(h, _)| h == host)
-            .map(|(_, ip)| vec![*ip])
+        map.iter().find(|(h, _)| h == host).map(|(_, ip)| vec![*ip])
     });
     c.set_resolve_hook(Some(hook.clone()));
     if let Some(p) = &c.pool {
@@ -224,7 +222,12 @@ async fn loopback_ipv6_and_mapped_forms() {
         }
     });
     let mut c = ctx(Some(EgressPolicy::loopback()), true);
-    assert_eq!(reaches(&mut c, &format!("http://[::1]:{port}/")).await.status, 200);
+    assert_eq!(
+        reaches(&mut c, &format!("http://[::1]:{port}/"))
+            .await
+            .status,
+        200
+    );
 }
 
 #[tokio::test]
@@ -235,7 +238,12 @@ async fn open_mode_reaches_an_outside_address() {
     let s = site(ip, ok_site()).await;
     for policy in [None, Some(EgressPolicy::open())] {
         let mut c = ctx(policy, true);
-        assert_eq!(reaches(&mut c, &format!("http://{ip}:{}/", s.port)).await.status, 200);
+        assert_eq!(
+            reaches(&mut c, &format!("http://{ip}:{}/", s.port))
+                .await
+                .status,
+            200
+        );
     }
 }
 
@@ -249,7 +257,11 @@ async fn loopback_mode_refuses_an_outside_address_without_a_syn() {
         assert_eq!(b.target, ip.to_string());
         assert_eq!(b.kind, lb_net::egress::BlockedKind::Address);
         if let Some(p) = &c.pool {
-            assert_eq!((p.groups(), p.opened()), (0, 0), "a refused origin has no pool entry");
+            assert_eq!(
+                (p.groups(), p.opened()),
+                (0, 0),
+                "a refused origin has no pool entry"
+            );
         }
     }
     assert!(l.untouched(), "a connection reached the refused listener");
@@ -364,12 +376,21 @@ async fn localhost_names_must_resolve_to_loopback() {
         // the address check, so no SYN goes out.
         let calls = hosts(
             &c,
-            &[("evil.localhost", ip), ("good.localhost", "127.0.0.1".parse().unwrap())],
+            &[
+                ("evil.localhost", ip),
+                ("good.localhost", "127.0.0.1".parse().unwrap()),
+            ],
         );
-        let b = blocked(&mut c, &format!("http://evil.localhost:{}/", outside.port())).await;
+        let b = blocked(
+            &mut c,
+            &format!("http://evil.localhost:{}/", outside.port()),
+        )
+        .await;
         assert_eq!(b.kind, lb_net::egress::BlockedKind::Address);
         assert_eq!(
-            reaches(&mut c, &format!("http://good.localhost:{}/", inside.port)).await.status,
+            reaches(&mut c, &format!("http://good.localhost:{}/", inside.port))
+                .await
+                .status,
             200
         );
         assert_eq!(calls.lock().unwrap().len(), 2);
@@ -391,7 +412,11 @@ async fn redirects_are_checked_at_every_hop() {
             vec![("Location".into(), "http://example.test/x".into())],
             String::new(),
         ),
-        "/to-local" => (302, vec![("Location".into(), "/landed".into())], String::new()),
+        "/to-local" => (
+            302,
+            vec![("Location".into(), "/landed".into())],
+            String::new(),
+        ),
         _ => (200, vec![], "landed".into()),
     })
     .await;
@@ -441,7 +466,12 @@ async fn open_mode_is_the_default_and_changes_nothing() {
     let s = site("127.0.0.1".parse().unwrap(), ok_site()).await;
     let mut c = ctx(None, true);
     assert!(c.egress.is_open());
-    assert_eq!(reaches(&mut c, &format!("http://127.0.0.1:{}/", s.port)).await.status, 200);
+    assert_eq!(
+        reaches(&mut c, &format!("http://127.0.0.1:{}/", s.port))
+            .await
+            .status,
+        200
+    );
 }
 
 // Proxies ------------------------------------------------------------------
@@ -516,7 +546,11 @@ async fn a_refused_target_never_reaches_the_proxy() {
             via(&mut c, &proxy);
             // `http:` (a forward request on the HTTP proxy), `https:` (a
             // CONNECT tunnel) and an outside IP literal.
-            for url in ["http://example.test/", "https://example.test/", "http://10.1.2.3:8080/"] {
+            for url in [
+                "http://example.test/",
+                "https://example.test/",
+                "http://10.1.2.3:8080/",
+            ] {
                 blocked(&mut c, url).await;
             }
         }
@@ -625,8 +659,14 @@ async fn websocket_connections_are_refused_too() {
     for pooled in [false, true] {
         let mut c = ctx(Some(EgressPolicy::loopback()), pooled);
         let calls = hosts(&c, &[("example.test", ip)]);
-        assert_eq!(ws_failure(&mut c, &format!("ws://{ip}:{}/", l.port())).await, want);
-        assert_eq!(ws_failure(&mut c, &format!("wss://{ip}:{}/", l.port())).await, want);
+        assert_eq!(
+            ws_failure(&mut c, &format!("ws://{ip}:{}/", l.port())).await,
+            want
+        );
+        assert_eq!(
+            ws_failure(&mut c, &format!("wss://{ip}:{}/", l.port())).await,
+            want
+        );
         assert_eq!(ws_failure(&mut c, "ws://example.test/").await, want);
         assert!(calls.lock().unwrap().is_empty());
         // Through a proxy the target is checked as well.
