@@ -30,8 +30,12 @@ of html, text, markdown, links, json, got "x"`.
 - Hidden content uses the page's own layout engine in the chrome build
   (`Page::extract`, `Window::with_layout_engine`): `display: none` skips a
   subtree, `visibility` other than `visible` skips the text of that
-  element only (a visible child still shows). The `hidden` attribute and
-  closed `dialog`s are skipped by name. The firefox build, which has no
+  element only (a visible child still shows). The `hidden` attribute,
+  closed `dialog`s, the body of a closed `details` (everything but its
+  first `summary`) and an inline `content-visibility: hidden` are skipped
+  by name or attribute, in both builds (a style sheet's
+  `content-visibility` is not seen: the style engine does not know the
+  property). `display: none` on the root element hides the page. The firefox build, which has no
   style engine in `lb-page` yet, uses `attribute_probe` (the `hidden`
   attribute and inline `style` only). The converter takes the style
   answers as a closure, so it is engine-neutral.
@@ -58,7 +62,13 @@ of html, text, markdown, links, json, got "x"`.
   when an item has two blocks apart from nested lists. A list right after
   another list uses the other marker than that list did (`-` and `*`,
   `.` and `)` alternate), so neighbours never merge, however many there
-  are. An item with nothing to show (hidden, icon only, an empty nested
+  are. The first block of a bullet item that is an `hr` is written `***`
+  (`- ---` would be a thematic break). Numbers stay within nine digits
+  (CommonMark's limit; a reader only uses the first number of a list).
+  Block quotes and list items nest with their `>` and indentation to 24
+  levels; deeper ones are written as plain blocks, because every level
+  re-prefixes every line below it and the output would grow with depth
+  times lines (390 nested quotes gave 78 MB from 410 KB). An item with nothing to show (hidden, icon only, an empty nested
   list) is not an item and not counted; a list with no items is dropped.
 - Inline: links `[text](absolute URL)` (an `href` that does not resolve or
   is `javascript:` leaves the text without a link; a link with empty
@@ -69,11 +79,25 @@ of html, text, markdown, links, json, got "x"`.
   with a fence longer than any backtick run inside. Edge whitespace of an
   emphasis, link or code span goes outside its markers. A closing `*`,
   `**` or `~~` that follows punctuation and precedes a letter or digit
-  would not close in CommonMark, so a space is written after it. A link
-  that holds blocks stays one link: its blocks are joined with spaces;
-  headings inside it are still listed as headings (and count for the
-  `h1` rule). The control characters U+0001 to U+0003, which the
-  converter uses as buffer markers, are removed from page text first.
+  would not close in CommonMark, so a space is written after it.
+  A span inside a span of its own kind (`<b><b>`) is written once; two
+  spans of one kind with nothing between them (`<b>a</b><b>b</b>`) are
+  one span. Spans that use the same marker character but are of another
+  kind (`<b>a</b><i>b</i>`, which would give `**a***b*`) and two code
+  spans in a row are separated by U+200B, or by a space when the second
+  span starts with punctuation or the first ends after punctuation
+  (neither would flank otherwise). A literal `!` before a link is
+  escaped (`\![x](u)` would be an image). An inline span that holds
+  blocks does not carry its markers into them. A link that holds blocks
+  stays one link: its blocks are joined with spaces; headings inside it,
+  or inside a table cell, are still listed as headings (and count for the
+  `h1` rule). The control characters U+0001 to U+0004, which the
+  converter uses as buffer markers, are removed from page text first,
+  together with the other control characters except HTML whitespace
+  (VT, FS, NEL, DEL, ...: a line end to some readers); U+2028 and U+2029
+  become spaces. In a `pre`, a lone CR (from `&#13;`) becomes a newline
+  and a form feed is dropped, so page text cannot end a block quote or a
+  list item.
 - `<br>` is a backslash hard break (never two trailing spaces); two in a
   row, with only whitespace between, end the paragraph.
 - Code blocks are fenced with at least three backticks, more when the
@@ -93,11 +117,12 @@ of html, text, markdown, links, json, got "x"`.
 - Whitespace collapses as rendering collapses it; NBSP is kept; a block
   holding only whitespace or NBSP is dropped. Markdown specials are
   escaped as text: `\ ` * [ ] <` always, `_` unless between two letters or
-  digits, `~` when doubled, `&` when it would read as a character
+  digits, `~` always (a lone `~` is strikethrough in GFM, three at the start of a line open a fence), `&` when it would read as a character
   reference, and at the start of a line `#`, `-`, `+`, `=`, `>` and
   `1.` / `1)` where they would start a block (not in cells and
-  headings). Trailing spaces and tabs are removed from every line,
-  including inside code blocks.
+  headings). A trailing run of `#` after a space in a heading or the title
+  is escaped (it would be a closing sequence). Trailing spaces and tabs
+  are removed from every line, including inside code blocks.
 - Blocks are joined by one blank line and the text ends with one newline;
   an empty page gives an empty string. The text starts with `# <title>`
   only when no non-empty, visible `h1` was written.
@@ -109,7 +134,9 @@ of html, text, markdown, links, json, got "x"`.
 
 One line per `a` with an `href`, in flat-tree document order:
 `URL<TAB>text`. The URL is absolute; the text is the whitespace-normalised
-text of the anchor (images give their `alt`, blocks and `br` give spaces).
+text of the anchor (images give their `alt`, blocks and `br` give spaces;
+control characters are dropped and U+2028/U+2029 are spaces, so a line is
+one anchor).
 `href` values that start with `#` (after trimming), `javascript:` values
 and values that do not resolve are dropped; entries with the same URL and
 text are dropped after the first. `a` elements inside `script`, `style`,
@@ -127,7 +154,9 @@ by hand so the order does not depend on a `serde_json` feature:
 `description` (first `meta name=description` with a non-empty
 `content`, normalised, or `null`), `canonical` (`link rel~=canonical` `href`, absolute, or `null`),
 `headings` (`[{level, text}]`, in document order, including headings
-inside links),
+inside links and table cells; a heading with no text, such as one that
+holds only an image without `alt`, is written in the Markdown but not
+listed),
 `links` (`[{url, text, rel}]`, the same list as the links dump with the
 normalised `rel`), `text` (the `--dump text` string) and `markdown`.
 
@@ -136,7 +165,7 @@ normalised `rel`), `text` (the `--dump text` string) and `markdown`.
 The expectations are hand-written from these rules, not browser
 recordings.
 
-- `crates/lb-page/tests/extract/`: 19 cases (`NAME.html` or `NAME.txt`
+- `crates/lb-page/tests/extract/`: 20 cases (`NAME.html` or `NAME.txt`
   with `NAME.md`, `NAME.links`, `NAME.json`; `gen_json.py` writes the JSON
   files from hand-written metadata). `tests/extract.rs` loads each page
   from a loopback server and compares all three outputs. Cases: headings,
@@ -148,16 +177,22 @@ recordings.
   a page without `h1`, a page built by script, a `text/plain` response,
   and `regress` (round 2: adjacent lists, empty items, nested `ol start`,
   marker characters, a heading inside a link, emphasis next to
-  punctuation, an empty first description).
-- 24 unit tests in the module (escaping, base selection, link filtering,
+  punctuation, an empty first description) and `regress3` (round 3: a
+  link after `!`, `~` at the start of a span, CR in `pre`, an `hr` item,
+  adjacent spans, a trailing `#`, a nine-digit number, a heading in a
+  table cell, a closed `details`, `content-visibility`).
+- 35 unit tests in the module (escaping, base selection, link filtering,
   numbering, emphasis edges, breaks, tables, fences, probes, depth limit,
   JSON layout, and one per round 2 problem: adjacent lists, empty items,
   nested `ol start`, a table of `colspan` cells, marker characters,
   headings in links, emphasis next to punctuation, hidden links, an empty
-  description).
+  description; round 3 adds one per problem: a link after `!`, tildes,
+  control characters, an `hr` item, adjacent spans, a trailing `#`, list
+  numbers, headings in cells, closed `details`, one walk per nested chain,
+  the depth limit for quotes and lists).
 - `bin/lightbrowser/tests/extract_cli.rs`: the built binary against a
   loopback `python3 -m http.server` that serves the same files; all
-  three modes for seven cases equal the golden files, `json.text` equals
+  three modes for eight cases equal the golden files, `json.text` equals
   `--dump text`, `--dump html` is unchanged, an error status shows in the
   JSON (exit code 1), and a bad `--dump` value exits with 2 and lists the
   five values.
@@ -172,7 +207,23 @@ recordings.
 - The links dump leaves out hidden anchors (round 2; the first version
   listed them). A tool that wants every anchor of the DOM should read
   `--dump html`.
+- Round 3 checks: a differential fuzz of random inline and block pages
+  against `markdown_it` (commonmark with tables and strikethrough; word
+  order, per-word span kinds, counts of items, links, code blocks, quotes,
+  tables, rules and heading levels) found no difference in 750 block
+  pages and, bar one, in 750 inline pages of the final code: an intraword `**` span
+  inside an `*` span after a literal `***`, where `markdown_it` and the
+  CommonMark rule of three disagree. A 1.25 MB chain of 390 nested spans
+  with a block at the bottom costs about 4 s more than `--dump text` in a
+  debug build (8.3 s against 4.4 s; it was 16 s against 4 s), the same as
+  a page without nesting, so no walk repeats per level.
 - Not done: `rowspan`, `srcset`/`picture`, reversed lists, task-list
   checkboxes, definition lists as such, `<q>` quotes, math, text of
-  `iframe`s and of `svg`. Text inside `pre` loses trailing spaces per
+  `iframe`s and of `svg`. An inline element is inline or block by its tag,
+  not by its computed `display` (`<span style="display:block">` stays
+  inline). `href=""` is dropped from the link list (it names the page
+  itself) and fragment-only links are dropped from the list but kept in
+  the Markdown. The JSON `text` is the `--dump text` string, so it keeps
+  what the Markdown leaves out (a closed `details`, `display: none`
+  text) and not shadow content. Text inside `pre` loses trailing spaces per
   line. Hidden-ness in the firefox build ignores style sheets.

@@ -614,10 +614,7 @@ impl Inline {
 /// Backslash-escape the Markdown specials of one whitespace-free word.
 /// `ls`: the word starts a line, so block markers count.
 fn escape_word(w: &str, ls: bool) -> String {
-    let chars: Vec<char> = w
-        .chars()
-        .filter(|c| !MARKERS.contains(c))
-        .collect();
+    let chars: Vec<char> = w.chars().filter(|c| !MARKERS.contains(c)).collect();
     let n = chars.len();
     let all = |c: char| chars.iter().all(|&x| x == c);
     let mut o = String::with_capacity(w.len() + 4);
@@ -1167,11 +1164,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             let marker = if ordered {
                 // At most 9 digits (CommonMark); only the first number of a
                 // list counts to a reader.
-                format!(
-                    "{}{} ",
-                    num.min(999_999_999),
-                    if alt { ')' } else { '.' }
-                )
+                format!("{}{} ", num.min(999_999_999), if alt { ')' } else { '.' })
             } else {
                 (if alt { "* " } else { "- " }).to_owned()
             };
@@ -1256,7 +1249,11 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                         // A lone CR is a line end to Markdown readers (the
                         // parser has already made CRLF into LF).
                         let t = clean(doc.character_data(k).unwrap_or(""));
-                        s.push_str(&t.replace("\r\n", "\n").replace('\r', "\n").replace('\x0c', ""));
+                        s.push_str(
+                            &t.replace("\r\n", "\n")
+                                .replace('\r', "\n")
+                                .replace('\x0c', ""),
+                        );
                     }
                 }
                 NodeType::Element => {
@@ -1558,15 +1555,28 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                 .chars()
                 .next_back();
             let tail = inl.s.trim_end_matches(SENT);
-            if ends_unescaped(tail, mark) && !tail[..tail.len() - mark.len()].ends_with(fc) {
+            let keep = tail.len().saturating_sub(mark.len());
+            // A nested span at the very start of the text would no longer
+            // follow a marker, so it could not open after a letter.
+            let nested_after_letter = core.starts_with(['*', '~'])
+                && tail[..keep]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_alphanumeric);
+            if ends_unescaped(tail, mark) && !tail[..keep].ends_with(fc) && !nested_after_letter {
                 // Right after a span of the same kind: one span.
-                let keep = tail.len() - mark.len();
                 inl.s.truncate(keep);
             } else {
                 if ends_unescaped(tail, fc.encode_utf8(&mut [0; 4])) {
                     // Another span's marker run ends here: the runs would
-                    // join (`**a***b*`).
-                    inl.s.push(SEP);
+                    // join (`**a***b*`). A zero-width space keeps the words
+                    // together, but punctuation after it would not open the
+                    // span: a space then.
+                    inl.s.push(if first.is_some_and(is_punct) {
+                        ' '
+                    } else {
+                        SEP
+                    });
                 }
                 let prev = inl.s.chars().rev().find(|&c| !MARKERS.contains(&c));
                 if prev.is_some_and(char::is_alphanumeric) && first.is_some_and(is_punct) {
@@ -2199,7 +2209,10 @@ mod tests {
 
     #[test]
     fn a_tilde_never_opens_a_fence_or_a_second_marker_run() {
-        assert_eq!(md("<p><del>~5 items</del> left</p>"), "~~\\~5 items~~ left\n");
+        assert_eq!(
+            md("<p><del>~5 items</del> left</p>"),
+            "~~\\~5 items~~ left\n"
+        );
         assert_eq!(md("<p><del><del>x</del></del> y</p>"), "~~x~~ y\n");
         assert_eq!(md("<p>~~~ not a fence</p>"), "\\~\\~\\~ not a fence\n");
         assert_eq!(md("<p><s>a</s>~b</p>"), "~~a~~\\~b\n");
@@ -2217,23 +2230,30 @@ mod tests {
             "- ```\n  a\n  b\n  ```\n"
         );
         // Other control characters are dropped (binary data, form feed).
-        assert_eq!(md("<pre>a\u{c}b\u{b}c\u{85}d\u{7f}e</pre>"), "```\nabcde\n```\n");
+        assert_eq!(
+            md("<pre>a\u{c}b\u{b}c\u{85}d\u{7f}e</pre>"),
+            "```\nabcde\n```\n"
+        );
         assert_eq!(md("<p>a\u{b}b\u{1c}c</p>"), "abc\n");
         // Unicode line separators are spaces, so a link stays on one line.
         let e = run("<a href=/a>x\u{2028}y\u{85}z\u{b}w\u{2029}v</a>");
         assert_eq!(e.links[0].text, "x yzw v");
-        assert!(!links_dump(&e).trim_end().contains(['\u{2028}', '\u{85}', '\u{b}']));
+        assert!(
+            !links_dump(&e)
+                .trim_end()
+                .contains(['\u{2028}', '\u{85}', '\u{b}'])
+        );
     }
 
     #[test]
     fn an_hr_item_stays_an_item() {
         assert_eq!(md("<ul><li><hr></li><li>x</ul>"), "- ***\n- x\n");
-        assert_eq!(md("<ul><li><hr><p>after</p></li><li>x</ul>"), "- ***\n\n  after\n\n- x\n");
-        // With the other marker or a number, `---` is fine.
         assert_eq!(
-            md("<ul><li>a</ul><ul><li><hr></ul>"),
-            "- a\n\n* ---\n"
+            md("<ul><li><hr><p>after</p></li><li>x</ul>"),
+            "- ***\n\n  after\n\n- x\n"
         );
+        // With the other marker or a number, `---` is fine.
+        assert_eq!(md("<ul><li>a</ul><ul><li><hr></ul>"), "- a\n\n* ---\n");
         assert_eq!(md("<ol><li><hr></ol>"), "1. ---\n");
         assert_eq!(md("<p>a</p><hr><p>b</p>"), "a\n\n---\n\nb\n");
     }
@@ -2241,20 +2261,36 @@ mod tests {
     #[test]
     fn adjacent_spans_stay_separate_spans() {
         // Same kind: one span.
-        assert_eq!(md("<p><b>a</b><b>b</b> and <i>c</i><i>d</i></p>"), "**ab** and *cd*\n");
+        assert_eq!(
+            md("<p><b>a</b><b>b</b> and <i>c</i><i>d</i></p>"),
+            "**ab** and *cd*\n"
+        );
         assert_eq!(md("<p><s>s</s><s>t</s></p>"), "~~st~~\n");
         assert_eq!(md("<p><b>a:</b><b>b</b></p>"), "**a:b**\n");
         // Nested spans of a kind change nothing.
         assert_eq!(md("<p><b><b>x</b></b> y</p>"), "**x** y\n");
         assert_eq!(md("<p><i>a<i>b</i></i></p>"), "*ab*\n");
-        assert_eq!(md("<p><b>a <a href='/x'><b>l</b></a></b></p>"), "**a [l](https://example.com/x)**\n");
+        assert_eq!(
+            md("<p><b>a <a href='/x'><b>l</b></a></b></p>"),
+            "**a [l](https://example.com/x)**\n"
+        );
         // Another kind of the same marker character: a space after
         // punctuation, else a zero-width space.
         assert_eq!(md("<p><b>Note:</b><i>text</i></p>"), "**Note:** *text*\n");
-        assert_eq!(md("<p><b>a</b><i>b</i> <i>c</i><b>d</b></p>"), "**a**\u{200b}*b* *c*\u{200b}**d**\n");
+        assert_eq!(
+            md("<p><b>a</b><i>b</i> <i>c</i><b>d</b></p>"),
+            "**a**\u{200b}*b* *c*\u{200b}**d**\n"
+        );
         assert_eq!(
             md("<p><strong><code>c</code></strong><em>w</em></p>"),
             "**`c`** *w*\n"
+        );
+        // Punctuation at the start of the second span needs a real space
+        // (a zero-width space is neither space nor punctuation to CommonMark).
+        assert_eq!(md("<p><b>a</b><i>~x~</i></p>"), "**a** *\\~x\\~*\n");
+        assert_eq!(
+            md("<p><i>w</i><i><del>x</del> y</i></p>"),
+            "*w* *~~x~~ y*\n"
         );
         // Code spans in a row.
         assert_eq!(
@@ -2286,17 +2322,26 @@ mod tests {
             md("<ol start=999999999><li>a<li>b<li>c</ol>"),
             "999999999. a\n999999999. b\n999999999. c\n"
         );
-        assert_eq!(md("<ol><li value=999999999>a<li>b</ol>"), "999999999. a\n999999999. b\n");
+        assert_eq!(
+            md("<ol><li value=999999999>a<li>b</ol>"),
+            "999999999. a\n999999999. b\n"
+        );
     }
 
     #[test]
     fn headings_in_table_cells_are_headings() {
         let e = run("<table><tr><td><h2>InCell</h2></td></tr></table><h2>Out</h2>");
-        let got: Vec<(u8, &str)> = e.headings.iter().map(|h| (h.level, h.text.as_str())).collect();
+        let got: Vec<(u8, &str)> = e
+            .headings
+            .iter()
+            .map(|h| (h.level, h.text.as_str()))
+            .collect();
         assert_eq!(got, [(2, "InCell"), (2, "Out")]);
         // A cell heading counts for the h1 rule; one without text is not
         // listed (it is still written).
-        let e = run("<title>T</title><table><tr><td><h1>Cell</h1><td><h2><img src=/a.png></h2></table>");
+        let e = run(
+            "<title>T</title><table><tr><td><h1>Cell</h1><td><h2><img src=/a.png></h2></table>",
+        );
         assert_eq!(e.headings.len(), 1);
         assert!(!e.markdown.starts_with("# T"), "{}", e.markdown);
     }
@@ -2304,16 +2349,26 @@ mod tests {
     #[test]
     fn closed_details_and_hidden_content_are_not_extracted() {
         assert_eq!(
-            md("<details><summary>Sum</summary>closed body<p>x</p><summary>two</summary></details>\
-                <details open><summary>S2</summary>open body</details>"),
+            md(
+                "<details><summary>Sum</summary>closed body<p>x</p><summary>two</summary></details>\
+                <details open><summary>S2</summary>open body</details>"
+            ),
             "Sum\n\nS2\n\nopen body\n"
         );
         assert_eq!(
-            md("<div style='color:red; Content-Visibility : hidden'>cv<a href=/x>l</a></div><p>y</p>"),
+            md(
+                "<div style='color:red; Content-Visibility : hidden'>cv<a href=/x>l</a></div><p>y</p>"
+            ),
             "y\n"
         );
-        assert_eq!(md("<div style='content-visibility:auto'>shown</div>"), "shown\n");
-        assert_eq!(md("<html style='display:none'><body><p>seen?</p></body></html>"), "");
+        assert_eq!(
+            md("<div style='content-visibility:auto'>shown</div>"),
+            "shown\n"
+        );
+        assert_eq!(
+            md("<html style='display:none'><body><p>seen?</p></body></html>"),
+            ""
+        );
         let e = run("<details><summary>s</summary><a href=/x>l</a></details>");
         assert!(e.links.is_empty());
     }
@@ -2356,7 +2411,11 @@ mod tests {
         assert!(m.contains('x'));
         assert!(m.lines().all(|l| l.len() <= 2 * MAX_CONTAINERS + 2), "{m}");
         // Content past the limit is still there.
-        let html = format!("{}<p>a</p><li>b</li>{}", "<ul><li>".repeat(30), "</ul>".repeat(30));
+        let html = format!(
+            "{}<p>a</p><li>b</li>{}",
+            "<ul><li>".repeat(30),
+            "</ul>".repeat(30)
+        );
         let m = md(&html);
         assert!(m.contains('a') && m.contains('b'));
     }
