@@ -6,7 +6,6 @@
   - Plantain
     1. Green
     2. Ripe
--
 - Cherries
 
 3) Three
@@ -20,9 +19,9 @@ Between
 
 * Second list, adjacent
 
-1) Loose one
+1. Loose one
 
-2) Loose para one
+2. Loose para one
 
    Loose para two
 

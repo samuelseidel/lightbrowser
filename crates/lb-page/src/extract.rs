@@ -26,6 +26,7 @@
 //! - A link that holds block content stays one inline link (its blocks
 //!   are joined with spaces).
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use lb_dom::{Document, NodeId, NodeType, ns};
@@ -35,6 +36,51 @@ use url::Url;
 const BR: char = '\u{1}';
 /// Marks a paragraph break in an inline buffer (two `<br>` in a row).
 const PARA: char = '\u{2}';
+/// Marks the end of a closing `*`, `**` or `~~` after punctuation: it
+/// becomes a space when a letter or digit follows (CommonMark would not
+/// close the span there), else it is dropped.
+const SENT: char = '\u{3}';
+
+/// Page text without the control characters used as buffer markers, so
+/// page data cannot change the block structure of the output.
+fn clean(s: &str) -> Cow<'_, str> {
+    if s.contains([BR, PARA, SENT]) {
+        s.replace([BR, PARA, SENT], "").into()
+    } else {
+        s.into()
+    }
+}
+
+/// Punctuation or symbol (what CommonMark's flanking rules call
+/// punctuation), approximated for non-ASCII.
+fn is_punct(c: char) -> bool {
+    if c.is_ascii() {
+        c.is_ascii_punctuation()
+    } else {
+        !c.is_alphanumeric() && !c.is_whitespace() && !c.is_control()
+    }
+}
+
+/// Replace each [`SENT`]: a space before a letter or digit, else nothing.
+fn resolve_sent(s: &str) -> String {
+    if !s.contains(SENT) {
+        return s.to_owned();
+    }
+    let mut o = String::with_capacity(s.len());
+    let mut pending = false;
+    for c in s.chars() {
+        if c == SENT {
+            pending = true;
+            continue;
+        }
+        if pending && c.is_alphanumeric() {
+            o.push(' ');
+        }
+        pending = false;
+        o.push(c);
+    }
+    o
+}
 
 /// A heading of the page, in document order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,7 +223,8 @@ fn meta_description(doc: &Document) -> Option<String> {
         if !name.trim().eq_ignore_ascii_case("description") {
             return None;
         }
-        doc.get_attribute(n, "content").map(norm_ws)
+        let d = norm_ws(doc.get_attribute(n, "content")?);
+        (!d.is_empty()).then_some(d)
     })
 }
 
@@ -499,7 +546,7 @@ impl Inline {
 /// Backslash-escape the Markdown specials of one whitespace-free word.
 /// `ls`: the word starts a line, so block markers count.
 fn escape_word(w: &str, ls: bool) -> String {
-    let chars: Vec<char> = w.chars().filter(|&c| c != BR && c != PARA).collect();
+    let chars: Vec<char> = w.chars().filter(|&c| c != BR && c != PARA && c != SENT).collect();
     let n = chars.len();
     let all = |c: char| chars.iter().all(|&x| x == c);
     let mut o = String::with_capacity(w.len() + 4);
@@ -605,8 +652,9 @@ fn escape_pipes(s: &str) -> String {
 }
 
 /// Put `inner` into `inl`: its edge spaces and breaks go outside, `f` wraps
-/// the rest (nothing when the rest is empty).
-fn emit(inl: &mut Inline, inner: &str, f: impl FnOnce(&str) -> String) {
+/// the rest (nothing when the rest is empty). `f` gets the character
+/// before the wrapped text and the text.
+fn emit(inl: &mut Inline, inner: &str, f: impl FnOnce(Option<char>, &str) -> String) {
     let edge = |c: char| c == ' ' || c == BR || c == PARA;
     let core = inner.trim_matches(edge);
     if core.is_empty() {
@@ -616,7 +664,8 @@ fn emit(inl: &mut Inline, inner: &str, f: impl FnOnce(&str) -> String) {
     let lead = &inner[..inner.len() - inner.trim_start_matches(edge).len()];
     let trail = &inner[inner.trim_end_matches(edge).len()..];
     inl.append(lead);
-    inl.raw(&f(core));
+    let prev = inl.s.chars().rev().find(|&c| c != SENT);
+    inl.raw(&f(prev, core));
     inl.append(trail);
 }
 
@@ -650,13 +699,27 @@ enum Kind {
 struct Block {
     kind: Kind,
     text: String,
+    /// A list written with the alternate marker (`*`, `)`), so that the
+    /// next adjacent list can use the other one.
+    alt: bool,
+    /// A list that may directly follow a paragraph: a bullet list, or a
+    /// numbered one that starts at 1 (CommonMark's rule).
+    interrupts: bool,
+}
+
+impl Block {
+    fn new(kind: Kind, text: String) -> Block {
+        Block {
+            kind,
+            text,
+            alt: false,
+            interrupts: true,
+        }
+    }
 }
 
 fn other(text: String) -> Block {
-    Block {
-        kind: Kind::Other,
-        text,
-    }
+    Block::new(Kind::Other, text)
 }
 
 /// Deepest element nesting the converter follows.
@@ -736,7 +799,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             parts.push(format!("# {}", flatten(&t.s)));
         }
         parts.extend(blocks.into_iter().map(|b| b.text));
-        let joined = parts.join("\n\n");
+        let joined = resolve_sent(&parts.join("\n\n"));
         let mut md = joined
             .split('\n')
             .map(|l| l.trim_end_matches([' ', '\t']))
@@ -756,12 +819,16 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
     /// Flow content: inline runs become paragraphs, block elements their
     /// own blocks.
     fn flow_nodes(&mut self, parent: NodeId, kids: &[NodeId], out: &mut Vec<Block>) {
+        let mut inl = Inline::default();
         if self.depth >= MAX_DEPTH {
+            // Too deep to follow: the rest is one paragraph of plain text.
+            let t = self.flat_text(parent, kids);
+            inl.text(&t);
+            self.flush(&mut inl, out);
             return;
         }
         self.depth += 1;
         let doc = self.doc;
-        let mut inl = Inline::default();
         for &c in kids {
             match doc.node_type(c) {
                 NodeType::Text => {
@@ -802,10 +869,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             if t.trim().is_empty() {
                 continue;
             }
-            out.push(Block {
-                kind: Kind::Text,
-                text: t.replace(BR, "\\\n"),
-            });
+            out.push(Block::new(Kind::Text, t.replace(BR, "\\\n")));
         }
     }
 
@@ -828,6 +892,41 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         }
     }
 
+    /// Record the headings below `c` that are written inside an inline
+    /// link (document order, hidden ones left out).
+    fn collect_headings(&mut self, c: NodeId) {
+        let doc = self.doc;
+        let mut stack: Vec<NodeId> = doc.flat_children(c);
+        stack.reverse();
+        while let Some(n) = stack.pop() {
+            if doc.node_type(n) != NodeType::Element {
+                continue;
+            }
+            let Some(name) = self.html_name(n) else {
+                continue;
+            };
+            if self.skipped(n, name) {
+                continue;
+            }
+            if let [b'h', d @ b'1'..=b'6'] = name.as_bytes() {
+                let text = self.plain(n);
+                if !text.is_empty() {
+                    if *d == b'1' {
+                        self.h1 = true;
+                    }
+                    self.headings.push(Heading {
+                        level: d - b'0',
+                        text,
+                    });
+                }
+                continue;
+            }
+            let mut kids = doc.flat_children(n);
+            kids.reverse();
+            stack.extend(kids);
+        }
+    }
+
     fn heading(&mut self, c: NodeId, level: u8, out: &mut Vec<Block>) {
         let mut sub = Inline::line();
         self.children(c, &mut sub);
@@ -847,9 +946,9 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
 
     fn list(&mut self, c: NodeId, ordered: bool, out: &mut Vec<Block>) {
         let doc = self.doc;
-        // A list right after another one needs the other marker, or
-        // Markdown would join them.
-        let alt = out.last().is_some_and(|b| b.kind == Kind::List);
+        // A list right after another one needs the other marker than that
+        // one used, or Markdown would join them.
+        let alt = out.last().is_some_and(|b| b.kind == Kind::List && !b.alt);
         let number = |v: Option<&str>| {
             v.and_then(|v| v.trim().parse::<i64>().ok())
                 .filter(|n| (0..=999_999_999).contains(n))
@@ -861,6 +960,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         };
         let mut items = Vec::new();
         let mut loose = false;
+        let mut first_num = None;
         for k in doc.flat_children(c) {
             let mut blocks = Vec::new();
             match doc.node_type(k) {
@@ -889,12 +989,20 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                 }
                 _ => continue,
             }
+            // An item with nothing to show (a hidden or icon-only entry, an
+            // empty nested list) is not an item.
+            if blocks.is_empty() {
+                continue;
+            }
             let mut body = String::new();
             for (i, b) in blocks.iter().enumerate() {
                 if i > 0 {
-                    // A nested list follows its item's text tightly.
+                    // A nested list follows its item's text tightly, unless
+                    // it is a numbered list that does not start at 1: that
+                    // cannot interrupt a paragraph, so a blank line (which
+                    // does not make the outer list loose here) separates.
                     if b.kind == Kind::List && blocks[i - 1].kind == Kind::Text {
-                        body.push('\n');
+                        body.push_str(if b.interrupts { "\n" } else { "\n\n" });
                     } else {
                         body.push_str("\n\n");
                         loose = true;
@@ -907,6 +1015,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             } else {
                 (if alt { "* " } else { "- " }).to_owned()
             };
+            first_num.get_or_insert(num);
             num += 1;
             items.push(indent_item(&marker, &body));
         }
@@ -914,6 +1023,8 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             out.push(Block {
                 kind: Kind::List,
                 text: items.join(if loose { "\n\n" } else { "\n" }),
+                alt,
+                interrupts: !ordered || first_num == Some(1),
             });
         }
     }
@@ -966,15 +1077,18 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
     }
 
     fn pre_text(&mut self, c: NodeId, s: &mut String, depth: usize) {
+        let doc = self.doc;
         if depth >= MAX_DEPTH {
+            let kids = doc.flat_children(c);
+            let t = self.flat_text(c, &kids);
+            s.push_str(&t);
             return;
         }
-        let doc = self.doc;
         for k in doc.flat_children(c) {
             match doc.node_type(k) {
                 NodeType::Text => {
                     if self.text_visible(c) {
-                        s.push_str(doc.character_data(k).unwrap_or(""));
+                        s.push_str(&clean(doc.character_data(k).unwrap_or("")));
                     }
                 }
                 NodeType::Element => {
@@ -1115,6 +1229,28 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         if ncols == 0 {
             return;
         }
+        if let Some(cap) = caption {
+            let mut sub = Inline::line();
+            self.children(cap, &mut sub);
+            let t = flatten(&sub.s);
+            if !t.is_empty() {
+                out.push(Block::new(Kind::Text, t));
+            }
+        }
+        // A GFM table is rectangular: padding every row to the widest one
+        // costs rows x columns. For a ragged or colspan-heavy table where
+        // that is far more than the cells there are, write one line per
+        // row instead (no padding, no colspan cells), so the output stays
+        // linear in the input.
+        let nrows = rows.len() + usize::from(header.is_some());
+        let ncells: usize = rows.iter().chain(header.iter()).map(Vec::len).sum();
+        if nrows.saturating_mul(ncols) > 8 * ncells + 4096 {
+            for r in header.iter().chain(rows.iter()) {
+                let texts: Vec<&str> = r.iter().map(|c| c.text.as_str()).collect();
+                out.push(other(format!("| {} |", texts.join(" | "))));
+            }
+            return;
+        }
         let mut aligns: Vec<Option<&'static str>> = vec![None; ncols];
         let expand = |r: &Vec<Cell>, aligns: &mut Vec<Option<&'static str>>| {
             let mut cells = Vec::with_capacity(ncols);
@@ -1158,17 +1294,6 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             .collect();
         let mut lines = vec![fmt(&head_cells), fmt(&delim)];
         lines.extend(body_cells.iter().map(|r| fmt(r)));
-        if let Some(cap) = caption {
-            let mut sub = Inline::line();
-            self.children(cap, &mut sub);
-            let t = flatten(&sub.s);
-            if !t.is_empty() {
-                out.push(Block {
-                    kind: Kind::Text,
-                    text: t,
-                });
-            }
-        }
         out.push(other(lines.join("\n")));
     }
 
@@ -1176,6 +1301,9 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
 
     fn children(&mut self, c: NodeId, inl: &mut Inline) {
         if self.depth >= MAX_DEPTH {
+            let kids = self.doc.flat_children(c);
+            let t = self.flat_text(c, &kids);
+            inl.text(&t);
             return;
         }
         self.depth += 1;
@@ -1213,7 +1341,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             "del" | "s" | "strike" => self.wrap(c, "~~", inl),
             "code" | "kbd" | "samp" | "tt" => {
                 let raw = self.plain_raw(c);
-                emit(inl, &raw, code_span);
+                emit(inl, &raw, |_, core| code_span(core));
             }
             _ if is_block(name) => {
                 inl.space();
@@ -1227,7 +1355,30 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
     fn wrap(&mut self, c: NodeId, mark: &str, inl: &mut Inline) {
         let mut sub = inl.sub();
         self.children(c, &mut sub);
-        emit(inl, &sub.s, |core| format!("{mark}{core}{mark}"));
+        emit(inl, &sub.s, |prev, core| {
+            // CommonMark opens a span only when the marker is left-flanking
+            // and closes it only when right-flanking: punctuation inside
+            // an edge needs a space (or punctuation) outside it. Markers
+            // of nested spans do not count as the edge.
+            let first = core.trim_start_matches(['*', '~']).chars().next();
+            let last = core
+                .trim_end_matches(SENT)
+                .trim_end_matches(['*', '~'])
+                .chars()
+                .next_back();
+            let open_gap = prev.is_some_and(char::is_alphanumeric) && first.is_some_and(is_punct);
+            let mut o = String::new();
+            if open_gap {
+                o.push(' ');
+            }
+            o.push_str(mark);
+            o.push_str(core);
+            o.push_str(mark);
+            if last.is_some_and(is_punct) {
+                o.push(SENT);
+            }
+            o
+        });
     }
 
     fn anchor(&mut self, c: NodeId, inl: &mut Inline) {
@@ -1235,12 +1386,17 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             .doc
             .get_attribute(c, "href")
             .and_then(|h| resolve(self.base, h));
+        // The blocks of a link are written as one inline link, but its
+        // headings are still headings of the page.
+        if self.has_block(c) {
+            self.collect_headings(c);
+        }
         let mut sub = inl.sub();
         self.children(c, &mut sub);
         match url {
             Some(u) => {
                 let inner = sub.s.replace(PARA, &BR.to_string());
-                emit(inl, &inner, |core| {
+                emit(inl, &inner, |_, core| {
                     format!("[{core}]({})", escape_dest(u.as_str()))
                 });
             }
@@ -1260,7 +1416,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         else {
             return;
         };
-        let alt = escape_plain(&norm_ws(doc.get_attribute(c, "alt").unwrap_or("")));
+        let alt = escape_plain(&norm_ws(&clean(doc.get_attribute(c, "alt").unwrap_or(""))));
         inl.raw(&format!("![{alt}]({})", escape_dest(u.as_str())));
     }
 
@@ -1274,6 +1430,76 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         s
     }
 
+    /// The text of `kids` (children of `parent`) with whitespace collapsed,
+    /// without recursion: for content nested deeper than [`MAX_DEPTH`],
+    /// which is kept as plain text rather than dropped. Blocks and `br`
+    /// give spaces; images give their `alt`.
+    fn flat_text(&mut self, parent: NodeId, kids: &[NodeId]) -> String {
+        enum It {
+            Visit(NodeId, NodeId),
+            Space,
+        }
+        fn space(s: &mut String) {
+            if !s.ends_with(' ') {
+                s.push(' ');
+            }
+        }
+        let doc = self.doc;
+        let mut s = String::new();
+        let mut stack: Vec<It> = kids.iter().rev().map(|&k| It::Visit(k, parent)).collect();
+        while let Some(it) = stack.pop() {
+            let (n, p) = match it {
+                It::Space => {
+                    space(&mut s);
+                    continue;
+                }
+                It::Visit(n, p) => (n, p),
+            };
+            match doc.node_type(n) {
+                NodeType::Text => {
+                    if self.text_visible(p) {
+                        let t = clean(doc.character_data(n).unwrap_or(""));
+                        for (i, w) in t.split(is_html_ws).enumerate() {
+                            if i > 0 {
+                                space(&mut s);
+                            }
+                            s.push_str(w);
+                        }
+                    }
+                }
+                NodeType::Element => {
+                    let Some(name) = self.html_name(n) else {
+                        continue;
+                    };
+                    if self.skipped(n, name) {
+                        continue;
+                    }
+                    match name {
+                        "br" => space(&mut s),
+                        "img" => {
+                            if !self.style(n).visibility_hidden
+                                && let Some(alt) = doc.get_attribute(n, "alt")
+                            {
+                                s.push_str(&norm_ws(&clean(alt)));
+                            }
+                        }
+                        _ => {
+                            if is_block(name) {
+                                space(&mut s);
+                                stack.push(It::Space);
+                            }
+                            let mut ks = doc.flat_children(n);
+                            ks.reverse();
+                            stack.extend(ks.into_iter().map(|k| It::Visit(k, n)));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        s
+    }
+
     fn plain(&mut self, c: NodeId) -> String {
         self.plain_raw(c).trim_matches(' ').to_owned()
     }
@@ -1284,15 +1510,24 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                 s.push(' ');
             }
         }
+        let doc = self.doc;
         if depth >= MAX_DEPTH {
+            let kids = doc.flat_children(c);
+            let t = self.flat_text(c, &kids);
+            for ch in t.chars() {
+                if ch == ' ' {
+                    space(s);
+                } else {
+                    s.push(ch);
+                }
+            }
             return;
         }
-        let doc = self.doc;
         for k in doc.flat_children(c) {
             match doc.node_type(k) {
                 NodeType::Text => {
                     if self.text_visible(c) {
-                        let t = doc.character_data(k).unwrap_or("");
+                        let t = clean(doc.character_data(k).unwrap_or(""));
                         for (i, w) in t.split(is_html_ws).enumerate() {
                             if i > 0 {
                                 space(s);
@@ -1314,7 +1549,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                             if !self.style(k).visibility_hidden
                                 && let Some(alt) = doc.get_attribute(k, "alt")
                             {
-                                let alt = norm_ws(alt);
+                                let alt = norm_ws(&clean(alt));
                                 if !alt.is_empty() {
                                     s.push_str(&alt);
                                 }
@@ -1339,8 +1574,9 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
 
     // ----- links -----
 
-    /// Anchors with an `href` in document order (hidden ones too), minus
-    /// fragment-only and `javascript:` targets and duplicates.
+    /// Anchors with an `href` in document order, minus hidden ones (as in
+    /// the Markdown), fragment-only and `javascript:` targets and
+    /// duplicates.
     fn links(&mut self) -> Vec<Link> {
         let doc = self.doc;
         let mut out = Vec::new();
@@ -1351,10 +1587,12 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                 let Some(name) = self.html_name(n) else {
                     continue;
                 };
-                if matches!(name, "script" | "style" | "template" | "noscript") {
+                // The same content the Markdown leaves out has no links.
+                if self.skipped(n, name) {
                     continue;
                 }
                 if name == "a"
+                    && !self.style(n).visibility_hidden
                     && let Some(href) = doc.get_attribute(n, "href")
                     && !href.trim_matches(is_html_ws).starts_with('#')
                     && let Some(u) = resolve(self.base, href)
@@ -1582,10 +1820,144 @@ mod tests {
     fn deep_nesting_does_not_overflow_the_stack() {
         let html = format!("{}x{}", "<div>".repeat(5000), "</div>".repeat(5000));
         let e = run(&html);
-        // Past the depth limit the rest is dropped, but nothing crashes.
-        assert!(e.markdown.is_empty() || e.markdown == "x\n");
+        // Past the depth limit the rest is kept as plain text.
+        assert_eq!(e.markdown, "x\n");
         let html = format!("{}x{}", "<span>".repeat(5000), "</span>".repeat(5000));
-        let _ = run(&html);
+        assert_eq!(run(&html).markdown, "x\n");
+        let html = format!("{}x{}", "<ul><li>".repeat(1000), "</ul>".repeat(1000));
+        assert!(run(&html).markdown.contains('x'));
+        let html = format!(
+            "<table><tr><td>{}x{}</table>",
+            "<b>".repeat(1000),
+            "</b>".repeat(1000)
+        );
+        assert!(run(&html).markdown.contains('x'));
+        // Headings, hidden parts and block breaks of the cut-off content.
+        let html = format!(
+            "{}a<p>b</p><p hidden>c</p><h2>d</h2><br>e{}",
+            "<div>".repeat(1000),
+            "</div>".repeat(1000)
+        );
+        assert_eq!(run(&html).markdown, "a b d e\n");
+    }
+
+    #[test]
+    fn adjacent_lists_alternate_markers() {
+        assert_eq!(
+            md("<ul><li>a<ul><li>b<ul><li>c<ul><li>d"),
+            "- a\n  - b\n    - c\n      - d\n"
+        );
+        assert_eq!(
+            md("<ul><li>a</ul><ul><li>b</ul><ul><li>c</ul><ul><li>d</ul>"),
+            "- a\n\n* b\n\n- c\n\n* d\n"
+        );
+        assert_eq!(
+            md("<ol><li>a</ol><ol><li>b</ol><ol><li>c</ol>"),
+            "1. a\n\n1) b\n\n1. c\n"
+        );
+        // A list of the other kind is a new list anyway; the marker flag
+        // still alternates, so no two neighbours share one.
+        assert_eq!(md("<ul><li>a</ul><ol><li>b</ol><ul><li>c</ul>"), "- a\n\n1) b\n\n- c\n");
+    }
+
+    #[test]
+    fn items_with_nothing_to_show_are_not_items() {
+        assert_eq!(md("<ul style='visibility:hidden'><li>a<li>b</ul>"), "");
+        assert_eq!(
+            md("<ul><li><svg width=4></svg><li><a href='/tw'><i></i></a><li>real</ul>"),
+            "- real\n"
+        );
+        assert_eq!(md("<ul><li><ul></ul></ul><p>x"), "x\n");
+        // Numbering follows the items that are written.
+        assert_eq!(md("<ol><li>a<li><li>c</ol>"), "1. a\n2. c\n");
+    }
+
+    #[test]
+    fn a_numbered_list_that_cannot_interrupt_a_paragraph_follows_a_blank_line() {
+        assert_eq!(
+            md("<ol><li>a<li>b<ol start=5><li>c<li value=2>d</ol><li>e</ol>"),
+            "1. a\n2. b\n\n   5. c\n   2. d\n3. e\n"
+        );
+        assert_eq!(md("<ul><li>o<ol start=3><li>x</ol></ul>"), "- o\n\n  3. x\n");
+        // From 1 on, and bullets, follow tightly.
+        assert_eq!(md("<ul><li>o<ol><li>x</ol></ul>"), "- o\n  1. x\n");
+        assert_eq!(md("<ol><li>o<ul><li>x</ul></ol>"), "1. o\n   - x\n");
+    }
+
+    #[test]
+    fn a_table_is_not_padded_beyond_its_cells() {
+        let mut html = String::from("<table><tr>");
+        html.push_str(&"<td colspan=100>x".repeat(100));
+        html.push_str("</tr>");
+        html.push_str(&"<tr><td>y</tr>".repeat(1000));
+        html.push_str("</table>");
+        let m = md(&html);
+        assert!(m.len() < 20_000, "{} bytes", m.len());
+        assert!(!m.contains("---"));
+        assert!(m.starts_with("| x | x |"));
+        assert_eq!(m.matches("| y |\n").count(), 1000);
+        // A usual ragged table is still a table.
+        assert_eq!(
+            md("<table><tr><td>a<td>b<td>c<tr><td>d</table>"),
+            "|  |  |  |\n| --- | --- | --- |\n| a | b | c |\n| d |  |  |\n"
+        );
+    }
+
+    #[test]
+    fn marker_characters_in_the_page_do_not_change_the_structure() {
+        assert_eq!(
+            md("<p>X<code>p&#2;q</code>Y <code>r&#1;s</code>&#3;t</p>"),
+            "X`pq`Y `rs`t\n"
+        );
+        assert_eq!(md("<pre>pre&#1;x&#2;y</pre>"), "```\nprexy\n```\n");
+        let e = run("<a href=/x>a&#1;b&#2;<img alt='c&#2;d'></a>");
+        assert_eq!(e.links[0].text, "abcd");
+        assert_eq!(e.markdown, "[ab](https://example.com/x)\n");
+    }
+
+    #[test]
+    fn headings_inside_a_link_are_headings() {
+        let e = run(
+            "<title>T</title><a href=/c><h3>Card <b>title</b></h3><p>body</p></a>\
+             <a href=/h><h1>Site</h1></a><a href=/n><h2 hidden>x</h2><h2></h2></a>",
+        );
+        let got: Vec<(u8, &str)> = e.headings.iter().map(|h| (h.level, h.text.as_str())).collect();
+        assert_eq!(got, [(3, "Card title"), (1, "Site")]);
+        // The page has an h1, so the title is not added.
+        assert!(!e.markdown.starts_with("# T"), "{}", e.markdown);
+    }
+
+    #[test]
+    fn emphasis_next_to_punctuation_still_closes() {
+        assert_eq!(md("<p><b>Note:</b>text"), "**Note:** text\n");
+        assert_eq!(md("<p><em>\"q\"</em>word"), "*\"q\"* word\n");
+        assert_eq!(md("<p>a<b>(b)</b>"), "a **(b)**\n");
+        assert_eq!(md("<p>a<b>(b)</b>."), "a **(b)**.\n");
+        assert_eq!(md("<p><b>Note:</b> text <b>x.</b>"), "**Note:** text **x.**\n");
+        assert_eq!(md("<p><b><i>Note:</i></b>text"), "***Note:*** text\n");
+        // Letters inside the edges and punctuation outside need nothing.
+        assert_eq!(md("<p>a<b>b</b>c (<b>d</b>)"), "a**b**c (**d**)\n");
+        assert_eq!(md("<p><s>x</s>-y"), "~~x~~-y\n");
+    }
+
+    #[test]
+    fn links_leave_out_what_the_markdown_leaves_out() {
+        let e = run(
+            "<a href=/a>a</a><a href=/b hidden>b</a><a href=/c style='display:none'>c</a>\
+             <div style='display:none'><a href=/d>d</a></div>\
+             <a href=/e style='visibility:hidden'>e</a><dialog><a href=/f>f</a></dialog>\
+             <a href=/g>g</a>",
+        );
+        let urls: Vec<&str> = e.links.iter().map(|l| l.url.as_str()).collect();
+        assert_eq!(urls, ["https://example.com/a", "https://example.com/g"]);
+    }
+
+    #[test]
+    fn an_empty_description_is_not_one() {
+        let e = run("<meta name=description content=' '><meta name=description content=second>");
+        assert_eq!(e.description.as_deref(), Some("second"));
+        let e = run("<meta name=description content=''>");
+        assert_eq!(e.description, None);
     }
 
     #[test]

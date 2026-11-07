@@ -89,6 +89,16 @@ CASES = {
         "Scripted title", None, None, None, [(1, "Built by script")], {},
         "Built by script\nalpha\nbeta",
     ),
+    # Round 2 regressions: adjacent lists, empty items, nested `ol start`,
+    # control characters, a heading inside a link, emphasis next to
+    # punctuation, an empty first description meta. The `text` keeps the
+    # raw U+0001 / U+0002 of the page (the old text rules do not touch them).
+    "regress": (
+        "Regressions", None, "second description", None,
+        [(2, "Adjacent lists"), (2, "Empty items"), (2, "Nested start"), (2, "Control characters"), (3, "Card title"), (2, "Flanking")],
+        {},
+        "Adjacent lists\na\nb\nc\nd\nx\no1\no2\no3\nEmpty items\nh1\nh2\nreal\nNested start\na\nb\nc\nd\ne\nouter\nx\nControl characters\nXp\x02qY r\x01s\npre\x01x\x02y\nCard title\ncard body\nFlanking\nNote:text\n\"q\"word\na(b)",
+    ),
     "plain": (
         "", None, None, None, [], {},
         "line one\nline two <b>not markup</b>",
