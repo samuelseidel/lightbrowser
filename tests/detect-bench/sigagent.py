@@ -30,6 +30,10 @@ _KEY_FIRST = re.compile(r"[a-z*]")
 _KEY_REST = re.compile(r"[a-z0-9_\-.*]")
 _TCHAR = re.compile(r"[A-Za-z0-9!#$%&'*+\-.^_`|~]")
 _B64 = re.compile(r"[A-Za-z0-9+/=]*")
+# ASCII digits only: str.isdigit() is also true for U+00B2, U+00B3 and U+00B9, which
+# arrive as latin-1 header bytes and make int() raise a plain ValueError.
+_DIGITS = frozenset("0123456789")
+MAX_TIME = 253402300799  # 9999-12-31T23:59:59Z; created/expires beyond it are not times
 
 
 class SFError(ValueError):
@@ -92,7 +96,7 @@ class _Reader:
             if self.eat("0"):
                 return False
             raise SFError("bad boolean")
-        if c == "-" or c.isdigit():
+        if c == "-" or c in _DIGITS:
             return self.number()
         if c and (c.isalpha() and c.isascii() or c == "*"):
             start = self.i
@@ -142,14 +146,14 @@ class _Reader:
         start = self.i
         self.eat("-")
         digits = 0
-        while self.peek().isdigit():
+        while self.peek() in _DIGITS and self.peek():
             self.i += 1
             digits += 1
         if not digits:
             raise SFError("bad number")
         if self.eat("."):
             frac = 0
-            while self.peek().isdigit():
+            while self.peek() in _DIGITS and self.peek():
                 self.i += 1
                 frac += 1
             if not 1 <= frac <= 3 or digits > 12:
@@ -260,6 +264,15 @@ def _signature_agent(raw: str, label: str):
 
 
 def parse(headers: dict) -> tuple[dict | None, list[str]]:
+    """Recognise a signed-agent declaration; see _parse. Never raises: anything the
+    parsers did not foresee (a stray ValueError, a RecursionError) is a rejection."""
+    try:
+        return _parse(headers)
+    except (ValueError, ArithmeticError, RecursionError, TypeError) as e:
+        return None, [f"unparseable: {type(e).__name__}"]
+
+
+def _parse(headers: dict) -> tuple[dict | None, list[str]]:
     """Recognise a signed-agent declaration in `headers` (lowercase names).
 
     Returns (declaration, problems). The declaration is the first well-formed
@@ -306,7 +319,12 @@ def parse(headers: dict) -> tuple[dict | None, list[str]]:
         if not isinstance(created, int) or isinstance(created, bool):
             problems.append(f"{label}: no integer created")
             continue
-        if expires is not None and (not isinstance(expires, int) or isinstance(expires, bool) or expires < created):
+        if not 0 <= created <= MAX_TIME:
+            problems.append(f"{label}: created is not a plausible time")
+            continue
+        if expires is not None and (
+            not isinstance(expires, int) or isinstance(expires, bool) or not created <= expires <= MAX_TIME
+        ):
             problems.append(f"{label}: bad expires")
             continue
         sig = sigs.get(label)

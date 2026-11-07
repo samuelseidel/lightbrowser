@@ -41,6 +41,8 @@ SAMPLES = 32
 MAX_DIST_PX = 0.8       # RMS distance of two shapes, in px (at the pair's mean chord)
 MAX_DIST_BEND = 0.12    # ... and at most this share of the smaller bend
 HASH_STEP = 0.01        # shape hash quantisation, in chords
+MAX_STROKES = 300       # strokes compared per session: the pairing is quadratic and a
+                        # trace can hold tens of thousands of events (a hostile one on purpose)
 
 
 def pointer_strokes(session: dict) -> list[list[tuple[float, float, float]]]:
@@ -48,7 +50,8 @@ def pointer_strokes(session: dict) -> list[list[tuple[float, float, float]]]:
     out: list[list[tuple[float, float, float]]] = []
     pages = sorted(session.get("pages", {}).values(), key=lambda p: p.get("received", 0))
     for pg in pages:
-        ev = [e for e in pg.get("trace", []) if e.get("tr")]
+        trace = pg.get("trace") if isinstance(pg, dict) else None
+        ev = [e for e in trace if isinstance(e, dict) and e.get("tr")] if isinstance(trace, list) else []
         downs = sorted(e["t"] for e in ev if e.get("type") == "mousedown" and isinstance(e.get("t"), (int, float)))
         cur: list[tuple[float, float, float]] = []
         for e in ev:
@@ -125,8 +128,9 @@ def same_stroke(a: dict, b: dict) -> bool:
 
 
 def repeated(session: dict) -> list[tuple[dict, dict, float]]:
-    """Pairs of informative strokes of one session that are the same shape."""
-    shapes = [n for n in (normalise(s) for s in pointer_strokes(session)) if n and n["informative"]]
+    """Pairs of informative strokes of one session that are the same shape
+    (among its first `MAX_STROKES` informative strokes)."""
+    shapes = [n for n in (normalise(s) for s in pointer_strokes(session)) if n and n["informative"]][:MAX_STROKES]
     out = []
     for i in range(len(shapes)):
         for j in range(i + 1, len(shapes)):

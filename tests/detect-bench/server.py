@@ -547,6 +547,17 @@ class Handler(BaseHTTPRequestHandler):
         """Cross-session groups over every retained session (call with the store lock held)."""
         return scoring.fleet_index(self.store.sessions.values(), self.config)
 
+    def scored(self, s: dict, fleet: dict | None) -> dict:
+        """`score_session` that cannot take the endpoint down. /api/report keeps
+        whatever JSON a client sends, so a session can hold a value no rule or
+        report field expects; it is then listed as unscorable with the error
+        class, and every other session is scored as usual."""
+        try:
+            return scoring.score_session(s, self.config, fleet)
+        except Exception as e:  # noqa: BLE001 - see the docstring
+            return {"sid": s.get("sid"), "score": 0, "verdict": "unscorable", "fired": [], "info_fired": [],
+                    "agent_declared": None, "error": type(e).__name__}
+
     def clusters(self) -> dict:
         """Sessions grouped by a hash of their stable device probes and by the
         shape of their pointer strokes. Groups of one are left out; a group the
@@ -572,7 +583,7 @@ class Handler(BaseHTTPRequestHandler):
                 rows = []
                 fleet = self.fleet()
                 for s in self.store.sessions.values():
-                    r = scoring.score_session(s, self.config, fleet)
+                    r = self.scored(s, fleet)
                     rows.append({
                         "sid": s["sid"], "created": s["created"], "beacons": s["beacons"],
                         "ua": (s["user_agents"] or [""])[0], "score": r["score"],
@@ -589,7 +600,7 @@ class Handler(BaseHTTPRequestHandler):
             if s is None:
                 return self.send_json(404, {"error": "unknown session"})
             if kind == "score":
-                return self.send_json(200, scoring.score_session(s, self.config, self.fleet()))
+                return self.send_json(200, self.scored(s, self.fleet()))
             if kind == "session":
                 return self.send_json(200, s)
             pages = sorted(s["pages"].values(), key=lambda p: p["received"])

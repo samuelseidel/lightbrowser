@@ -556,8 +556,14 @@ class PathRepeat(unittest.TestCase):
 
 # ---- beh_click_offset_repeat ----------------------------------------------------
 
-def click(tg, cx, cy, w=100.0, h=30.0, ti=0, tr=1, d=1):
-    return {"t": 1000.0, "type": "click", "tr": tr, "x": 0, "y": 0, "b": 0, "d": d, "tg": tg, "ti": ti,
+_CLICK_SPOT = itertools.count()
+
+
+def click(tg, cx, cy, w=100.0, h=30.0, ti=0, tr=1, d=1, x=None, y=None):
+    """A click event. Unless `x`, `y` say otherwise, each click is at its own pointer position."""
+    n = next(_CLICK_SPOT)
+    return {"t": 1000.0, "type": "click", "tr": tr, "x": 40 + 37 * n if x is None else x,
+            "y": 60 + 23 * n if y is None else y, "b": 0, "d": d, "tg": tg, "ti": ti,
             "cx": cx, "cy": cy, "w": w, "h": h, "f": 1}
 
 
@@ -590,6 +596,23 @@ class ClickOffsetRepeat(unittest.TestCase):
         pages = [[corner("#go", 7, 9, 100, 30)], [corner("#go", 7.2, 9.4, 100, 30)],
                  [corner("#go", 6.9, 9.1, 100, 30)], [corner("#go", 7.3, 9.3, 100, 30)]]
         self.assertIsNotNone(self.detail(trace_session(pages)))
+
+    def test_a_parked_pointer_on_the_same_button_of_successive_pages_is_one_spot(self):
+        # Pagination, "Add to cart" on product after product, "Back": the person
+        # does not move the mouse between page loads; the same link at the same
+        # place is one pointer position, however many URLs it is on.
+        pages = [[corner("a", 13, 11, 92, 34, ti=5, x=300, y=500)] for _ in range(6)]
+        self.assertIsNone(self.detail(trace_session(pages)))
+        # ... and with the pointer nudged by a pixel or two between pages the
+        # offsets drift too far apart to agree.
+        pages = [[corner("a", 13 + 2 * i, 11 + i, 92, 34, ti=5, x=300 + 2 * i, y=500 + i)] for i in range(6)]
+        self.assertIsNone(self.detail(trace_session(pages)))
+
+    def test_one_spot_does_not_hide_a_real_repeat_beside_it(self):
+        parked = [[corner("a", 13, 11, 92, 34, ti=5, x=300, y=500)] for _ in range(3)]
+        moved = [[corner(f"#t{i}", 13, 11, 92 + i, 34, x=100 + 50 * i, y=200)] for i in range(4)]
+        # the three parked clicks are one spot: 1 + 4 = 5 targets, not 7
+        self.assertIn("on 5 different targets", self.detail(trace_session(parked + moved)) or "")
 
     def test_three_targets_are_not_enough(self):
         clicks = [corner("#a", 5, 5, 120, 40), corner("#b", 5, 5, 90, 30), corner("#c", 5, 5, 60, 24)]

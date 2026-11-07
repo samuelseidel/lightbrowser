@@ -123,7 +123,7 @@ def event_counts(s: dict) -> dict:
     counts: dict[str, int] = {}
     for pg in s.get("pages", {}).values():
         for e in pg.get("trace", []):
-            if e.get("tr"):
+            if isinstance(e, dict) and e.get("tr") and isinstance(e.get("type"), str):
                 counts[e["type"]] = counts.get(e["type"], 0) + 1
     return counts
 
@@ -958,10 +958,17 @@ def fleet_parts(s: dict) -> dict | None:
     if isinstance(audio, dict) and audio.get("hash"):
         parts["audio"] = audio["hash"]
     fonts = _val(s, "fonts")
-    surf = _val(s, "os_surface") if isinstance(_val(s, "os_surface"), dict) else {}
+    surf = _val(s, "os_surface")
+    surf = surf if isinstance(surf, dict) else {}
     if isinstance(fonts, dict) and fonts.get("hash"):
-        det = ((surf.get("fonts") or {}).get("detected")) or {}
-        parts["fonts"] = [fonts["hash"], sorted((k, list(v)) for k, v in det.items())] if isinstance(det, dict) else fonts["hash"]
+        sf = surf.get("fonts")
+        det = (sf.get("detected") if isinstance(sf, dict) else None) or {}
+        if isinstance(det, dict):
+            # A hostile beacon can send any JSON: only lists of scalars are values here.
+            parts["fonts"] = [fonts["hash"], sorted((str(k), list(v) if isinstance(v, (list, tuple)) else v)
+                                                    for k, v in det.items())]
+        else:
+            parts["fonts"] = fonts["hash"]
     sc = (surf or {}).get("screen")
     if isinstance(sc, dict):
         parts["screen"] = [sc.get(k) for k in ("width", "height", "availWidth", "availHeight", "availLeft", "availTop", "dpr")]
@@ -974,6 +981,19 @@ def fleet_parts(s: dict) -> dict | None:
     return parts if len(parts) >= 5 else None
 
 
+def safe_fleet_parts(s: dict) -> dict | None:
+    """`fleet_parts` that treats a session it cannot read as one without parts:
+    a beacon is arbitrary JSON, and one bad value must not stop the scoring of
+    every other session (the index is built over all of them)."""
+    try:
+        parts = fleet_parts(s)
+        if parts is not None:
+            json.dumps(parts, sort_keys=True)
+        return parts
+    except (TypeError, ValueError, AttributeError, KeyError, RecursionError):
+        return None
+
+
 def fleet_hash(parts: dict) -> str:
     return hashlib.sha256(json.dumps(parts, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
 
@@ -981,8 +1001,16 @@ def fleet_hash(parts: dict) -> str:
 def _fleet_groups(sessions, key, cfg) -> dict[str, list[str]]:
     groups: dict[str, list[tuple[float, str]]] = {}
     for s in sessions:
-        for k in key(s):
-            groups.setdefault(k, []).append((s.get("created", 0), s["sid"]))
+        if not isinstance(s.get("sid"), str):
+            continue
+        created = s.get("created")
+        created = created if isinstance(created, (int, float)) and not isinstance(created, bool) else 0
+        try:
+            keys = list(key(s))
+        except (TypeError, ValueError, AttributeError, KeyError, RecursionError):
+            continue  # a trace the geometry cannot read has no shape hash
+        for k in keys:
+            groups.setdefault(k, []).append((created, s["sid"]))
     window = cfg.get("fleet_window_s") or 0
     out = {}
     for k, members in groups.items():
@@ -1005,10 +1033,10 @@ def fleet_index(sessions, cfg: dict | None = None) -> dict:
     (hash -> the values hashed) and `shape` (stroke shape hash -> session ids).
     Pass every retained session."""
     cfg = cfg or load_config()
-    sessions = list(sessions)
-    parts_by_sid = {s["sid"]: fleet_parts(s) for s in sessions}
+    sessions = [s for s in sessions if isinstance(s, dict)]
+    parts_by_sid = {s["sid"]: safe_fleet_parts(s) for s in sessions if isinstance(s.get("sid"), str)}
     hashes = {sid: fleet_hash(p) for sid, p in parts_by_sid.items() if p}
-    fp = _fleet_groups(sessions, lambda s: [hashes[s["sid"]]] if s["sid"] in hashes else [], cfg)
+    fp = _fleet_groups(sessions, lambda s: [hashes[s["sid"]]] if s.get("sid") in hashes else [], cfg)
     shape = _fleet_groups(sessions, shapes.session_shape_hashes, cfg)
     return {
         "sessions": len(sessions),
@@ -1025,7 +1053,7 @@ def chk_fleet_fingerprint_reuse(s, cfg):
     fleet = cfg.get("_fleet")
     if not fleet:
         return None
-    parts = fleet_parts(s)
+    parts = safe_fleet_parts(s)
     if not parts:
         return None
     h = fleet_hash(parts)
@@ -1048,35 +1076,53 @@ def chk_beh_path_repeat(s, cfg):
     return None
 
 
+MAX_CLICKS_COMPARED = 120  # the grouping below is quadratic in a group's size
+
+
+def _num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
 def click_offset_groups(s: dict, tol: float = 1.0) -> dict | None:
     """The largest group of clicks on different targets whose offsets agree
     within `tol` px, in either frame: from the target's top-left corner or from
-    its centre. Returns {frame, offset, targets, clicks} or None."""
+    its centre. Returns {frame, offset, targets, clicks} or None.
+
+    Targets are counted by where the pointer was as well as by element: the same
+    button on successive pages (pagination, "Add to cart", "Back") clicked
+    without moving the mouse is one pointer position, not several targets."""
     clicks = []
-    for url, pg in sorted(((p.get("url"), p) for p in s.get("pages", {}).values()), key=lambda x: str(x[0])):
-        for e in pg.get("trace", []):
-            if (e.get("type") == "click" and e.get("tr") and (e.get("d") or 0) > 0 and (e.get("w") or 0) >= 10
-                    and (e.get("h") or 0) >= 10 and isinstance(e.get("cx"), (int, float))
-                    and isinstance(e.get("cy"), (int, float))):
-                clicks.append({"tgt": (url, e.get("tg"), e.get("ti", 0)), "cx": e["cx"], "cy": e["cy"],
-                               "tl": (e["cx"] + e["w"] / 2, e["cy"] + e["h"] / 2)})
+    pages = [p for p in s.get("pages", {}).values() if isinstance(p, dict)]
+    for url, pg in sorted(((p.get("url"), p) for p in pages), key=lambda x: str(x[0])):
+        for e in pg.get("trace") or []:
+            if not isinstance(e, dict) or e.get("type") != "click" or not e.get("tr"):
+                continue
+            if not all(_num(e.get(k)) for k in ("d", "w", "h", "cx", "cy")) or e["d"] <= 0 or e["w"] < 10 or e["h"] < 10:
+                continue
+            pos = (round(e["x"]), round(e["y"])) if _num(e.get("x")) and _num(e.get("y")) else None
+            clicks.append({"tgt": (url, e.get("tg"), e.get("ti", 0)), "pos": pos, "cx": e["cx"], "cy": e["cy"],
+                           "tl": (e["cx"] + e["w"] / 2, e["cy"] + e["h"] / 2)})
     best = None
-    clicks = clicks[:200]
+    clicks = clicks[:MAX_CLICKS_COMPARED]
     for frame in ("centre", "corner"):
         off = (lambda c: (c["cx"], c["cy"])) if frame == "centre" else (lambda c: c["tl"])
         # A set of offsets agrees within `tol` when it fits a box of side `tol`;
         # such a box can start at some click's x and some click's y.
-        xs = sorted({off(c)[0] for c in clicks})
-        ys = sorted({off(c)[1] for c in clicks})
-        for x0 in xs:
-            for y0 in ys:
-                members = [c for c in clicks if 0 <= off(c)[0] - x0 <= tol and 0 <= off(c)[1] - y0 <= tol]
-                targets = {c["tgt"] for c in members}
+        for x0 in sorted({off(c)[0] for c in clicks}):
+            col = [c for c in clicks if 0 <= off(c)[0] - x0 <= tol]
+            if len(col) < 2:
+                continue
+            for y0 in sorted({off(c)[1] for c in col}):
+                members = [c for c in col if 0 <= off(c)[1] - y0 <= tol]
                 if all(abs(c["cx"]) < 1 and abs(c["cy"]) < 1 for c in members):
                     continue  # the exact centre is beh_click_center's
-                if len(targets) >= 2 and (best is None or len(targets) > best["targets"]):
+                targets = len({c["tgt"] for c in members})
+                # a click without a recorded pointer position counts as its own
+                spots = len({c["pos"] if c["pos"] is not None else id(c) for c in members})
+                n = min(targets, spots)
+                if n >= 2 and (best is None or n > best["targets"]):
                     mx, my = (sum(off(c)[i] for c in members) / len(members) for i in (0, 1))
-                    best = {"frame": frame, "offset": [round(mx, 1), round(my, 1)], "targets": len(targets),
+                    best = {"frame": frame, "offset": [round(mx, 1), round(my, 1)], "targets": n,
                             "clicks": len(members)}
     return best
 
@@ -1170,6 +1216,11 @@ def _webrtc(s: dict) -> dict | None:
     return None
 
 
+def _bare(addr) -> str:
+    """An ICE address as text, without the brackets Chrome puts around IPv6."""
+    return str(addr).strip("[]") if isinstance(addr, str) else ""
+
+
 def chk_webrtc_candidates(s, cfg):
     o, _ = _chrome_os(s)
     v = _webrtc(s)
@@ -1177,23 +1228,25 @@ def chk_webrtc_candidates(s, cfg):
         return None
     if v.get("supported") is False:
         return "RTCPeerConnection is missing"
-    cands = [c for c in v.get("candidates") or [] if isinstance(c, dict)]
+    raw_cands = v.get("candidates")
+    cands = [c for c in raw_cands if isinstance(c, dict)] if isinstance(raw_cands, list) else []
     reasons = []
     hosts = [c for c in cands if c.get("type") == "host"]
     reflexive = [c for c in cands if c.get("type") == "srflx"]
     if not hosts:
         reasons.append("no host candidate")
-    raw = [c.get("address") for c in hosts
-           if not c.get("mdns") and not re.match(r"^(127\.|::1$)", str(c.get("address") or ""))]
+    raw = [_bare(c.get("address")) for c in hosts
+           if not c.get("mdns") and not re.match(r"^(127\.|::1$)", _bare(c.get("address")))]
     if raw:
         reasons.append(f"host candidate exposes {raw[0]} (Chrome gives an mDNS name)")
-    stun = v.get("stun")
+    stun = v.get("stun") if isinstance(v.get("stun"), str) else None
     if stun and not reflexive:
         reasons.append(f"no server-reflexive candidate although the STUN responder {stun} is on loopback")
     if stun and reflexive:
         host = re.sub(r":\d+$", "", stun).strip("[]")
-        if any(c.get("address") != host for c in reflexive):
-            reasons.append(f"server-reflexive address {reflexive[0].get('address')} is not the responder's view of the sender ({host})")
+        if any(_bare(c.get("address")) != host for c in reflexive):
+            reasons.append(f"server-reflexive address {_bare(reflexive[0].get('address'))} is not the responder's view "
+                           f"of the sender ({host})")
     return "; ".join(reasons) or None
 
 
@@ -1412,6 +1465,7 @@ def score_session(s: dict, cfg: dict | None = None, fleet: dict | None = None) -
     probes = merged_probes(s)
     fired = []
     info = []
+    check_errors: list[str] = []
     for r in RULES:
         if r["id"] in disabled:
             continue
@@ -1422,7 +1476,11 @@ def score_session(s: dict, cfg: dict | None = None, fleet: dict | None = None) -
                 continue
             detail = p["value"]
         else:
-            detail = r["check"](s, cfg)
+            try:
+                detail = r["check"](s, cfg)
+            except Exception:  # noqa: BLE001 - a beacon is arbitrary JSON; one rule must not stop the scoring
+                check_errors.append(r["id"])
+                continue
             if not detail:
                 continue
         if w <= 0:
@@ -1458,6 +1516,8 @@ def score_session(s: dict, cfg: dict | None = None, fleet: dict | None = None) -
         "signals": server_signals(s),
         "agent_declared": agent,
     }
+    if check_errors:
+        out["check_errors"] = check_errors  # rules that could not read this session's data
     if agent:
         out["score_verdict"] = verdict
     else:
