@@ -586,20 +586,36 @@ fn blocks_hosts_outside_the_policy() {
 
     // A script-triggered top-frame navigation to a blocked host is stopped too.
     m.ok("browser_navigate", json!({"url": format!("{base}/")}));
-    m.ok(
+    // The refusal is noted by the first tool result after it happened. On a
+    // loaded machine that can be the result of this very call (the timer
+    // fires before the result is made), so keep every result's text.
+    let mut notes = m.ok(
         "browser_evaluate",
         json!({"expression": "setTimeout(() => { location.href = 'http://blocked.example/js' }, 0)"}),
     );
-    std::thread::sleep(Duration::from_millis(500));
-    let nav = m.ok("browser_evaluate", json!({"expression": "location.href"}));
+    let mut href = String::new();
+    for _ in 0..50 {
+        if notes.contains("blocked.example/js") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        let t = m.ok("browser_evaluate", json!({"expression": "location.href"}));
+        if href.is_empty() {
+            href = t.clone();
+        }
+        notes.push_str(&t);
+    }
+    if href.is_empty() {
+        href = m.ok("browser_evaluate", json!({"expression": "location.href"}));
+    }
     assert!(
-        nav.starts_with(&format!("\"{base}/\"")),
-        "the page stayed where it was: {nav}"
+        href.starts_with(&format!("\"{base}/\"")),
+        "the page stayed where it was: {href}"
     );
     // The tool result says what the policy refused meanwhile.
     assert!(
-        nav.contains("blocked.example/js") && nav.contains("--allow-host"),
-        "{nav}"
+        notes.contains("blocked.example/js") && notes.contains("--allow-host"),
+        "{notes}"
     );
 
     // Bad input is a tool error too.
