@@ -256,7 +256,9 @@ async fn an_allowed_name_rebound_to_a_public_address_is_blocked_for_a_page() {
             .goto(url, WaitUntil::Load, Duration::from_secs(20))
             .await
         {
-            Err(PageError::Net(e)) => assert!(e.starts_with("net::ERR_BLOCKED_BY_CLIENT"), "{url}: {e}"),
+            Err(PageError::Net(e)) => {
+                assert!(e.starts_with("net::ERR_BLOCKED_BY_CLIENT"), "{url}: {e}")
+            }
             other => panic!("{url}: {other:?}"),
         }
     }

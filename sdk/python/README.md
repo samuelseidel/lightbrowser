@@ -66,7 +66,12 @@ startup_timeout=60, validate=True, playwright=None)`
   worker or a proxy hop included) fails as `net::ERR_BLOCKED_BY_CLIENT`
   before DNS and before any packet leaves. `egress=["10.0.0.5", "*.lab.test",
   "192.168.0.0/16"]` allows those too (a name glob, an IP or a CIDR block);
-  `egress="open"` removes the restriction. Needs a binary that has the flag.
+  a listed name may resolve to internal addresses only (loopback, RFC 1918,
+  unique-local), so pin one that lives elsewhere to its addresses:
+  `"build.example.test@203.0.113.7"`. `egress="open"` removes the
+  restriction; the words `open`/`loopback`/`allowlist` inside a list, and
+  `--egress`/`--allow-host` in `extra_args`, raise `ValueError`. Needs a
+  binary that has the flag.
 - The server always binds 127.0.0.1; `port=0` lets the OS choose and the SDK
   reads the port from the `DevTools listening on ws://...` line on stderr.
 - `new_context(**kw)` and `new_page(**kw)` return stock Playwright objects.

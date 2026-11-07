@@ -1,8 +1,8 @@
 // Record how Chrome 153 reports a request the client blocked
 // (Fetch.failRequest with BlockedByClient, which is what Playwright's
 // route.abort('blockedbyclient') sends) on the surfaces the egress policy
-// refuses on (ADR 0044): top-level navigation, fetch, XHR, image, script and
-// worker fetch. Loopback only: the blocked host (blocked.test) is never
+// refuses on (ADR 0044): top-level navigation, fetch, XHR, image, script,
+// parser-inserted module scripts (async and deferred) and worker fetch. Loopback only: the blocked host (blocked.test) is never
 // looked up, the request is failed before the network.
 //
 // WebSocket: no CDP command blocks one, so its text is recorded for a host

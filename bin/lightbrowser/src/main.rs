@@ -1096,7 +1096,9 @@ mod tests {
         );
         assert!(parse_serve_args(&strs(&["--egress"])).is_err());
         // Two different modes must not let the last one lift the first.
-        assert!(parse_fetch_args(&strs(&["u", "--egress", "loopback", "--egress", "open"])).is_err());
+        assert!(
+            parse_fetch_args(&strs(&["u", "--egress", "loopback", "--egress", "open"])).is_err()
+        );
         assert!(parse_serve_args(&strs(&["--egress=open", "--egress", "loopback"])).is_err());
         assert!(parse_serve_args(&strs(&["--egress=loopback", "--egress", "Loopback"])).is_ok());
         // An entry that holds every address is refused like `*`.
@@ -1114,7 +1116,14 @@ mod tests {
             "a.lab.test@10.0.0.0/8",
         ]))
         .unwrap();
-        assert!(s.egress.policy().unwrap().unwrap().check_name("a.lab.test").is_ok());
+        assert!(
+            s.egress
+                .policy()
+                .unwrap()
+                .unwrap()
+                .check_name("a.lab.test")
+                .is_ok()
+        );
         // `fingerprint-report` takes the same flags.
         let r = parse_report_args(&strs(&["--url", "http://x/", "--egress", "loopback"])).unwrap();
         assert!(r.egress.policy().unwrap().is_some());

@@ -125,7 +125,9 @@ impl fmt::Display for Blocked {
             BlockedKind::Name => "host name",
             BlockedKind::Address => "address",
             BlockedKind::Invalid => "host",
-            BlockedKind::ProxiedName => "host name through a proxy (the proxy resolves it; only a name an unpinned allow entry lists may go)",
+            BlockedKind::ProxiedName => {
+                "host name through a proxy (the proxy resolves it; only a name an unpinned allow entry lists may go)"
+            }
         };
         write!(
             f,
@@ -580,7 +582,9 @@ impl EgressPolicy {
                     .any(|r| r.pins.is_none() && glob(&r.pattern, &n))
                 {
                     Ok(())
-                } else if self.name_listed(&n) || (self.mode == EgressMode::Loopback && is_localhost(&n)) {
+                } else if self.name_listed(&n)
+                    || (self.mode == EgressMode::Loopback && is_localhost(&n))
+                {
                     Err(self.refuse(&n, BlockedKind::ProxiedName))
                 } else {
                     Err(self.refuse(&n, BlockedKind::Name))

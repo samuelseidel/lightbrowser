@@ -692,7 +692,10 @@ async fn a_name_through_a_proxy_needs_an_unpinned_entry() {
             format!("127.0.0.1:{}", p.http),
             format!("socks5://127.0.0.1:{}", p.socks),
         ] {
-            let mut c = ctx(Some(loopback_with(&["*.lab.test", "pin.test@127.0.0.1"])), pooled);
+            let mut c = ctx(
+                Some(loopback_with(&["*.lab.test", "pin.test@127.0.0.1"])),
+                pooled,
+            );
             via_all(&mut c, &proxy);
             let before = s.hits.load(Ordering::SeqCst);
             for url in [
