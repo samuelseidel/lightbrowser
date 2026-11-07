@@ -218,15 +218,31 @@ pub(crate) async fn navigate_committed(
 ) -> Result<NavResult, PageError> {
     let Target {
         url,
-        initiator,
+        mut initiator,
         replace,
         post,
-        user_activated,
+        mut user_activated,
         kind,
         transition,
-        referrer,
+        mut referrer,
     } = target;
     let is_post = post.is_some();
+    // A reload or traversal makes the request of the entry again: the same
+    // initiator (`Sec-Fetch-Site`) and referrer, as a browser-initiated
+    // navigation (`Sec-Fetch-User`).
+    if initiator.is_none() && referrer.is_none() {
+        let s = page.history.borrow();
+        let entry = match &kind {
+            NavKind::Reload | NavKind::ReloadBypassingCache => s.current_entry(),
+            NavKind::History(id) => s.entries.iter().find(|e| e.id == *id),
+            NavKind::New => None,
+        };
+        if let Some(e) = entry {
+            initiator = e.initiator.clone();
+            referrer = e.referrer.clone();
+            user_activated = true;
+        }
+    }
     // `beforeunload` of the document being left: if the user chose to stay
     // (a dismissed dialog), the navigation stops here.
     if let Some(old) = page.window()
@@ -348,6 +364,8 @@ pub(crate) async fn navigate_committed(
                 doc: seq,
                 replace,
                 post: is_post,
+                initiator: initiator.as_ref(),
+                referrer: referrer.as_ref(),
             },
         );
     }
@@ -390,9 +408,9 @@ pub(crate) async fn navigate_committed(
                     lb_net::header_profile::referrer_with_policy(r, policy.as_deref(), &resp.url)
                         .unwrap_or_default()
                 }
-                None => initiator
-                    .as_ref()
-                    .map(|u| u.to_string())
+                // What the request's `Referer` was (default policy, no
+                // fragment).
+                None => lb_net::header_profile::referrer_for(initiator.as_ref(), &resp.url)
                     .unwrap_or_default(),
             },
             content_type: if html { mime } else { "text/html".into() },

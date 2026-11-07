@@ -17,6 +17,9 @@ use url::Url;
 use crate::browser::WorkerState;
 use crate::page::PageState;
 
+/// Chrome's `kMaxSessionHistoryEntries`.
+pub(crate) const MAX_ENTRIES: usize = 50;
+
 /// One entry of the session history.
 #[derive(Debug, Clone)]
 pub(crate) struct Entry {
@@ -33,6 +36,13 @@ pub(crate) struct Entry {
     pub state: Option<String>,
     /// The document that holds the entry (0: none yet).
     pub doc: u64,
+    /// The document that started the navigation (a link, `location`): a
+    /// reload or traversal of the entry is made as if it started it again
+    /// (`Sec-Fetch-Site`, default `Referer`).
+    pub initiator: Option<Url>,
+    /// The referrer `Page.navigate` gave and its policy; reloads and
+    /// traversals send it again.
+    pub referrer: Option<(Url, Option<String>)>,
 }
 
 /// How a committed document relates to the history.
@@ -81,7 +91,14 @@ impl Session {
             transition,
             state: None,
             doc,
+            initiator: None,
+            referrer: None,
         });
+        // Chrome keeps at most 50 entries and drops the oldest ones.
+        if self.entries.len() > MAX_ENTRIES {
+            let extra = self.entries.len() - MAX_ENTRIES;
+            self.entries.drain(..extra);
+        }
         self.current = self.entries.len() - 1;
     }
 
@@ -115,6 +132,8 @@ impl Session {
                     e.state = None;
                     e.title = String::new();
                     e.doc = c.doc;
+                    e.initiator = c.initiator.cloned();
+                    e.referrer = c.referrer.cloned();
                 } else {
                     self.entries.truncate(self.current + 1);
                     self.push(
@@ -123,6 +142,10 @@ impl Session {
                         c.transition.to_string(),
                         c.doc,
                     );
+                    if let Some(e) = self.entries.last_mut() {
+                        e.initiator = c.initiator.cloned();
+                        e.referrer = c.referrer.cloned();
+                    }
                 }
             }
             NavKind::Reload | NavKind::ReloadBypassingCache => {
@@ -146,6 +169,10 @@ impl Session {
                         transition.into(),
                         c.doc,
                     );
+                    if let Some(e) = self.entries.last_mut() {
+                        e.initiator = c.initiator.cloned();
+                        e.referrer = c.referrer.cloned();
+                    }
                 }
             }
             NavKind::History(id) => {
@@ -162,7 +189,14 @@ impl Session {
 
     /// A same-document entry: `pushState`, `replaceState`, a fragment
     /// navigation. `title` is the document's.
-    pub(crate) fn record(&mut self, url: &Url, state: Option<String>, replace: bool, title: &str) {
+    pub(crate) fn record(
+        &mut self,
+        url: &Url,
+        state: Option<String>,
+        replace: bool,
+        transition: &str,
+        title: &str,
+    ) {
         let Some(cur) = self.entries.get_mut(self.current) else {
             return;
         };
@@ -172,9 +206,12 @@ impl Session {
             return;
         }
         let (user_typed, doc) = (cur.user_typed.clone(), cur.doc);
+        let (initiator, referrer) = (cur.initiator.clone(), cur.referrer.clone());
         self.entries.truncate(self.current + 1);
-        self.push(url.clone(), user_typed, "link".into(), doc);
+        self.push(url.clone(), user_typed, transition.into(), doc);
         let e = &mut self.entries[self.current];
+        e.initiator = initiator;
+        e.referrer = referrer;
         e.state = state;
         // The new entry starts with the document's title; its own title
         // changes from here on belong to it.
@@ -209,6 +246,8 @@ pub(crate) struct Commit<'a> {
     pub replace: bool,
     /// A form POST never counts as the same URL.
     pub post: bool,
+    pub initiator: Option<&'a Url>,
+    pub referrer: Option<&'a (Url, Option<String>)>,
 }
 
 impl Commit<'_> {
@@ -259,7 +298,7 @@ impl SessionHost for PageSession {
         s.current_entry().and_then(|e| e.state.clone())
     }
 
-    fn record(&self, url: &Url, state: Option<String>, replace: bool, fragment: bool) {
+    fn record(&self, url: &Url, state: Option<String>, replace: bool, fragment: Option<&str>) {
         let Some(p) = self.page.upgrade() else { return };
         p.session_leave();
         let title = p.live_title().unwrap_or_default();
@@ -269,14 +308,25 @@ impl SessionHost for PageSession {
                 frame_id: a.target.clone(),
             });
         }
-        p.history.borrow_mut().record(url, state, replace, &title);
+        p.history.borrow_mut().record(
+            url,
+            state,
+            replace,
+            fragment.unwrap_or("link"),
+            &title,
+        );
         p.update_life(|l| l.url = url.to_string());
         if let Some(a) = &agent {
             a.same_document(url);
             a.emit(PageEvent::NavigatedWithinDocument {
                 frame_id: a.target.clone(),
                 url: url.to_string(),
-                navigation_type: if fragment { "fragment" } else { "historyApi" }.into(),
+                navigation_type: if fragment.is_some() {
+                    "fragment"
+                } else {
+                    "historyApi"
+                }
+                .into(),
             });
             a.emit(PageEvent::FrameStoppedLoading {
                 frame_id: a.target.clone(),
@@ -416,6 +466,8 @@ mod tests {
                 doc,
                 replace: false,
                 post: false,
+                initiator: None,
+                referrer: None,
             },
         );
     }
@@ -472,10 +524,10 @@ mod tests {
         // keeps its own title.
         commit(&mut s, &NavKind::New, "http://h.test/hashpage", "typed", 11);
         s.sync_title("Hash");
-        s.record(&u("http://h.test/pushed1"), None, false, "Hash");
+        s.record(&u("http://h.test/pushed1"), None, false, "link", "Hash");
         s.sync_title("T1");
-        s.record(&u("http://h.test/pushed2"), None, false, "T1");
-        s.record(&u("http://h.test/replaced2"), None, true, "T1");
+        s.record(&u("http://h.test/pushed2"), None, false, "link", "T1");
+        s.record(&u("http://h.test/replaced2"), None, true, "link", "T1");
         assert_eq!(
             &view(&s)[4..],
             [
@@ -521,8 +573,20 @@ mod tests {
             2,
             "a navigation to the URL the page is on replaces its entry"
         );
-        s.record(&u("http://h.test/p"), Some("{\"n\":1}".into()), false, "");
-        s.record(&u("http://h.test/q"), Some("{\"n\":2}".into()), false, "");
+        s.record(
+            &u("http://h.test/p"),
+            Some("{\"n\":1}".into()),
+            false,
+            "link",
+            "",
+        );
+        s.record(
+            &u("http://h.test/q"),
+            Some("{\"n\":2}".into()),
+            false,
+            "link",
+            "",
+        );
         assert_eq!(
             s.current_entry().unwrap().state.as_deref(),
             Some("{\"n\":2}")

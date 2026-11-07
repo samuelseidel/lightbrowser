@@ -514,7 +514,13 @@ pub(crate) fn form_entries(
 
 /// Add (or replace) a same-document history entry: in the page's session
 /// history when the window has one, else in the window's own list.
-fn record_entry(w: &Rc<Window>, url: &Url, state: Option<String>, replace: bool, fragment: bool) {
+fn record_entry(
+    w: &Rc<Window>,
+    url: &Url,
+    state: Option<String>,
+    replace: bool,
+    fragment: Option<&str>,
+) {
     let host = w.session.borrow().clone();
     if let Some(host) = host {
         host.record(url, state, replace, fragment);
@@ -574,6 +580,20 @@ pub(crate) fn apply_traversal(js: &mut dyn Js, w: &Rc<Window>, url: Url, state: 
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
 pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
+    navigate_to_as(js, w, url, replace, None);
+}
+
+/// [`navigate_to`], for the browser when `browser` holds the transition
+/// type of the entry (CDP `Page.navigate`): a fragment navigation to the
+/// URL the document is on adds an entry then; from a script it replaces
+/// the current one, as in Chrome.
+pub(crate) fn navigate_to_as(
+    js: &mut dyn Js,
+    w: &Rc<Window>,
+    url: Url,
+    replace: bool,
+    browser: Option<&str>,
+) {
     let cur = w.url();
     let same_doc = url.fragment().is_some() && {
         let (mut a, mut b) = (cur.clone(), url.clone());
@@ -584,12 +604,25 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
     if same_doc {
         let old = cur.to_string();
         let new = url.to_string();
-        record_entry(w, &url, None, replace, true);
+        let replace = replace || (browser.is_none() && old == new);
+        record_entry(w, &url, None, replace, Some(browser.unwrap_or("link")));
         w.set_url(url);
-        if old != new {
-            w.queue_task(
-                TaskSource::DomManipulation,
-                Box::new(move |js, w| {
+        // Chrome fires `popstate` (state null) for a fragment navigation,
+        // then `hashchange` when the URL changed.
+        w.queue_task(
+            TaskSource::DomManipulation,
+            Box::new(move |js, w| {
+                fire_event_with(
+                    js,
+                    w,
+                    WINDOW_REF,
+                    "PopStateEvent",
+                    "popstate",
+                    false,
+                    false,
+                    EventExtra::PopState(None),
+                );
+                if old != new {
                     fire_event_with(
                         js,
                         w,
@@ -600,9 +633,9 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
                         false,
                         EventExtra::HashChange { old, new },
                     );
-                }),
-            );
-        }
+                }
+            }),
+        );
         let _ = js;
         return;
     }
@@ -1077,6 +1110,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                     Some(u)
                 };
                 match target {
+                    // Blink: setting `hash` to the fragment it has does
+                    // not navigate.
+                    Some(u) if prop == "hash" && u == w.url() => Ok(()),
                     Some(u) => {
                         navigate_to(cx, w, u, false);
                         Ok(())
@@ -1169,7 +1205,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 }
                 _ => w.url(),
             };
-            record_entry(w, &url, state, replace, false);
+            record_entry(w, &url, state, replace, None);
             w.set_url(url);
             Ok(())
         });

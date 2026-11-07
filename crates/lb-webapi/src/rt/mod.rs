@@ -781,8 +781,10 @@ pub trait SessionHost {
     fn state(&self) -> Option<String>;
     /// The document changed its URL without loading: a new entry (or the
     /// current one, for `replace`) at `url` with `state`.
-    /// `fragment` says it was a fragment navigation, not the History API.
-    fn record(&self, url: &Url, state: Option<String>, replace: bool, fragment: bool);
+    /// `fragment` is the entry's transition type when it was a fragment
+    /// navigation (`link` from a script, the browser's own for CDP), `None`
+    /// for the History API.
+    fn record(&self, url: &Url, state: Option<String>, replace: bool, fragment: Option<&str>);
 }
 
 /// `document.readyState`.
@@ -1498,8 +1500,12 @@ impl Window {
         self.traversal.take()
     }
 
+    /// Chrome keeps the first traversal a task asked for and ignores the
+    /// ones after it (`history.back(); history.forward()` goes back).
     pub(crate) fn request_traversal(&self, delta: i32) {
-        self.traversal.set(Some(delta));
+        if self.traversal.get().is_none() {
+            self.traversal.set(Some(delta));
+        }
         self.wake();
     }
 
@@ -1515,10 +1521,11 @@ impl Window {
         window::apply_traversal(js, self, url, state);
     }
 
-    /// A fragment navigation made by the browser (`Page.navigate` to the
-    /// current URL with another fragment).
-    pub fn navigate_fragment(self: &Rc<Self>, js: &mut dyn Js, url: Url, replace: bool) {
-        window::navigate_to(js, self, url, replace);
+    /// A fragment navigation made by the browser (`Page.navigate` to a URL
+    /// of this document with a fragment); `transition` is the entry's CDP
+    /// transition type.
+    pub fn navigate_fragment(self: &Rc<Self>, js: &mut dyn Js, url: Url, transition: &str) {
+        window::navigate_to_as(js, self, url, false, Some(transition));
     }
 
     /// Serialized main document.

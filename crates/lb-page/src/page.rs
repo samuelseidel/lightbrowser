@@ -661,10 +661,10 @@ impl Page {
                             agent.nav_started_same_document(&url, "sameDocument");
                         }
                         let realm = w.realm();
-                        let replace = cur == url;
+                        let transition = transition.clone().unwrap_or_else(|| "typed".into());
                         ws.with_engine(|engine| {
                             let mut js = EngineJs { engine, realm };
-                            w.navigate_fragment(&mut js, url, replace);
+                            w.navigate_fragment(&mut js, url, &transition);
                             js.engine.perform_microtask_checkpoint();
                         });
                         return Ok(true);
