@@ -1003,8 +1003,54 @@ async function runAll() {
   return out;
 }
 
+/**
+ * Steps whose difference from Chrome is understood and kept, each with the
+ * reason (`scenario: label`). They are reported as `known` and do not fail
+ * the run; a step that now matches is reported as `known but equal` so the
+ * entry gets removed.
+ */
+const KNOWN = {
+  // Persona consistency (ADR 0009): a value that contradicts the persona
+  // is refused, where Chrome applies it.
+  'puppeteer.newPage: setDeviceMetrics': 'persona: Puppeteer\'s default viewport sends screenOrientation portraitPrimary / angle 0, which contradicts the persona screen',
+  'playwright.newPage: init Emulation.setTouchEmulationEnabled': 'persona: maxTouchPoints is 0',
+  'playwright.newPage: init Emulation.setTimezoneOverride': 'persona: timezone',
+  'playwright.newPage: init Emulation.setLocaleOverride': 'persona: locale',
+  'emulation: metrics 800x600': 'persona: device metrics',
+  'emulation: dims': 'persona: device metrics',
+  'emulation: metrics 1024x768 dsf2': 'persona: device metrics',
+  'emulation: dims 2': 'persona: device metrics',
+  'emulation: touch on': 'persona: maxTouchPoints is 0',
+  'emulation: timezone': 'persona: timezone',
+  'emulation: timezone invalid': 'persona: timezone',
+  'emulation: locale': 'persona: locale',
+  'emulation: locale invalid': 'persona: locale',
+  'screenshot: metrics': 'persona: device metrics',
+  'screenshot: viewport png': 'persona: size follows the persona viewport',
+  'screenshot: puppeteer default': 'persona: size follows the persona viewport',
+  'screenshot: transparent png': 'persona: size follows the persona viewport',
+  // Not part of this package (ADR 0045, open items).
+  'evaluate: evaluate rejected': 'exceptionDetails of a rejected promise: text, stack trace',
+  'evaluate: evaluate throws': 'exceptionDetails has no stack trace and has executionContextId',
+  'evaluate: evaluate syntax error': 'exceptionDetails has executionContextId',
+  'evaluate: getProperties': 'internalProperties are not listed',
+  'evaluate: removeBinding': 'Runtime.removeBinding is not implemented',
+  'evaluate: queryObjects missing': 'Runtime.queryObjects is not implemented',
+  'evaluate: DOM.describeNode': 'the node has a parentId Chrome omits',
+  'evaluate: Accessibility': 'AX nodes lack chromeRole and name sources',
+  'frames: getDocument': 'the root node has a frameId Chrome omits',
+  'fetch: requestPaused event': 'request headers are the persona set, not Chrome\'s list at that stage',
+  'cookies: Storage.getCookies after': 'sameSite, and a domain cookie set with Storage.setCookies gets a leading dot',
+  'browser: performance metrics': 'Performance.getMetrics is not implemented',
+  'browser: Page.setDocumentContent': 'Page.setDocumentContent is not implemented',
+  'browser: content after setDocumentContent': 'follows from Page.setDocumentContent',
+  'browser: Page.getResourceTree': 'Page.getResourceTree is not implemented',
+};
+
 function compare(expected, actual) {
   const problems = [];
+  const known = new Set();
+  const knownSeen = new Set();
   let checked = 0;
   for (const [name, exp] of Object.entries(expected.scenarios)) {
     const act = actual.scenarios[name];
@@ -1040,17 +1086,32 @@ function compare(expected, actual) {
       if (JSON.stringify(e.events) !== JSON.stringify(a.events)) problems.push(`${at}: events ${JSON.stringify(a.events)}, Chrome ${JSON.stringify(e.events)}`);
     }
   }
-  return { problems, checked };
+  // Differences of steps in KNOWN move to `known`.
+  const kept = [];
+  for (const p of problems) {
+    const key = Object.keys(KNOWN).find((k) => {
+      const [scenario, label] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 2)];
+      return p.startsWith(`${scenario} #`) && new RegExp(`^${scenario.replace(/\./g, '\\.')} #\\d+ ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(`).test(p);
+    });
+    if (key) {
+      knownSeen.add(key);
+      known.add(`${p.split(' (')[0]}: ${KNOWN[key]}`);
+    } else kept.push(p);
+  }
+  const stale = Object.keys(KNOWN).filter((k) => !knownSeen.has(k) && !opt('only', null));
+  return { problems: kept, known: [...known], stale, checked };
 }
 
 const chromeFile = path.join(here, 'chrome.json');
 if (mode === 'diff') {
   // diff EXPECTED.json ACTUAL.json: compare two recordings, no browser.
   const files = argv.filter((a) => !a.startsWith('--'));
-  const { problems, checked } = compare(JSON.parse(readFileSync(files[0], 'utf8')), JSON.parse(readFileSync(files[1], 'utf8')));
+  const { problems, known, stale, checked } = compare(JSON.parse(readFileSync(files[0], 'utf8')), JSON.parse(readFileSync(files[1], 'utf8')));
   for (const p of problems) console.log(p);
-  console.log(`${checked} steps compared; ${problems.length} differences`);
-  process.exit(problems.length ? 1 : 0);
+  if (verbose) for (const k of known) console.log(`known: ${k}`);
+  for (const k of stale) console.log(`stale KNOWN entry (the step matches now): ${k}`);
+  console.log(`${checked} steps compared; ${problems.length} differences, ${known.length} known, ${stale.length} stale`);
+  process.exit(problems.length || stale.length ? 1 : 0);
 }
 const result = await runAll();
 if (mode === 'record') {
@@ -1064,10 +1125,12 @@ if (mode === 'record') {
 } else if (mode === 'compare') {
   const expected = JSON.parse(readFileSync(opt('expect', chromeFile), 'utf8'));
   if (opt('out', null)) writeFileSync(opt('out'), JSON.stringify(result, null, 1) + '\n');
-  const { problems, checked } = compare(expected, result);
+  const { problems, known, stale, checked } = compare(expected, result);
   for (const p of problems) console.log(p);
-  console.log(`${checked} steps compared with ${expected.browser}; ${problems.length} differences`);
-  process.exit(problems.length ? 1 : 0);
+  if (verbose) for (const k of known) console.log(`known: ${k}`);
+  for (const k of stale) console.log(`stale KNOWN entry (the step matches now): ${k}`);
+  console.log(`${checked} steps compared with ${expected.browser}; ${problems.length} differences, ${known.length} known, ${stale.length} stale`);
+  process.exit(problems.length || stale.length ? 1 : 0);
 } else {
   console.log(JSON.stringify(result, null, 1));
 }

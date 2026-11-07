@@ -795,6 +795,10 @@ impl Agent {
     }
 
     pub(crate) fn object(&self, id: &str) -> HostResult<ObjEntry> {
+        // Ids are `page.context.n`: anything else is no id at all.
+        if id.split('.').count() != 3 || id.split('.').any(|p| p.parse::<u64>().is_err()) {
+            return Err(HostError::new("Invalid remote object id"));
+        }
         self.st
             .borrow()
             .objects

@@ -178,9 +178,9 @@
      }
     },
     "value": {
+     "attached": true,
      "type": "page",
-     "url": "about:blank",
-     "attached": true
+     "url": "about:blank"
     }
    },
    {
@@ -377,10 +377,8 @@
    {
     "label": "init Page.setFontFamilies",
     "method": "Page.setFontFamilies",
-    "ok": false,
-    "error": {
-     "code": -32602
-    }
+    "ok": true,
+    "shape": {}
    },
    {
     "label": "init Emulation.setEmulatedMedia",
@@ -523,11 +521,11 @@
      "loaderId": "string"
     },
     "value": {
-     "hasLoader": true,
-     "frame": true
+     "frame": true,
+     "hasLoader": true
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -564,13 +562,13 @@
     },
     "value": {
      "referer": null,
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -607,13 +605,13 @@
     },
     "value": {
      "referer": "https://ref.example.test/page?q=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -650,13 +648,13 @@
     },
     "value": {
      "referer": "{A}/from?x=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -693,13 +691,13 @@
     },
     "value": {
      "referer": "{B}/from?x=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -736,13 +734,13 @@
     },
     "value": {
      "referer": null,
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -779,13 +777,13 @@
     },
     "value": {
      "referer": null,
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -822,13 +820,13 @@
     },
     "value": {
      "referer": "https://ref.example.test/",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -865,13 +863,13 @@
     },
     "value": {
      "referer": null,
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -908,13 +906,13 @@
     },
     "value": {
      "referer": null,
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -951,13 +949,13 @@
     },
     "value": {
      "referer": "{A}/from?x=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -994,13 +992,13 @@
     },
     "value": {
      "referer": "{A}/from?x=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1037,13 +1035,13 @@
     },
     "value": {
      "referer": null,
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1080,13 +1078,13 @@
     },
     "value": {
      "referer": "http://ref.example.test/page?q=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1123,13 +1121,13 @@
     },
     "value": {
      "referer": "https://ref.example.test/page?q=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1166,13 +1164,13 @@
     },
     "value": {
      "referer": "{A}/from?x=1",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1197,13 +1195,13 @@
     },
     "value": {
      "referer": "{A}/",
-     "sec-fetch-site": "none",
-     "sec-fetch-mode": "navigate",
      "sec-fetch-dest": "document",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-site": "none",
      "sec-fetch-user": "?1"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1273,22 +1271,8 @@
      "loaderId": "string"
     },
     "value": {
-     "err": "net::ERR_UNSAFE_PORT"
-    },
-    "events": [
-     "Page.frameStartedNavigating",
-     "Page.frameStartedLoading",
-     "Runtime.executionContextsCleared",
-     "lifecycle:init",
-     "Runtime.executionContextsCleared",
-     "Page.frameNavigated",
-     "Runtime.executionContextCreated",
-     "Page.domContentEventFired",
-     "lifecycle:DOMContentLoaded",
-     "Page.loadEventFired",
-     "lifecycle:load",
-     "Page.frameStoppedLoading"
-    ]
+     "err": "net::ERR_CONNECTION_REFUSED"
+    }
    },
    {
     "label": "redirect",
@@ -1300,7 +1284,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1336,7 +1320,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1362,9 +1346,9 @@
      "hasLoader": false
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:sameDocument",
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:fragment",
      "Page.frameStoppedLoading"
     ]
    },
@@ -1402,10 +1386,10 @@
      "currentIndex": 0,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       }
      ]
     }
@@ -1420,7 +1404,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1454,16 +1438,16 @@
      "currentIndex": 1,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       }
      ]
     }
@@ -1478,7 +1462,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1502,7 +1486,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1536,28 +1520,28 @@
      "currentIndex": 3,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/b",
-       "userTypedURL": "{A}/b",
        "title": "Page B",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/b",
+       "userTypedURL": "{A}/b"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       }
      ]
     }
@@ -1568,7 +1552,7 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1614,28 +1598,28 @@
      "currentIndex": 2,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/b",
-       "userTypedURL": "{A}/b",
        "title": "Page B",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/b",
+       "userTypedURL": "{A}/b"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       }
      ]
     }
@@ -1646,7 +1630,7 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1678,7 +1662,7 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1724,28 +1708,28 @@
      "currentIndex": 2,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/b",
-       "userTypedURL": "{A}/b",
        "title": "Page B",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/b",
+       "userTypedURL": "{A}/b"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       }
      ]
     }
@@ -1783,7 +1767,7 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1807,7 +1791,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1841,22 +1825,22 @@
      "currentIndex": 2,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       }
      ]
     }
@@ -1873,7 +1857,7 @@
      }
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1911,7 +1895,7 @@
      }
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1949,7 +1933,7 @@
      }
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -1995,22 +1979,22 @@
      "currentIndex": 0,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       }
      ]
     }
@@ -2027,7 +2011,7 @@
      }
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -2065,11 +2049,8 @@
      }
     },
     "events": [
-     "Page.frameScheduledNavigation",
-     "Page.frameRequestedNavigation",
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:reload",
      "Page.frameStartedLoading",
-     "Page.frameClearedScheduledNavigation",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
      "Runtime.executionContextsCleared",
@@ -2115,22 +2096,22 @@
      "currentIndex": 2,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       }
      ]
     }
@@ -2145,7 +2126,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -2173,7 +2154,7 @@
     "value": 5,
     "events": [
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:historyApi",
      "Page.frameStoppedLoading"
     ]
    },
@@ -2191,7 +2172,7 @@
     "value": 6,
     "events": [
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:historyApi",
      "Page.frameStoppedLoading"
     ]
    },
@@ -2209,7 +2190,7 @@
     "value": 6,
     "events": [
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:historyApi",
      "Page.frameStoppedLoading"
     ]
    },
@@ -2233,40 +2214,40 @@
      "currentIndex": 5,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       },
       {
-       "url": "{A}/hashpage",
-       "userTypedURL": "{A}/hashpage",
        "title": "Hash",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage"
       },
       {
+       "title": "T1",
+       "transitionType": "link",
        "url": "{A}/pushed1",
-       "userTypedURL": "{A}/hashpage",
-       "title": "T1",
-       "transitionType": "link"
+       "userTypedURL": "{A}/hashpage"
       },
       {
-       "url": "{A}/replaced2",
-       "userTypedURL": "{A}/hashpage",
        "title": "T1",
-       "transitionType": "link"
+       "transitionType": "link",
+       "url": "{A}/replaced2",
+       "userTypedURL": "{A}/hashpage"
       }
      ]
     }
@@ -2283,9 +2264,9 @@
     },
     "value": "{\"n\":1} /pushed1",
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historySameDocument",
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:fragment",
      "Page.frameStoppedLoading"
     ]
    },
@@ -2309,40 +2290,40 @@
      "currentIndex": 4,
      "entries": [
       {
-       "url": "about:blank",
-       "userTypedURL": "about:blank",
        "title": "",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "about:blank",
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       },
       {
-       "url": "{A}/hashpage",
-       "userTypedURL": "{A}/hashpage",
        "title": "Hash",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage"
       },
       {
+       "title": "T1",
+       "transitionType": "link",
        "url": "{A}/pushed1",
-       "userTypedURL": "{A}/hashpage",
-       "title": "T1",
-       "transitionType": "link"
+       "userTypedURL": "{A}/hashpage"
       },
       {
-       "url": "{A}/replaced2",
-       "userTypedURL": "{A}/hashpage",
        "title": "T1",
-       "transitionType": "link"
+       "transitionType": "link",
+       "url": "{A}/replaced2",
+       "userTypedURL": "{A}/hashpage"
       }
      ]
     }
@@ -2353,9 +2334,9 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historySameDocument",
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:fragment",
      "Page.frameStoppedLoading"
     ]
    },
@@ -2377,9 +2358,9 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historySameDocument",
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:fragment",
      "Page.frameStoppedLoading"
     ]
    },
@@ -2405,7 +2386,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -2425,7 +2406,7 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historyDifferentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -2461,7 +2442,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -2487,11 +2468,9 @@
     },
     "value": "{A}/hashpage#target",
     "events": [
-     "Page.frameScheduledNavigation",
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
-     "Page.frameStoppedLoading",
-     "Page.frameClearedScheduledNavigation"
+     "Page.navigatedWithinDocument:fragment",
+     "Page.frameStoppedLoading"
     ]
    },
    {
@@ -2514,46 +2493,46 @@
      "currentIndex": 6,
      "entries": [
       {
+       "title": "",
+       "transitionType": "typed",
        "url": "about:blank",
-       "userTypedURL": "about:blank",
-       "title": "",
-       "transitionType": "typed"
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       },
       {
-       "url": "{A}/hashpage",
-       "userTypedURL": "{A}/hashpage",
        "title": "Hash",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage"
       },
       {
-       "url": "{A}/pushed1",
-       "userTypedURL": "{A}/hashpage",
        "title": "",
-       "transitionType": "link"
+       "transitionType": "link",
+       "url": "{A}/pushed1",
+       "userTypedURL": "{A}/hashpage"
       },
       {
+       "title": "Hash",
+       "transitionType": "typed",
        "url": "{A}/hashpage",
-       "userTypedURL": "{A}/hashpage",
-       "title": "Hash",
-       "transitionType": "typed"
+       "userTypedURL": "{A}/hashpage"
       },
       {
-       "url": "{A}/hashpage#target",
-       "userTypedURL": "{A}/hashpage",
        "title": "Hash",
-       "transitionType": "link"
+       "transitionType": "link",
+       "url": "{A}/hashpage#target",
+       "userTypedURL": "{A}/hashpage"
       }
      ]
     }
@@ -2570,9 +2549,9 @@
     },
     "value": "{A}/hashpage#target -> {A}/hashpage",
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:historySameDocument",
      "Page.frameStartedLoading",
-     "Page.navigatedWithinDocument",
+     "Page.navigatedWithinDocument:fragment",
      "Page.frameStoppedLoading"
     ]
    },
@@ -2582,7 +2561,7 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:reload",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -2616,46 +2595,46 @@
      "currentIndex": 5,
      "entries": [
       {
+       "title": "",
+       "transitionType": "typed",
        "url": "about:blank",
-       "userTypedURL": "about:blank",
-       "title": "",
-       "transitionType": "typed"
+       "userTypedURL": "about:blank"
       },
       {
-       "url": "{A}/a",
-       "userTypedURL": "{A}/a",
        "title": "Page A",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a"
       },
       {
-       "url": "{A}/c",
-       "userTypedURL": "{A}/c",
        "title": "Page C",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c"
       },
       {
-       "url": "{A}/hashpage",
-       "userTypedURL": "{A}/hashpage",
        "title": "Hash",
-       "transitionType": "typed"
+       "transitionType": "typed",
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage"
       },
       {
-       "url": "{A}/pushed1",
-       "userTypedURL": "{A}/hashpage",
        "title": "",
-       "transitionType": "link"
+       "transitionType": "link",
+       "url": "{A}/pushed1",
+       "userTypedURL": "{A}/hashpage"
       },
       {
+       "title": "Hash",
+       "transitionType": "reload",
        "url": "{A}/hashpage",
-       "userTypedURL": "{A}/hashpage",
-       "title": "Hash",
-       "transitionType": "reload"
+       "userTypedURL": "{A}/hashpage"
       },
       {
-       "url": "{A}/hashpage#target",
-       "userTypedURL": "{A}/hashpage",
        "title": "Hash",
-       "transitionType": "link"
+       "transitionType": "link",
+       "url": "{A}/hashpage#target",
+       "userTypedURL": "{A}/hashpage"
       }
      ]
     }
@@ -2666,7 +2645,7 @@
     "ok": true,
     "shape": {},
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:reloadBypassingCache",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -2706,10 +2685,10 @@
      "currentIndex": 0,
      "entries": [
       {
-       "url": "{A}/hashpage",
-       "userTypedURL": "{A}/hashpage",
        "title": "Hash",
-       "transitionType": "reload"
+       "transitionType": "reload",
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage"
       }
      ]
     }
@@ -2739,7 +2718,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -3099,7 +3078,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -3178,9 +3157,9 @@
      "data": "string"
     },
     "value": {
+     "h": 600,
      "magic": "PNG",
-     "w": 800,
-     "h": 600
+     "w": 800
     }
    },
    {
@@ -3191,9 +3170,9 @@
      "data": "string"
     },
     "value": {
+     "h": 600,
      "magic": "PNG",
-     "w": 800,
-     "h": 600
+     "w": 800
     }
    },
    {
@@ -3204,9 +3183,9 @@
      "data": "string"
     },
     "value": {
+     "h": 50,
      "magic": "PNG",
-     "w": 100,
-     "h": 50
+     "w": 100
     }
    },
    {
@@ -3245,9 +3224,9 @@
      "data": "string"
     },
     "value": {
+     "h": 600,
      "magic": "PNG",
-     "w": 800,
-     "h": 600
+     "w": 800
     }
    },
    {
@@ -3297,7 +3276,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -3323,9 +3302,9 @@
      }
     },
     "value": {
+     "description": "2",
      "type": "number",
-     "value": 2,
-     "description": "2"
+     "value": 2
     }
    },
    {
@@ -3353,9 +3332,9 @@
      }
     },
     "value": {
+     "description": "5",
      "type": "number",
-     "value": 5,
-     "description": "5"
+     "value": 5
     }
    },
    {
@@ -3394,8 +3373,8 @@
      }
     },
     "value": {
-     "text": "Uncaught (in promise) Error: boom",
-     "desc": "Error: boom"
+     "desc": "Error: boom",
+     "text": "Uncaught (in promise) Error: boom"
     }
    },
    {
@@ -3437,8 +3416,8 @@
      }
     },
     "value": {
-     "text": "Uncaught",
-     "desc": "TypeError: bad"
+     "desc": "TypeError: bad",
+     "text": "Uncaught"
     }
    },
    {
@@ -3469,8 +3448,8 @@
      }
     },
     "value": {
-     "text": "Uncaught",
-     "desc": "SyntaxError: let is disallowed as a lexically bound name"
+     "desc": "SyntaxError: let is disallowed as a lexically bound name",
+     "text": "Uncaught"
     }
    },
    {
@@ -3516,9 +3495,9 @@
      }
     },
     "value": {
+     "description": "10n",
      "type": "bigint",
-     "unserializableValue": "10n",
-     "description": "10n"
+     "unserializableValue": "10n"
     }
    },
    {
@@ -3533,9 +3512,9 @@
      }
     },
     "value": {
+     "description": "NaN",
      "type": "number",
-     "unserializableValue": "NaN",
-     "description": "NaN"
+     "unserializableValue": "NaN"
     }
    },
    {
@@ -3551,9 +3530,9 @@
      }
     },
     "value": {
-     "type": "function",
      "className": "Function",
-     "desc": "function(){}"
+     "desc": "function(){}",
+     "type": "function"
     }
    },
    {
@@ -3687,9 +3666,9 @@
      }
     },
     "value": {
+     "description": "42",
      "type": "number",
-     "value": 42,
-     "description": "42"
+     "value": 42
     }
    },
    {
@@ -3787,32 +3766,7 @@
      "frameId": "string",
      "isDownload": "boolean",
      "loaderId": "string"
-    },
-    "events": [
-     "Page.frameStartedNavigating",
-     "Page.frameStartedLoading",
-     "Runtime.executionContextsCleared",
-     "lifecycle:init",
-     "Runtime.executionContextsCleared",
-     "Page.frameNavigated",
-     "Runtime.executionContextCreated",
-     "Page.frameAttached",
-     "lifecycle:init",
-     "Page.frameRequestedNavigation",
-     "Page.frameStartedNavigating",
-     "Page.frameStartedLoading",
-     "Page.domContentEventFired",
-     "lifecycle:DOMContentLoaded",
-     "lifecycle:init",
-     "Page.frameNavigated",
-     "Runtime.executionContextCreated",
-     "lifecycle:DOMContentLoaded",
-     "lifecycle:load",
-     "Page.frameStoppedLoading",
-     "Page.loadEventFired",
-     "lifecycle:load",
-     "Page.frameStoppedLoading"
-    ]
+    }
    },
    {
     "label": "getFrameTree",
@@ -3995,7 +3949,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -4160,7 +4114,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -4252,7 +4206,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -4414,7 +4368,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -4452,24 +4406,24 @@
     },
     "value": [
      {
-      "name": "srv",
-      "value": "1",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": false,
+      "name": "srv",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "1"
      },
      {
-      "name": "srvhttp",
-      "value": "2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "srvhttp",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "2"
      }
     ]
    },
@@ -4497,24 +4451,24 @@
     },
     "value": [
      {
-      "name": "srv",
-      "value": "1",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": false,
+      "name": "srv",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "1"
      },
      {
-      "name": "srvhttp",
-      "value": "2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "srvhttp",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "2"
      }
     ]
    },
@@ -4548,44 +4502,44 @@
     },
     "value": [
      {
-      "name": "c1",
-      "value": "v1",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": false,
+      "name": "c1",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "v1"
      },
      {
-      "name": "c2",
-      "value": "v2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "c2",
+      "path": "/",
+      "sameSite": "Lax",
       "secure": false,
       "session": false,
-      "sameSite": "Lax"
+      "value": "v2"
      },
      {
-      "name": "srv",
-      "value": "1",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": false,
+      "name": "srv",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "1"
      },
      {
-      "name": "srvhttp",
-      "value": "2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "srvhttp",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "2"
      }
     ]
    },
@@ -4669,44 +4623,44 @@
     },
     "value": [
      {
-      "name": "c2",
-      "value": "v2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "c2",
+      "path": "/",
+      "sameSite": "Lax",
       "secure": false,
       "session": false,
-      "sameSite": "Lax"
+      "value": "v2"
      },
      {
+      "domain": "127.0.0.1",
+      "httpOnly": false,
       "name": "c3",
-      "value": "v3",
-      "domain": "127.0.0.1",
       "path": "/",
-      "httpOnly": false,
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "v3"
      },
      {
+      "domain": "127.0.0.1",
+      "httpOnly": false,
       "name": "srv",
-      "value": "1",
-      "domain": "127.0.0.1",
       "path": "/",
-      "httpOnly": false,
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "1"
      },
      {
-      "name": "srvhttp",
-      "value": "2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "srvhttp",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "2"
      }
     ]
    },
@@ -4734,44 +4688,44 @@
     },
     "value": [
      {
-      "name": "c2",
-      "value": "v2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "c2",
+      "path": "/",
+      "sameSite": "Lax",
       "secure": false,
       "session": false,
-      "sameSite": "Lax"
+      "value": "v2"
      },
      {
+      "domain": "127.0.0.1",
+      "httpOnly": false,
       "name": "c3",
-      "value": "v3",
-      "domain": "127.0.0.1",
       "path": "/",
-      "httpOnly": false,
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "v3"
      },
      {
+      "domain": "127.0.0.1",
+      "httpOnly": false,
       "name": "srv",
-      "value": "1",
-      "domain": "127.0.0.1",
       "path": "/",
-      "httpOnly": false,
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "1"
      },
      {
-      "name": "srvhttp",
-      "value": "2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "srvhttp",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "2"
      }
     ]
    },
@@ -4805,54 +4759,54 @@
     },
     "value": [
      {
-      "name": "c2",
-      "value": "v2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "c2",
+      "path": "/",
+      "sameSite": "Lax",
       "secure": false,
       "session": false,
-      "sameSite": "Lax"
+      "value": "v2"
      },
      {
+      "domain": "127.0.0.1",
+      "httpOnly": false,
       "name": "c3",
-      "value": "v3",
-      "domain": "127.0.0.1",
       "path": "/",
-      "httpOnly": false,
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "v3"
      },
      {
+      "domain": "127.0.0.1",
+      "httpOnly": false,
       "name": "s1",
-      "value": "x",
-      "domain": "127.0.0.1",
       "path": "/",
-      "httpOnly": false,
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "x"
      },
      {
+      "domain": "127.0.0.1",
+      "httpOnly": false,
       "name": "srv",
-      "value": "1",
-      "domain": "127.0.0.1",
       "path": "/",
-      "httpOnly": false,
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "1"
      },
      {
-      "name": "srvhttp",
-      "value": "2",
       "domain": "127.0.0.1",
-      "path": "/",
       "httpOnly": true,
+      "name": "srvhttp",
+      "path": "/",
+      "sameSite": null,
       "secure": false,
       "session": true,
-      "sameSite": null
+      "value": "2"
      }
     ]
    },
@@ -4898,7 +4852,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",
@@ -5128,7 +5082,7 @@
      "loaderId": "string"
     },
     "events": [
-     "Page.frameStartedNavigating",
+     "Page.frameStartedNavigating:differentDocument",
      "Page.frameStartedLoading",
      "Runtime.executionContextsCleared",
      "lifecycle:init",

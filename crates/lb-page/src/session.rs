@@ -319,24 +319,16 @@ pub(crate) fn traverse_to(
     id: i64,
     committed: Option<tokio::sync::oneshot::Sender<Result<crate::NavResult, crate::context::PageError>>>,
 ) -> bool {
-    let (url, state, same_doc, nav_type) = {
+    let (url, state, same_doc) = {
         let s = page.history.borrow();
         let Some(i) = s.entries.iter().position(|e| e.id == id) else {
             return false;
         };
-        let cur = s.current_entry();
-        let cur_doc = cur.map(|e| e.doc);
-        let fragment_only = cur.is_some_and(|c| {
-            let (mut a, mut b) = (c.url.clone(), s.entries[i].url.clone());
-            a.set_fragment(None);
-            b.set_fragment(None);
-            a == b && s.entries[i].state.is_none() && c.url != s.entries[i].url
-        });
+        let cur_doc = s.current_entry().map(|e| e.doc);
         (
             s.entries[i].url.clone(),
             s.entries[i].state.clone(),
             cur_doc == Some(s.entries[i].doc) && page.window().is_some(),
-            "fragment",
         )
     };
     if same_doc && let Some(w) = page.window() {
@@ -361,7 +353,8 @@ pub(crate) fn traverse_to(
             a.emit(PageEvent::NavigatedWithinDocument {
                 frame_id: a.target.clone(),
                 url: url.to_string(),
-                navigation_type: nav_type.into(),
+                // Chrome says `fragment` for every traversal inside a document.
+                navigation_type: "fragment".into(),
             });
         }
         let realm = w.realm();

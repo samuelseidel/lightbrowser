@@ -1673,10 +1673,7 @@ fn child_trees(a: &agent::Agent, w: &lb_webapi::rt::Window) -> Vec<FrameTree> {
                 loader,
                 c.window.url().as_str(),
             );
-            let name = frames::window_name(&c.window);
-            if !name.is_empty() {
-                frame.name = Some(name);
-            }
+            frame.name = Some(frames::window_name(&c.window));
             FrameTree {
                 frame,
                 child_frames: child_trees(a, &c.window),

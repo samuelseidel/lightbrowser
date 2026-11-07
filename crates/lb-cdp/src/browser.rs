@@ -1014,6 +1014,7 @@ fn host_err(e: HostError) -> CdpError {
     // client sent), not the `-32000` of a failed command.
     const BAD_PARAMS: &[&str] = &[
         "Invalid InterceptionId.",
+        "Invalid cookie fields",
         "Unknown permission type",
         "No frame for given id found",
         "Unknown errorReason",
@@ -2205,6 +2206,12 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
         c.p.get("browserContextId")
             .and_then(Value::as_str)
             .map(str::to_string);
+    if c.method.starts_with("Storage.") && c.target.is_some() && explicit_ctx.is_some() {
+        return Err(CdpError::new(
+            protocol::code::INVALID_PARAMS,
+            "browserContextId is only allowed for Browser target",
+        ));
+    }
     match c.method {
         "Network.enable" => {
             c.page()?;
@@ -2235,6 +2242,12 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
         "Network.setCookie" => {
             let ctx = c.cookie_context(None);
             let cookie: CookieParam = params(c.p)?;
+            if cookie.url.is_none() && cookie.domain.is_none() {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "At least one of the url or domain needs to be specified",
+                ));
+            }
             let ok = host.set_cookies(&ctx, vec![cookie]).is_ok();
             Ok(json!({ "success": ok }))
         }
