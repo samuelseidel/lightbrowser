@@ -73,6 +73,9 @@ struct Shared {
     /// The context's TCP/IP SYN profile (ADR 0031): set once, before the
     /// first request (`fetch --tcp-profile`). `None` sends the host's SYN.
     tcp_profile: std::sync::OnceLock<Arc<lb_net::tcpfp::TcpProfile>>,
+    /// The context's egress policy (ADR 0044): set once, before the first
+    /// request (`serve`/`fetch` `--egress`). Unset means open.
+    egress: std::sync::OnceLock<Arc<lb_net::EgressPolicy>>,
     /// Permission states a CDP client set (`Browser.grantPermissions`).
     permissions: lb_webapi::host::SharedPermissions,
     /// IndexedDB databases of every origin, in memory (ADR 0028), chrome
@@ -191,6 +194,7 @@ impl BrowserContext {
             connections: ConnectionPool::new(),
             proxy: std::sync::OnceLock::new(),
             tcp_profile: std::sync::OnceLock::new(),
+            egress: std::sync::OnceLock::new(),
             permissions: Default::default(),
             #[cfg(feature = "chrome")]
             idb: Default::default(),
@@ -285,6 +289,27 @@ impl BrowserContext {
         Ok(())
     }
 
+    /// Restrict this context's network to `policy` (ADR 0044): page and
+    /// worker requests, service worker fetches, WebSockets, favicons and
+    /// the proxy hop all go through it; a refused request fails as blocked
+    /// (`net::ERR_BLOCKED_BY_CLIENT`) and never leaves the machine. Only
+    /// the first call counts; call it before the first request.
+    pub fn set_egress(&self, policy: Arc<lb_net::EgressPolicy>) {
+        let _ = self.0.egress.set(policy);
+    }
+
+    /// The context's egress policy, if one was set.
+    pub fn egress(&self) -> Option<&Arc<lb_net::EgressPolicy>> {
+        self.0.egress.get()
+    }
+
+    /// Answer the name lookups of this context's connections from `hook`
+    /// first (a hosts file that needs no root). For tests.
+    #[doc(hidden)]
+    pub fn set_resolve_hook(&self, hook: Option<Arc<lb_net::pool::ResolveHook>>) {
+        self.0.connections.set_resolve_hook(hook);
+    }
+
     /// Permission states a CDP client set for this context.
     pub fn permissions(&self) -> &lb_webapi::host::SharedPermissions {
         &self.0.permissions
@@ -334,6 +359,9 @@ impl BrowserContext {
         net.pool = Some(self.0.connections.clone());
         net.proxy = self.0.proxy.get().cloned();
         net.tcp_profile = self.0.tcp_profile.get().cloned();
+        if let Some(e) = self.0.egress.get() {
+            net.egress = Arc::clone(e);
+        }
         Ok(net)
     }
 

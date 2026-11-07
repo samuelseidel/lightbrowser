@@ -60,6 +60,11 @@ pub(crate) fn fail_text(reason: &str) -> String {
 
 /// A Chrome-style `net::ERR_*` text for an lb-net error message.
 pub(crate) fn net_error_text(e: &str) -> String {
+    // The egress policy's reason (ADR 0044) is for people; Chrome's text for
+    // a request the client blocked has none.
+    if e.starts_with("net::ERR_BLOCKED_BY_CLIENT") {
+        return "net::ERR_BLOCKED_BY_CLIENT".to_string();
+    }
     if e.starts_with("net::") {
         return e.to_string();
     }
@@ -680,6 +685,12 @@ mod tests {
             b"hello!?"
         );
         assert_eq!(base64_encode(b"ab"), "YWI=");
+        assert_eq!(
+            net_error_text(
+                "net::ERR_BLOCKED_BY_CLIENT: egress policy (loopback) does not allow host name \"a.test\""
+            ),
+            "net::ERR_BLOCKED_BY_CLIENT"
+        );
         assert_eq!(
             net_error_text("connect: Connection refused (os error 111)"),
             "net::ERR_CONNECTION_REFUSED"

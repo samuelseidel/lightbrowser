@@ -1,0 +1,22 @@
+{
+ "chrome": "153.0.8010.12",
+ "navigate": {
+  "errorText": "net::ERR_BLOCKED_BY_CLIENT"
+ },
+ "playwright_goto": "page.goto: net::ERR_BLOCKED_BY_CLIENT at http://blocked.test:8099/",
+ "probes": {
+  "ws": "error, close 1006 clean=false",
+  "fetch": "TypeError: Failed to fetch",
+  "xhr": "error status=0 readyState=4",
+  "img": "error",
+  "script": "error",
+  "worker": "TypeError: Failed to fetch"
+ },
+ "console": [
+  "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+  "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+  "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+  "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+  "error: WebSocket connection to 'ws://blocked.test:8099/' failed: Error in connection establishment: net::ERR_NAME_NOT_RESOLVED"
+ ]
+}

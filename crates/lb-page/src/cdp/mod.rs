@@ -112,6 +112,10 @@ pub struct CdpHostOptions {
     /// use it (ADR 0027).
     pub proxy_server: Option<String>,
     pub proxy_bypass_list: Option<String>,
+    /// Egress policy of every context this host makes (ADR 0044). `None`:
+    /// open. A CDP client cannot change it (`createBrowserContext` has no
+    /// such parameter).
+    pub egress: Option<Arc<lb_net::EgressPolicy>>,
 }
 
 impl CdpHostOptions {
@@ -124,6 +128,7 @@ impl CdpHostOptions {
             workers: BrowserOptions::default().workers,
             proxy_server: None,
             proxy_bypass_list: None,
+            egress: None,
         }
     }
 }
@@ -299,6 +304,9 @@ impl CdpHost {
         let ctx = BrowserContext::new(opts).map_err(page_err)?;
         if let Some(p) = proxy {
             ctx.set_proxy(p);
+        }
+        if let Some(e) = &self.opts.egress {
+            ctx.set_egress(Arc::clone(e));
         }
         Ok(ctx)
     }

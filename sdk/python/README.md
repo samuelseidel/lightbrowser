@@ -53,13 +53,20 @@ Async: `from lightbrowser.async_api import AsyncBrowser`, with `await` on
 ### Browser
 
 `Browser(persona=None, *, executable_path=None, port=0, insecure=False,
-profiles_dir=None, workers=None, extra_args=(), startup_timeout=60,
-validate=True, playwright=None)`
+profiles_dir=None, workers=None, egress="loopback", extra_args=(),
+startup_timeout=60, validate=True, playwright=None)`
 
 - `persona`: a `Persona`, a path, a dict (written to a private temp dir and
   removed on close), or `None` for the binary's default Chrome persona. With
   `validate=True` it first goes through `lightbrowser validate`, so a bad
   persona raises `PersonaValidationError` with the rule text.
+- **Loopback only by default.** The launcher starts `serve --egress loopback`
+  (ADR 0044): the browser connects only to `127.0.0.0/8`, `::1`, `localhost`
+  and `*.localhost`. Anything else (a redirect, a subresource, a WebSocket, a
+  worker or a proxy hop included) fails as `net::ERR_BLOCKED_BY_CLIENT`
+  before DNS and before any packet leaves. `egress=["10.0.0.5", "*.lab.test",
+  "192.168.0.0/16"]` allows those too (a name glob, an IP or a CIDR block);
+  `egress="open"` removes the restriction. Needs a binary that has the flag.
 - The server always binds 127.0.0.1; `port=0` lets the OS choose and the SDK
   reads the port from the `DevTools listening on ws://...` line on stderr.
 - `new_context(**kw)` and `new_page(**kw)` return stock Playwright objects.

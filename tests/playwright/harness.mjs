@@ -52,7 +52,10 @@ function serveSite() {
 
 function serveBrowser() {
   assert.ok(existsSync(bin), `${bin} not found; run cargo build -p lightbrowser first`);
-  const proc = spawn(bin, ['serve', '--port', '0'], { cwd: repo, stdio: ['ignore', 'ignore', 'pipe'] });
+  // LIGHTBROWSER_SERVE_ARGS: extra arguments for `serve` (space separated),
+  // e.g. `--egress loopback` to run every suite under the egress policy.
+  const extra = (process.env.LIGHTBROWSER_SERVE_ARGS || '').split(/\s+/).filter(Boolean);
+  const proc = spawn(bin, ['serve', '--port', '0', ...extra], { cwd: repo, stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = new Promise((resolve, reject) => {
     let log = '';
     const timer = setTimeout(() => reject(new Error(`no DevTools line:\n${log}`)), 15000);
