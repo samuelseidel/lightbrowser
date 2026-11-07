@@ -523,17 +523,34 @@ pub(crate) fn install() {
 }
 
 /// Extracts the ICU data from the prebuilt `librusty_v8.a`: the member
-/// [`MEMBER`] (an ELF64 object), from symbol [`SYMBOL`] to the end of its
-/// section. Used by the `icu_pack` example and the `icu_data` tests.
+/// [`MEMBER`] (an ELF64 object on Linux, a 64-bit Mach-O object on macOS),
+/// from symbol [`SYMBOL`] to the end of its section. Used by the
+/// `icu_pack` example and the `icu_data` tests.
 pub fn extract_from_archive(ar: &[u8]) -> Result<Vec<u8>, String> {
-    let obj = archive_member(ar, MEMBER)?;
-    elf_symbol_section_tail(obj, SYMBOL)
+    let obj = archive_members(ar)?
+        .into_iter()
+        .find(|(n, _)| *n == MEMBER.as_bytes())
+        .map(|(_, body)| body)
+        .ok_or_else(|| format!("{MEMBER} not found in archive"))?;
+    if obj.starts_with(&MACHO64_MAGIC) {
+        macho_symbol_section_tail(obj, SYMBOL)
+    } else {
+        elf_symbol_section_tail(obj, SYMBOL)
+    }
 }
 
-fn archive_member<'a>(ar: &'a [u8], name: &str) -> Result<&'a [u8], String> {
+/// One `ar` member: its name and its body.
+pub type ArMember<'a> = (&'a [u8], &'a [u8]);
+
+/// The members of an `ar` archive, in order, including the symbol index.
+/// Reads both the GNU format (Linux: `/` index, `//` long-name table,
+/// `name/` and `/<offset>` names) and the BSD format (macOS: `__.SYMDEF`
+/// index, `#1/<len>` names stored at the start of the body).
+pub fn archive_members(ar: &[u8]) -> Result<Vec<ArMember<'_>>, String> {
     if !ar.starts_with(b"!<arch>\n") {
         return Err("not an ar archive".into());
     }
+    let mut out = Vec::new();
     let mut pos = 8;
     let mut long_names: &[u8] = &[];
     while pos + 60 <= ar.len() {
@@ -542,32 +559,165 @@ fn archive_member<'a>(ar: &'a [u8], name: &str) -> Result<&'a [u8], String> {
             .ok()
             .and_then(|s| s.trim().parse().ok())
             .ok_or("bad ar member size")?;
-        let body = ar
+        let mut body = ar
             .get(pos + 60..pos + 60 + size)
             .ok_or("truncated ar member")?;
+        pos += 60 + size + (size & 1);
         let raw = std::str::from_utf8(&hdr[0..16])
             .map_err(|_| "bad ar name")?
             .trim_end();
-        let member = if raw == "//" {
+        let name: &[u8] = if raw == "//" {
             long_names = body;
-            None
+            continue;
+        } else if let Some(len) = raw.strip_prefix("#1/") {
+            // BSD: the name is the first `len` bytes of the body, padded
+            // with NULs.
+            let len: usize = len.parse().map_err(|_| "bad BSD name length")?;
+            let n = body.get(..len).ok_or("bad BSD name length")?;
+            body = &body[len..];
+            &n[..n.iter().position(|&c| c == 0).unwrap_or(n.len())]
         } else if let Some(off) = raw.strip_prefix('/').and_then(|o| o.parse::<usize>().ok()) {
             let rest = long_names.get(off..).ok_or("bad long name offset")?;
-            let end = rest.iter().position(|&c| c == b'\n').unwrap_or(rest.len());
-            Some(
-                std::str::from_utf8(&rest[..end])
-                    .map_err(|_| "bad long name")?
-                    .trim_end_matches('/'),
-            )
+            let n = &rest[..rest.iter().position(|&c| c == b'\n').unwrap_or(rest.len())];
+            n.strip_suffix(b"/").unwrap_or(n)
+        } else if raw == "/" || raw == "/SYM64/" {
+            raw.as_bytes()
         } else {
-            Some(raw.trim_end_matches('/'))
+            raw.trim_end_matches('/').as_bytes()
         };
-        if member == Some(name) {
-            return Ok(body);
-        }
-        pos += 60 + size + (size & 1);
+        out.push((name, body));
     }
-    Err(format!("{name} not found in archive"))
+    Ok(out)
+}
+
+/// The global symbol names of an `ar` archive's index: GNU `/` or
+/// `/SYM64/`, or BSD `__.SYMDEF` / `__.SYMDEF SORTED` (and their `_64`
+/// forms). Names are given as the C or C++ source spells them: the
+/// leading `_` that Mach-O adds to every symbol is removed for a BSD
+/// index. Used by the `unused_v8` tests.
+pub fn archive_symbols(ar: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    let members = archive_members(ar)?;
+    let &(name, body) = members.first().ok_or("empty archive")?;
+    let bad = || "malformed symbol index".to_string();
+    let int = |o: usize, w: usize, big: bool| -> Result<usize, String> {
+        let b = body.get(o..o + w).ok_or_else(bad)?;
+        let fold = |a: u64, &x: &u8| (a << 8) | u64::from(x);
+        let v = if big {
+            b.iter().fold(0, fold)
+        } else {
+            b.iter().rev().fold(0, fold)
+        };
+        usize::try_from(v).map_err(|_| bad())
+    };
+    let cstr =
+        |s: &[u8]| -> Vec<u8> { s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())].to_vec() };
+    match name {
+        b"/" | b"/SYM64/" => {
+            // Big-endian count, one member offset per symbol, then the
+            // NUL-terminated names.
+            let w = if name == b"/" { 4 } else { 8 };
+            let count = int(0, w, true)?;
+            let names = body.get(w + w * count..).ok_or_else(bad)?;
+            Ok(names
+                .split(|&b| b == 0)
+                .take(count)
+                .map(<[u8]>::to_vec)
+                .collect())
+        }
+        b"__.SYMDEF" | b"__.SYMDEF SORTED" | b"__.SYMDEF_64" | b"__.SYMDEF_64 SORTED" => {
+            // Host-endian (little-endian on every Mac we build for): byte
+            // length of the `ranlib` entries, the entries (string offset,
+            // member offset), byte length of the strings, the strings.
+            let w = if name.starts_with(b"__.SYMDEF_64") {
+                8
+            } else {
+                4
+            };
+            let ranlib = int(0, w, false)?;
+            let strtab = w + ranlib + w;
+            let strsize = int(w + ranlib, w, false)?;
+            let strings = body.get(strtab..strtab + strsize).ok_or_else(bad)?;
+            (w..w + ranlib)
+                .step_by(2 * w)
+                .map(|e| {
+                    let s = cstr(strings.get(int(e, w, false)?..).ok_or_else(bad)?);
+                    Ok(s.strip_prefix(b"_").map(<[u8]>::to_vec).unwrap_or(s))
+                })
+                .collect()
+        }
+        _ => Err("archive has no symbol index".into()),
+    }
+}
+
+/// `MH_MAGIC_64` as a little-endian Mach-O object stores it.
+const MACHO64_MAGIC: [u8; 4] = [0xcf, 0xfa, 0xed, 0xfe];
+
+/// [`elf_symbol_section_tail`] for a little-endian 64-bit Mach-O object,
+/// whose symbol names carry a leading `_`.
+fn macho_symbol_section_tail(obj: &[u8], symbol: &str) -> Result<Vec<u8>, String> {
+    const LC_SYMTAB: usize = 0x2;
+    const LC_SEGMENT_64: usize = 0x19;
+    const S_ZEROFILL: usize = 0x1;
+    let bad = || "malformed Mach-O".to_string();
+    let u32_at = |o: usize| {
+        obj.get(o..o + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize)
+            .ok_or_else(bad)
+    };
+    let u64_at = |o: usize| {
+        obj.get(o..o + 8)
+            .map(|b| u64::from_le_bytes(b.try_into().unwrap()) as usize)
+            .ok_or_else(bad)
+    };
+    // (addr, size, file offset, flags) per section, in ordinal order.
+    let mut sections = Vec::new();
+    let mut symtab = None;
+    let mut lc = 32; // after mach_header_64
+    for _ in 0..u32_at(16)? {
+        let (cmd, cmdsize) = (u32_at(lc)?, u32_at(lc + 4)?);
+        if cmd == LC_SEGMENT_64 {
+            for k in 0..u32_at(lc + 64)? {
+                let s = lc + 72 + 80 * k; // section_64 entries
+                sections.push((
+                    u64_at(s + 32)?,
+                    u64_at(s + 40)?,
+                    u32_at(s + 48)?,
+                    u32_at(s + 64)?,
+                ));
+            }
+        } else if cmd == LC_SYMTAB {
+            symtab = Some((u32_at(lc + 8)?, u32_at(lc + 12)?, u32_at(lc + 16)?));
+        }
+        if cmdsize < 8 {
+            return Err(bad());
+        }
+        lc += cmdsize;
+    }
+    let (symoff, nsyms, stroff) = symtab.ok_or("no LC_SYMTAB")?;
+    let want = format!("_{symbol}");
+    for k in 0..nsyms {
+        let e = symoff + 16 * k; // nlist_64
+        let name = obj.get(stroff + u32_at(e)?..).ok_or_else(bad)?;
+        let name = &name[..name.iter().position(|&c| c == 0).ok_or_else(bad)?];
+        if name != want.as_bytes() {
+            continue;
+        }
+        let n_type = *obj.get(e + 4).ok_or_else(bad)?;
+        let n_sect = usize::from(*obj.get(e + 5).ok_or_else(bad)?);
+        let value = u64_at(e + 8)?;
+        if n_type & 0x0e != 0x0e || n_sect == 0 {
+            return Err(format!("{symbol} is not defined in a section"));
+        }
+        let (addr, size, off, flags) = *sections.get(n_sect - 1).ok_or_else(bad)?;
+        if flags & 0xff == S_ZEROFILL || value < addr {
+            return Err(format!("{symbol} is not in a section with file data"));
+        }
+        return obj
+            .get(off + (value - addr)..off + size)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(bad);
+    }
+    Err(format!("symbol {symbol} not found"))
 }
 
 fn elf_symbol_section_tail(obj: &[u8], symbol: &str) -> Result<Vec<u8>, String> {
@@ -640,4 +790,75 @@ pub fn find_archive(exe: &std::path::Path) -> Option<std::path::PathBuf> {
     exe.ancestors()
         .map(|d| d.join("gn_out/obj/librusty_v8.a"))
         .find(|p| p.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn member(name: &str, body: &[u8]) -> Vec<u8> {
+        let mut m = format!(
+            "{name:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n",
+            0,
+            0,
+            0,
+            644,
+            body.len()
+        )
+        .into_bytes();
+        m.extend_from_slice(body);
+        if body.len() % 2 == 1 {
+            m.push(b'\n');
+        }
+        m
+    }
+
+    #[test]
+    fn reads_gnu_archives() {
+        let mut index = 2u32.to_be_bytes().to_vec();
+        index.extend_from_slice(&[0; 8]);
+        index.extend_from_slice(b"icudt78_dat\0_ZN2v84Stub\0");
+        let mut ar = b"!<arch>\n".to_vec();
+        ar.extend(member("/", &index));
+        ar.extend(member("//", b"a_rather_long_member_name.o/\n"));
+        ar.extend(member("short.o/", b"abc"));
+        ar.extend(member("/0", b"long body"));
+        let m = archive_members(&ar).unwrap();
+        let names: Vec<_> = m.iter().map(|m| m.0).collect();
+        assert_eq!(
+            names,
+            [&b"/"[..], b"short.o", b"a_rather_long_member_name.o"]
+        );
+        assert_eq!((m[1].1, m[2].1), (&b"abc"[..], &b"long body"[..]));
+        assert_eq!(
+            archive_symbols(&ar).unwrap(),
+            [b"icudt78_dat".to_vec(), b"_ZN2v84Stub".to_vec()]
+        );
+    }
+
+    #[test]
+    fn reads_bsd_archives() {
+        let strings = b"_icudt78_dat\0__ZN2v84Stub\0\0\0";
+        let mut index = 16u32.to_le_bytes().to_vec();
+        for (strx, off) in [(0u32, 8u32), (13, 8)] {
+            index.extend_from_slice(&strx.to_le_bytes());
+            index.extend_from_slice(&off.to_le_bytes());
+        }
+        index.extend_from_slice(&(strings.len() as u32).to_le_bytes());
+        index.extend_from_slice(strings);
+        let mut body = b"__.SYMDEF SORTED\0\0\0\0".to_vec();
+        body.extend_from_slice(&index);
+        let mut ar = b"!<arch>\n".to_vec();
+        ar.extend(member("#1/20", &body));
+        let mut body = b"icudtl_dat.o\0\0\0\0".to_vec();
+        body.extend_from_slice(b"object");
+        ar.extend(member("#1/16", &body));
+        let m = archive_members(&ar).unwrap();
+        assert_eq!(m[0].0, b"__.SYMDEF SORTED");
+        assert_eq!((m[1].0, m[1].1), (&b"icudtl_dat.o"[..], &b"object"[..]));
+        assert_eq!(
+            archive_symbols(&ar).unwrap(),
+            [b"icudt78_dat".to_vec(), b"_ZN2v84Stub".to_vec()]
+        );
+    }
 }

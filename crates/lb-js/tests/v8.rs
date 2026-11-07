@@ -1167,32 +1167,33 @@ mod unused_v8 {
     use super::*;
     use lb_js::{icu_data, unused_v8};
 
-    /// The global symbol names of the archive's index (GNU `/` member).
+    /// The global symbol names of the archive's index (GNU `/` member on
+    /// Linux, BSD `__.SYMDEF` on macOS, without Mach-O's leading `_`).
     fn archive_symbols() -> std::collections::HashSet<Vec<u8>> {
         let exe = std::env::current_exe().unwrap();
         let archive = icu_data::find_archive(&exe).expect("librusty_v8.a (RUSTY_V8_ARCHIVE)");
         let ar = std::fs::read(&archive).unwrap();
-        assert!(ar.starts_with(b"!<arch>\n"));
-        let hdr = &ar[8..68];
-        assert_eq!(&hdr[..2], b"/ ", "first member is the symbol index");
-        let size: usize = std::str::from_utf8(&hdr[48..58])
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        let body = &ar[68..68 + size];
-        let count = u32::from_be_bytes(body[..4].try_into().unwrap()) as usize;
-        body[4 + 4 * count..]
-            .split(|&b| b == 0)
-            .map(<[u8]>::to_vec)
-            .collect()
+        let syms = icu_data::archive_symbols(&ar).unwrap();
+        assert!(
+            !syms.is_empty(),
+            "empty symbol index in {}",
+            archive.display()
+        );
+        syms.into_iter().collect()
     }
 
     #[test]
     fn stubs_name_archive_symbols() {
         let syms = archive_symbols();
+        // V8 builds the Wasm revectorizer (`wasm-revec-phase.o`) only for
+        // x64 (`V8_ENABLE_WASM_SIMD256_REVEC`); elsewhere its stub defines
+        // a name nothing references.
+        let x64_only = |n: &str| n.contains("WasmRevecPhase");
         for (path, names) in unused_v8::STUBS {
             for n in *names {
+                if !cfg!(target_arch = "x86_64") && x64_only(n) {
+                    continue;
+                }
                 assert!(
                     syms.contains(n.as_bytes()),
                     "{path}: {n} is not in the V8 archive (renamed? update unused_v8.rs)"

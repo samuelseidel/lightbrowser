@@ -106,7 +106,7 @@ pub fn decode(bytes: &[u8], content_type: Option<&str>) -> Result<Pixmap, Decode
 
 /// Unpremultiplied RGBA8 → premultiplied, in place.
 pub fn premultiply(data: &mut [u8]) {
-    for p in data.chunks_exact_mut(4) {
+    for p in data.as_chunks_mut::<4>().0.iter_mut() {
         let a = u16::from(p[3]);
         if a < 255 {
             for c in &mut p[..3] {
@@ -185,7 +185,7 @@ mod tests {
 
     fn png(w: u32, h: u32) -> Vec<u8> {
         let mut b = crate::Bitmap::new(w, h);
-        for p in b.data.chunks_exact_mut(4) {
+        for p in b.data.as_chunks_mut::<4>().0.iter_mut() {
             p.copy_from_slice(&[200, 100, 50, 128]);
         }
         crate::encode::encode(&b, "image/png", None)

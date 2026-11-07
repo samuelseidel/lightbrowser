@@ -1081,7 +1081,7 @@ impl Canvas2d {
         let (w, h) = (i64::from(self.width), i64::from(self.height));
         let Some(pm) = &self.pixmap else {
             if self.opaque {
-                for (i, p) in out.data.chunks_exact_mut(4).enumerate() {
+                for (i, p) in out.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                     let (x, y) = (
                         sx + (i as i64 % i64::from(sw)),
                         sy + (i as i64 / i64::from(sw)),
@@ -1384,7 +1384,9 @@ fn make_shadow(layer: &Pixmap, color: Color, blur: f64) -> Option<Pixmap> {
     let (w, h) = (layer.width() as usize, layer.height() as usize);
     let mut alpha: Vec<f32> = layer
         .data()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| f32::from(p[3]))
         .collect();
     let sigma = blur / 2.0;
@@ -1402,7 +1404,7 @@ fn make_shadow(layer: &Pixmap, color: Color, blur: f64) -> Option<Pixmap> {
     let mut out = Pixmap::new(w as u32, h as u32)?;
     let base = to_skia(color, 1.0);
     let (cr, cg, cb, ca) = (base.red(), base.green(), base.blue(), base.alpha());
-    for (px, a) in out.data_mut().chunks_exact_mut(4).zip(alpha) {
+    for (px, a) in out.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(alpha) {
         let a = (a / 255.0).clamp(0.0, 1.0) * ca;
         if a <= 0.0 {
             continue;
@@ -1478,8 +1480,10 @@ mod tests {
         assert!(
             n.get_image_data(0, 0, 4, 4)
                 .data
-                .chunks_exact(4)
-                .all(|p| p == [10, 20, 30, 255])
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| *p == [10, 20, 30, 255])
         );
     }
 
@@ -1501,7 +1505,7 @@ mod tests {
             c.fill_text("\u{1F600}", 4.0, 4.0, None);
             let d = c.get_image_data(0, 0, 80, 70).data;
             let (mut inked, mut colored) = (0, 0);
-            for px in d.chunks_exact(4) {
+            for px in d.as_chunks::<4>().0.iter() {
                 if px[3] == 0 {
                     continue;
                 }
@@ -1618,7 +1622,9 @@ mod tests {
         let ink = t
             .read(0, 0, 120, 30, false)
             .data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[3] > 0)
             .count();
         assert!(ink > 50, "{ink}");

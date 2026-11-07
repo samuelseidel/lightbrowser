@@ -259,7 +259,7 @@ pub fn paint_page(
 pub fn encode_screenshot(p: &Pixmap, format: ImageFormat) -> Vec<u8> {
     let mut bmp = Bitmap::new(p.width(), p.height());
     let opaque = matches!(format, ImageFormat::Jpeg(_));
-    for (dst, px) in bmp.data.chunks_exact_mut(4).zip(p.pixels()) {
+    for (dst, px) in bmp.data.as_chunks_mut::<4>().0.iter_mut().zip(p.pixels()) {
         let c = px.demultiply();
         if opaque {
             // Over white.

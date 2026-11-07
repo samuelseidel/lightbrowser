@@ -3191,6 +3191,24 @@ Checks on macOS (arm64):
     `BuildInput` lacks `hints`/`restart`.
 - **Not run:** Playwright (not installed here), bench and T-010.
 
+### Build health after the merge (2026-11-07)
+
+The three failures above are fixed:
+- `lb-net` `header_profile.rs`: the form-POST unit test sets `hints: &[]`
+  and `restart: false` (no `Accept-CH`, not a `Critical-CH` retry), so it
+  still checks the plain form-POST headers.
+- Clippy 1.99: constant-size `chunks_exact`/`chunks_exact_mut` became
+  `as_chunks`/`as_chunks_mut` (stable since Rust 1.88, our MSRV) in
+  `lb-fptest`, `lb-gl`, `lb-net`, `lb-paint` and `lb-webapi`. Same
+  behaviour: both skip a short tail.
+- `lb-js` `icu_data.rs` reads BSD `ar` archives (`__.SYMDEF` index,
+  `#1/<len>` names) and Mach-O objects as well as GNU `ar` and ELF; new
+  `archive_members`/`archive_symbols` serve the `icu_pack` example and the
+  tests. Only those use it: the binary embeds `icu/icudt78.dat.zch`, so
+  Linux is unchanged. The macOS arm64 archive's ICU data equals the
+  checked-in file. `stubs_name_archive_symbols` skips `WasmRevecPhase` off
+  x86_64, since V8 builds the revectorizer only for x64.
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from
