@@ -539,6 +539,13 @@ pub fn extract_from_archive(ar: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
+/// `len` bytes of `b` from `start`, or `None` when that runs past the end
+/// (or the sum overflows): offsets and lengths read from a file may be
+/// anything.
+fn slice_at(b: &[u8], start: usize, len: usize) -> Option<&[u8]> {
+    b.get(start..)?.get(..len)
+}
+
 /// One `ar` member: its name and its body.
 pub type ArMember<'a> = (&'a [u8], &'a [u8]);
 
@@ -559,9 +566,7 @@ pub fn archive_members(ar: &[u8]) -> Result<Vec<ArMember<'_>>, String> {
             .ok()
             .and_then(|s| s.trim().parse().ok())
             .ok_or("bad ar member size")?;
-        let mut body = ar
-            .get(pos + 60..pos + 60 + size)
-            .ok_or("truncated ar member")?;
+        let mut body = slice_at(ar, pos + 60, size).ok_or("truncated ar member")?;
         pos += 60 + size + (size & 1);
         let raw = std::str::from_utf8(&hdr[0..16])
             .map_err(|_| "bad ar name")?
@@ -600,7 +605,7 @@ pub fn archive_symbols(ar: &[u8]) -> Result<Vec<Vec<u8>>, String> {
     let &(name, body) = members.first().ok_or("empty archive")?;
     let bad = || "malformed symbol index".to_string();
     let int = |o: usize, w: usize, big: bool| -> Result<usize, String> {
-        let b = body.get(o..o + w).ok_or_else(bad)?;
+        let b = slice_at(body, o, w).ok_or_else(bad)?;
         let fold = |a: u64, &x: &u8| (a << 8) | u64::from(x);
         let v = if big {
             b.iter().fold(0, fold)
@@ -617,7 +622,8 @@ pub fn archive_symbols(ar: &[u8]) -> Result<Vec<Vec<u8>>, String> {
             // NUL-terminated names.
             let w = if name == b"/" { 4 } else { 8 };
             let count = int(0, w, true)?;
-            let names = body.get(w + w * count..).ok_or_else(bad)?;
+            let skip = count.checked_mul(w).and_then(|n| n.checked_add(w));
+            let names = body.get(skip.ok_or_else(bad)?..).ok_or_else(bad)?;
             Ok(names
                 .split(|&b| b == 0)
                 .take(count)
@@ -634,9 +640,11 @@ pub fn archive_symbols(ar: &[u8]) -> Result<Vec<Vec<u8>>, String> {
                 4
             };
             let ranlib = int(0, w, false)?;
-            let strtab = w + ranlib + w;
+            // `ranlib` bytes of entries must fit in the body before the
+            // string length is read, so the sums below cannot overflow.
+            slice_at(body, w, ranlib).ok_or_else(bad)?;
             let strsize = int(w + ranlib, w, false)?;
-            let strings = body.get(strtab..strtab + strsize).ok_or_else(bad)?;
+            let strings = slice_at(body, w + ranlib + w, strsize).ok_or_else(bad)?;
             (w..w + ranlib)
                 .step_by(2 * w)
                 .map(|e| {
@@ -657,16 +665,18 @@ const MACHO64_MAGIC: [u8; 4] = [0xcf, 0xfa, 0xed, 0xfe];
 fn macho_symbol_section_tail(obj: &[u8], symbol: &str) -> Result<Vec<u8>, String> {
     const LC_SYMTAB: usize = 0x2;
     const LC_SEGMENT_64: usize = 0x19;
-    const S_ZEROFILL: usize = 0x1;
+    // Section types with no file data: S_ZEROFILL, S_GB_ZEROFILL,
+    // S_THREAD_LOCAL_ZEROFILL. Their `offset` is 0.
+    const ZEROFILL: [usize; 3] = [0x1, 0xc, 0x12];
     let bad = || "malformed Mach-O".to_string();
     let u32_at = |o: usize| {
-        obj.get(o..o + 4)
+        slice_at(obj, o, 4)
             .map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize)
             .ok_or_else(bad)
     };
     let u64_at = |o: usize| {
-        obj.get(o..o + 8)
-            .map(|b| u64::from_le_bytes(b.try_into().unwrap()) as usize)
+        slice_at(obj, o, 8)
+            .and_then(|b| usize::try_from(u64::from_le_bytes(b.try_into().unwrap())).ok())
             .ok_or_else(bad)
     };
     // (addr, size, file offset, flags) per section, in ordinal order.
@@ -697,7 +707,8 @@ fn macho_symbol_section_tail(obj: &[u8], symbol: &str) -> Result<Vec<u8>, String
     let want = format!("_{symbol}");
     for k in 0..nsyms {
         let e = symoff + 16 * k; // nlist_64
-        let name = obj.get(stroff + u32_at(e)?..).ok_or_else(bad)?;
+        let strx = stroff.checked_add(u32_at(e)?).ok_or_else(bad)?;
+        let name = obj.get(strx..).ok_or_else(bad)?;
         let name = &name[..name.iter().position(|&c| c == 0).ok_or_else(bad)?];
         if name != want.as_bytes() {
             continue;
@@ -709,11 +720,13 @@ fn macho_symbol_section_tail(obj: &[u8], symbol: &str) -> Result<Vec<u8>, String
             return Err(format!("{symbol} is not defined in a section"));
         }
         let (addr, size, off, flags) = *sections.get(n_sect - 1).ok_or_else(bad)?;
-        if flags & 0xff == S_ZEROFILL || value < addr {
+        if ZEROFILL.contains(&(flags & 0xff)) || (off == 0 && size > 0) || value < addr {
             return Err(format!("{symbol} is not in a section with file data"));
         }
-        return obj
-            .get(off + (value - addr)..off + size)
+        let (start, end) = (off.checked_add(value - addr), off.checked_add(size));
+        return start
+            .zip(end)
+            .and_then(|(start, end)| obj.get(start..end))
             .map(<[u8]>::to_vec)
             .ok_or_else(bad);
     }
@@ -860,5 +873,159 @@ mod tests {
             archive_symbols(&ar).unwrap(),
             [b"icudt78_dat".to_vec(), b"_ZN2v84Stub".to_vec()]
         );
+    }
+
+    #[test]
+    fn reads_gnu_sym64_index() {
+        let mut index = 2u64.to_be_bytes().to_vec();
+        index.extend_from_slice(&[0; 16]);
+        index.extend_from_slice(b"icudt78_dat\0_ZN2v84Stub\0");
+        let mut ar = b"!<arch>\n".to_vec();
+        ar.extend(member("/SYM64/", &index));
+        ar.extend(member("short.o/", b"abc"));
+        assert_eq!(archive_members(&ar).unwrap()[0].0, b"/SYM64/");
+        assert_eq!(
+            archive_symbols(&ar).unwrap(),
+            [b"icudt78_dat".to_vec(), b"_ZN2v84Stub".to_vec()]
+        );
+        // A count whose offsets would run past `usize` is an error.
+        let mut ar = b"!<arch>\n".to_vec();
+        ar.extend(member("/SYM64/", &u64::MAX.to_be_bytes()));
+        assert!(archive_symbols(&ar).is_err());
+    }
+
+    /// A BSD `__.SYMDEF_64` index (8-byte `ranlib` fields) for `strings`,
+    /// with `entries` (string offset, member offset), stored as `#1/16`.
+    fn symdef64(ranlib_len: u64, entries: &[(u64, u64)], strings: &[u8]) -> Vec<u8> {
+        let mut body = b"__.SYMDEF_64\0\0\0\0".to_vec();
+        body.extend_from_slice(&ranlib_len.to_le_bytes());
+        for (strx, off) in entries {
+            body.extend_from_slice(&strx.to_le_bytes());
+            body.extend_from_slice(&off.to_le_bytes());
+        }
+        body.extend_from_slice(&(strings.len() as u64).to_le_bytes());
+        body.extend_from_slice(strings);
+        member("#1/16", &body)
+    }
+
+    #[test]
+    fn reads_bsd_symdef64_short_names_and_odd_sizes() {
+        let mut ar = b"!<arch>\n".to_vec();
+        ar.extend(symdef64(
+            32,
+            &[(0, 8), (13, 8)],
+            b"_icudt78_dat\0__ZN2v84Stub\0\0\0",
+        ));
+        // A short name in the header, an odd body, then a `#1/` member
+        // whose name and body add up to an odd size.
+        ar.extend(member("short.o", b"abc"));
+        ar.extend(member("#1/12", b"icudtl_dat.oodd"));
+        ar.extend(member("last.o", b"end"));
+        let m = archive_members(&ar).unwrap();
+        let names: Vec<_> = m.iter().map(|m| m.0).collect();
+        assert_eq!(
+            names,
+            [&b"__.SYMDEF_64"[..], b"short.o", b"icudtl_dat.o", b"last.o"]
+        );
+        assert_eq!(
+            (m[1].1, m[2].1, m[3].1),
+            (&b"abc"[..], &b"odd"[..], &b"end"[..])
+        );
+        assert_eq!(
+            archive_symbols(&ar).unwrap(),
+            [b"icudt78_dat".to_vec(), b"_ZN2v84Stub".to_vec()]
+        );
+        // Lengths that would overflow are errors, not panics.
+        for ranlib_len in [u64::MAX, u64::MAX - 7] {
+            let mut ar = b"!<arch>\n".to_vec();
+            ar.extend(symdef64(ranlib_len, &[], b""));
+            assert!(archive_symbols(&ar).is_err());
+        }
+    }
+
+    /// A minimal 64-bit Mach-O object: one `LC_SEGMENT_64` with `__text`
+    /// ("code" at address 0) and `__const` (`sect2_size` bytes
+    /// "headDATAtail" at address 0x10, file offset `sect2_off`, flags
+    /// `sect2_flags`), and an `LC_SYMTAB` with `_other` in section 1 and
+    /// `_icudt78_dat` in section 2 at `value`.
+    fn macho(sect2_flags: u32, sect2_off: Option<u32>, sect2_size: u64, value: u64) -> Vec<u8> {
+        const DATA: usize = 32 + 232 + 24;
+        let (symoff, stroff) = (DATA + 16, DATA + 16 + 32);
+        let mut o = Vec::new();
+        let u32s = |o: &mut Vec<u8>, v: &[u32]| v.iter().for_each(|x| o.extend(x.to_le_bytes()));
+        let u64s = |o: &mut Vec<u8>, v: &[u64]| v.iter().for_each(|x| o.extend(x.to_le_bytes()));
+        let name16 = |o: &mut Vec<u8>, n: &str| {
+            o.extend(n.as_bytes());
+            o.extend(std::iter::repeat_n(0, 16 - n.len()));
+        };
+        o.extend(MACHO64_MAGIC);
+        u32s(&mut o, &[0x0100_000c, 0, 1, 2, 256, 0, 0]);
+        // LC_SEGMENT_64 with two section_64 entries.
+        u32s(&mut o, &[0x19, 232]);
+        name16(&mut o, "");
+        u64s(&mut o, &[0, 0x1c, DATA as u64, 16]);
+        u32s(&mut o, &[7, 7, 2, 0]);
+        let sections = [
+            ("__text", 0, 4, Some(DATA as u32), 0x8000_0400),
+            ("__const", 0x10, sect2_size, sect2_off, sect2_flags),
+        ];
+        for (name, addr, size, off, flags) in sections {
+            name16(&mut o, name);
+            name16(&mut o, "__TEXT");
+            u64s(&mut o, &[addr, size]);
+            u32s(
+                &mut o,
+                &[off.unwrap_or(DATA as u32 + 4), 0, 0, 0, flags, 0, 0, 0],
+            );
+        }
+        // LC_SYMTAB.
+        u32s(&mut o, &[0x2, 24, symoff as u32, 2, stroff as u32, 21]);
+        assert_eq!(o.len(), DATA);
+        o.extend(b"codeheadDATAtail");
+        for (strx, sect, v) in [(1u32, 1u8, 0u64), (8, 2, value)] {
+            u32s(&mut o, &[strx]);
+            o.extend([0x0f, sect, 0, 0]);
+            u64s(&mut o, &[v]);
+        }
+        o.extend(b"\0_other\0_icudt78_dat\0");
+        o
+    }
+
+    #[test]
+    fn reads_macho_objects() {
+        let obj = macho(0, None, 12, 0x14);
+        assert_eq!(
+            macho_symbol_section_tail(&obj, SYMBOL).unwrap(),
+            b"DATAtail"
+        );
+        assert_eq!(macho_symbol_section_tail(&obj, "other").unwrap(), b"code");
+        assert!(macho_symbol_section_tail(&obj, "missing").is_err());
+        // Through a BSD archive, as on macOS.
+        let mut body = b"icudtl_dat.o\0\0\0\0".to_vec();
+        body.extend(&obj);
+        let mut ar = b"!<arch>\n".to_vec();
+        ar.extend(symdef64(16, &[(0, 8)], b"_icudt78_dat\0\0\0\0"));
+        ar.extend(member("#1/16", &body));
+        assert_eq!(extract_from_archive(&ar).unwrap(), b"DATAtail");
+    }
+
+    #[test]
+    fn rejects_macho_sections_without_data_and_bad_offsets() {
+        // S_ZEROFILL, S_GB_ZEROFILL, S_THREAD_LOCAL_ZEROFILL, and a section
+        // with data but file offset 0 (the header).
+        for (flags, off) in [
+            (0x1, Some(0)),
+            (0xc, Some(0)),
+            (0x12, Some(0)),
+            (0, Some(0)),
+        ] {
+            let err = macho_symbol_section_tail(&macho(flags, off, 12, 0x14), SYMBOL);
+            assert!(err.unwrap_err().contains("file data"), "flags {flags:#x}");
+        }
+        // Values that would overflow the offset sums.
+        for (size, value) in [(12, u64::MAX), (u64::MAX, 0x14), (12, 0x10 + 13)] {
+            let err = macho_symbol_section_tail(&macho(0, None, size, value), SYMBOL);
+            assert_eq!(err.unwrap_err(), "malformed Mach-O");
+        }
     }
 }
