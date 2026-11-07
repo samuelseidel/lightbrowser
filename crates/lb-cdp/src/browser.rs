@@ -1341,38 +1341,10 @@ async fn browser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value,
                 _ => Err(CdpError::invalid_params(format!("unknown behavior {b:?}"))),
             }
         }
-        "Browser.getWindowForTarget" | "Browser.getWindowBounds" => {
-            if c.method == "Browser.getWindowForTarget" {
-                let t = match opt_str(c.p, "targetId")? {
-                    Some(id) => id.to_string(),
-                    None => c.page()?,
-                };
-                if c.sh.state.borrow().target_info(&t).is_none() {
-                    return Err(CdpError::server("No target with given id found"));
-                }
-            } else if c.p.get("windowId").and_then(Value::as_i64).is_none() {
-                return Err(CdpError::invalid_params("windowId: integer expected"));
-            }
-            let p = c.persona();
-            let (left, top) = p.window_position();
-            let state = if p.screen.maximized == Some(true) {
-                "maximized"
-            } else {
-                "normal"
-            };
-            let bounds = json!({
-                "left": left,
-                "top": top,
-                "width": p.screen.outer_width,
-                "height": p.screen.outer_height,
-                "windowState": state,
-            });
-            if c.method == "Browser.getWindowBounds" {
-                Ok(json!({ "bounds": bounds }))
-            } else {
-                Ok(json!({ "windowId": 1, "bounds": bounds }))
-            }
-        }
+        // Playwright goes on to `Browser.setWindowBounds` when this succeeds and
+        // would resize the persona's window (ADR 0009 revision 2): the answer
+        // stays "not found", as for a headless browser without a window.
+        "Browser.getWindowForTarget" => Err(CdpError::server("Browser window not found")),
         "Browser.grantPermissions" | "Browser.resetPermissions" | "Browser.setPermission" => {
             let explicit =
                 c.p.get("browserContextId")

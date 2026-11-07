@@ -10,7 +10,6 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "close",
             "setDownloadBehavior",
             "getWindowForTarget",
-            "getWindowBounds",
             "grantPermissions",
             "resetPermissions",
             "setPermission",

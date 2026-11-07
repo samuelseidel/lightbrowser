@@ -1029,6 +1029,11 @@ const KNOWN = {
   'screenshot: viewport png': 'persona: size follows the persona viewport',
   'screenshot: puppeteer default': 'persona: size follows the persona viewport',
   'screenshot: transparent png': 'persona: size follows the persona viewport',
+  // A browser window is not exposed (ADR 0009 revision 2).
+  'puppeteer.newPage: getWindowForTarget': 'Browser.getWindowForTarget answers "Browser window not found": Playwright would go on to resize the persona window',
+  'playwright.newPage: init Browser.getWindowForTarget': 'same',
+  'browser: getWindowBounds': 'Browser.getWindowBounds is not implemented (no window id exists)',
+  'browser: getWindowForTarget': 'same',
   // Not part of this package (ADR 0045, open items).
   'evaluate: evaluate rejected': 'exceptionDetails of a rejected promise: text, stack trace',
   'evaluate: evaluate throws': 'exceptionDetails has no stack trace and has executionContextId',
