@@ -217,6 +217,7 @@ async fn read_body(
     response: http::Response<h2::RecvStream>,
     max_body: usize,
 ) -> Result<RawResponse, NetError> {
+    let head_at = std::time::Instant::now();
     let (parts, mut body) = response.into_parts();
     let mut buf = BytesMut::new();
     while let Some(chunk) = body.data().await {
@@ -233,6 +234,8 @@ async fn read_body(
         headers: ordered(&parts.headers),
         body: buf.freeze(),
         version: HttpVersion::Http2,
+        head_at,
+        done_at: std::time::Instant::now(),
     })
 }
 

@@ -463,6 +463,7 @@ pub(crate) fn local_response(
         body: bytes::Bytes::from(body),
         url: url.clone(),
         redirected: false,
+        timing: None,
     };
     match url.scheme() {
         "blob" => {

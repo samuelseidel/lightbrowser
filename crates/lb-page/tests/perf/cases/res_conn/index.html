@@ -1,0 +1,23 @@
+<!doctype html><html><head><title>conn</title></head><body>
+<!--LOG-->
+<script>
+// A request on a reused connection has domainLookup* and connect* equal to
+// fetchStart; a new connection only orders them (the gaps between its steps
+// are below the clock resolution in LB, so they are not compared).
+async function one(label,url,reused){
+  var r=await fetch(url);await r.text();
+  var e=performance.getEntriesByName(new URL(url,location.href).href).pop();
+  var flags=[e.domainLookupStart>=e.fetchStart,e.domainLookupEnd>=e.domainLookupStart,e.connectStart>=e.domainLookupEnd,e.connectEnd>=e.connectStart,
+    e.secureConnectionStart,e.requestStart>=e.connectEnd,e.responseStart>=e.requestStart,e.responseEnd>=e.responseStart,e.nextHopProtocol,chain(e)];
+  if(reused)flags.push('reused='+(e.domainLookupStart===e.fetchStart&&e.domainLookupEnd===e.fetchStart&&e.connectStart===e.fetchStart&&e.connectEnd===e.fetchStart));
+  log(label+' '+flags.join());
+}
+addEventListener('load',async function(){
+  await sleep(300);
+  await one('X first',X+'/c.txt?size=10&cors=1&tao=1&i=1',false);
+  await one('X second',X+'/c.txt?size=10&cors=1&tao=1&i=2',true);
+  await one('X third',X+'/c.txt?size=10&cors=1&tao=1&i=3',true);
+  await one('O reused','c.txt?size=10&i=4',true);
+  end();
+});
+</script></body></html>

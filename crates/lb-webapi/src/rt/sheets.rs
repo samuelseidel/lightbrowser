@@ -647,6 +647,7 @@ fn load_sheet(
             body: body.into(),
             url: url.clone(),
             redirected: false,
+            timing: None,
         });
         let w = w.clone();
         let w2 = w.clone();

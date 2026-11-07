@@ -1,0 +1,15 @@
+<!doctype html><html><head><title>worker</title></head><body>
+<!--LOG-->
+<script>
+addEventListener('load',async function(){
+  await sleep(300);
+  var before=performance.getEntriesByType('resource').length;
+  var w=new Worker('w.js?x='+XP);
+  var msg=await new Promise(function(r){w.onmessage=function(e){r(e.data)};w.onerror=function(e){r('error '+e.message)}});
+  log(msg);
+  await sleep(100);
+  var added=performance.getEntriesByType('resource').slice(before).filter(function(e){return !/favicon/.test(e.name)});
+  log('page timeline '+added.map(function(e){return [e.entryType,short(e.name),e.initiatorType,e.responseStatus,e.encodedBodySize,e.transferSize-e.encodedBodySize].join(' ')}).join(' ; '));
+  end();
+});
+</script></body></html>

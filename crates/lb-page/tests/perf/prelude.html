@@ -1,0 +1,22 @@
+<script>var L=[];function log(s){L.push(String(s))}function end(){log('end')}
+function err(e){return e&&e.name!==undefined?(Object.prototype.toString.call(e)+' '+e.name+': '+e.message):'value '+String(e)}
+function t(n,f){try{log(n+': '+f())}catch(e){log(n+' threw '+err(e))}}
+// O is this page's origin, X the second loopback origin (query ?x=PORT).
+var O=location.origin, XP=new URLSearchParams(location.search).get('x'), X='http://127.0.0.1:'+XP;
+function J(v){return JSON.stringify(v)}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function short(u){return String(u).split(O).join('O').split(X).join('X')}
+// Names of all enumerable properties (own and inherited), in order.
+function keys(e){var k=[];for(var p in e)k.push(p);return k.join(',')}
+// Non-zero timing values of a resource or navigation entry never decrease
+// along the fetch sequence.
+var SEQ=['startTime','fetchStart','domainLookupStart','domainLookupEnd','connectStart','connectEnd','requestStart','responseStart','responseEnd'];
+function chain(e){var last=-1,ok=true;for(var i=0;i<SEQ.length;i++){var v=e[SEQ[i]];if(v===0&&i>0)continue;if(v<last)ok=false;last=v}return ok}
+function durOk(e){return Math.abs(e.duration-(e.responseEnd-e.startTime))<1e-6}
+// One line about a resource entry, without absolute times.
+function res(e){return [e.entryType,short(e.name),e.initiatorType,'proto='+e.nextHopProtocol,e.renderBlockingStatus,e.responseStatus,'ct='+e.contentType,'ce='+e.contentEncoding,
+ 'enc='+e.encodedBodySize+' dec='+e.decodedBodySize+' xfer-enc='+(e.transferSize-e.encodedBodySize),'chain='+chain(e),'dur='+durOk(e),
+ 'redir='+(e.redirectStart>0)+'/'+(e.redirectEnd>0),'dns='+(e.domainLookupStart>0),'req='+(e.requestStart>0),'resp='+(e.responseStart>0),'tls='+(e.secureConnectionStart>0)].join(' ')}
+function resList(f){return performance.getEntriesByType('resource').filter(f||function(){return true}).map(res).sort().join('\n')}
+function drain(r){return r.then(function(x){return x.text()})}
+</script>

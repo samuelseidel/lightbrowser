@@ -5,6 +5,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use http::{Method, StatusCode};
@@ -21,6 +22,7 @@ use crate::pool::{ConnectParams, ConnectionPool, Dialer, GroupKey, Lease};
 use crate::profile::ClientHelloProfile;
 use crate::proxy::{self, Proxy};
 use crate::tcpfp::TcpProfile;
+use crate::timing::{ConnTiming, FetchTiming, RedirectTiming};
 use crate::tls::TlsConnector;
 use crate::{decompress, h1, h2};
 
@@ -70,6 +72,10 @@ pub struct RawResponse {
     pub headers: OrderedHeaders,
     pub body: Bytes,
     pub version: HttpVersion,
+    /// The response head had been read, and the body (Resource Timing's
+    /// `responseStart` and `responseEnd`).
+    pub head_at: std::time::Instant,
+    pub done_at: std::time::Instant,
 }
 
 /// One redirect that was followed on the way to a [`Response`].
@@ -108,6 +114,8 @@ pub struct Response {
     pub request_headers: OrderedHeaders,
     /// Redirects followed, in order. Empty when there were none.
     pub redirects: Vec<RedirectHop>,
+    /// What the fetch measured (ADR 0046).
+    pub timing: FetchTiming,
 }
 
 impl Response {
@@ -345,6 +353,9 @@ pub fn fetch(
 
 async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, NetError> {
     let mut req = req;
+    let chain_start = Instant::now();
+    let mut redirect_end: Option<Instant> = None;
+    let mut redirect_times: Vec<RedirectTiming> = Vec::new();
     let mut redirects: Vec<RedirectHop> = Vec::new();
     let initiator = req.meta.as_ref().and_then(|m| m.initiator.clone());
     let meta = req.meta.clone().unwrap_or_default();
@@ -363,6 +374,7 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
         } else {
             Vec::new()
         };
+        let hop_start = Instant::now();
         let hop = fetch_once(ctx, &req, redirects.len(), site, &hints, restart).await?;
         restart = false;
         if hints_on && top_level {
@@ -382,6 +394,11 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             if !matches!(next.scheme(), "http" | "https") {
                 return Err(NetError::UnsupportedScheme(next.scheme().to_owned()));
             }
+            redirect_end = Some(hop.done_at);
+            redirect_times.push(RedirectTiming {
+                url: req.url.clone(),
+                timing_allow_origin: header_values(&hop.headers, "timing-allow-origin"),
+            });
             redirects.push(RedirectHop {
                 url: req.url.clone(),
                 method: req.method.clone(),
@@ -403,6 +420,18 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             continue;
         }
 
+        let timing = FetchTiming {
+            start: chain_start,
+            redirect: redirect_end.map(|e| (chain_start, e)),
+            redirects: redirect_times,
+            fetch_start: hop_start,
+            conn: hop.conn,
+            request_start: hop.request_start,
+            response_start: hop.head_at,
+            response_end: hop.done_at,
+            encoded_body_size: hop.encoded_len as u64,
+            decoded_body_size: hop.body.len() as u64,
+        };
         return Ok(Response {
             status: hop.status,
             headers: hop.headers,
@@ -414,6 +443,7 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             method: req.method,
             request_headers: hop.sent,
             redirects,
+            timing,
         });
     }
 }
@@ -428,6 +458,13 @@ struct Hop {
     sent: OrderedHeaders,
     connection_id: Option<u64>,
     connection_reused: bool,
+    /// Setup of the connection opened for this hop (`None`: reused).
+    conn: Option<ConnTiming>,
+    request_start: Instant,
+    head_at: Instant,
+    done_at: Instant,
+    /// Body bytes on the wire (before `Content-Encoding` is undone).
+    encoded_len: usize,
 }
 
 /// `Critical-CH`: the response names a hint its origin asked for (stored
@@ -536,7 +573,9 @@ async fn fetch_once_inner(
         }
     };
 
-    let (raw, sent, connection_id, connection_reused) = if let Some(pool) = ctx.pool.clone() {
+    let (raw, sent, connection_id, connection_reused, conn, request_start) = if let Some(pool) =
+        ctx.pool.clone()
+    {
         let key = GroupKey::for_request(&req.url, &meta)
             .ok_or_else(|| NetError::Http(format!("url has no host: {}", req.url)))?;
         // The urgency the request's `priority` value carries orders the
@@ -571,32 +610,38 @@ async fn fetch_once_inner(
         } else {
             None
         };
+        let t0 = Instant::now();
         let mut tcp = match &forward {
             Some(p) => p.dial(&ctx.dialer).await?,
             None => ctx.connect_tcp(&req.url, bare_host, port).await?,
         };
-        let (raw, sent) = match connector {
+        let mut conn = ConnTiming::whole(t0, Instant::now());
+        let (raw, sent, request_start) = match connector {
             None => {
                 let wire = wire(HttpVersion::Http1);
+                let request_start = Instant::now();
                 let raw = h1::send_on_form(&mut tcp, &wire, ctx.max_body, forward.is_some())
                     .await
                     .map_err(|e| e.error)?
                     .0;
-                (raw, wire.headers)
+                (raw, wire.headers, request_start)
             }
             Some(connector) => {
+                conn.secure_start = Some(Instant::now());
                 let (stream, version) = connector.connect(bare_host, tcp).await?;
+                conn.connect_end = Instant::now();
                 let wire = wire(version);
+                let request_start = Instant::now();
                 let raw = match version {
                     HttpVersion::Http2 => {
                         h2::send_with_limit(stream, &wire, &ctx.profile, ctx.max_body).await?
                     }
                     HttpVersion::Http1 => h1::send_with_limit(stream, &wire, ctx.max_body).await?,
                 };
-                (raw, wire.headers)
+                (raw, wire.headers, request_start)
             }
         };
-        (raw, sent, None, false)
+        (raw, sent, None, false, Some(conn), request_start)
     };
 
     let set_cookies = header_values(&raw.headers, "set-cookie");
@@ -604,6 +649,7 @@ async fn fetch_once_inner(
         ctx.cookies.store_response(&req.url, &set_cookies);
     }
 
+    let encoded_len = raw.body.len();
     let encoding = header_values(&raw.headers, "content-encoding").join(",");
     let body = if raw.body.is_empty() || encoding.trim().is_empty() {
         raw.body
@@ -623,6 +669,11 @@ async fn fetch_once_inner(
         sent,
         connection_id,
         connection_reused,
+        conn,
+        request_start,
+        head_at: raw.head_at,
+        done_at: raw.done_at,
+        encoded_len,
     })
 }
 
@@ -638,19 +689,21 @@ async fn pooled_exchange(
     wire: &(dyn Fn(HttpVersion) -> Request + Sync),
     max_body: usize,
     absolute: bool,
-) -> Result<(RawResponse, OrderedHeaders, Option<u64>, bool), NetError> {
+) -> Result<PooledExchange, NetError> {
     let mut retried = false;
     loop {
         match pool.acquire(key, urgency, params).await? {
             Lease::H1 { mut conn, reused } => {
                 let req = wire(HttpVersion::Http1);
                 let mut guard = SocketGuard::new(pool, key, params, false);
+                let opened = (!reused).then_some(conn.timing);
+                let request_start = Instant::now();
                 match h1::send_on_form(&mut conn.stream, &req, max_body, absolute).await {
                     Ok((raw, reusable)) => {
                         guard.defuse();
                         let id = conn.id;
                         pool.release(key, conn, reusable, params);
-                        return Ok((raw, req.headers, Some(id), reused));
+                        return Ok((raw, req.headers, Some(id), reused, opened, request_start));
                     }
                     Err(e) if reused && e.nothing_received && !retried => {
                         tracing::debug!("resending on a new connection: {}", e.error);
@@ -663,6 +716,8 @@ async fn pooled_exchange(
                 let req = wire(HttpVersion::Http2);
                 let mut guard = SocketGuard::new(pool, key, params, true);
                 let id = conn.id;
+                let opened = Some(conn.timing);
+                let request_start = Instant::now();
                 let started = h2::start(conn.stream, &req, &params.profile).await?;
                 let (send, driver, first) = started.split();
                 guard.defuse();
@@ -672,13 +727,14 @@ async fn pooled_exchange(
                     }
                 });
                 let raw = h2::finish_started(first, &req, max_body).await?;
-                return Ok((raw, req.headers, Some(id), false));
+                return Ok((raw, req.headers, Some(id), false, opened, request_start));
             }
             Lease::H2(session) => {
                 let req = wire(HttpVersion::Http2);
                 let id = session.id;
+                let request_start = Instant::now();
                 match h2::request_on(session.send.clone(), &req, max_body).await {
-                    Ok(raw) => return Ok((raw, req.headers, Some(id), true)),
+                    Ok(raw) => return Ok((raw, req.headers, Some(id), true, None, request_start)),
                     Err(e) if e.retryable && !retried => {
                         tracing::debug!("session {id} refused the request: {}", e.error);
                         pool.session_closed(key, id);
@@ -690,6 +746,18 @@ async fn pooled_exchange(
         }
     }
 }
+
+/// What [`pooled_exchange`] returns: the response, the request headers as
+/// sent, the connection's id, whether it was reused, the setup of a
+/// connection opened for the request, and when the request was written.
+type PooledExchange = (
+    RawResponse,
+    OrderedHeaders,
+    Option<u64>,
+    bool,
+    Option<ConnTiming>,
+    Instant,
+);
 
 /// Gives a busy socket's slot back to the pool if the request ends without
 /// [`ConnectionPool::release`] (error, panic).

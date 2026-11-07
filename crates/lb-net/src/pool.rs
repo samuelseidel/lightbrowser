@@ -59,6 +59,7 @@ use crate::header_profile::{RequestKind, RequestMeta};
 use crate::profile::ClientHelloProfile;
 use crate::proxy::Proxy;
 use crate::tcpfp::{self, TcpProfile};
+use crate::timing::ConnTiming;
 use crate::tls::{SessionCache, SessionKey, TlsConnector};
 
 /// Chrome's limit of sockets per group (`kMaxSocketsPerGroup`).
@@ -156,7 +157,20 @@ impl Dialer {
         port: u16,
         tcp: Option<&TcpProfile>,
     ) -> Result<TcpStream, NetError> {
+        Ok(self.connect_timed(host, port, tcp).await?.0)
+    }
+
+    /// [`Dialer::connect`], also telling when the DNS lookup started and
+    /// ended, and when the TCP connect ended.
+    pub(crate) async fn connect_timed(
+        &self,
+        host: &str,
+        port: u16,
+        tcp: Option<&TcpProfile>,
+    ) -> Result<(TcpStream, Instant, Instant, Instant), NetError> {
+        let dns_start = Instant::now();
         let addrs = self.resolve(host, port).await?;
+        let dns_end = Instant::now();
         let mut last = None;
         for addr in addrs {
             let connect = tcpfp::connect(addr, tcp);
@@ -164,7 +178,7 @@ impl Dialer {
                 Ok(Ok(tcp)) => {
                     // Small writes (h2 preface, request headers) should not wait.
                     let _ = tcp.set_nodelay(true);
-                    return Ok(tcp);
+                    return Ok((tcp, dns_start, dns_end, Instant::now()));
                 }
                 Ok(Err(e)) => last = Some(e),
                 Err(_) => {
@@ -246,6 +260,8 @@ impl AsyncWrite for Stream {
 pub struct Conn {
     pub id: u64,
     pub stream: Stream,
+    /// How the connection was set up (Resource Timing).
+    pub timing: crate::timing::ConnTiming,
 }
 
 /// A usable HTTP/2 session.
@@ -633,18 +649,36 @@ impl ConnectionPool {
         } else {
             None
         };
-        let tcp = match &params.proxy {
+        let t0 = Instant::now();
+        let (tcp, mut timing) = match &params.proxy {
             // Forward requests: the connection goes to the proxy itself.
             Some(p) if p.kind == crate::proxy::ProxyKind::Http && !key.https => {
-                p.dial(&self.inner.dialer).await?
+                let tcp = p.dial(&self.inner.dialer).await?;
+                (tcp, ConnTiming::whole(t0, Instant::now()))
             }
             Some(p) => {
-                p.tunnel(&self.inner.dialer, host, key.port, &params.user_agent)
-                    .await?
+                let tcp = p
+                    .tunnel(&self.inner.dialer, host, key.port, &params.user_agent)
+                    .await?;
+                (tcp, ConnTiming::whole(t0, Instant::now()))
             }
             None => {
                 let tcp = params.tcp_profile.as_deref();
-                self.inner.dialer.connect(host, key.port, tcp).await?
+                let (tcp, dns_start, dns_end, end) = self
+                    .inner
+                    .dialer
+                    .connect_timed(host, key.port, tcp)
+                    .await?;
+                (
+                    tcp,
+                    ConnTiming {
+                        dns_start,
+                        dns_end,
+                        connect_start: dns_end,
+                        secure_start: None,
+                        connect_end: end,
+                    },
+                )
             }
         };
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
@@ -653,17 +687,21 @@ impl ConnectionPool {
                 Conn {
                     id,
                     stream: Stream::Plain(tcp),
+                    timing,
                 },
                 HttpVersion::Http1,
             )),
             Some(c) => {
+                timing.secure_start = Some(Instant::now());
                 let (s, version) = c
                     .connect_resuming(host, tcp, Some(&key.session_key()))
                     .await?;
+                timing.connect_end = Instant::now();
                 Ok((
                     Conn {
                         id,
                         stream: Stream::Tls(Box::new(s)),
+                        timing,
                     },
                     version,
                 ))

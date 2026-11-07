@@ -1000,6 +1000,7 @@ fn response_of(
         body: body.unwrap_or_default().into(),
         url: Url::parse(&url).unwrap_or_else(|_| req_url.clone()),
         redirected,
+        timing: None,
     })
 }
 

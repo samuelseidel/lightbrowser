@@ -427,6 +427,7 @@ impl BrowserContext {
         let r = lb_net::fetch(&mut net, wire).await;
         self.put_back(net);
         let resp = r.map_err(Ok)?;
+        let timing = Some(net_timing(&resp.timing, resp.version));
         let trace = FetchTrace {
             redirects: resp.redirects,
             method: resp.method.to_string(),
@@ -441,6 +442,7 @@ impl BrowserContext {
                 body: resp.body,
                 redirected: resp.final_url != url,
                 url: resp.final_url,
+                timing,
             },
             trace,
         ))
@@ -483,6 +485,37 @@ impl BrowserContext {
                 .await
                 .map(|(r, _)| r),
         )
+    }
+}
+
+/// lb-net's measurements as the page layer's type.
+fn net_timing(t: &lb_net::FetchTiming, version: lb_net::HttpVersion) -> lb_webapi::host::NetTiming {
+    use lb_webapi::host::{NetConnTiming, NetTiming};
+    NetTiming {
+        start: t.start,
+        redirect: t.redirect,
+        redirects: t
+            .redirects
+            .iter()
+            .map(|r| (r.url.clone(), r.timing_allow_origin.clone()))
+            .collect(),
+        fetch_start: t.fetch_start,
+        conn: t.conn.map(|c| NetConnTiming {
+            dns_start: c.dns_start,
+            dns_end: c.dns_end,
+            connect_start: c.connect_start,
+            secure_start: c.secure_start,
+            connect_end: c.connect_end,
+        }),
+        request_start: t.request_start,
+        response_start: t.response_start,
+        response_end: t.response_end,
+        encoded_body_size: t.encoded_body_size,
+        decoded_body_size: t.decoded_body_size,
+        protocol: match version {
+            lb_net::HttpVersion::Http2 => "h2",
+            lb_net::HttpVersion::Http1 => "http/1.1",
+        },
     }
 }
 

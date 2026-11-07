@@ -393,6 +393,7 @@ pub(crate) async fn page_fetch(
                     body: body.into(),
                     url: req.url.clone(),
                     redirected: false,
+                    timing: None,
                 });
             }
         }

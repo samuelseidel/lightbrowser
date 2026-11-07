@@ -247,6 +247,7 @@ where
             }
         };
         let _ = buf.split_to(head_len);
+        let head_at = std::time::Instant::now();
         // 101 is a final answer for us; other 1xx are interim.
         if status.is_informational() && status != StatusCode::SWITCHING_PROTOCOLS {
             continue;
@@ -315,6 +316,8 @@ where
                 headers,
                 body,
                 version: HttpVersion::Http1,
+                head_at,
+                done_at: std::time::Instant::now(),
             },
             reusable,
         ));

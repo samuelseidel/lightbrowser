@@ -1,0 +1,24 @@
+<!doctype html><html><head><title>redirect</title></head><body>
+<!--LOG-->
+<script>
+async function go(label,url,init){
+  try{var r=await fetch(url,init);var b=await r.text();log(label+' -> status '+r.status+' redirected='+r.redirected+' '+short(r.url))}catch(e){log(label+' failed '+err(e))}
+}
+function rd(e){return [short(e.name),'start0='+(e.startTime===e.redirectStart),'rs='+(e.redirectStart>0),'re='+(e.redirectEnd>0),'order='+(e.redirectStart<=e.redirectEnd&&e.redirectEnd<=e.fetchStart),'fetch>start='+(e.fetchStart>e.startTime),
+  'proto='+e.nextHopProtocol,'status='+e.responseStatus,'enc='+e.encodedBodySize,'chain='+chain(e),'dur='+durOk(e)].join(' ')}
+addEventListener('load',async function(){
+  await sleep(200);
+  var base=performance.getEntriesByType('resource').length;
+  await go('same-origin 1 hop','/redir?to='+encodeURIComponent('/res_redirect/t.txt?size=30'));
+  await go('same-origin 2 hops','/redir?to='+encodeURIComponent('/redir?to='+encodeURIComponent('/res_redirect/t.txt?size=31')));
+  await go('same to cross, cors',  '/redir?cors=1&to='+encodeURIComponent(X+'/t.txt?size=32&cors=1'));
+  await go('same to cross, tao on target only','/redir?cors=1&to='+encodeURIComponent(X+'/t.txt?size=33&cors=1&tao=1'));
+  await go('same to cross, tao on all','/redir?cors=1&tao=1&to='+encodeURIComponent(X+'/t.txt?size=34&cors=1&tao=1'));
+  await go('cross to same',X+'/redir?cors=1&to='+encodeURIComponent(O+'/res_redirect/t.txt?size=35&cors=1'));
+  await go('cross to same, tao on all',X+'/redir?cors=1&tao=1&to='+encodeURIComponent(O+'/res_redirect/t.txt?size=36&cors=1&tao=1'));
+  await sleep(200);
+  var list=performance.getEntriesByType('resource').slice(base).filter(function(e){return !/favicon/.test(e.name)});
+  for(var i=0;i<list.length;i++)log(rd(list[i]));
+  end();
+});
+</script></body></html>

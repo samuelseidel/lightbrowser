@@ -1,0 +1,89 @@
+<!doctype html><html><head><title>user timing</title></head><body>
+<!--LOG-->
+<script>
+function d(e){return e.entryType+' '+e.name+' start='+e.startTime+' dur='+e.duration+' detail='+J(e.detail)}
+function names(l){return l.map(function(e){return e.entryType.slice(0,3)+':'+e.name}).join(' ')}
+addEventListener('load',async function(){
+  await sleep(50);
+  var t0=performance.now();
+  var m=performance.mark('a');
+  log('mark '+[m instanceof PerformanceMark,m instanceof PerformanceEntry,Object.prototype.toString.call(m),m.name,m.entryType,m.startTime>=t0&&m.startTime<=performance.now(),m.duration,J(m.detail)].join());
+  log('mark keys '+keys(m)+' | json '+Object.keys(m.toJSON()).join()+' | own '+Object.getOwnPropertyNames(m).join()+' | nav '+typeof m.navigationId);
+  log('navigationId same '+(m.navigationId===performance.getEntriesByType('navigation')[0].navigationId));
+  performance.clearMarks();
+  var m2=performance.mark('a',{startTime:100000,detail:{x:[1,2],s:'t'}});
+  log('mark opts '+d(m2)+' '+(m2.detail===m2.detail)+' '+(m2.detail!==undefined));
+  var o={k:1};var m3=performance.mark('b',{startTime:250000.5,detail:o});
+  log('detail cloned '+(m3.detail!==o)+' '+J(m3.detail));
+  var m4=new PerformanceMark('c',{startTime:300,detail:'str'});
+  log('ctor '+d(m4)+' inbuf='+performance.getEntriesByName('c').length);
+  t('ctor none',function(){return new PerformanceMark()});
+  t('ctor call',function(){return PerformanceMark('x')});
+  t('mark none',function(){return performance.mark()});
+  t('mark undefined',function(){return performance.mark(undefined).name});
+  t('mark number',function(){return performance.mark(5).name});
+  t('mark nav name',function(){return performance.mark('navigationStart')});
+  t('mark nav name 2',function(){return performance.mark('loadEventEnd')});
+  t('mark neg',function(){return performance.mark('n',{startTime:-1})});
+  t('mark nan',function(){return performance.mark('n',{startTime:NaN})});
+  t('mark str time',function(){return performance.mark('n',{startTime:'5'}).startTime});
+  t('mark func detail',function(){return performance.mark('n',{detail:function(){}})});
+  t('mark opts null',function(){var x=performance.mark('n2',null);return x.name+' '+(x.startTime>0)+' '+J(x.detail)});
+  t('mark opts number',function(){return performance.mark('n3',5)});
+  t('mark detail undefined',function(){var x=performance.mark('n4',{detail:undefined});return x.name+' '+(x.startTime>0)+' '+J(x.detail)});
+  log('buffer '+names(performance.getEntriesByType('mark')));
+  // measure
+  var ms=performance.measure('m1','a','b');
+  log('measure '+d(ms)+' '+[ms instanceof PerformanceMeasure,Object.prototype.toString.call(ms),keys(ms),Object.keys(ms.toJSON()).join()].join(' | '));
+  log('m 1 arg '+(function(){var x=performance.measure('m2');return [x.startTime,x.duration>0,x.duration<=performance.now(),J(x.detail)].join()})());
+  log('m start mark '+(function(){var x=performance.measure('m3','a');return [x.startTime,x.duration>0].join()})());
+  log('m undefined start '+(function(){var x=performance.measure('m4',undefined,'b');return [x.startTime,x.duration].join()})());
+  log('m opts '+d(performance.measure('m5',{start:'a',end:'b'})));
+  log('m opts num '+d(performance.measure('m6',{start:10,end:25.5})));
+  log('m opts start+dur '+d(performance.measure('m7',{start:'a',duration:20})));
+  log('m opts end+dur '+d(performance.measure('m8',{end:'b',duration:20})));
+  log('m opts detail '+d(performance.measure('m9',{start:'a',end:'b',detail:{z:1}})));
+  log('m opts only dur '+(function(){try{var x=performance.measure('m10',{duration:5});return x.duration+' '+(x.startTime>0)}catch(e){return err(e)}})());
+  log('m opts none '+(function(){var x=performance.measure('m11',{});return [x.startTime,x.duration>0].join()})());
+  log('m nav attr '+(function(){var x=performance.measure('m12','fetchStart');return [x.startTime>=0,x.duration>0].join()})());
+  log('m nav attr2 '+(function(){var x=performance.measure('m13','navigationStart','domInteractive');return [x.startTime,x.duration>0].join()})());
+  t('m nav 0',function(){var x=performance.measure('m14','redirectStart','unloadEventEnd');return [x.startTime,x.duration].join()});
+  t('m nav 0 b',function(){var x=performance.measure('m15','domInteractive','unloadEventStart');return [x.startTime>0,x.duration].join()});
+  t('measure none',function(){return performance.measure()});
+  t('measure missing',function(){return performance.measure('q','zz')});
+  t('measure missing end',function(){return performance.measure('q','a','zz')});
+  t('measure missing opts',function(){return performance.measure('q',{start:'zz'})});
+  t('measure opts+end',function(){return performance.measure('q',{start:1},'b')});
+  t('measure opts+start',function(){return performance.measure('q',{start:1},'b','c')});
+  t('measure start dur end',function(){return performance.measure('q',{start:1,end:2,duration:3})});
+  t('measure neg start',function(){return performance.measure('q',{start:-1})});
+  t('measure bad dur',function(){return performance.measure('q',{start:1,duration:-1})});
+  t('measure nan',function(){return performance.measure('q',{start:NaN})});
+  t('measure bool',function(){return performance.measure('q',{start:true}).startTime});
+  t('measure opts num',function(){return performance.measure('q',5)});
+  t('measure func detail',function(){return performance.measure('q',{detail:function(){}})});
+  log('measures '+names(performance.getEntriesByType('measure')));
+  log('all '+names(performance.getEntries().filter(function(e){return e.entryType=='mark'||e.entryType=='measure'})));
+  // by name and type
+  log('byname a '+names(performance.getEntriesByName('a')));
+  log('byname a mark '+names(performance.getEntriesByName('a','mark')));
+  log('byname a measure '+names(performance.getEntriesByName('a','measure')));
+  log('byname none '+performance.getEntriesByName('nope').length+' '+performance.getEntriesByType('nope').length);
+  t('byname noargs',function(){return performance.getEntriesByName()});
+  t('bytype noargs',function(){return performance.getEntriesByType()});
+  log('array '+Array.isArray(performance.getEntries())+' '+(performance.getEntries()!==performance.getEntries()));
+  // clear
+  performance.clearMarks('a');
+  log('after clearMarks(a) '+names(performance.getEntriesByType('mark')));
+  performance.clearMarks('nope');
+  performance.clearMeasures('m1');
+  log('after clearMeasures(m1) '+names(performance.getEntriesByType('measure')).slice(0,30));
+  performance.clearMarks();performance.clearMeasures();
+  log('after clear '+performance.getEntriesByType('mark').length+' '+performance.getEntriesByType('measure').length);
+  t('clearMarks nav',function(){return performance.clearMarks('navigationStart')});
+  // marks between measures: mark overwrites? duplicates allowed
+  performance.mark('dup',{startTime:1});performance.mark('dup',{startTime:2});
+  log('dup '+performance.getEntriesByName('dup').map(function(e){return e.startTime}).join()+' measure uses last: '+performance.measure('md','dup').startTime);
+  end();
+});
+</script></body></html>

@@ -209,6 +209,7 @@ pub(crate) async fn navigate_committed(
             body: bytes::Bytes::new(),
             url: url.clone(),
             redirected: false,
+            timing: None,
         })
     } else {
         let req = document_request(

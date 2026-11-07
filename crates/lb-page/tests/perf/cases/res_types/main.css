@@ -1,0 +1,4 @@
+@import url(imp.css);
+@font-face{font-family:F;src:url(f.woff2)}
+body{background:url(bg.png)}
+p.f{font-family:F}
