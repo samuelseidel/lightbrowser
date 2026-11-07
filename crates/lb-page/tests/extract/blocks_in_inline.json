@@ -39,5 +39,5 @@
     }
   ],
   "text": "Link blocks\nCard title\nCard description\nCustom element paragraph\nSpan\nwith a div\ninside\nSection head\nArticle text\nTerm\nDefinition\nSummary\nDetail text\nCaption text",
-  "markdown": "# Link blocks\n\n[Card title Card *description*](http://{HOST}/card)\n\n[![](http://{HOST}/i.png)](http://{HOST}/img)\n\nCustom element paragraph\n\nSpan\n\nwith a div\n\ninside\n\n## Section head\n\nArticle text\n\nTerm\n\nDefinition\n\nSummary\n\nDetail text\n\n![Figure](http://{HOST}/f.png)\n\nCaption text\n"
+  "markdown": "# Link blocks\n\n[Card title Card *description*](http://{HOST}/card)\n\n[![](http://{HOST}/i.png)](http://{HOST}/img)\n\nCustom element paragraph\n\nSpan\n\nwith a div\n\ninside\n\n## Section head\n\nArticle text\n\nTerm\n\nDefinition\n\nSummary\n\n![Figure](http://{HOST}/f.png)\n\nCaption text\n"
 }

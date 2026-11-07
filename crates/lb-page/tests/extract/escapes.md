@@ -1,6 +1,6 @@
 # Escapes
 
-\*star\* \_under\_ \`tick\` \[brackets\] \<html> back\\slash \~\~tilde\~\~ a~b
+\*star\* \_under\_ \`tick\` \[brackets\] \<html> back\\slash \~\~tilde\~\~ a\~b
 
 \# not a heading
 

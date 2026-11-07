@@ -22,8 +22,6 @@ Definition
 
 Summary
 
-Detail text
-
 ![Figure](http://{HOST}/f.png)
 
 Caption text

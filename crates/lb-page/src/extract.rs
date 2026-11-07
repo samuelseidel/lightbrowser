@@ -27,7 +27,7 @@
 //!   are joined with spaces).
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use lb_dom::{Document, NodeId, NodeType, ns};
 use url::Url;
@@ -41,13 +41,63 @@ const PARA: char = '\u{2}';
 /// close the span there), else it is dropped.
 const SENT: char = '\u{3}';
 
-/// Page text without the control characters used as buffer markers, so
-/// page data cannot change the block structure of the output.
+/// Separates two spans whose markers would run together (`**a***b*`): a
+/// zero-width space, or one space when the span before it ends after
+/// punctuation (see [`resolve_sent`]).
+const SEP: char = '\u{4}';
+
+/// The buffer markers (never page text).
+const MARKERS: [char; 4] = [BR, PARA, SENT, SEP];
+
+/// Page text without what could change the output's structure: the buffer
+/// markers, control characters (VT, FS, NEL, DEL, ...: a line break to some
+/// readers) other than HTML whitespace, and U+2028/U+2029 (a space).
 fn clean(s: &str) -> Cow<'_, str> {
-    if s.contains([BR, PARA, SENT]) {
-        s.replace([BR, PARA, SENT], "").into()
+    let bad = |c: char| {
+        MARKERS.contains(&c)
+            || c == '\u{2028}'
+            || c == '\u{2029}'
+            || (c.is_control() && !is_html_ws(c))
+    };
+    if s.contains(bad) {
+        s.chars()
+            .filter_map(|c| match c {
+                '\u{2028}' | '\u{2029}' => Some(' '),
+                c if bad(c) => None,
+                c => Some(c),
+            })
+            .collect::<String>()
+            .into()
     } else {
         s.into()
+    }
+}
+
+/// Backslashes directly before the end of `s`.
+fn trailing_backslashes(s: &str) -> usize {
+    s.bytes().rev().take_while(|&b| b == b'\\').count()
+}
+
+/// `s` (ignoring [`SENT`]s) ends with `suffix` and its first character is
+/// not escaped.
+fn ends_unescaped(s: &str, suffix: &str) -> bool {
+    let t = s.trim_end_matches(SENT);
+    t.ends_with(suffix) && trailing_backslashes(&t[..t.len() - suffix.len()]) % 2 == 0
+}
+
+/// A closing sequence of `#` ends an ATX heading: escape the first of a
+/// trailing run that follows a space (or is the whole text).
+fn escape_closing_hash(md: &str) -> String {
+    let t = md.trim_end_matches(SENT);
+    let run = t.len() - t.trim_end_matches('#').len();
+    if run == 0 {
+        return md.to_owned();
+    }
+    let at = t.len() - run;
+    if at == 0 || t[..at].ends_with(' ') {
+        format!("{}\\{}", &md[..at], &md[at..])
+    } else {
+        md.to_owned()
     }
 }
 
@@ -61,9 +111,10 @@ fn is_punct(c: char) -> bool {
     }
 }
 
-/// Replace each [`SENT`]: a space before a letter or digit, else nothing.
+/// Replace each [`SENT`]: a space before a letter, a digit or a [`SEP`],
+/// else nothing; each [`SEP`] (without a [`SENT`] before it) by U+200B.
 fn resolve_sent(s: &str) -> String {
-    if !s.contains(SENT) {
+    if !s.contains([SENT, SEP]) {
         return s.to_owned();
     }
     let mut o = String::with_capacity(s.len());
@@ -71,6 +122,11 @@ fn resolve_sent(s: &str) -> String {
     for c in s.chars() {
         if c == SENT {
             pending = true;
+            continue;
+        }
+        if c == SEP {
+            o.push(if pending { ' ' } else { '\u{200b}' });
+            pending = false;
             continue;
         }
         if pending && c.is_alphanumeric() {
@@ -179,6 +235,9 @@ pub fn extract<P: FnMut(NodeId) -> NodeStyle>(
         headings: Vec::new(),
         h1: false,
         depth: 0,
+        cdepth: 0,
+        active: [false; 3],
+        block_memo: HashMap::new(),
     };
     let title = doc.title();
     let markdown = ex.markdown(&title);
@@ -511,13 +570,22 @@ impl Inline {
         }
     }
 
-    /// Already escaped text, kept as it is.
+    /// Already escaped text, kept as it is. A link right after a literal
+    /// `!` would read as an image, so the `!` is escaped then.
     fn raw(&mut self, t: &str) {
+        if t.starts_with('[')
+            && self.s.ends_with('!')
+            && trailing_backslashes(&self.s[..self.s.len() - 1]) % 2 == 0
+        {
+            self.s.pop();
+            self.s.push_str("\\!");
+        }
         self.s.push_str(t);
     }
 
     /// Text of a text node: whitespace collapses, specials are escaped.
     fn text(&mut self, t: &str) {
+        let t = clean(t);
         for (i, w) in t.split(is_html_ws).enumerate() {
             if i > 0 {
                 self.space();
@@ -548,7 +616,7 @@ impl Inline {
 fn escape_word(w: &str, ls: bool) -> String {
     let chars: Vec<char> = w
         .chars()
-        .filter(|&c| c != BR && c != PARA && c != SENT)
+        .filter(|c| !MARKERS.contains(c))
         .collect();
     let n = chars.len();
     let all = |c: char| chars.iter().all(|&x| x == c);
@@ -563,7 +631,9 @@ fn escape_word(w: &str, ls: bool) -> String {
                 !(prev.is_some_and(char::is_alphanumeric)
                     && next.is_some_and(char::is_alphanumeric))
             }
-            '~' => prev == Some('~') || next == Some('~'),
+            // A lone `~` is a strikethrough marker in GFM, and a run of
+            // three at the start of a line opens a code fence.
+            '~' => true,
             '&' => entity_like(&chars[i + 1..]),
             '>' => first,
             '#' => first && n <= 6 && all('#'),
@@ -654,10 +724,9 @@ fn escape_pipes(s: &str) -> String {
     o
 }
 
-/// Put `inner` into `inl`: its edge spaces and breaks go outside, `f` wraps
-/// the rest (nothing when the rest is empty). `f` gets the character
-/// before the wrapped text and the text.
-fn emit(inl: &mut Inline, inner: &str, f: impl FnOnce(Option<char>, &str) -> String) {
+/// Put `inner` into `inl`: its edge spaces and breaks go outside, `f` writes
+/// the rest into `inl` (nothing when the rest is empty).
+fn emit(inl: &mut Inline, inner: &str, f: impl FnOnce(&mut Inline, &str)) {
     let edge = |c: char| c == ' ' || c == BR || c == PARA;
     let core = inner.trim_matches(edge);
     if core.is_empty() {
@@ -667,8 +736,7 @@ fn emit(inl: &mut Inline, inner: &str, f: impl FnOnce(Option<char>, &str) -> Str
     let lead = &inner[..inner.len() - inner.trim_start_matches(edge).len()];
     let trail = &inner[inner.trim_end_matches(edge).len()..];
     inl.append(lead);
-    let prev = inl.s.chars().rev().find(|&c| c != SENT);
-    inl.raw(&f(prev, core));
+    f(inl, core);
     inl.append(trail);
 }
 
@@ -728,6 +796,12 @@ fn other(text: String) -> Block {
 /// Deepest element nesting the converter follows.
 const MAX_DEPTH: usize = 400;
 
+/// Deepest nesting of block quotes and list items that is written with
+/// `>` and indentation. Every level adds its prefix to every line below
+/// it, so the output grows with depth times lines; deeper containers are
+/// written as plain blocks.
+const MAX_CONTAINERS: usize = 24;
+
 struct Ex<'a, P: FnMut(NodeId) -> NodeStyle> {
     doc: &'a Document,
     base: &'a Url,
@@ -735,6 +809,12 @@ struct Ex<'a, P: FnMut(NodeId) -> NodeStyle> {
     headings: Vec<Heading>,
     h1: bool,
     depth: usize,
+    /// Block quotes and list items open around the current node.
+    cdepth: usize,
+    /// Spans (`*`, `**`, `~~`) open around the current inline node.
+    active: [bool; 3],
+    /// [`Ex::has_block`] per node.
+    block_memo: HashMap<NodeId, bool>,
 }
 
 impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
@@ -749,37 +829,93 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         (self.probe)(n)
     }
 
-    /// Not rendered: skipped by name, hidden, closed dialog or `display:
-    /// none`.
+    /// Not rendered: skipped by name, hidden, closed dialog, a closed
+    /// `details` body, `content-visibility: hidden` or `display: none`.
     fn skipped(&mut self, n: NodeId, name: &str) -> bool {
         is_skipped_name(name)
             || self.doc.has_attribute(n, "hidden")
             || (name == "dialog" && !self.doc.has_attribute(n, "open"))
+            || self.in_closed_details(n, name)
+            || self.content_hidden(n)
             || self.style(n).display_none
     }
 
-    fn text_visible(&mut self, parent: NodeId) -> bool {
-        !self.style(parent).visibility_hidden
+    /// `n` is a child of a closed `details` other than its first `summary`.
+    fn in_closed_details(&self, n: NodeId, name: &str) -> bool {
+        let doc = self.doc;
+        let Some(p) = doc.parent(n) else {
+            return false;
+        };
+        self.closed_details(p)
+            && !(name == "summary"
+                && doc
+                    .children(p)
+                    .find(|&k| self.html_name(k) == Some("summary"))
+                    == Some(n))
     }
 
-    /// Any block-level element below `c` in the flat tree.
-    fn has_block(&self, c: NodeId) -> bool {
+    fn closed_details(&self, n: NodeId) -> bool {
+        self.html_name(n) == Some("details") && !self.doc.has_attribute(n, "open")
+    }
+
+    /// An inline `content-visibility: hidden` (a style sheet's is not seen:
+    /// the style engine does not know the property).
+    fn content_hidden(&self, n: NodeId) -> bool {
+        self.doc
+            .get_attribute(n, "style")
+            .is_some_and(|s| s.to_ascii_lowercase().contains("content-visibility"))
+            && inline_decl(self.doc.get_attribute(n, "style"), "content-visibility").as_deref()
+                == Some("hidden")
+    }
+
+    /// Text directly in `parent` is shown.
+    fn text_visible(&mut self, parent: NodeId) -> bool {
+        !self.style(parent).visibility_hidden && !self.closed_details(parent)
+    }
+
+    /// Any block-level element below `c` in the flat tree. Answers are kept
+    /// per node, so a chain of nested inline elements costs one walk.
+    fn has_block(&mut self, c: NodeId) -> bool {
+        enum St {
+            Enter(NodeId),
+            Exit(NodeId),
+        }
+        if let Some(&b) = self.block_memo.get(&c) {
+            return b;
+        }
         let doc = self.doc;
-        let mut stack = doc.flat_children(c);
-        while let Some(n) = stack.pop() {
-            if doc.node_type(n) != NodeType::Element {
-                continue;
-            }
-            if let Some(name) = self.html_name(n) {
-                if is_block(name) {
-                    return true;
+        let mut stack = vec![St::Enter(c)];
+        while let Some(st) = stack.pop() {
+            match st {
+                St::Enter(n) => {
+                    if self.block_memo.contains_key(&n) {
+                        continue;
+                    }
+                    stack.push(St::Exit(n));
+                    for k in doc.flat_children(n) {
+                        if doc.node_type(k) == NodeType::Element
+                            && let Some(name) = self.html_name(k)
+                            && !is_block(name)
+                            && !is_skipped_name(name)
+                        {
+                            stack.push(St::Enter(k));
+                        }
+                    }
                 }
-                if !is_skipped_name(name) {
-                    stack.extend(doc.flat_children(n));
+                St::Exit(n) => {
+                    let r = doc.flat_children(n).into_iter().any(|k| {
+                        doc.node_type(k) == NodeType::Element
+                            && self.html_name(k).is_some_and(|name| {
+                                is_block(name)
+                                    || (!is_skipped_name(name)
+                                        && self.block_memo.get(&k).copied().unwrap_or(false))
+                            })
+                    });
+                    self.block_memo.insert(n, r);
                 }
             }
         }
-        false
+        self.block_memo.get(&c).copied().unwrap_or(false)
     }
 
     // ----- Markdown -----
@@ -791,7 +927,10 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             .or_else(|| doc.document_element())
             .unwrap_or(Document::DOCUMENT);
         let mut blocks = Vec::new();
-        if !self.style(root).display_none {
+        let root_hidden = doc
+            .document_element()
+            .is_some_and(|r| r != root && self.style(r).display_none);
+        if !root_hidden && !self.style(root).display_none {
             self.flow(root, &mut blocks);
         }
         let mut parts: Vec<String> = Vec::new();
@@ -799,7 +938,7 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         if !self.h1 && !title.is_empty() {
             let mut t = Inline::line();
             t.text(&title);
-            parts.push(format!("# {}", flatten(&t.s)));
+            parts.push(format!("# {}", escape_closing_hash(&flatten(&t.s))));
         }
         parts.extend(blocks.into_iter().map(|b| b.text));
         let joined = resolve_sent(&parts.join("\n\n"));
@@ -853,7 +992,9 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                         // An inline element around blocks: its content is
                         // flow content (a link stays one inline link).
                         self.flush(&mut inl, out);
+                        let active = std::mem::take(&mut self.active);
                         self.flow(c, out);
+                        self.active = active;
                     } else {
                         self.inline_el(c, name, &mut inl);
                     }
@@ -895,45 +1036,22 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         }
     }
 
-    /// Record the headings below `c` that are written inside an inline
-    /// link (document order, hidden ones left out).
-    fn collect_headings(&mut self, c: NodeId) {
-        let doc = self.doc;
-        let mut stack: Vec<NodeId> = doc.flat_children(c);
-        stack.reverse();
-        while let Some(n) = stack.pop() {
-            if doc.node_type(n) != NodeType::Element {
-                continue;
+    /// List a heading that is written inside inline content (a link, a
+    /// table cell): its text, in document order.
+    fn note_heading(&mut self, c: NodeId, level: u8) {
+        let text = self.plain(c);
+        if !text.is_empty() {
+            if level == 1 {
+                self.h1 = true;
             }
-            let Some(name) = self.html_name(n) else {
-                continue;
-            };
-            if self.skipped(n, name) {
-                continue;
-            }
-            if let [b'h', d @ b'1'..=b'6'] = name.as_bytes() {
-                let text = self.plain(n);
-                if !text.is_empty() {
-                    if *d == b'1' {
-                        self.h1 = true;
-                    }
-                    self.headings.push(Heading {
-                        level: d - b'0',
-                        text,
-                    });
-                }
-                continue;
-            }
-            let mut kids = doc.flat_children(n);
-            kids.reverse();
-            stack.extend(kids);
+            self.headings.push(Heading { level, text });
         }
     }
 
     fn heading(&mut self, c: NodeId, level: u8, out: &mut Vec<Block>) {
         let mut sub = Inline::line();
         self.children(c, &mut sub);
-        let md = flatten(&sub.s);
+        let md = escape_closing_hash(&flatten(&sub.s));
         if md.trim().is_empty() {
             return;
         }
@@ -948,6 +1066,39 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
     }
 
     fn list(&mut self, c: NodeId, ordered: bool, out: &mut Vec<Block>) {
+        if self.cdepth >= MAX_CONTAINERS {
+            return self.list_flat(c, out);
+        }
+        self.cdepth += 1;
+        self.list_items(c, ordered, out);
+        self.cdepth -= 1;
+    }
+
+    /// A list nested too deep for [`MAX_CONTAINERS`]: its items are plain
+    /// blocks.
+    fn list_flat(&mut self, c: NodeId, out: &mut Vec<Block>) {
+        for k in self.doc.flat_children(c) {
+            match self.doc.node_type(k) {
+                NodeType::Element => {
+                    let Some(name) = self.html_name(k) else {
+                        continue;
+                    };
+                    if self.skipped(k, name) {
+                        continue;
+                    }
+                    if name == "li" {
+                        self.flow(k, out);
+                    } else {
+                        self.flow_nodes(c, &[k], out);
+                    }
+                }
+                NodeType::Text => self.flow_nodes(c, &[k], out),
+                _ => {}
+            }
+        }
+    }
+
+    fn list_items(&mut self, c: NodeId, ordered: bool, out: &mut Vec<Block>) {
         let doc = self.doc;
         // A list right after another one needs the other marker than that
         // one used, or Markdown would join them.
@@ -1014,7 +1165,13 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
                 body.push_str(&b.text);
             }
             let marker = if ordered {
-                format!("{num}{} ", if alt { ')' } else { '.' })
+                // At most 9 digits (CommonMark); only the first number of a
+                // list counts to a reader.
+                format!(
+                    "{}{} ",
+                    num.min(999_999_999),
+                    if alt { ')' } else { '.' }
+                )
             } else {
                 (if alt { "* " } else { "- " }).to_owned()
             };
@@ -1033,8 +1190,13 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
     }
 
     fn quote(&mut self, c: NodeId, out: &mut Vec<Block>) {
+        if self.cdepth >= MAX_CONTAINERS {
+            return self.flow(c, out);
+        }
+        self.cdepth += 1;
         let mut inner = Vec::new();
         self.flow(c, &mut inner);
+        self.cdepth -= 1;
         if inner.is_empty() {
             return;
         }
@@ -1091,7 +1253,10 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             match doc.node_type(k) {
                 NodeType::Text => {
                     if self.text_visible(c) {
-                        s.push_str(&clean(doc.character_data(k).unwrap_or("")));
+                        // A lone CR is a line end to Markdown readers (the
+                        // parser has already made CRLF into LF).
+                        let t = clean(doc.character_data(k).unwrap_or(""));
+                        s.push_str(&t.replace("\r\n", "\n").replace('\r', "\n").replace('\x0c', ""));
                     }
                 }
                 NodeType::Element => {
@@ -1344,10 +1509,19 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             "del" | "s" | "strike" => self.wrap(c, "~~", inl),
             "code" | "kbd" | "samp" | "tt" => {
                 let raw = self.plain_raw(c);
-                emit(inl, &raw, |_, core| code_span(core));
+                emit(inl, &raw, |inl, core| {
+                    // Two code spans in a row would merge into one.
+                    if ends_unescaped(&inl.s, "`") {
+                        inl.s.push(SEP);
+                    }
+                    inl.raw(&code_span(core));
+                });
             }
             _ if is_block(name) => {
                 inl.space();
+                if let [b'h', d @ b'1'..=b'6'] = name.as_bytes() {
+                    self.note_heading(c, d - b'0');
+                }
                 self.children(c, inl);
                 inl.space();
             }
@@ -1355,32 +1529,56 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
         }
     }
 
-    fn wrap(&mut self, c: NodeId, mark: &str, inl: &mut Inline) {
+    fn wrap(&mut self, c: NodeId, mark: &'static str, inl: &mut Inline) {
+        // A span inside a span of its own kind changes nothing.
+        let kind = match mark {
+            "*" => 0,
+            "**" => 1,
+            _ => 2,
+        };
+        if self.active[kind] {
+            self.children(c, inl);
+            return;
+        }
+        self.active[kind] = true;
         let mut sub = inl.sub();
         self.children(c, &mut sub);
-        emit(inl, &sub.s, |prev, core| {
+        self.active[kind] = false;
+        emit(inl, &sub.s, |inl, core| {
             // CommonMark opens a span only when the marker is left-flanking
             // and closes it only when right-flanking: punctuation inside
             // an edge needs a space (or punctuation) outside it. Markers
-            // of nested spans do not count as the edge.
-            let first = core.trim_start_matches(['*', '~']).chars().next();
+            // of nested spans of the same family are part of the run, not
+            // the edge; those of the other family are punctuation.
+            let fc = mark.chars().next().unwrap_or('*');
+            let first = core.trim_start_matches(fc).chars().next();
             let last = core
                 .trim_end_matches(SENT)
-                .trim_end_matches(['*', '~'])
+                .trim_end_matches(fc)
                 .chars()
                 .next_back();
-            let open_gap = prev.is_some_and(char::is_alphanumeric) && first.is_some_and(is_punct);
-            let mut o = String::new();
-            if open_gap {
-                o.push(' ');
+            let tail = inl.s.trim_end_matches(SENT);
+            if ends_unescaped(tail, mark) && !tail[..tail.len() - mark.len()].ends_with(fc) {
+                // Right after a span of the same kind: one span.
+                let keep = tail.len() - mark.len();
+                inl.s.truncate(keep);
+            } else {
+                if ends_unescaped(tail, fc.encode_utf8(&mut [0; 4])) {
+                    // Another span's marker run ends here: the runs would
+                    // join (`**a***b*`).
+                    inl.s.push(SEP);
+                }
+                let prev = inl.s.chars().rev().find(|&c| !MARKERS.contains(&c));
+                if prev.is_some_and(char::is_alphanumeric) && first.is_some_and(is_punct) {
+                    inl.s.push(' ');
+                }
+                inl.s.push_str(mark);
             }
-            o.push_str(mark);
-            o.push_str(core);
-            o.push_str(mark);
+            inl.s.push_str(core);
+            inl.s.push_str(mark);
             if last.is_some_and(is_punct) {
-                o.push(SENT);
+                inl.s.push(SENT);
             }
-            o
         });
     }
 
@@ -1389,18 +1587,15 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
             .doc
             .get_attribute(c, "href")
             .and_then(|h| resolve(self.base, h));
-        // The blocks of a link are written as one inline link, but its
-        // headings are still headings of the page.
-        if self.has_block(c) {
-            self.collect_headings(c);
-        }
+        // The blocks of a link are written as one inline link; its headings
+        // are still headings of the page ([`Ex::inline_el`] lists them).
         let mut sub = inl.sub();
         self.children(c, &mut sub);
         match url {
             Some(u) => {
                 let inner = sub.s.replace(PARA, &BR.to_string());
-                emit(inl, &inner, |_, core| {
-                    format!("[{core}]({})", escape_dest(u.as_str()))
+                emit(inl, &inner, |inl, core| {
+                    inl.raw(&format!("[{core}]({})", escape_dest(u.as_str())));
                 });
             }
             None => inl.append(&sub.s),
@@ -1620,6 +1815,14 @@ impl<'a, P: FnMut(NodeId) -> NodeStyle> Ex<'a, P> {
 
 /// Marker on the first line, the rest indented under it.
 fn indent_item(marker: &str, body: &str) -> String {
+    // `- ---` is a thematic break, not an item that holds one.
+    let hr;
+    let body = if marker == "- " && (body == "---" || body.starts_with("---\n")) {
+        hr = format!("***{}", &body[3..]);
+        &hr
+    } else {
+        body
+    };
     let pad = " ".repeat(marker.len());
     let mut o = String::new();
     for (i, l) in body.split('\n').enumerate() {
@@ -1658,7 +1861,8 @@ mod tests {
         assert_eq!(escape_word("snake_case", false), "snake_case");
         assert_eq!(escape_word("_x_", false), "\\_x\\_");
         assert_eq!(escape_word("a~~b", false), "a\\~\\~b");
-        assert_eq!(escape_word("a~b", false), "a~b");
+        assert_eq!(escape_word("a~b", false), "a\\~b");
+        assert_eq!(escape_word("~5", false), "\\~5");
         assert_eq!(escape_word("#", true), "\\#");
         assert_eq!(escape_word("#", false), "#");
         assert_eq!(escape_word("#tag", true), "#tag");
@@ -1974,6 +2178,187 @@ mod tests {
         assert_eq!(e.description.as_deref(), Some("second"));
         let e = run("<meta name=description content=''>");
         assert_eq!(e.description, None);
+    }
+
+    #[test]
+    fn a_link_after_an_exclamation_mark_stays_a_link() {
+        assert_eq!(
+            md("<p>Wow!<a href='/x'>click</a> and <b>bold!</b><a href='/y'>y</a></p>"),
+            "Wow\\![click](https://example.com/x) and **bold!**[y](https://example.com/y)\n"
+        );
+        // Already separated, or an image: unchanged.
+        assert_eq!(
+            md("<p>Wow! <a href='/x'>c</a></p>"),
+            "Wow! [c](https://example.com/x)\n"
+        );
+        assert_eq!(
+            md("<p>a!<img src='/i.png' alt='i'></p>"),
+            "a!![i](https://example.com/i.png)\n"
+        );
+    }
+
+    #[test]
+    fn a_tilde_never_opens_a_fence_or_a_second_marker_run() {
+        assert_eq!(md("<p><del>~5 items</del> left</p>"), "~~\\~5 items~~ left\n");
+        assert_eq!(md("<p><del><del>x</del></del> y</p>"), "~~x~~ y\n");
+        assert_eq!(md("<p>~~~ not a fence</p>"), "\\~\\~\\~ not a fence\n");
+        assert_eq!(md("<p><s>a</s>~b</p>"), "~~a~~\\~b\n");
+    }
+
+    #[test]
+    fn control_characters_cannot_change_the_block_structure() {
+        // CR from a character reference is a line end to Markdown readers.
+        assert_eq!(
+            md("<blockquote><pre>a&#13;# injected\nb</pre></blockquote>"),
+            "> ```\n> a\n> # injected\n> b\n> ```\n"
+        );
+        assert_eq!(
+            md("<ul><li><pre>a&#13;b</pre></ul>"),
+            "- ```\n  a\n  b\n  ```\n"
+        );
+        // Other control characters are dropped (binary data, form feed).
+        assert_eq!(md("<pre>a\u{c}b\u{b}c\u{85}d\u{7f}e</pre>"), "```\nabcde\n```\n");
+        assert_eq!(md("<p>a\u{b}b\u{1c}c</p>"), "abc\n");
+        // Unicode line separators are spaces, so a link stays on one line.
+        let e = run("<a href=/a>x\u{2028}y\u{85}z\u{b}w\u{2029}v</a>");
+        assert_eq!(e.links[0].text, "x yzw v");
+        assert!(!links_dump(&e).trim_end().contains(['\u{2028}', '\u{85}', '\u{b}']));
+    }
+
+    #[test]
+    fn an_hr_item_stays_an_item() {
+        assert_eq!(md("<ul><li><hr></li><li>x</ul>"), "- ***\n- x\n");
+        assert_eq!(md("<ul><li><hr><p>after</p></li><li>x</ul>"), "- ***\n\n  after\n\n- x\n");
+        // With the other marker or a number, `---` is fine.
+        assert_eq!(
+            md("<ul><li>a</ul><ul><li><hr></ul>"),
+            "- a\n\n* ---\n"
+        );
+        assert_eq!(md("<ol><li><hr></ol>"), "1. ---\n");
+        assert_eq!(md("<p>a</p><hr><p>b</p>"), "a\n\n---\n\nb\n");
+    }
+
+    #[test]
+    fn adjacent_spans_stay_separate_spans() {
+        // Same kind: one span.
+        assert_eq!(md("<p><b>a</b><b>b</b> and <i>c</i><i>d</i></p>"), "**ab** and *cd*\n");
+        assert_eq!(md("<p><s>s</s><s>t</s></p>"), "~~st~~\n");
+        assert_eq!(md("<p><b>a:</b><b>b</b></p>"), "**a:b**\n");
+        // Nested spans of a kind change nothing.
+        assert_eq!(md("<p><b><b>x</b></b> y</p>"), "**x** y\n");
+        assert_eq!(md("<p><i>a<i>b</i></i></p>"), "*ab*\n");
+        assert_eq!(md("<p><b>a <a href='/x'><b>l</b></a></b></p>"), "**a [l](https://example.com/x)**\n");
+        // Another kind of the same marker character: a space after
+        // punctuation, else a zero-width space.
+        assert_eq!(md("<p><b>Note:</b><i>text</i></p>"), "**Note:** *text*\n");
+        assert_eq!(md("<p><b>a</b><i>b</i> <i>c</i><b>d</b></p>"), "**a**\u{200b}*b* *c*\u{200b}**d**\n");
+        assert_eq!(
+            md("<p><strong><code>c</code></strong><em>w</em></p>"),
+            "**`c`** *w*\n"
+        );
+        // Code spans in a row.
+        assert_eq!(
+            md("<p><code>c1</code><code>c2</code> <code>c3</code></p>"),
+            "`c1`\u{200b}`c2` `c3`\n"
+        );
+        // Another marker character is punctuation to the flanking rules.
+        assert_eq!(md("<p>a<em><del>b</del></em> c</p>"), "a *~~b~~* c\n");
+        assert_eq!(md("<p>a<del><b>b</b></del> c</p>"), "a ~~**b**~~ c\n");
+        // A literal marker character before a span is escaped, not a run.
+        assert_eq!(md("<p>a*<b>b</b></p>"), "a\\***b**\n");
+        // Spans of a block inside a span do not carry over.
+        assert_eq!(md("<b>x<div><b>y</b></div></b>"), "x\n\n**y**\n");
+    }
+
+    #[test]
+    fn a_trailing_hash_run_does_not_close_a_heading() {
+        assert_eq!(md("<h2>Foo #</h2>"), "## Foo \\#\n");
+        assert_eq!(md("<h1>x ##</h1>"), "# x \\##\n");
+        assert_eq!(md("<h3>#</h3>"), "### \\#\n");
+        assert_eq!(md("<h2>C#</h2><h2>a #b</h2>"), "## C#\n\n## a #b\n");
+        assert_eq!(md("<title>Foo #</title><p>x</p>"), "# Foo \\#\n\nx\n");
+        assert_eq!(md("<h2>Foo <b>#</b></h2>"), "## Foo **#**\n");
+    }
+
+    #[test]
+    fn list_numbers_stay_within_nine_digits() {
+        assert_eq!(
+            md("<ol start=999999999><li>a<li>b<li>c</ol>"),
+            "999999999. a\n999999999. b\n999999999. c\n"
+        );
+        assert_eq!(md("<ol><li value=999999999>a<li>b</ol>"), "999999999. a\n999999999. b\n");
+    }
+
+    #[test]
+    fn headings_in_table_cells_are_headings() {
+        let e = run("<table><tr><td><h2>InCell</h2></td></tr></table><h2>Out</h2>");
+        let got: Vec<(u8, &str)> = e.headings.iter().map(|h| (h.level, h.text.as_str())).collect();
+        assert_eq!(got, [(2, "InCell"), (2, "Out")]);
+        // A cell heading counts for the h1 rule; one without text is not
+        // listed (it is still written).
+        let e = run("<title>T</title><table><tr><td><h1>Cell</h1><td><h2><img src=/a.png></h2></table>");
+        assert_eq!(e.headings.len(), 1);
+        assert!(!e.markdown.starts_with("# T"), "{}", e.markdown);
+    }
+
+    #[test]
+    fn closed_details_and_hidden_content_are_not_extracted() {
+        assert_eq!(
+            md("<details><summary>Sum</summary>closed body<p>x</p><summary>two</summary></details>\
+                <details open><summary>S2</summary>open body</details>"),
+            "Sum\n\nS2\n\nopen body\n"
+        );
+        assert_eq!(
+            md("<div style='color:red; Content-Visibility : hidden'>cv<a href=/x>l</a></div><p>y</p>"),
+            "y\n"
+        );
+        assert_eq!(md("<div style='content-visibility:auto'>shown</div>"), "shown\n");
+        assert_eq!(md("<html style='display:none'><body><p>seen?</p></body></html>"), "");
+        let e = run("<details><summary>s</summary><a href=/x>l</a></details>");
+        assert!(e.links.is_empty());
+    }
+
+    #[test]
+    fn nested_inline_chains_are_walked_once() {
+        // Each of 380 nested spans has 300 siblings and a block at the
+        // bottom: a walk per level would visit them 380 times over.
+        let mut html = String::new();
+        for _ in 0..380 {
+            html.push_str("<span>");
+        }
+        html.push_str("<div>bottom</div>");
+        for _ in 0..380 {
+            html.push_str(&"<i>x</i>".repeat(300));
+            html.push_str("</span>");
+        }
+        let t = std::time::Instant::now();
+        let m = md(&html);
+        assert!(m.contains("bottom"));
+        assert_eq!(m.matches('x').count(), 380 * 300);
+        assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn deep_quotes_and_lists_do_not_multiply_the_output() {
+        let html = format!(
+            "{}{}{}",
+            "<blockquote>".repeat(100),
+            "<p>x</p>".repeat(1000),
+            "</blockquote>".repeat(100)
+        );
+        let m = md(&html);
+        assert_eq!(m.matches('x').count(), 1000);
+        assert!(m.len() < 150_000, "{} bytes", m.len());
+        let deepest = m.lines().map(|l| l.matches("> ").count()).max().unwrap();
+        assert_eq!(deepest, MAX_CONTAINERS);
+        let html = format!("{}x{}", "<ul><li>".repeat(100), "</ul>".repeat(100));
+        let m = md(&html);
+        assert!(m.contains('x'));
+        assert!(m.lines().all(|l| l.len() <= 2 * MAX_CONTAINERS + 2), "{m}");
+        // Content past the limit is still there.
+        let html = format!("{}<p>a</p><li>b</li>{}", "<ul><li>".repeat(30), "</ul>".repeat(30));
+        let m = md(&html);
+        assert!(m.contains('a') && m.contains('b'));
     }
 
     #[test]

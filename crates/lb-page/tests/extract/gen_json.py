@@ -99,6 +99,19 @@ CASES = {
         {},
         "Adjacent lists\na\nb\nc\nd\nx\no1\no2\no3\nEmpty items\nh1\nh2\nreal\nNested start\na\nb\nc\nd\ne\nouter\nx\nControl characters\nXp\x02qY r\x01s\npre\x01x\x02y\nCard title\ncard body\nFlanking\nNote:text\n\"q\"word\na(b)",
     ),
+    # Round 3 regressions (see ADR 0042 round 3): a link after `!`, `~` at
+    # the start of a span, CR in `pre`, an hr as the first block of an item,
+    # adjacent spans, a trailing `#` in a heading and the title, a 9-digit
+    # list number, a heading in a table cell, a closed `details`,
+    # `content-visibility:hidden`. The `text` is what the older `--dump
+    # text` rules give for this page (they know nothing of `details` or
+    # `content-visibility`, and keep the CR).
+    "regress3": (
+        "Round 3 #", None, None, None,
+        [(2, "Heading #"), (3, "InCell")],
+        {},
+        "Heading #\nWow!click and bold!y\n~5 items left x y\na\r# injected\nb\nx\nab and cd\nNote:text and c1c2\nab c\na\nb\nc\nInCell\n\nSum\nclosed body\nclosed para\ncv hidden cv link\nend",
+    ),
     "plain": (
         "", None, None, None, [], {},
         "line one\nline two <b>not markup</b>",
