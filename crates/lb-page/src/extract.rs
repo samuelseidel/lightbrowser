@@ -546,7 +546,10 @@ impl Inline {
 /// Backslash-escape the Markdown specials of one whitespace-free word.
 /// `ls`: the word starts a line, so block markers count.
 fn escape_word(w: &str, ls: bool) -> String {
-    let chars: Vec<char> = w.chars().filter(|&c| c != BR && c != PARA && c != SENT).collect();
+    let chars: Vec<char> = w
+        .chars()
+        .filter(|&c| c != BR && c != PARA && c != SENT)
+        .collect();
     let n = chars.len();
     let all = |c: char| chars.iter().all(|&x| x == c);
     let mut o = String::with_capacity(w.len() + 4);
@@ -1857,7 +1860,10 @@ mod tests {
         );
         // A list of the other kind is a new list anyway; the marker flag
         // still alternates, so no two neighbours share one.
-        assert_eq!(md("<ul><li>a</ul><ol><li>b</ol><ul><li>c</ul>"), "- a\n\n1) b\n\n- c\n");
+        assert_eq!(
+            md("<ul><li>a</ul><ol><li>b</ol><ul><li>c</ul>"),
+            "- a\n\n1) b\n\n- c\n"
+        );
     }
 
     #[test]
@@ -1878,7 +1884,10 @@ mod tests {
             md("<ol><li>a<li>b<ol start=5><li>c<li value=2>d</ol><li>e</ol>"),
             "1. a\n2. b\n\n   5. c\n   2. d\n3. e\n"
         );
-        assert_eq!(md("<ul><li>o<ol start=3><li>x</ol></ul>"), "- o\n\n  3. x\n");
+        assert_eq!(
+            md("<ul><li>o<ol start=3><li>x</ol></ul>"),
+            "- o\n\n  3. x\n"
+        );
         // From 1 on, and bullets, follow tightly.
         assert_eq!(md("<ul><li>o<ol><li>x</ol></ul>"), "- o\n  1. x\n");
         assert_eq!(md("<ol><li>o<ul><li>x</ul></ol>"), "1. o\n   - x\n");
@@ -1921,7 +1930,11 @@ mod tests {
             "<title>T</title><a href=/c><h3>Card <b>title</b></h3><p>body</p></a>\
              <a href=/h><h1>Site</h1></a><a href=/n><h2 hidden>x</h2><h2></h2></a>",
         );
-        let got: Vec<(u8, &str)> = e.headings.iter().map(|h| (h.level, h.text.as_str())).collect();
+        let got: Vec<(u8, &str)> = e
+            .headings
+            .iter()
+            .map(|h| (h.level, h.text.as_str()))
+            .collect();
         assert_eq!(got, [(3, "Card title"), (1, "Site")]);
         // The page has an h1, so the title is not added.
         assert!(!e.markdown.starts_with("# T"), "{}", e.markdown);
@@ -1933,7 +1946,10 @@ mod tests {
         assert_eq!(md("<p><em>\"q\"</em>word"), "*\"q\"* word\n");
         assert_eq!(md("<p>a<b>(b)</b>"), "a **(b)**\n");
         assert_eq!(md("<p>a<b>(b)</b>."), "a **(b)**.\n");
-        assert_eq!(md("<p><b>Note:</b> text <b>x.</b>"), "**Note:** text **x.**\n");
+        assert_eq!(
+            md("<p><b>Note:</b> text <b>x.</b>"),
+            "**Note:** text **x.**\n"
+        );
         assert_eq!(md("<p><b><i>Note:</i></b>text"), "***Note:*** text\n");
         // Letters inside the edges and punctuation outside need nothing.
         assert_eq!(md("<p>a<b>b</b>c (<b>d</b>)"), "a**b**c (**d**)\n");
