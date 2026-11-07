@@ -3372,7 +3372,13 @@ and nine `lb-cdp` tests failed on one lint and on the mock host refusing
 media emulation, both fixed after it. `apis::import_page` failed once
 under heavy load (its last line orders a fresh `import()` against a
 `setTimeout(0)`, a race with the loopback fetch) and passed 6 of 6 runs
-alone. Bench (5 x 50 pages; Chromium 1243 on the same machine):
+alone. Fixed at the cause: page and worker loops ran every queued task
+before any due timer, so a fast fetch could overtake a timer that was due
+first. Tasks now carry the time they were queued, and a timer that came
+due before the next task was queued runs first (real clock; virtual time
+unchanged), the order Chrome's scheduler serves queues of equal priority
+in. All 109 `pages` cases pass; `import_page` 24 of 24 with 8 runs at a
+time. Bench (5 x 50 pages; Chromium 1243 on the same machine):
 
 | | `fetch` | CDP | Chromium (CDP) |
 |---|---|---|---|

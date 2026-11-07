@@ -935,7 +935,9 @@ pub struct Window {
     pub(crate) cache: RefCell<HashMap<(u32, u32, &'static str, String), u32>>,
     pub(crate) listeners: RefCell<HashMap<HostRef, Vec<Rc<events::Listener>>>>,
     pub(crate) handlers: RefCell<HashMap<(HostRef, String), HandlerValue>>,
-    tasks: RefCell<[VecDeque<TaskFn>; SOURCES]>,
+    /// Queued tasks by source, each with the page clock time it was
+    /// queued at (see [`Window::next_task_queued_at`]).
+    tasks: RefCell<[VecDeque<(f64, TaskFn)>; SOURCES]>,
     pub(crate) timers: RefCell<BTreeMap<u32, Timer>>,
     next_timer: Cell<u32>,
     timer_seq: Cell<u64>,
@@ -1582,7 +1584,8 @@ impl Window {
 
     /// Queue a task and wake the event loop.
     pub fn queue_task(&self, source: TaskSource, f: TaskFn) {
-        self.tasks.borrow_mut()[source as usize].push_back(f);
+        let at = self.clock.now();
+        self.tasks.borrow_mut()[source as usize].push_back((at, f));
         self.wake();
     }
 
@@ -1591,7 +1594,18 @@ impl Window {
         // IndexedDB: transactions of the previous task become inactive.
         idb::task_boundary(self);
         let mut q = self.tasks.borrow_mut();
-        q.iter_mut().find_map(|q| q.pop_front())
+        q.iter_mut().find_map(|q| q.pop_front()).map(|(_, f)| f)
+    }
+
+    /// When the task [`Window::take_task`] would return next was queued
+    /// (page clock ms). The page loop runs a timer that came due before
+    /// it first: tasks and timers in the order they became ready, as
+    /// Chrome's scheduler serves queues of equal priority.
+    pub fn next_task_queued_at(&self) -> Option<f64> {
+        self.tasks
+            .borrow()
+            .iter()
+            .find_map(|q| q.front().map(|(at, _)| *at))
     }
 
     /// Number of queued tasks.

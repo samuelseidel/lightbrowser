@@ -217,7 +217,8 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
     let mut next_frame = 0.0f64;
     let mut gc_done = false;
     let mut quiet_since: Option<f64> = None;
-    // Tasks run before timers, but a page that keeps queueing tasks (an
+    // Tasks and due timers run in the order they became ready (below);
+    // with a virtual clock tasks go first. A page that keeps queueing tasks (an
     // IndexedDB request loop, a postMessage ping-pong) must not starve
     // its due timers: after this many tasks in a row a due timer goes
     // first (real clock only).
@@ -255,6 +256,31 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             }
         }
         for x in wins.iter().filter(|_| !did) {
+            // A timer that came due before this window's next task was
+            // queued runs first (real clock; see `next_task_queued_at`).
+            let timer_first = !x.clock.is_virtual()
+                && matches!(
+                    (x.next_timer_due(), x.next_task_queued_at()),
+                    (Some(due), Some(queued)) if due <= x.clock.now() && due < queued
+                );
+            if timer_first {
+                let realm = x.realm();
+                let ran = ws
+                    .with_engine(|engine| {
+                        let mut js = EngineJs { engine, realm };
+                        let ran = x.run_due_timer(&mut js);
+                        if ran {
+                            js.engine.perform_microtask_checkpoint();
+                        }
+                        ran
+                    })
+                    .unwrap_or(false);
+                if ran {
+                    did = true;
+                    streak = 0;
+                    break;
+                }
+            }
             if let Some(task) = x.take_task() {
                 let realm = x.realm();
                 ws.with_engine(|engine| {

@@ -472,7 +472,14 @@ async fn event_loop(
         if let Some(l) = link.as_deref_mut() {
             l.poll(engine, w);
         }
-        if streak >= 50 && !w.clock.is_virtual() {
+        // A timer that came due before the next task was queued runs
+        // first, as in the page loop (`Window::next_task_queued_at`).
+        let timer_first = !w.clock.is_virtual()
+            && matches!(
+                (w.next_timer_due(), w.next_task_queued_at()),
+                (Some(due), Some(queued)) if due <= w.clock.now() && due < queued
+            );
+        if (streak >= 50 || timer_first) && !w.clock.is_virtual() {
             streak = 0;
             let mut js = EngineJs {
                 engine: &mut *engine,

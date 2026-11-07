@@ -268,7 +268,7 @@ personas (ROADMAP, Risks).
 
 1. `Page.navigate` → `lb-net` request. The persona's OS picks the TCP SYN, and its family picks the ClientHello, H2 settings and header order.
 2. The response body streams into `html5ever`, which builds the DOM arena incrementally.
-3. Scripts run in the realm (classic, `defer`, `async`, modules) through the HTML event loop: tasks, microtasks and timers.
+3. Scripts run in the realm (classic, `defer`, `async`, modules) through the HTML event loop: tasks, microtasks and timers. Tasks and due timers run in the order they became ready (a timer that came due before the next task was queued goes first), as Chrome's scheduler serves queues of equal priority; on a virtual clock tasks go first.
 4. Style and layout stay dirty. They are computed only when JS or CDP asks for geometry (`getBoundingClientRect`, `offsetWidth`, `elementFromPoint`, Playwright actionability, IntersectionObserver).
 5. Load events fire. Lifecycle events go to CDP (`Page.lifecycleEvent`). After `load` of a top-level document the page requests its icon once per URL (`<link rel=icon>` or `/favicon.ico`), as Chrome does.
 6. Navigating away runs the unload steps (`pagehide`, `visibilitychange` to hidden, `unload`; `sendBeacon` requests go out), then drops the document arena, its frames and the realm.
