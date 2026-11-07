@@ -1,0 +1,10 @@
+<!doctype html><!--LOG--><script>
+var n = 0, first = 0;
+for (var i = 1; i <= 100; i++) {
+  n++; history.pushState(n, '', '#b' + n);
+  if (history.state !== n && !first) first = i;
+}
+log('came from ' + sessionStorage.getItem('from'));
+log('first ignored pushState on the next document: ' + first);
+end();
+</script>

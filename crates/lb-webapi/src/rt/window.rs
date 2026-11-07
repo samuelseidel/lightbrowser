@@ -515,6 +515,9 @@ pub(crate) fn form_entries(
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
 pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
+    if !w.navigation_allowed() {
+        return;
+    }
     let cur = w.url();
     let same_doc = url.fragment().is_some() && {
         let (mut a, mut b) = (cur.clone(), url.clone());
@@ -563,7 +566,7 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
         let _ = js;
         return;
     }
-    w.request_navigation(NavRequest::get(url, replace));
+    w.post_navigation(NavRequest::get(url, replace));
 }
 
 /// `(screenX, screenY)`: the persona's `window_position()` (Wayland 0,0;
@@ -1060,7 +1063,8 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Location", "reload", |_cx, w| {
-        w.request_navigation(NavRequest::get(w.url(), true));
+        // Not counted by the limiter (Chrome 153).
+        w.post_navigation(NavRequest::get(w.url(), true));
         Ok(())
     });
     method(reg, rt, "Location", "toString", |cx, w| {
@@ -1075,7 +1079,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "History", "length", |cx, w| {
         not_fully_active(w, "length")?;
         let h = w.history.borrow();
-        cx.ret(h.before + h.entries.len() as u32)
+        cx.ret((h.before + h.entries.len() as u32).min(super::HISTORY_MAX))
     });
     getter(reg, rt, "History", "state", |cx, w| {
         not_fully_active(w, "state")?;
@@ -1119,6 +1123,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 }
                 _ => w.url(),
             };
+            if !w.navigation_allowed() {
+                return Ok(());
+            }
             {
                 let mut h = w.history.borrow_mut();
                 let entry = HistEntry {
@@ -1145,9 +1152,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             } else {
                 delta
             };
+            if !w.navigation_allowed() {
+                return Ok(());
+            }
             if delta == 0 {
                 if name == "go" {
-                    w.request_navigation(NavRequest::get(w.url(), true));
+                    w.post_navigation(NavRequest::get(w.url(), true));
                 }
                 return Ok(());
             }

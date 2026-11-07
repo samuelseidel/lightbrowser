@@ -1,0 +1,11 @@
+<!doctype html><!--LOG--><iframe id=f src="child.html"></iframe><script>
+// Each frame has its own budget; the documents of one frame share it.
+var n = 0, ok = 0;
+for (var i = 1; i <= 250; i++) { n++; history.pushState(n, '', '#p' + n); if (history.state === n) ok++; }
+log('top accepted ' + ok);
+var got = [];
+addEventListener('message', function (e) {
+  got.push(e.data);
+  if (/second document/.test(e.data)) { got.forEach(log); end(); }
+});
+</script>

@@ -1,0 +1,23 @@
+<!doctype html><body><script>
+var kind = decodeURIComponent(location.search.slice(1));
+var key = 'loads-' + kind;
+var loads = +(sessionStorage.getItem(key) || 0);
+sessionStorage.setItem(key, loads + 1);
+if (loads > 0) {
+  parent.postMessage(kind + ': loaded again, ' + location.pathname + location.search, '*');
+} else {
+  var n = 0;
+  for (var i = 1; i <= 205; i++) { n++; history.pushState(n, '', '#a' + n); }
+  if (kind == 'href') location.href = 'other.html';
+  if (kind == 'assign') location.assign('other.html?assign');
+  if (kind == 'replace') location.replace('other.html?replace');
+  if (kind == 'reload') location.reload();
+  if (kind == 'go(0)') history.go(0);
+  if (kind == 'fragment') location.hash = '#frag';
+  if (kind == 'link click') { var a = document.createElement('a'); a.href = 'other.html?link'; document.body.appendChild(a); a.click(); }
+  if (kind == 'form submit') { var f = document.createElement('form'); f.action = 'other.html'; document.body.appendChild(f); f.submit(); }
+  setTimeout(function () {
+    parent.postMessage(kind + ': stayed, hash ' + location.hash + ', state ' + history.state, '*');
+  }, 700);
+}
+</script>

@@ -889,6 +889,50 @@ pub(crate) struct History {
     pub scroll_restoration: String,
 }
 
+/// Chrome's `NavigationRateLimiter` (ADR 0047): a document may start 200
+/// navigations of its own in a window of 10 s; `history.pushState`,
+/// `replaceState`, `go`, `back`, `forward` and navigations started by script,
+/// a link or a form count (a reload does not), and what comes after the
+/// 200th is ignored without a trace for the page. The window starts at the
+/// first counted call and restarts at the first one after it ended. One
+/// console warning for each window in which something was ignored. Chrome 153
+/// keeps one limiter for each document (a new document of the same frame
+/// starts afresh), so it lives in the [`Window`]; time comes from the
+/// window's clock, so a virtual clock works.
+#[derive(Default)]
+pub(crate) struct NavLimiter {
+    count: Cell<u32>,
+    /// Window clock (ms) at the first counted call of this window.
+    start: Cell<f64>,
+    warned: Cell<bool>,
+}
+
+/// Calls the limiter lets through in one window.
+pub(crate) const NAV_LIMIT: u32 = 200;
+/// Length of the limiter's window in ms.
+pub(crate) const NAV_WINDOW_MS: f64 = 10_000.0;
+/// `history.length` never shows more than this (Chrome's session history
+/// size).
+pub(crate) const HISTORY_MAX: u32 = 50;
+/// Text of the warning for the first ignored call of a window.
+pub(crate) const NAV_THROTTLE_WARNING: &str = "Throttling navigation to prevent the browser from hanging. See https://crbug.com/1038223. Command line switch --disable-ipc-flooding-protection can be used to bypass the protection";
+
+impl NavLimiter {
+    /// Count a call at `now` (ms): `true` when it may go on.
+    fn count_call(&self, now: f64) -> bool {
+        if self.count.get() == 0 || now - self.start.get() > NAV_WINDOW_MS {
+            self.count.set(0);
+            self.start.set(now);
+            self.warned.set(false);
+        }
+        if self.count.get() >= NAV_LIMIT {
+            return false;
+        }
+        self.count.set(self.count.get() + 1);
+        true
+    }
+}
+
 /// Event handler storage (`onclick`), see `events`.
 pub(crate) enum HandlerValue {
     Compiled(Handle),
@@ -969,6 +1013,7 @@ pub struct Window {
     pub(crate) bg: RefCell<bgimage::BgImages>,
     ready_state: Cell<ReadyState>,
     pub(crate) history: RefCell<History>,
+    nav_limiter: NavLimiter,
     pub(crate) observers: RefCell<Vec<u32>>,
     pub(crate) mo_queued: Cell<bool>,
     /// Slot assignments of the main document's shadow trees as last seen
@@ -1101,6 +1146,7 @@ impl Window {
                 before: init.history_len,
                 scroll_restoration: "auto".into(),
             }),
+            nav_limiter: NavLimiter::default(),
             observers: RefCell::new(Vec::new()),
             mo_queued: Cell::new(false),
             slot_state: RefCell::new(shadow::SlotState::default()),
@@ -1571,9 +1617,33 @@ impl Window {
         self.nav_request.borrow_mut().take()
     }
 
+    /// A navigation script, a link or a form starts: counted by the
+    /// rate limiter, and ignored when that says so.
     pub(crate) fn request_navigation(&self, req: NavRequest) {
+        if self.navigation_allowed() {
+            self.post_navigation(req);
+        }
+    }
+
+    /// Hand a navigation to the page layer, not counted (a reload; callers
+    /// that counted already).
+    pub(crate) fn post_navigation(&self, req: NavRequest) {
         *self.nav_request.borrow_mut() = Some(req);
         self.wake();
+    }
+
+    /// Count one navigation start against this document's limiter; `false`
+    /// when it is over the limit and must be ignored (the first such call
+    /// of a window logs Chrome's warning).
+    pub(crate) fn navigation_allowed(&self) -> bool {
+        let l = &self.nav_limiter;
+        if l.count_call(self.clock.now()) {
+            return true;
+        }
+        if !l.warned.replace(true) {
+            self.warn(NAV_THROTTLE_WARNING);
+        }
+        false
     }
 
     pub fn wake(&self) {

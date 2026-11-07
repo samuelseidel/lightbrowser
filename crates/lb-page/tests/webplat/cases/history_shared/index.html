@@ -1,0 +1,16 @@
+<!doctype html><!--LOG--><script>
+// Which calls use the same budget? For each kind, make 40 calls of it,
+// then see how many pushState calls are accepted in all: 200 minus 40
+// if the kind shares the budget, 200 if it does not ('none' is the
+// plain budget). Each kind runs in a new iframe, which has its own.
+var kinds = ['none', 'replaceState', 'hash', 'back-forward'];
+var kind = 0;
+function next() {
+  if (kind == kinds.length) { end(); return; }
+  var f = document.createElement('iframe');
+  f.src = 'frame.html?' + kinds[kind];
+  document.body.appendChild(f);
+}
+addEventListener('message', function (e) { log(e.data); kind++; next(); });
+document.addEventListener('DOMContentLoaded', next);
+</script>
