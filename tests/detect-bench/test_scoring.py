@@ -79,7 +79,7 @@ class Catalogue(unittest.TestCase):
 
     def test_collector_and_catalogue_agree(self):
         src = (HERE / "sites" / "collector.js").read_text()
-        emitted = set(re.findall(r"\b(?:probe|add)\('([a-z0-9_]+)'", src))
+        emitted = set(re.findall(r"\b(?:probe|add|late)\('([a-z0-9_]+)'", src))
         catalogued = {r["probe"] for r in scoring.RULES if "probe" in r}
         self.assertEqual(emitted - catalogued, set(), "probes missing from scoring.RULES")
         self.assertEqual(catalogued - emitted, set(), "rules for probes the collector never sends")

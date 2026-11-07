@@ -21,6 +21,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import ssl
 import struct
 import subprocess
@@ -44,6 +45,10 @@ SID_RE = re.compile(r"^[0-9a-f]{16}$")
 MAX_BODY = 2 * 1024 * 1024
 MAX_REQUESTS_PER_SESSION = 500
 MAX_TRACE = 20000
+MAX_HEADER_VALUE = 600
+# Signed-agent headers (RFC 9421, see sigagent.py): kept in full on the first
+# document and on every request that carries them.
+AGENT_HEADERS = ("signature-agent", "signature-input", "signature")
 
 # Product catalogue used by the shop and search pages.
 PRODUCTS = [
@@ -74,6 +79,106 @@ PALETTE = ["#d1495b", "#edae49", "#00798c", "#30638e", "#003d5b", "#6a4c93"]
 
 def now() -> float:
     return time.time()
+
+
+STUN_MAGIC = 0x2112A442
+
+
+class StunResponder:
+    """A loopback-only UDP STUN server (RFC 5389): it answers Binding requests
+    with the sender's address as XOR-MAPPED-ADDRESS and nothing else.
+
+    The collector's `webrtc_candidates` probe gathers ICE candidates against
+    it. It binds 127.0.0.1 or ::1 only (never a public address), counts the
+    requests it answered and ignores anything that is not a well-formed
+    Binding request. `requests` keeps the last 100 senders and times.
+    """
+
+    def __init__(self, host: str, port: int = 0):
+        if host not in ("127.0.0.1", "::1"):
+            raise ValueError(f"STUN responder binds loopback only, not {host!r}")
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        self.sock = socket.socket(family, socket.SOCK_DGRAM)
+        self.sock.bind((host, port))
+        self.sock.settimeout(0.2)
+        self.host = host
+        self.port = self.sock.getsockname()[1]
+        self.answered = 0
+        self.ignored = 0
+        self.requests: list[dict] = []
+        self.lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    @staticmethod
+    def parse(data: bytes) -> bytes | None:
+        """The transaction id of a well-formed Binding request, else None."""
+        if len(data) < 20 or data[0] & 0xC0:
+            return None
+        mtype, length, cookie = struct.unpack(">HHI", data[:8])
+        if mtype != 0x0001 or cookie != STUN_MAGIC or length % 4 or len(data) != 20 + length:
+            return None
+        # Attributes must be well formed TLVs that fill the message.
+        i = 20
+        while i < len(data):
+            if i + 4 > len(data):
+                return None
+            alen = struct.unpack(">H", data[i + 2:i + 4])[0]
+            i += 4 + alen + (-alen % 4)
+        return data[8:20] if i == len(data) else None
+
+    @staticmethod
+    def response(txid: bytes, addr: tuple) -> bytes:
+        """Binding success response with XOR-MAPPED-ADDRESS for `addr`."""
+        port = addr[1] ^ (STUN_MAGIC >> 16)
+        if ":" in addr[0]:
+            raw = socket.inet_pton(socket.AF_INET6, addr[0].split("%")[0])
+            key = struct.pack(">I", STUN_MAGIC) + txid
+            body = struct.pack(">BBH", 0, 2, port) + bytes(a ^ b for a, b in zip(raw, key))
+        else:
+            raw = socket.inet_aton(addr[0])
+            body = struct.pack(">BBH", 0, 1, port) + bytes(a ^ b for a, b in zip(raw, struct.pack(">I", STUN_MAGIC)))
+        attr = struct.pack(">HH", 0x0020, len(body)) + body
+        return struct.pack(">HHI", 0x0101, len(attr), STUN_MAGIC) + txid + attr
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                data, addr = self.sock.recvfrom(2048)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            txid = self.parse(data)
+            with self.lock:
+                if txid is None:
+                    self.ignored += 1
+                    continue
+                self.answered += 1
+                self.requests.append({"t": now(), "from": f"{addr[0]}:{addr[1]}"})
+                del self.requests[:-100]
+            try:
+                self.sock.sendto(self.response(txid, addr), addr)
+            except OSError:
+                pass
+
+    def start(self) -> "StunResponder":
+        self._thread.start()
+        return self
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(1)
+        self.sock.close()
+
+    def address(self) -> str:
+        return f"[{self.host}]:{self.port}" if ":" in self.host else f"{self.host}:{self.port}"
+
+    def stats(self) -> dict:
+        with self.lock:
+            return {"address": self.address(), "answered": self.answered, "ignored": self.ignored,
+                    "requests": list(self.requests)}
 
 
 class Store:
@@ -176,6 +281,7 @@ class Handler(BaseHTTPRequestHandler):
     store: Store
     config: dict
     quiet = False
+    stun: StunResponder | None = None
 
     # ---- helpers -------------------------------------------------------
 
@@ -224,13 +330,43 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj, indent=1).encode()
         self.send_body(code, body, "application/json", {"Cache-Control": "no-store"})
 
+    def fetch_context(self) -> dict:
+        """The values (not only the names) of Referer, Sec-Fetch-* and Origin,
+        and the request's own origin: what `referer_context_mismatch` judges."""
+        h = self.headers
+
+        def val(name: str) -> str | None:
+            v = h.get(name)
+            return v[:MAX_HEADER_VALUE] if v is not None else None
+
+        return {
+            "host": val("Host"),
+            "scheme": "https" if self.tls_info() else "http",
+            "referer": val("Referer"),
+            "origin": val("Origin"),
+            "sec_fetch_site": val("Sec-Fetch-Site"),
+            "sec_fetch_mode": val("Sec-Fetch-Mode"),
+            "sec_fetch_dest": val("Sec-Fetch-Dest"),
+            "sec_fetch_user": val("Sec-Fetch-User"),
+        }
+
+    def agent_headers(self) -> dict:
+        """Signature-Agent / Signature-Input / Signature as sent (repeated header
+        lines joined with ", " as Structured Fields require); only those present."""
+        out = {}
+        for name in AGENT_HEADERS:
+            vals = self.headers.get_all(name)
+            if vals:
+                out[name] = ", ".join(v.strip() for v in vals)[:4096]
+        return out
+
     def record_request(self, s: dict | None, path: str, kind: str) -> None:
         if s is None or len(s["requests"]) >= MAX_REQUESTS_PER_SESSION:
             return
         t = now()
         docs = s["documents"]
         since = round((t - docs[-1]["t"]) * 1000, 1) if docs else None
-        s["requests"].append({
+        req = {
             "t": t,
             "path": path,
             "kind": kind,
@@ -239,7 +375,12 @@ class Handler(BaseHTTPRequestHandler):
             "http_version": self.request_version,
             "ua": self.headers.get("User-Agent"),
             "header_names": list(self.headers.keys()),
-        })
+            **self.fetch_context(),
+        }
+        agent = self.agent_headers()
+        if agent:
+            req["agent"] = agent
+        s["requests"].append(req)
         self.note_ua(s)
 
     def note_ua(self, s: dict) -> None:
@@ -266,7 +407,11 @@ class Handler(BaseHTTPRequestHandler):
                 "headers": {k.lower(): v for k, v in hdrs.items() if k.lower() != "cookie"},
                 "cookie": not fresh,
                 "scheme": "https" if self.tls_info() else "http",
+                **{k: v for k, v in self.fetch_context().items() if k not in ("host", "scheme")},
             }
+            agent = self.agent_headers()
+            if agent:
+                doc["headers"].update(agent)  # in full: the headers dict above keeps the last line only
             tls = self.tls_info()
             if tls:
                 doc["tls"] = tls
@@ -282,6 +427,7 @@ class Handler(BaseHTTPRequestHandler):
             "acceptLanguage": hdrs.get("Accept-Language", ""),
             "secChUa": hdrs.get("sec-ch-ua", ""),
             "secChUaPlatform": hdrs.get("sec-ch-ua-platform", ""),
+            "stun": self.stun.address() if self.stun else "",
         }
         tpl = (SITES / f"{name}.html").read_text()
         q = query.get("q", [""])[0][:200]
@@ -397,16 +543,41 @@ class Handler(BaseHTTPRequestHandler):
             self.store.flush()
         self.send_json(200, {"ok": True})
 
+    def fleet(self) -> dict:
+        """Cross-session groups over every retained session (call with the store lock held)."""
+        return scoring.fleet_index(self.store.sessions.values(), self.config)
+
+    def clusters(self) -> dict:
+        """Sessions grouped by a hash of their stable device probes and by the
+        shape of their pointer strokes. Groups of one are left out; a group the
+        size of the threshold or more is what `fleet_fingerprint_reuse` fires on."""
+        idx = self.fleet()
+        thr = idx["threshold"]
+        fps = [{"hash": h, "size": len(sids), "fires": len(sids) >= thr, "sessions": sids,
+                "parts": idx["parts"].get(h)}
+               for h, sids in sorted(idx["fingerprint"].items(), key=lambda kv: -len(kv[1])) if len(sids) >= 2]
+        shs = [{"hash": h, "size": len(sids), "sessions": sids}
+               for h, sids in sorted(idx["shape"].items(), key=lambda kv: -len(kv[1])) if len(sids) >= 2]
+        return {"sessions_retained": idx["sessions"], "threshold": thr, "window_s": self.config.get("fleet_window_s", 0),
+                "fingerprint": fps, "path_shape": shs}
+
     def api_get(self, path: str, query: dict) -> None:
+        if path == "/api/clusters":
+            with self.store.lock:
+                return self.send_json(200, self.clusters())
+        if path == "/api/stun":
+            return self.send_json(200, self.stun.stats() if self.stun else {"address": None})
         if path == "/api/results":
             with self.store.lock:
                 rows = []
+                fleet = self.fleet()
                 for s in self.store.sessions.values():
-                    r = scoring.score_session(s, self.config)
+                    r = scoring.score_session(s, self.config, fleet)
                     rows.append({
                         "sid": s["sid"], "created": s["created"], "beacons": s["beacons"],
                         "ua": (s["user_agents"] or [""])[0], "score": r["score"],
                         "verdict": r["verdict"], "fired": [f["id"] for f in r["fired"]],
+                        "agent_declared": bool(r["agent_declared"]),
                     })
             return self.send_json(200, {"sessions": rows})
         m = re.fullmatch(r"/api/(score|session|trace)/([0-9a-f]{16})", path)
@@ -418,7 +589,7 @@ class Handler(BaseHTTPRequestHandler):
             if s is None:
                 return self.send_json(404, {"error": "unknown session"})
             if kind == "score":
-                return self.send_json(200, scoring.score_session(s, self.config))
+                return self.send_json(200, scoring.score_session(s, self.config, self.fleet()))
             if kind == "session":
                 return self.send_json(200, s)
             pages = sorted(s["pages"].values(), key=lambda p: p["received"])
@@ -460,6 +631,9 @@ def main(argv=None) -> int:
     ap.add_argument("--results-dir", default=str(HERE / "results"))
     ap.add_argument("--config", help="JSON file overriding thresholds/weights (see scoring.py)")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--stun-port", type=int, default=0,
+                    help="UDP port of the loopback STUN responder (0: any free port)")
+    ap.add_argument("--no-stun", action="store_true", help="do not start the STUN responder")
     a = ap.parse_args(argv)
 
     if a.host not in ("127.0.0.1", "::1"):
@@ -468,6 +642,7 @@ def main(argv=None) -> int:
     Handler.store = Store(Path(a.results_dir))
     Handler.config = scoring.load_config(a.config)
     Handler.quiet = a.quiet
+    Handler.stun = None if a.no_stun else StunResponder(a.host, a.stun_port).start()
     httpd = LoopbackServer((a.host, a.port), Handler)
     scheme = "http"
     if a.tls:
@@ -480,13 +655,15 @@ def main(argv=None) -> int:
         scheme = "https"
     host = "localhost" if a.tls else a.host
     print(f"detect-bench on {scheme}://{host}:{httpd.server_address[1]}/shop "
-          f"(results: {Handler.store.path})", flush=True)
+          f"(results: {Handler.store.path}; STUN udp {Handler.stun.address() if Handler.stun else 'off'})", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         httpd.server_close()
+        if Handler.stun:
+            Handler.stun.close()
     return 0
 
 

@@ -19,10 +19,16 @@ Run `python3 -m unittest test_scoring` for the tests.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
+
+import shapes
+import sigagent
 
 DEFAULT_CONFIG = {
     "thresholds": {"bot": 70, "suspect": 40},
@@ -31,6 +37,11 @@ DEFAULT_CONFIG = {
     # How long after the first document a session may stay beacon-less
     # before "no_beacon" fires.
     "beacon_grace_s": 4,
+    # fleet_fingerprint_reuse: this many retained sessions with one
+    # fingerprint hash make a fleet. With a window (seconds, 0 = all retained
+    # sessions) only sessions created within it of each other count.
+    "fleet_threshold": 3,
+    "fleet_window_s": 0,
 }
 
 # ---- expected request shapes per family (HTTP/1.1 navigations) -------------
@@ -794,6 +805,398 @@ def chk_sw_navigator_mismatch(s, cfg):
     return ("service worker differs: " + ", ".join(diff)) if diff else None
 
 
+# ---- request context (wave 2) -------------------------------------------------
+# What stock Chrome 153 sends for Referer and Sec-Fetch-* on this bench was
+# recorded on loopback (README, "Request context"): the requests below are the
+# ways a request can contradict itself or the page that made it.
+
+def _origin(url: str) -> str | None:
+    try:
+        u = urlsplit(url)
+    except ValueError:
+        return None
+    return f"{u.scheme}://{u.netloc}".lower() if u.scheme and u.netloc else None
+
+
+def _page_url(url: str) -> str | None:
+    """scheme://host/path?query of a URL, without the fragment."""
+    try:
+        u = urlsplit(url)
+    except ValueError:
+        return None
+    if not u.scheme or not u.netloc:
+        return None
+    return f"{u.scheme}://{u.netloc}".lower() + (u.path or "/") + (f"?{u.query}" if u.query else "")
+
+
+def request_meta(e: dict) -> dict | None:
+    """Referer and Sec-Fetch-* of a recorded document or request, or None for
+    sessions recorded before the values were kept."""
+    h = e.get("headers")
+    if isinstance(h, dict):  # a document keeps every header value
+        return {"site": h.get("sec-fetch-site"), "mode": h.get("sec-fetch-mode"), "dest": h.get("sec-fetch-dest"),
+                "referer": h.get("referer"), "host": h.get("host"), "scheme": e.get("scheme", "http"),
+                "path": e.get("path"), "kind": "document"}
+    if "sec_fetch_site" not in e:
+        return None
+    return {"site": e.get("sec_fetch_site"), "mode": e.get("sec_fetch_mode"), "dest": e.get("sec_fetch_dest"),
+            "referer": e.get("referer"), "host": e.get("host"), "scheme": e.get("scheme", "http"),
+            "path": e.get("path"), "kind": e.get("kind")}
+
+
+def chk_referer_context_mismatch(s, cfg):
+    """A request that contradicts itself or its page: Sec-Fetch-Site none on a
+    subresource, a same-origin subresource whose Referer is not a page of this
+    session, a Referer naming another origin on a same-origin request, or a
+    document that is user-initiated (none) yet has a Referer."""
+    metas = [(d, request_meta(d)) for d in s.get("documents", [])]
+    pages = set()
+    for _, m in metas:
+        if m and m["host"] and m["path"]:
+            u = _page_url(f"{m['scheme']}://{m['host']}{m['path']}")
+            if u:
+                pages.add(u)
+    problems = []
+
+    def note(m, text):
+        problems.append(f"{m['kind']} {m['path']}: {text}")
+
+    for _, m in metas:
+        if not m or not m["site"]:
+            continue
+        own = f"{m['scheme']}://{m['host']}".lower() if m["host"] else None
+        ref = m["referer"]
+        if m["site"] == "none" and ref:
+            note(m, f"Sec-Fetch-Site none with Referer {ref[:80]}")
+        elif m["site"] == "same-origin" and ref and own and _origin(ref) != own:
+            note(m, f"Sec-Fetch-Site same-origin with Referer {ref[:80]}")
+    for r in s.get("requests", []):
+        m = request_meta(r)
+        if not m or not m["site"]:
+            continue
+        own = f"{m['scheme']}://{m['host']}".lower() if m["host"] else None
+        ref = m["referer"]
+        if m["site"] == "none":
+            note(m, "Sec-Fetch-Site none on a subresource")
+        elif m["site"] == "same-origin" and own:
+            if not ref:
+                if m["kind"] in CHROME_REFERS:
+                    note(m, "Sec-Fetch-Site same-origin without Referer")
+            elif _origin(ref) != own:
+                note(m, f"Sec-Fetch-Site same-origin with Referer {ref[:80]}")
+            elif pages and _page_url(ref) not in pages:
+                note(m, f"Referer {ref[:80]} is not a page of this session")
+    if problems:
+        return f"{len(problems)} request(s): " + "; ".join(problems[:3])
+    return None
+
+
+# Request kinds stock Chrome always sends a Referer with on this bench (all
+# same-origin, no Referrer-Policy): see the README's "Request context".
+CHROME_REFERS = {"css", "js", "img", "favicon", "beacon", "form"}
+
+
+# ---- signed agents (a session class, not a score) -------------------------------
+
+def declared_agent(s: dict) -> dict | None:
+    """The first well-formed RFC 9421 signed-agent declaration in a session's
+    documents or requests (see sigagent.py), with how many requests carried
+    it. Never verified. Malformed headers are not accepted."""
+    found, carried = None, 0
+    entries = [d.get("headers", {}) for d in s.get("documents", [])] + [r.get("agent", {}) for r in s.get("requests", [])]
+    for h in entries:
+        if not h:
+            continue
+        decl, _ = sigagent.parse(h)
+        if decl:
+            carried += 1
+            found = found or decl
+    if found:
+        found = dict(found, requests=carried)
+    return found
+
+
+def agent_problems(s: dict) -> list[str]:
+    """Why a session's signature headers were not accepted (for reports)."""
+    out = []
+    entries = [d.get("headers", {}) for d in s.get("documents", [])] + [r.get("agent", {}) for r in s.get("requests", [])]
+    for h in entries:
+        decl, problems = sigagent.parse(h) if h else (None, [])
+        if not decl:
+            out += [p for p in problems if p not in out]
+    return out
+
+
+# ---- fleet reuse and pointer paths (wave 2) -----------------------------------
+
+def _val(s: dict, pid: str):
+    """Value of the first page's probe `pid` that is a usable value."""
+    for pg in sorted(s.get("pages", {}).values(), key=lambda p: p.get("received", 0)):
+        p = (pg.get("probes") or {}).get(pid)
+        v = p.get("value") if isinstance(p, dict) else None
+        if v is not None and not (isinstance(v, dict) and (v.get("timeout") or "error" in v)):
+            return v
+    return None
+
+
+def fleet_parts(s: dict) -> dict | None:
+    """The stable high-entropy values of a session's device, or None when the
+    session did not report enough of them (UA plus at least 4 of canvas,
+    WebGL, audio, fonts, screen, time zone, languages)."""
+    parts: dict = {}
+    ua = doc_ua(s)
+    if not ua:
+        return None
+    parts["ua"] = ua
+    canvas = _val(s, "canvas")
+    if isinstance(canvas, dict) and canvas.get("hash"):
+        parts["canvas"] = canvas["hash"]
+    gl = _val(s, "webgl_params")
+    if isinstance(gl, dict) and gl.get("paramHash"):
+        parts["webgl"] = [gl.get("vendor"), gl.get("renderer"), gl["paramHash"], gl.get("extHash")]
+    audio = _val(s, "audio")
+    if isinstance(audio, dict) and audio.get("hash"):
+        parts["audio"] = audio["hash"]
+    fonts = _val(s, "fonts")
+    surf = _val(s, "os_surface") if isinstance(_val(s, "os_surface"), dict) else {}
+    if isinstance(fonts, dict) and fonts.get("hash"):
+        det = ((surf.get("fonts") or {}).get("detected")) or {}
+        parts["fonts"] = [fonts["hash"], sorted((k, list(v)) for k, v in det.items())] if isinstance(det, dict) else fonts["hash"]
+    sc = (surf or {}).get("screen")
+    if isinstance(sc, dict):
+        parts["screen"] = [sc.get(k) for k in ("width", "height", "availWidth", "availHeight", "availLeft", "availTop", "dpr")]
+    tz = _val(s, "timezone_utc")
+    if isinstance(tz, str):
+        parts["tz"] = tz
+    langs = _val(s, "languages")
+    if isinstance(langs, dict) and isinstance(langs.get("languages"), list):
+        parts["languages"] = langs["languages"]
+    return parts if len(parts) >= 5 else None
+
+
+def fleet_hash(parts: dict) -> str:
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
+
+
+def _fleet_groups(sessions, key, cfg) -> dict[str, list[str]]:
+    groups: dict[str, list[tuple[float, str]]] = {}
+    for s in sessions:
+        for k in key(s):
+            groups.setdefault(k, []).append((s.get("created", 0), s["sid"]))
+    window = cfg.get("fleet_window_s") or 0
+    out = {}
+    for k, members in groups.items():
+        members.sort()
+        if window:
+            # The largest run of sessions each within `window` s of the previous one.
+            best, run = [], []
+            for m in members:
+                run = run + [m] if run and m[0] - run[-1][0] <= window else [m]
+                if len(run) > len(best):
+                    best = run
+            members = best
+        out[k] = [sid for _, sid in members]
+    return out
+
+
+def fleet_index(sessions, cfg: dict | None = None) -> dict:
+    """Cross-session groups for /api/clusters and fleet_fingerprint_reuse:
+    `fingerprint` (hash of the stable device probes -> session ids), `parts`
+    (hash -> the values hashed) and `shape` (stroke shape hash -> session ids).
+    Pass every retained session."""
+    cfg = cfg or load_config()
+    sessions = list(sessions)
+    parts_by_sid = {s["sid"]: fleet_parts(s) for s in sessions}
+    hashes = {sid: fleet_hash(p) for sid, p in parts_by_sid.items() if p}
+    fp = _fleet_groups(sessions, lambda s: [hashes[s["sid"]]] if s["sid"] in hashes else [], cfg)
+    shape = _fleet_groups(sessions, shapes.session_shape_hashes, cfg)
+    return {
+        "sessions": len(sessions),
+        "threshold": cfg.get("fleet_threshold", 3),
+        "fingerprint": fp,
+        "parts": {hashes[sid]: parts_by_sid[sid] for sid in hashes},
+        "shape": shape,
+    }
+
+
+def chk_fleet_fingerprint_reuse(s, cfg):
+    """Needs `cfg["_fleet"]` (a fleet_index of the retained sessions); without
+    it, or with fewer sessions than the threshold, it never fires."""
+    fleet = cfg.get("_fleet")
+    if not fleet:
+        return None
+    parts = fleet_parts(s)
+    if not parts:
+        return None
+    h = fleet_hash(parts)
+    members = fleet["fingerprint"].get(h, [])
+    if s.get("sid") in members and len(members) >= cfg.get("fleet_threshold", 3):
+        others = [m for m in members if m != s["sid"]][:3]
+        return f"{len(members)} retained sessions share device fingerprint {h} (also {', '.join(others)})"
+    return None
+
+
+def chk_beh_path_repeat(s, cfg):
+    """Two or more strokes (40 px and up) with nearly identical normalised
+    shapes: a stored path played again (shapes.py says how close is closer
+    than a person repeating a gesture)."""
+    pairs = shapes.repeated(s)
+    if pairs:
+        a, b, d = pairs[0]
+        return (f"{len(pairs)} repeated stroke pair(s); first: {a['length']:.0f} px and {b['length']:.0f} px, "
+                f"bend {a['bend']:.0f} px, shape distance {d:.2f} px")
+    return None
+
+
+def click_offset_groups(s: dict, tol: float = 1.0) -> dict | None:
+    """The largest group of clicks on different targets whose offsets agree
+    within `tol` px, in either frame: from the target's top-left corner or from
+    its centre. Returns {frame, offset, targets, clicks} or None."""
+    clicks = []
+    for url, pg in sorted(((p.get("url"), p) for p in s.get("pages", {}).values()), key=lambda x: str(x[0])):
+        for e in pg.get("trace", []):
+            if (e.get("type") == "click" and e.get("tr") and (e.get("d") or 0) > 0 and (e.get("w") or 0) >= 10
+                    and (e.get("h") or 0) >= 10 and isinstance(e.get("cx"), (int, float))
+                    and isinstance(e.get("cy"), (int, float))):
+                clicks.append({"tgt": (url, e.get("tg"), e.get("ti", 0)), "cx": e["cx"], "cy": e["cy"],
+                               "tl": (e["cx"] + e["w"] / 2, e["cy"] + e["h"] / 2)})
+    best = None
+    clicks = clicks[:200]
+    for frame in ("centre", "corner"):
+        off = (lambda c: (c["cx"], c["cy"])) if frame == "centre" else (lambda c: c["tl"])
+        # A set of offsets agrees within `tol` when it fits a box of side `tol`;
+        # such a box can start at some click's x and some click's y.
+        xs = sorted({off(c)[0] for c in clicks})
+        ys = sorted({off(c)[1] for c in clicks})
+        for x0 in xs:
+            for y0 in ys:
+                members = [c for c in clicks if 0 <= off(c)[0] - x0 <= tol and 0 <= off(c)[1] - y0 <= tol]
+                targets = {c["tgt"] for c in members}
+                if all(abs(c["cx"]) < 1 and abs(c["cy"]) < 1 for c in members):
+                    continue  # the exact centre is beh_click_center's
+                if len(targets) >= 2 and (best is None or len(targets) > best["targets"]):
+                    mx, my = (sum(off(c)[i] for c in members) / len(members) for i in (0, 1))
+                    best = {"frame": frame, "offset": [round(mx, 1), round(my, 1)], "targets": len(targets),
+                            "clicks": len(members)}
+    return best
+
+
+def chk_beh_click_offset_repeat(s, cfg):
+    g = click_offset_groups(s)
+    if g and g["targets"] >= 4:
+        return (f"{g['clicks']} clicks on {g['targets']} different targets at offset {g['offset']} "
+                f"from the target's {'centre' if g['frame'] == 'centre' else 'top-left corner'}")
+    return None
+
+
+# ---- fonts_overclaim -----------------------------------------------------------
+
+# How many of the collector's 36 candidate fonts (`OS_FONTS`) a real install of
+# each OS shows, with room for what users add. Derived in the README
+# ("fonts_overclaim") from the recorded data: Windows 12 (the Windows 11 catalogue
+# set), macOS 13 (the reference persona and its bench fixture), Linux 16 (the
+# four stock Chrome 153 captures, fontconfig aliases included), each plus 6 for
+# families a user can install anywhere (Inter, Noto Sans, Roboto, Open Sans,
+# Carlito, FreeSans).
+FONT_CEILING = {"windows": 18, "mac": 19, "linux": 22}
+
+
+def chk_fonts_overclaim(s, cfg):
+    o, _ = _chrome_os(s)
+    fonts = ((probe_value(s, "os_surface") or {}).get("fonts")) or {}
+    if not o or not isinstance(fonts.get("detected"), dict):
+        return None
+    n = len(fonts["detected"])
+    if n > FONT_CEILING[o]:
+        return f"{n} candidate fonts detected on {o}, a real install shows at most {FONT_CEILING[o]}"
+    return None
+
+
+# ---- worker_measure_mismatch ---------------------------------------------------
+
+MEASURE_TOLERANCE = 0.02  # px; Chrome gives the same doubles in both realms
+
+
+def _close(a, b) -> bool:
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_close(x, y) for x, y in zip(a, b))
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
+        return abs(a - b) <= MEASURE_TOLERANCE
+    return a == b
+
+
+def chk_worker_measure_mismatch(s, cfg):
+    """The `worker_measure` info probe: text measured on an OffscreenCanvas in a
+    dedicated worker against the page's canvas, plus the worker's view of
+    devicePixelRatio (Chrome workers have none: null or the page's), language,
+    locale and time zone."""
+    v = probe_value(s, "worker_measure")
+    if not v or not isinstance(v.get("window"), dict) or not isinstance(v.get("worker"), dict):
+        return None
+    win, wk = v["window"], v["worker"]
+    diff = []
+    wm, km = win.get("measure"), wk.get("measure")
+    if isinstance(wm, dict) and isinstance(km, dict):
+        bad = [k for k in sorted(set(wm) | set(km)) if not _close(wm.get(k), km.get(k))]
+        if bad:
+            k = bad[0]
+            diff.append(f"{len(bad)} of {len(wm)} measurements (first {k}: page {wm.get(k)} worker {km.get(k)})")
+    for k in ("language", "languages", "locale", "timeZone"):
+        if k in win and k in wk and win[k] != wk[k]:
+            diff.append(f"{k} page {win[k]!r} worker {wk[k]!r}")
+    if wk.get("dpr") is not None and wk.get("dpr") != win.get("dpr"):
+        diff.append(f"devicePixelRatio page {win.get('dpr')} worker {wk.get('dpr')}")
+    return ("worker differs: " + "; ".join(diff)) if diff else None
+
+
+# ---- webrtc_candidates ---------------------------------------------------------
+# Stock Chrome 153 (headless=new over CDP, Linux, rtx-dev, 2026-11-07) against the
+# bench's loopback STUN responder, nine pages: ICE gathering ends in 119-172 ms
+# with two UDP candidates, a host candidate whose address is an mDNS name
+# (`<uuid>.local`, Chrome hides local addresses) and a server-reflexive candidate
+# at the address the responder saw (127.0.0.1, the same port as the host
+# candidate, relatedAddress 0.0.0.0); the first candidate comes 3-56 ms in; the
+# responder answers exactly one Binding request per page. The rule compares a
+# session's gathering with that and is info only (weight 0) until LightBrowser
+# gathers server-reflexive candidates.
+
+def _webrtc(s: dict) -> dict | None:
+    """The first complete `webrtc_gather` value of a session."""
+    for pg in sorted(s.get("pages", {}).values(), key=lambda p: p.get("received", 0)):
+        p = (pg.get("probes") or {}).get("webrtc_gather")
+        v = p.get("value") if isinstance(p, dict) else None
+        if isinstance(v, dict) and v.get("complete") and not v.get("error"):
+            return v
+    return None
+
+
+def chk_webrtc_candidates(s, cfg):
+    o, _ = _chrome_os(s)
+    v = _webrtc(s)
+    if not o or not v:
+        return None
+    if v.get("supported") is False:
+        return "RTCPeerConnection is missing"
+    cands = [c for c in v.get("candidates") or [] if isinstance(c, dict)]
+    reasons = []
+    hosts = [c for c in cands if c.get("type") == "host"]
+    reflexive = [c for c in cands if c.get("type") == "srflx"]
+    if not hosts:
+        reasons.append("no host candidate")
+    raw = [c.get("address") for c in hosts
+           if not c.get("mdns") and not re.match(r"^(127\.|::1$)", str(c.get("address") or ""))]
+    if raw:
+        reasons.append(f"host candidate exposes {raw[0]} (Chrome gives an mDNS name)")
+    stun = v.get("stun")
+    if stun and not reflexive:
+        reasons.append(f"no server-reflexive candidate although the STUN responder {stun} is on loopback")
+    if stun and reflexive:
+        host = re.sub(r":\d+$", "", stun).strip("[]")
+        if any(c.get("address") != host for c in reflexive):
+            reasons.append(f"server-reflexive address {reflexive[0].get('address')} is not the responder's view of the sender ({host})")
+    return "; ".join(reasons) or None
+
+
 # ---- the catalogue ----------------------------------------------------------
 
 def P(id_, weight, cat, why, probe=None):
@@ -819,6 +1222,9 @@ RULES: list[dict] = [
     P("worker_navigator", 0, "automation", "Info only: navigator and UA-CH values in the page and in a dedicated worker."),
     S("worker_navigator_mismatch", 45, "automation", chk_worker_navigator_mismatch,
       "A dedicated worker's navigator or UA client hints (incl. high entropy, gpu) differ from the page's."),
+    P("worker_measure", 0, "automation", "Info only: text measured on an OffscreenCanvas in a dedicated worker, next to the page's."),
+    S("worker_measure_mismatch", 40, "automation", chk_worker_measure_mismatch,
+      "A dedicated worker measures text, or sees language, locale or time zone, differently from the page: a persona patched into the page only."),
     P("sw_navigator", 0, "automation", "Info only: navigator and UA-CH values in the page and in a service worker."),
     S("sw_navigator_mismatch", 45, "automation", chk_sw_navigator_mismatch,
       "A service worker's navigator or UA client hints (incl. high entropy, gpu) differ from the page's."),
@@ -868,6 +1274,10 @@ RULES: list[dict] = [
     P("beh_ttfi", 25, "behavior", "First click/key/wheel < 300 ms after navigation start or < 150 ms after load."),
     P("beh_scroll_no_input", 25, "behavior", "Page scrolled with no wheel, key, touch or press before it."),
     P("beh_wheel_pattern", 20, "behavior", "One huge wheel delta, or a perfectly regular wheel stream."),
+    S("beh_path_repeat", 30, "behavior", chk_beh_path_repeat,
+      "Two strokes of 40 px or more with nearly identical normalised shapes: a stored path played again."),
+    S("beh_click_offset_repeat", 30, "behavior", chk_beh_click_offset_repeat,
+      "4 or more clicks on different targets at the same offset inside the target (within 1 px, not the centre)."),
     P("beh_counts", 0, "behavior", "Info only: event counts and page dwell."),
 
     # Server-side and session-wide.
@@ -884,6 +1294,10 @@ RULES: list[dict] = [
     S("cookie_not_echoed", 40, "server", chk_cookie_not_echoed, "The session cookie was not sent back."),
     S("http_version", 40, "server", chk_http_version, "HTTP/1.0 or another version no current browser uses."),
     S("header_order", 30, "server", chk_header_order, "Header names, case or order differ from the claimed browser."),
+    S("referer_context_mismatch", 35, "server", chk_referer_context_mismatch,
+      "A request contradicts itself or its page: Sec-Fetch-Site none on a subresource, a Referer that is not the embedding page or names another origin on a same-origin request, a user-initiated document with a Referer."),
+    S("fleet_fingerprint_reuse", 30, "server", chk_fleet_fingerprint_reuse,
+      "Three or more retained sessions share one hash of the stable device probes (canvas, WebGL, audio, fonts, screen, UA, time zone, languages): one fleet image."),
     S("no_interaction", 30, "behavior", chk_no_interaction, "No trusted mouse, key, wheel or touch input in the session."),
     S("images_blocked", 30, "server", chk_images_blocked, "CSS/JS fetched but no images: image blocking."),
     S("accept_encoding_mismatch", 25, "server", chk_accept_encoding_mismatch, "Accept-Encoding differs from the claimed browser."),
@@ -930,6 +1344,11 @@ RULES: list[dict] = [
       "Info until a GNOME capture (target 15): Linux window above or left of the work area."),
     S("wheel_os", 0, "behavior", chk_wheel_os,
       "Info until captures (target 20): wheelDeltaY/deltaY ratio of another OS."),
+    P("webrtc_gather", 0, "consistency", "Info only: ICE candidates gathered against the bench's loopback STUN responder (types, addresses, timing)."),
+    S("webrtc_candidates", 0, "consistency", chk_webrtc_candidates,
+      "Info until LightBrowser gathers server-reflexive candidates (target 15): RTCPeerConnection missing, no host or server-reflexive candidate, a raw host address, or a reflexive address that is not the responder's view."),
+    S("fonts_overclaim", 25, "consistency", chk_fonts_overclaim,
+      "More of the probe's candidate fonts detected than a real install of the claimed OS shows."),
 ]
 
 RULE_IDS = {r["id"] for r in RULES}
@@ -978,12 +1397,21 @@ def server_signals(s: dict) -> dict:
     }
 
 
-def score_session(s: dict, cfg: dict | None = None) -> dict:
+def score_session(s: dict, cfg: dict | None = None, fleet: dict | None = None) -> dict:
+    """Score one session. `fleet` is `fleet_index(all retained sessions)`; without
+    it `fleet_fingerprint_reuse` stays quiet and the score is the single-session
+    score. A session that declares itself as a signed agent (`sigagent.py`) is
+    reported as `agent_declared` and gets the verdict `declared_agent`; its score
+    and the verdict the score would give (`score_verdict`) are reported too.
+    `info_fired` lists the weight-0 rules whose check fires (they never score)."""
     cfg = cfg or load_config()
+    if fleet is not None:
+        cfg = dict(cfg, _fleet=fleet)
     weights = cfg.get("weights", {})
     disabled = set(cfg.get("disabled", []))
     probes = merged_probes(s)
     fired = []
+    info = []
     for r in RULES:
         if r["id"] in disabled:
             continue
@@ -997,6 +1425,10 @@ def score_session(s: dict, cfg: dict | None = None) -> dict:
             detail = r["check"](s, cfg)
             if not detail:
                 continue
+        if w <= 0:
+            if "check" in r:
+                info.append({"id": r["id"], "cat": r["cat"], "detail": detail})
+            continue
         fired.append({"id": r["id"], "cat": r["cat"], "weight": w, "detail": detail, "why": r["why"]})
     # Suspicious probes the catalogue does not know yet count with the
     # collector's default weight, capped, so a new probe is visible at once.
@@ -1012,14 +1444,24 @@ def score_session(s: dict, cfg: dict | None = None) -> dict:
     by_cat = {c: combine(f["weight"] for f in fired if f["cat"] == c) for c in CATEGORIES}
     th = cfg["thresholds"]
     verdict = "bot" if score >= th["bot"] else "suspect" if score >= th["suspect"] else "human"
-    return {
+    agent = declared_agent(s)
+    out = {
         "sid": s.get("sid"),
         "score": score,
-        "verdict": verdict,
+        "verdict": "declared_agent" if agent else verdict,
         "thresholds": th,
         "by_category": by_cat,
         "fired": fired,
+        "info_fired": info,
         "pages": len(s.get("pages", {})),
         "events": event_counts(s),
         "signals": server_signals(s),
+        "agent_declared": agent,
     }
+    if agent:
+        out["score_verdict"] = verdict
+    else:
+        problems = agent_problems(s)
+        if problems:
+            out["agent_rejected"] = problems
+    return out
