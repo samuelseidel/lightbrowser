@@ -825,7 +825,16 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
                 extra(),
             );
             if ev.button == MouseButton::Right {
-                fire(js, w, t, "PointerEvent", "contextmenu", true, true, extra_with(0));
+                fire(
+                    js,
+                    w,
+                    t,
+                    "PointerEvent",
+                    "contextmenu",
+                    true,
+                    true,
+                    extra_with(0),
+                );
             }
         }
     }
@@ -2179,10 +2188,16 @@ fn dict_events(
     let mut ids = Vec::new();
     for i in 0..n {
         let item = cx.get_property(list, &i.to_string())?;
-        let id = cx.handle_host(item).filter(|h| h.kind == K_OBJ).map(|h| h.id);
+        let id = cx
+            .handle_host(item)
+            .filter(|h| h.kind == K_OBJ)
+            .map(|h| h.id);
         cx.release(item);
         match id.filter(|&id| {
-            w.with_obj(id, |o| matches!(o, Obj::Event(e) if e.iface == "PointerEvent")) == Some(true)
+            w.with_obj(
+                id,
+                |o| matches!(o, Obj::Event(e) if e.iface == "PointerEvent"),
+            ) == Some(true)
         }) {
             Some(id) => ids.push(id),
             None => {
@@ -2290,22 +2305,28 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         let id = w.new_obj(Obj::InputDevice(fires));
         cx.init_this(HostRef::new(K_OBJ, id))
     });
-    getter(reg, rt, "InputDeviceCapabilities", "firesTouchEvents", |cx, w| {
-        let id = match cx.this_host() {
-            Some(h) if h.kind == K_OBJ => h.id,
-            _ => return Err(super::illegal()),
-        };
-        match w
-            .with_obj(id, |o| match o {
-                Obj::InputDevice(b) => Some(*b),
-                _ => None,
-            })
-            .flatten()
-        {
-            Some(b) => cx.ret(b),
-            None => Err(super::illegal()),
-        }
-    });
+    getter(
+        reg,
+        rt,
+        "InputDeviceCapabilities",
+        "firesTouchEvents",
+        |cx, w| {
+            let id = match cx.this_host() {
+                Some(h) if h.kind == K_OBJ => h.id,
+                _ => return Err(super::illegal()),
+            };
+            match w
+                .with_obj(id, |o| match o {
+                    Obj::InputDevice(b) => Some(*b),
+                    _ => None,
+                })
+                .flatten()
+            {
+                Some(b) => cx.ret(b),
+                None => Err(super::illegal()),
+            }
+        },
+    );
 
     // Constructors with their init dictionaries.
     for iface in [
@@ -2473,13 +2494,13 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     mouse_num!("y", |w, e, m| m.client_y);
     mouse_num!("movementX", |w, e, m| m.movement_x);
     mouse_num!("movementY", |w, e, m| m.movement_y);
-    mouse_num!("button", |w, e, m| f64::from(
-        m.button.max(if matches!(e.type_.as_str(), "pointermove" | "pointerrawupdate") {
+    mouse_num!("button", |w, e, m| f64::from(m.button.max(
+        if matches!(e.type_.as_str(), "pointermove" | "pointerrawupdate") {
             -1
         } else {
             0
-        })
-    ));
+        }
+    )));
     mouse_num!("buttons", |w, e, m| f64::from(m.buttons));
     mouse_num!("pageX", |w, e, m| m.client_x
         + f64::from(w.with_layout(0, |l, d| l.window_scroll(d).0)));

@@ -153,8 +153,7 @@ fn fire(
     w: &Rc<Window>,
     utt: u32,
     type_: &str,
-    char_index: u32,
-    char_length: u32,
+    (char_index, char_length): (u32, u32),
     name: &str,
     error: Option<&str>,
 ) {
@@ -202,7 +201,12 @@ fn choose_voice(w: &Window, utt: u32) -> Option<(u16, bool)> {
         .map(usize::from)
         .filter(|&i| i < voices.len())
         .or_else(|| {
-            let primary = |s: &str| s.split(['-', '_']).next().unwrap_or("").to_ascii_lowercase();
+            let primary = |s: &str| {
+                s.split(['-', '_'])
+                    .next()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+            };
             let want = lang.replace('_', "-").to_ascii_lowercase();
             if want.is_empty() {
                 return None;
@@ -210,7 +214,11 @@ fn choose_voice(w: &Window, utt: u32) -> Option<(u16, bool)> {
             voices
                 .iter()
                 .position(|v| v.lang.replace('_', "-").eq_ignore_ascii_case(&want))
-                .or_else(|| voices.iter().position(|v| primary(&v.lang) == primary(&want)))
+                .or_else(|| {
+                    voices
+                        .iter()
+                        .position(|v| primary(&v.lang) == primary(&want))
+                })
         })
         .or_else(|| voices.iter().position(|v| v.default))
         .unwrap_or(0);
@@ -228,7 +236,13 @@ fn script(text: &str, rate: f64, words: bool) -> Vec<(f64, Kind)> {
         if let Some(s) = start.take() {
             if words {
                 let len = text[s..end_byte].encode_utf16().count() as u32;
-                out.push((f64::from(*n) * per_word, Kind::Boundary { index: start_units, len }));
+                out.push((
+                    f64::from(*n) * per_word,
+                    Kind::Boundary {
+                        index: start_units,
+                        len,
+                    },
+                ));
             }
             *n += 1;
         }
@@ -254,7 +268,7 @@ fn script(text: &str, rate: f64, words: bool) -> Vec<(f64, Kind)> {
 /// `SpeechSynthesis.speak(utterance)` after its arguments were checked.
 pub(crate) fn speak(js: &mut dyn Js, w: &Rc<Window>, utt: u32) {
     if !super::input::has_sticky_activation(w) {
-        fire(js, w, utt, "error", 0, 0, "", Some("not-allowed"));
+        fire(js, w, utt, "error", (0, 0), "", Some("not-allowed"));
         return;
     }
     let first = {
@@ -316,7 +330,8 @@ fn begin(w: &Rc<Window>, utt: u32, epoch: u64) {
         );
         return;
     };
-    let (text, rate) = utterance(w, utt, |u| (u.text.clone(), f64::from(u.rate))).unwrap_or_default();
+    let (text, rate) =
+        utterance(w, utt, |u| (u.text.clone(), f64::from(u.rate))).unwrap_or_default();
     let play = Play {
         script: script(&text, rate.max(0.1), local),
         idx: 0,
@@ -360,7 +375,11 @@ fn schedule_next(w: &Rc<Window>, epoch: u64) {
             return;
         }
         let Some(c) = st.ctl.as_ref() else { return };
-        let Some(p) = c.play.as_ref().filter(|p| !p.paused && p.idx < p.script.len()) else {
+        let Some(p) = c
+            .play
+            .as_ref()
+            .filter(|p| !p.paused && p.idx < p.script.len())
+        else {
             return;
         };
         ((p.base + p.script[p.idx].0 - w.clock.now()).max(0.0), c.utt)
@@ -405,11 +424,14 @@ fn run_event(js: &mut dyn Js, w: &Rc<Window>, epoch: u64, utt: u32) {
         if let Kind::Boundary { index, .. } = kind {
             p.last_boundary = index;
         }
-        (kind, utterance(w, utt, |u| u.text.encode_utf16().count() as u32).unwrap_or(0))
+        (
+            kind,
+            utterance(w, utt, |u| u.text.encode_utf16().count() as u32).unwrap_or(0),
+        )
     };
     match kind {
-        Kind::Start => fire(js, w, utt, "start", 0, 0, "", None),
-        Kind::Boundary { index, len } => fire(js, w, utt, "boundary", index, len, "word", None),
+        Kind::Start => fire(js, w, utt, "start", (0, 0), "", None),
+        Kind::Boundary { index, len } => fire(js, w, utt, "boundary", (index, len), "word", None),
         Kind::End => {
             drop_ctl(w);
             complete_with(js, w, utt, text_len, None);
@@ -438,8 +460,8 @@ fn complete_with(js: &mut dyn Js, w: &Rc<Window>, utt: u32, char_index: u32, err
         }
     };
     match error {
-        Some(e) => fire(js, w, utt, "error", char_index, 0, "", Some(e)),
-        None => fire(js, w, utt, "end", char_index, 0, "", None),
+        Some(e) => fire(js, w, utt, "error", (char_index, 0), "", Some(e)),
+        None => fire(js, w, utt, "end", (char_index, 0), "", None),
     }
     if start_next && !w.speech.borrow().queue.is_empty() {
         start_front(w);
@@ -496,7 +518,7 @@ pub(crate) fn pause(w: &Rc<Window>) {
                         .and_then(|c| c.play.as_ref())
                         .map_or(0, |p| p.last_boundary)
                 };
-                fire(js, w, utt, "pause", at, 0, "", None);
+                fire(js, w, utt, "pause", (at, 0), "", None);
             }),
         );
     }
@@ -547,7 +569,7 @@ pub(crate) fn resume(w: &Rc<Window>) {
                         .and_then(|c| c.play.as_ref())
                         .map_or(0, |p| p.last_boundary)
                 };
-                fire(js, w, utt, "resume", at, 0, "", None);
+                fire(js, w, utt, "resume", (at, 0), "", None);
                 schedule_next(w, epoch);
             }),
         ),
@@ -594,12 +616,7 @@ fn init_utterance(
     }
 }
 
-fn speech_event_ctor(
-    reg: &mut Registry,
-    rt: &Runtime,
-    iface: &'static str,
-    errors: bool,
-) {
+fn speech_event_ctor(reg: &mut Registry, rt: &Runtime, iface: &'static str, errors: bool) {
     ctor(reg, rt, iface, move |cx, w| {
         if cx.len() < 2 {
             return Err(HostError::type_error(format!(

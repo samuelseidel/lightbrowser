@@ -1855,8 +1855,8 @@ impl CacheStorageData {
             for e in lock(cache).iter() {
                 bytes += (e.url.as_str().len() + e.method.len()) as u64 + headers(&e.headers);
                 let r = &e.response;
-                bytes += (r.url.len() + r.status_text.len() + r.body.len()) as u64
-                    + headers(&r.headers);
+                bytes +=
+                    (r.url.len() + r.status_text.len() + r.body.len()) as u64 + headers(&r.headers);
             }
         }
         bytes

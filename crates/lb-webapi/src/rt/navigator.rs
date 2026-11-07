@@ -1564,10 +1564,7 @@ fn register_storage(reg: &mut Registry, rt: &Runtime) {
         }
         let parts = storage_breakdown(w);
         let usage: u64 = parts.iter().map(|(_, n)| n).sum();
-        let details: Vec<String> = parts
-            .iter()
-            .map(|(k, n)| format!("\"{k}\":{n}"))
-            .collect();
+        let details: Vec<String> = parts.iter().map(|(k, n)| format!("\"{k}\":{n}")).collect();
         cx.resolve_promise(
             r,
             Arg::Json(format!(

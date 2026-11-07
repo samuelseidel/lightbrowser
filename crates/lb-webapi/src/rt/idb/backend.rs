@@ -433,8 +433,18 @@ impl IdbBackend {
                 for (key, rec) in &store.records {
                     bytes += key.stored_size();
                     bytes += rec.value.data.len() as u64;
-                    bytes += rec.value.buffers.iter().map(|b| b.len() as u64).sum::<u64>();
-                    bytes += rec.value.blobs.iter().map(|(b, t)| (b.len() + t.len()) as u64).sum::<u64>();
+                    bytes += rec
+                        .value
+                        .buffers
+                        .iter()
+                        .map(|b| b.len() as u64)
+                        .sum::<u64>();
+                    bytes += rec
+                        .value
+                        .blobs
+                        .iter()
+                        .map(|(b, t)| (b.len() + t.len()) as u64)
+                        .sum::<u64>();
                     bytes += rec
                         .index_keys
                         .values()

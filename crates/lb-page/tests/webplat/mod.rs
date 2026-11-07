@@ -142,7 +142,11 @@ async fn eval(h: &CdpHost, expr: &str) -> serde_json::Value {
         )
         .await
         .unwrap();
-    assert!(r.exception_details.is_none(), "{expr}: {:?}", r.exception_details);
+    assert!(
+        r.exception_details.is_none(),
+        "{expr}: {:?}",
+        r.exception_details
+    );
     r.result.value.unwrap_or(serde_json::Value::Null)
 }
 
@@ -183,7 +187,12 @@ fn expand_playwright(steps: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
                 let (fx, fy) = (x, y);
                 for i in 1..=n {
                     let f = i as f64 / n as f64;
-                    out.push(mouse("mouseMoved", fx + (tx - fx) * f, fy + (ty - fy) * f, down));
+                    out.push(mouse(
+                        "mouseMoved",
+                        fx + (tx - fx) * f,
+                        fy + (ty - fy) * f,
+                        down,
+                    ));
                 }
                 (x, y) = (tx, ty);
                 if call == "click" {
@@ -235,11 +244,17 @@ async fn run_steps(
         } else {
             match s["method"].as_str().unwrap() {
                 "Input.dispatchMouseEvent" => h
-                    .dispatch_mouse_event("T", serde_json::from_value::<MouseEvent>(s["params"].clone()).unwrap())
+                    .dispatch_mouse_event(
+                        "T",
+                        serde_json::from_value::<MouseEvent>(s["params"].clone()).unwrap(),
+                    )
                     .await
                     .unwrap(),
                 "Input.dispatchKeyEvent" => h
-                    .dispatch_key_event("T", serde_json::from_value::<KeyEvent>(s["params"].clone()).unwrap())
+                    .dispatch_key_event(
+                        "T",
+                        serde_json::from_value::<KeyEvent>(s["params"].clone()).unwrap(),
+                    )
                     .await
                     .unwrap(),
                 m => panic!("step {m}"),
@@ -312,7 +327,10 @@ cases!(
 );
 
 // navigator.storage (the quota policy needs no disk: the numbers are
-// compared as relations, see the cases).
+// compared as relations, see the cases). `cases/storage_opfs` is recorded
+// in chrome.json for the origin private file system but not run: it is not
+// implemented (ADR 0047). Cases with a `persistent` file are recorded in a
+// regular profile.
 cases!(
     false;
     storage_shape,
