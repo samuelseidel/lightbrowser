@@ -3401,6 +3401,28 @@ up to 16): after a crawl on 24 cores the process has 6 threads instead
 of 20, private memory about 0.4 MB less, crawl times and CPU the same
 within the noise of 3-run benches; `LB_V8_THREADS` overrides.
 
+### Final commit verified on rtx-dev; private memory in the bench (2026-11-07)
+
+Commit `870ce76` checked out on rtx-dev and run through everything:
+build, fmt, clippy (chrome and firefox), the whole workspace test suite
+(73 suites, no failure), firefox tests, WPT **11739/12471**, Playwright
+**41/41**, release build (43.24 MB). `bench/run.py` now also records the
+private memory on Linux (`RssAnon`, sampled peak, idle, after the crawl):
+RSS counts the binary's file pages, whose residency moved by up to ~6 MB
+between otherwise equal runs on this ZFS machine (one run right after the
+builds showed CDP peak RSS 29 MB, the next ones 21 MB, same binary, same
+private memory). Bench on a quiet machine (3 x 50 pages, Chromium 1243):
+
+| | `fetch` | CDP | Chromium (CDP) |
+|---|---|---|---|
+| crawl | 0.67 s | 0.39 s | 3.00 s |
+| CPU | 0.60 s | 0.34 s | 12.4 s |
+| peak RSS | 17.6 MB | 21.0 MB | 2,883 MB (summed) |
+| peak private | | 9.9 MB | 1,345 MB |
+| idle private | | 1.37 MB | 290 MB |
+| private after crawl | | 8.7 MB | 1,325 MB |
+| new page | | 1.7 ms | 33.6 ms |
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from

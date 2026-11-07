@@ -79,6 +79,11 @@ must be 50/50 for LightBrowser and Chromium. `gen_corpus.py` is deterministic
   start of the crawl.
 - *Idle RSS*: `serve`, no client connected, 1 s after the DevTools line. Also
   recorded: after connecting, and after the crawl once all pages are closed.
+- *Private memory* (Linux): `RssAnon`, the process's own anonymous memory,
+  sampled with RSS (`peak_anon_mb`), idle and after the crawl. RSS also
+  counts the binary's file pages, whose residency moves with the page
+  cache (on a ZFS machine by up to ~6 MB between otherwise equal runs);
+  `RssAnon` does not, so compare builds by it.
 - *Startup*: spawn to the DevTools line (`listen_ms`), and to
   `connect_over_cdp` returning (`connect_ms`); `first_page_ms` is the first
   `new_page`, `new_page_ms` the median of 15 more.

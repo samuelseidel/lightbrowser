@@ -239,6 +239,17 @@ else:
         return 0
 
 
+def anon_kb(pid: int) -> int:
+    """Private anonymous memory (Linux `RssAnon`): what the process itself
+    uses, without the binary's and libraries' file pages, whose residency
+    moves with the page cache from run to run. 0 on macOS (see footprint)."""
+    return 0 if IS_MAC else status_kb(pid, "RssAnon:")
+
+
+def tree_anon_mb(root: int) -> float:
+    return sum(anon_kb(p) for p in proc_tree(root)) / 1024
+
+
 def tree_rss_mb(root: int) -> float:
     return sum(status_kb(p, "VmRSS:") for p in proc_tree(root)) / 1024
 
@@ -269,6 +280,7 @@ class Sampler(threading.Thread):
         self.hwm_mb = 0.0  # largest sum of the tree's own VmHWM
         self.peak_pss_mb = 0.0  # PSS counts shared pages once; sampled less often (it is costly)
         self.peak_fp_mb = 0.0  # macOS: largest sum of the tree's lifetime peak footprints
+        self.peak_anon_mb = 0.0  # Linux: largest sampled sum of RssAnon
         self._halt = threading.Event()
 
     def run(self) -> None:
@@ -282,6 +294,8 @@ class Sampler(threading.Thread):
             self.hwm_mb = max(self.hwm_mb, sum(status_kb(p, "VmHWM:") for p in pids) / 1024)
             if IS_MAC:
                 self.peak_fp_mb = max(self.peak_fp_mb, sum(footprint_peak_kb(p) for p in pids) / 1024)
+            else:
+                self.peak_anon_mb = max(self.peak_anon_mb, sum(anon_kb(p) for p in pids) / 1024)
             self._halt.wait(self.interval)
 
     def finish(self) -> None:
@@ -602,6 +616,7 @@ def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: in
                 res["idle_footprint_mb"] = tree_footprint_mb(pid)
             else:
                 res["idle_pss_mb"] = tree_pss_mb(pid)
+                res["idle_anon_mb"] = tree_anon_mb(pid)
             tc = time.perf_counter()
             browser = pw.chromium.connect_over_cdp(ws)
             res["connect_ms"] = res["listen_ms"] + (time.perf_counter() - tc) * 1e3
@@ -651,6 +666,8 @@ def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: in
             res["after_crawl_rss_mb"] = tree_rss_mb(pid)
             if IS_MAC:
                 res["after_crawl_footprint_mb"] = tree_footprint_mb(pid)
+            else:
+                res["after_crawl_anon_mb"] = tree_anon_mb(pid)
             res.update(
                 verified=verified, errors=errors[:5], crawl_total_s=total, pages_ms=[round(c, 1) for c in cycle],
                 page_median_ms=statistics.median(cycle) if cycle else None, page_p90_ms=pctl(cycle, 90) if cycle else None,
@@ -671,6 +688,7 @@ def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: in
                 res["peak_footprint_mb"] = sampler.peak_fp_mb
             else:
                 res["peak_pss_mb"] = sampler.peak_pss_mb
+                res["peak_anon_mb"] = sampler.peak_anon_mb
             if browser is not None:
                 try:
                     browser.close()
@@ -812,8 +830,10 @@ def budgets(summary: dict, lb_bin_mb: float, realm: dict | None) -> list[dict]:
 REPORT_KEYS = [
     ("crawl_total_s", "crawl total (s)"), ("page_median_ms", "page median (ms)"), ("page_p90_ms", "page p90 (ms)"),
     ("peak_rss_mb", "peak RSS (MB)"), ("peak_pss_mb", "peak PSS (MB, sampled)"), ("peak_footprint_mb", "peak footprint (MB, macOS)"),
-    ("cpu_s", "CPU (s)"), ("idle_rss_mb", "idle RSS (MB)"), ("idle_pss_mb", "idle PSS (MB)"), ("idle_footprint_mb", "idle footprint (MB, macOS)"),
+    ("peak_anon_mb", "peak private (MB, Linux RssAnon, sampled)"),
+    ("cpu_s", "CPU (s)"), ("idle_rss_mb", "idle RSS (MB)"), ("idle_pss_mb", "idle PSS (MB)"), ("idle_footprint_mb", "idle footprint (MB, macOS)"), ("idle_anon_mb", "idle private (MB, Linux)"),
     ("after_crawl_rss_mb", "RSS after crawl (MB)"), ("after_crawl_footprint_mb", "footprint after crawl (MB, macOS)"),
+    ("after_crawl_anon_mb", "private after crawl (MB, Linux)"),
     ("listen_ms", "start to listening (ms)"), ("connect_ms", "start to CDP connect (ms)"),
     ("first_page_ms", "first new page (ms)"), ("new_page_ms", "new page, median (ms)"),
 ]
