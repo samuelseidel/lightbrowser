@@ -3,6 +3,7 @@
 
 mod apis;
 mod common;
+mod console;
 mod frames;
 mod idb;
 mod images;

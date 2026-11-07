@@ -21,6 +21,7 @@ use lb_persona::{BrowserFamily, Persona};
 pub use v8;
 
 mod clone;
+mod console;
 #[doc(hidden)]
 pub mod icu_data;
 mod inspect;
@@ -980,6 +981,9 @@ struct RealmEntry {
     modules: Vec<ModuleEntry>,
     /// Its frame was removed ([`RealmOps::detach_realm`]).
     detached: bool,
+    /// V8's own functions the console's string builder calls, taken before
+    /// any page script ran ([`CallCtx::console_args`]).
+    console: Option<console::ConsoleBuiltins>,
 }
 
 /// Shared with the near-heap-limit callback through a raw pointer.
@@ -2237,6 +2241,7 @@ fn new_realm_in(
     };
     let scope = &mut v8::ContextScope::new(scope, context);
     let global = context.global(scope);
+    let console = console::capture_builtins(scope, global);
     {
         let mut st = state.borrow_mut();
         st.realm_by_global
@@ -2260,6 +2265,7 @@ fn new_realm_in(
                 loader: options.module_loader,
                 modules: Vec::new(),
                 detached: false,
+                console,
             },
         );
     }

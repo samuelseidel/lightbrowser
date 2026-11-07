@@ -39,6 +39,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0031](0031-tcp-stack-fingerprint.md) | TCP/IP stack fingerprint: socket options plus a netfilter shim | Accepted (2026-11-03) |
 | [0032](0032-whole-connection-tcp-shaping.md) | Shape the whole connection, not only the SYN | Accepted (2026-11-03) |
 | [0033](0033-public-data-source-of-truth.md) | Public data is the source of truth for TCP profiles | Accepted (2026-11-03) |
+| [0034](0034-console-side-effects.md) | Console calls run the page code Chrome runs, and no other | Accepted (2026-11-07) |
 
 ## Adding an ADR
 

@@ -3148,6 +3148,49 @@ runs with both binaries evicted first, 6 of 6 in both
 vs 0.77 / 0.77 s, peak RSS 26.50 / 26.25 vs 29.04 / 29.05 MB, CPU 0.57 /
 0.58 vs 0.79 / 0.79 s.
 
+## Console side effects (2026-11-07)
+
+ADR 0034. `console.log` turned objects into text with `JSON.stringify`
+(or `ToString`) inside the page realm, so every call ran the page's
+getters, `toJSON`, own `toString` and proxy traps, with or without a CDP
+client. `console.log(new Proxy({}, …))` and `console.log(Object(Symbol()))`
+threw into the page. Chrome without DevTools runs none of that, so one
+`console.log({get x() {…}})` told a page it was not in Chrome. V8's own
+`count`/`time`/`group`/… ran nothing, where Chrome converts their labels
+and arguments.
+
+Now `lb-js` `v8_engine/console.rs` follows Chrome:
+- V8's `Formatter`: `%s`, `%d`/`%i` and `%f` conversions that throw into
+  the page;
+- the inspector's `V8ValueStringBuilder` for every argument, using V8's own
+  `Object.prototype.toString` and wrapper `valueOf`, kept per realm before
+  page scripts run; throws are swallowed;
+- `firstArgToString` for labels, which throws into the page.
+
+`lb-webapi` replaces all 22 console methods. The message text we report
+reads data properties only: plain objects and arrays as JSON without
+accessors or `toJSON`, everything else as the builder's text.
+
+`lb-page` `tests/console/` has 3 cases (75 recorded hits, including which
+calls throw), equal to Chrome for Testing 153.0.8010.12 recorded with
+`chrome-headless-shell --dump-dom` (no DevTools client; `record.sh`), plus
+a test of the message text.
+
+Still open: `count`, `time*`, `group*`, `clear` and `profile*` send no CDP
+message.
+
+Checks on macOS (arm64):
+- **Pass:** fmt; `lb-js`, `lb-webapi`, `lb-page` (`pages` 108, WPT,
+  every target), `lb-cdp`, `lightbrowser`; firefox package tests.
+- **Fail, not caused by this change:**
+  - `lb-js` `icu_data`/`unused_v8` archive tests expect GNU `ar`, and
+    macOS has a BSD-format `librusty_v8.a`.
+  - Clippy 1.99 flags `chunks_exact` in `lb-fptest`, `lb-gl` and
+    `lb-net`.
+  - `lb-net`'s unit tests do not compile on `integrate/all-branches`:
+    `BuildInput` lacks `hints`/`restart`.
+- **Not run:** Playwright (not installed here), bench and T-010.
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from

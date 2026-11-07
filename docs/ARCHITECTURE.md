@@ -79,6 +79,7 @@ CDP wall 0.67 vs 0.77 / 0.76 s, `fetch` peak RSS 23.72 / 23.79 vs 24.36 /
 | 0031 | TCP/IP stack fingerprint: socket options plus a netfilter shim |
 | 0032 | Shape the whole connection (IP ID, SYN retransmits), not only the SYN |
 | 0033 | Public data is the source of truth for TCP profiles |
+| 0034 | Console calls run the page code Chrome runs, and no other |
 | 0025 | Web Crypto on BoringSSL with Blink's normalization and Chromium's status texts (randomness from the OS CSPRNG); WebSocket through lb-net's own client with Chrome's handshake and an http/1.1-only ClientHello; dynamic `import()` through an engine hook sharing the module map; `blob:`/`data:` in `fetch()`/XHR; synchronous XHR blocking the calling thread |
 
 ## Layers
@@ -298,6 +299,7 @@ timing.
 | Permissions, battery, media devices, speech voices | lb-webapi | persona |
 | `performance.now` resolution | lb-webapi (`coarse_time`) | Chrome 100 µs with Blink's jittered tick / Firefox 1 ms (RFP off: 20 µs) |
 | Automation tells (`webdriver`, CDP leaks) | lb-cdp, lb-page | never exposed to the page world |
+| Console side effects (getters, `toString`, `%s`) | lb-js `v8_engine/console.rs`, lb-webapi `rt/window.rs` | exactly Chrome's without DevTools: V8's `Formatter`, the inspector's string builder and label conversion (ADR 0034) |
 | Scrollbar width, default and generic fonts, emoji font, `font:` system keywords | lb-css, lb-layout, lb-paint | persona OS accessors (`scrollbar_width`, `font_defaults`, `font_aliases`), see "OS axis" |
 | High-entropy `Sec-CH-UA-*` request headers | lb-net (`client_hints`, `header_profile`) | persona `high_entropy_hints()`; `Accept-CH` / `Critical-CH` per origin; order from `captures/chrome_153_linux_accept_ch.jsonl` |
 | Mouse/keyboard dynamics | lb-behavior, replayed by lb-page (`cdp/human.rs`) | persona `behavior` (preset, seed, pointing device) and `wheel()` (detent, `wheelDelta` ratio) |

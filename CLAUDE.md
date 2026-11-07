@@ -262,6 +262,9 @@ cargo test -p lb-net --test proxy
 # Shadow DOM and custom elements vs Chrome (9 cases)
 cargo test -p lb-page --test pages shadow
 # re-record: crates/lb-page/tests/shadow/{serve.py,chrome.mjs} (python3 serve.py 18971 &)
+# Console calls run exactly Chrome's page code (getters, toString, %s; 3 cases, ADR 0034)
+cargo test -p lb-page --test pages console
+# re-record (no DevTools client): CHROME=/path/to/chrome-headless-shell sh crates/lb-page/tests/console/record.sh > crates/lb-page/tests/console/chrome.json
 # Image reuse within a document vs Chrome (5 cases, with request counts)
 cargo test -p lb-page --test pages images
 # re-record: crates/lb-page/tests/images/{serve.py,chrome.mjs}

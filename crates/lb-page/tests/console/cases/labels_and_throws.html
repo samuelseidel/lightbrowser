@@ -1,0 +1,42 @@
+<!doctype html><html><body><pre id=out></pre><script>
+const hits = [];
+const fn = n => { const f = function () {}; f.toString = () => { hits.push(n); return 'F'; }; return f; };
+const ts = n => ({ toString() { hits.push(n); return 'S'; } });
+const thr = n => ({ toString() { hits.push(n); throw new Error(n); } });
+const cases = {
+  countThrow: () => console.count(thr('countThrow')),
+  countResetThrow: () => console.countReset(thr('countResetThrow')),
+  timeThrow: () => console.time(thr('timeThrow')),
+  timeEndThrow: () => console.timeEnd(thr('timeEndThrow')),
+  timeStampThrow: () => console.timeStamp(thr('timeStampThrow')),
+  profileThrow: () => console.profile(thr('profileThrow')),
+  tagThrow: () => console.log({ get [Symbol.toStringTag]() { hits.push('tagThrow'); throw 1; } }, fn('tagThrowNext')),
+  fmtSThrow: () => console.log('%s', thr('fmtSThrow')),
+  fmtDThrow: () => console.log('%d', thr('fmtDThrow')),
+  arrThrow: () => { const a = [1, 2]; Object.defineProperty(a, 0, { get() { hits.push('arrThrow'); throw 1; } }); a[1] = fn('arrThrowNext'); console.log(a, fn('arrThrowArg2')); },
+  fnThrow: () => { const f = function () {}; f.toString = () => { hits.push('fnThrow'); throw 1; }; console.log(f); },
+  groupEndFn: () => console.groupEnd(fn('groupEndFn')),
+  clearFn: () => console.clear(fn('clearFn')),
+  timeLogNoTimer: () => console.timeLog('none', fn('timeLogNoTimer')),
+  timeEndArgs: () => { console.time('u'); console.timeEnd('u', fn('timeEndArgs')); },
+  timeStampFn: () => console.timeStamp(fn('timeStampFn')),
+  timeStampArg2: () => console.timeStamp('x', fn('timeStampArg2'), ts('timeStampArg2s')),
+  profileFn: () => { console.profile(fn('profileFn')); console.profileEnd(fn('profileEndFn')); },
+  assertFmt: () => console.assert(false, '%s', ts('assertFmt')),
+  dirFmt: () => console.dir('%s', ts('dirFmt')),
+  tableFmt: () => console.table('%s', ts('tableFmt')),
+  groupEndFmt: () => console.groupEnd('%s', ts('groupEndFmt')),
+  recurse: () => console.log('%s', { toString() { hits.push('recurse1'); return '%s'; } }, ts('recurse2')),
+  bypass: () => console.log('%_%s', ts('bypassSkipped'), ts('bypassS')),
+  fmtSym: () => console.log('%d %s', Symbol('a'), Symbol('b')),
+  fmtSobjTag: () => console.log('%s', { get [Symbol.toStringTag]() { hits.push('fmtSobjTag'); return 'T'; } }),
+  timeNoArgs: () => { console.time(); console.timeEnd(); console.count(); },
+  countUndef: () => console.count(undefined),
+  fmtNoSpecRest: () => console.log('plain', ts('fmtNoSpecRest')),
+  fmtPctEnd: () => console.log('%', ts('fmtPctEnd')),
+  fmtUnknown: () => console.log('%x%s', ts('fmtUnknown')),
+  group0: () => { console.group(); console.groupEnd(); },
+};
+for (const [k, f] of Object.entries(cases)) { try { f(); } catch (e) { hits.push(k + ':threw:' + (e && e.message || e)); } }
+window.HITS = JSON.stringify(hits); document.getElementById('out').textContent = 'HITS=' + window.HITS;
+</script></body></html>
