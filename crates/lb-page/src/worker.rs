@@ -229,8 +229,15 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
         None => {
             let mut req = NetRequest::get(url.clone(), Destination::Script, Some(creator.clone()));
             req.mode = if module { "cors" } else { "same-origin" };
+            let started = std::time::Instant::now();
             match ctx.fetch(req).await {
                 Ok(r) if (200..300).contains(&r.status) => {
+                    // The creator's timeline gets an `other` entry for a
+                    // dedicated worker's script (Chrome).
+                    if let (Some((p, _)), WorkerKind::Dedicated) = (&parent, kind) {
+                        let (u, resp) = (url.clone(), r.clone());
+                        p.send(Box::new(move |_js, w| w.perf_worker_script(u, started, &resp)));
+                    }
                     let t = lb_webapi::rt::script::script_source(&r.body, r.header("content-type"));
                     (r.url.clone(), t, Some(r))
                 }

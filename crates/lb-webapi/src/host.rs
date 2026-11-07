@@ -54,6 +54,14 @@ pub struct NetRequest {
     pub mode: &'static str,
     /// A navigation started by trusted user input (`Sec-Fetch-User: ?1`).
     pub user_activated: bool,
+    /// Resource Timing `initiatorType` of the request (`""`: taken from
+    /// `destination`).
+    pub initiator_type: &'static str,
+    /// The request blocks rendering (`renderBlockingStatus`).
+    pub render_blocking: bool,
+    /// A CORS-enabled load (`crossorigin` on a script or image): its
+    /// Resource Timing entry exposes the response like a `cors` request's.
+    pub timing_cors: bool,
 }
 
 impl NetRequest {
@@ -71,6 +79,9 @@ impl NetRequest {
                 _ => "no-cors",
             },
             user_activated: false,
+            initiator_type: "",
+            render_blocking: false,
+            timing_cors: false,
         }
     }
 }

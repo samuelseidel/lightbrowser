@@ -70,6 +70,7 @@ mod misc;
 pub mod modules;
 mod navigator;
 mod net;
+mod perf;
 mod rtc;
 pub mod screenshot;
 pub mod script;
@@ -107,6 +108,7 @@ use crate::registry::{Registry, host_fn};
 
 pub use canvas::{CanvasTarget, ContextFactory, ExternalContext, canvas_size};
 pub use chrome::LoadInfo;
+pub use perf::{NavInfo, NavMark};
 pub use events::{EventData, EventExtra, fire_event, fire_event_with};
 pub use image::load_visible_lazy_images;
 pub use script::ScriptKind;
@@ -480,6 +482,7 @@ impl Runtime {
         input::register(reg, &rt);
         serializer::register(reg, &rt);
         window::register(reg, &rt);
+        perf::register(reg, &rt);
         net::register(reg, &rt);
         misc::register(reg, &rt);
         files::register(reg, &rt);
@@ -797,13 +800,21 @@ pub struct Clock {
 
 impl Clock {
     pub fn new(virtual_time: bool) -> Clock {
+        Clock::started_at(virtual_time, None)
+    }
+
+    /// A clock whose navigation started at `start` (before the window was
+    /// made: the fetch of the document), so the document's own timeline
+    /// (`PerformanceNavigationTiming`) has no negative times.
+    pub fn started_at(virtual_time: bool, start: Option<Instant>) -> Clock {
         let wall = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0.0, |d| d.as_secs_f64() * 1000.0);
+        let before = start.map_or(0.0, |s| s.elapsed().as_secs_f64() * 1000.0);
         Clock {
-            start: Instant::now(),
-            time_origin: wall,
-            virtual_now: Cell::new(virtual_time.then_some(0.0)),
+            start: start.unwrap_or_else(Instant::now),
+            time_origin: wall - before,
+            virtual_now: Cell::new(virtual_time.then_some(before)),
         }
     }
     /// Milliseconds since navigation start.
@@ -836,6 +847,11 @@ pub struct NavRequest {
     /// Started by trusted user input (a click or Enter on a submit button):
     /// `Sec-Fetch-User: ?1`.
     pub user_activated: bool,
+    /// `location.reload()`: a reload navigation.
+    pub reload: bool,
+    /// `history.back()`, `forward()` or `go(n)` past this document's own
+    /// entries: move this many entries in the session history.
+    pub traverse: Option<i32>,
 }
 
 impl NavRequest {
@@ -846,6 +862,8 @@ impl NavRequest {
             replace,
             post: None,
             user_activated: false,
+            reload: false,
+            traverse: None,
         }
     }
 }
@@ -1014,6 +1032,8 @@ pub struct Window {
     /// How the document was loaded (`chrome.loadTimes()`); the page layer
     /// may fill in the protocol and navigation type.
     pub load_info: RefCell<LoadInfo>,
+    /// The performance timeline (`perf.rs`, ADR 0046).
+    pub(crate) perf: RefCell<perf::PerfState>,
     /// Nested browsing contexts: parent link, child frames, page hooks.
     pub(crate) frames: frames::FrameState,
     /// `document.visibilityState` is "hidden" (set while unloading).
@@ -1041,6 +1061,12 @@ impl std::fmt::Debug for Window {
 impl Window {
     /// A window for a new, empty document at `init.url`.
     pub fn new(rt: &Runtime, init: WindowInit) -> Rc<Window> {
+        Window::new_at(rt, init, None)
+    }
+
+    /// [`Window::new`] for a document whose navigation started at
+    /// `nav_start`: `performance.now()` and `timeOrigin` count from there.
+    pub fn new_at(rt: &Runtime, init: WindowInit, nav_start: Option<Instant>) -> Rc<Window> {
         let mutations: Rc<RefCell<Vec<(u32, Mutation)>>> = Rc::new(RefCell::new(Vec::new()));
         let mut doc = Document::new();
         let sink = mutations.clone();
@@ -1090,7 +1116,7 @@ impl Window {
             drag_intercept: RefCell::new(None),
             geo_watches: RefCell::new(HashMap::new()),
             geo_next_watch: Cell::new(1),
-            clock: Clock::new(init.virtual_time),
+            clock: Clock::started_at(init.virtual_time, nav_start),
             layout: RefCell::new(None),
             css: RefCell::new(sheets::CssState::default()),
             bg: RefCell::new(bgimage::BgImages::default()),
@@ -1125,6 +1151,7 @@ impl Window {
             selections: RefCell::new(HashMap::new()),
             nav_state: RefCell::new(navigator::NavState::default()),
             load_info: RefCell::new(LoadInfo::default()),
+            perf: RefCell::new(perf::PerfState::default()),
             frames: frames::FrameState::default(),
             hidden: Cell::new(false),
             wk: worker::WorkerSide::default(),
@@ -1462,17 +1489,20 @@ impl Window {
     pub fn set_ready_state(&self, s: ReadyState) {
         self.ready_state.set(s);
         let now = self.clock.now();
-        let mut li = self.load_info.borrow_mut();
-        match s {
-            ReadyState::Interactive => {
-                li.dcl_ms.get_or_insert(now);
+        {
+            let mut li = self.load_info.borrow_mut();
+            match s {
+                ReadyState::Interactive => {
+                    li.dcl_ms.get_or_insert(now);
+                }
+                ReadyState::Complete => {
+                    li.dcl_ms.get_or_insert(now);
+                    li.load_ms.get_or_insert(now);
+                }
+                ReadyState::Loading => {}
             }
-            ReadyState::Complete => {
-                li.dcl_ms.get_or_insert(now);
-                li.load_ms.get_or_insert(now);
-            }
-            ReadyState::Loading => {}
         }
+        self.perf_ready_state(s);
     }
 
     /// Forward console messages (and uncaught exceptions) to `sink`.
@@ -1760,6 +1790,11 @@ impl Window {
     /// Call after any DOM change and after each parser step.
     pub fn after_mutation(self: &Rc<Self>, js: &mut dyn Js) {
         misc::process_mutations(js, self);
+        if self.ready_state.get() != ReadyState::Loading {
+            // Content a script added after parsing ended is the first
+            // paint's (a single-page app).
+            self.arm_paint();
+        }
     }
 
     /// The layout engine, created on first use.
@@ -2033,6 +2068,8 @@ pub(crate) enum Obj {
         local: bool,
     },
     Performance,
+    /// Performance Timeline entries, observers and lists (`perf.rs`).
+    Perf(Box<perf::PerfObj>),
     Screen,
     DomImplementation {
         slot: u32,
@@ -2112,6 +2149,7 @@ impl Obj {
             Obj::Navigator => "Navigator",
             Obj::Storage { .. } => "Storage",
             Obj::Performance => "Performance",
+            Obj::Perf(p) => p.iface_name(),
             Obj::Screen => "Screen",
             Obj::DomImplementation { .. } => "DOMImplementation",
             Obj::MediaQueryList { .. } => "MediaQueryList",

@@ -536,7 +536,7 @@ pub(crate) fn cors_allows(origin: &url::Origin, resp: &NetResponse) -> bool {
 }
 
 /// CORS check for a cross-origin response.
-fn cors_ok(origin: &url::Origin, resp: &NetResponse) -> bool {
+pub(crate) fn cors_ok(origin: &url::Origin, resp: &NetResponse) -> bool {
     if !is_cross_origin(origin, resp) {
         return true;
     }
@@ -664,6 +664,9 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
         initiator: Some(w.url()),
         mode,
         user_activated: false,
+        initiator_type: "fetch",
+        render_blocking: false,
+        timing_cors: false,
     };
     start_request(
         w,
@@ -1236,6 +1239,9 @@ fn send_beacon(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostE
         initiator: Some(w.url()),
         mode: if safelisted { "no-cors" } else { "cors" },
         user_activated: false,
+        initiator_type: "beacon",
+        render_blocking: false,
+        timing_cors: false,
     };
     // Not tied to the window: the request survives the document's unload.
     let fut = w.net.fetch(req);
@@ -2035,6 +2041,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             initiator: Some(w.url()),
             mode: "cors",
             user_activated: false,
+            initiator_type: "xmlhttprequest",
+            render_blocking: false,
+            timing_cors: false,
         };
         if !is_async {
             return xhr_send_sync(cx, w, id, generation, req, origin);

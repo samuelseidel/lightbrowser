@@ -75,9 +75,40 @@ pub(crate) struct PageState {
     /// The next navigation is a reload (service worker `FetchEvent`
     /// request cache mode).
     pub reloading: Cell<bool>,
+    /// The URLs of this page's top-level documents in navigation order and
+    /// the current one (what `history.back()` moves through).
+    nav_history: RefCell<Vec<Url>>,
+    nav_index: Cell<usize>,
 }
 
 impl PageState {
+    /// A document committed: add it to the session history, replace the
+    /// current entry, or (a traversal) move to entry `to`.
+    pub(crate) fn session_commit(&self, url: &Url, replace: bool, to: Option<usize>) {
+        let mut s = self.nav_history.borrow_mut();
+        match to {
+            Some(i) if i < s.len() => self.nav_index.set(i),
+            _ if replace && !s.is_empty() => {
+                let i = self.nav_index.get().min(s.len() - 1);
+                s[i] = url.clone();
+            }
+            _ => {
+                let keep = if s.is_empty() { 0 } else { self.nav_index.get() + 1 };
+                s.truncate(keep);
+                s.push(url.clone());
+                self.nav_index.set(s.len() - 1);
+            }
+        }
+    }
+
+    /// The session entry `delta` away from the current one.
+    pub(crate) fn session_target(&self, delta: i32) -> Option<(usize, Url)> {
+        let s = self.nav_history.borrow();
+        let i = i64::try_from(self.nav_index.get()).ok()? + i64::from(delta);
+        let i = usize::try_from(i).ok()?;
+        s.get(i).map(|u| (i, u.clone()))
+    }
+
     pub(crate) fn window(&self) -> Option<Rc<Window>> {
         self.window.borrow().clone()
     }
@@ -327,12 +358,35 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             }
             did = true;
         }
+        // The first frame after content exists: first paint entries
+        // (ADR 0046).
+        for x in wins.iter().filter(|x| x.paint_due().is_some_and(|d| d <= x.clock.now())) {
+            x.run_paint();
+            did = true;
+        }
         if let Some(nav) = w.take_nav_request() {
             let (ws2, p2) = (ws.clone(), page.clone());
-            let target = crate::nav::Target::from_script(nav, w.url());
-            tokio::task::spawn_local(async move {
-                let _ = crate::nav::navigate(ws2, p2, target).await;
-            });
+            let mut target = crate::nav::Target::from_script(nav.clone(), w.url());
+            let mut go = true;
+            if let Some(delta) = nav.traverse {
+                // `history.back()` past the document's own entries.
+                match page.session_target(delta) {
+                    Some((i, url)) => {
+                        target.url = url;
+                        target.initiator = None;
+                        target.traverse = Some(i);
+                    }
+                    None => go = false,
+                }
+            }
+            if go {
+                if nav.reload {
+                    page.reloading.set(true);
+                }
+                tokio::task::spawn_local(async move {
+                    let _ = crate::nav::navigate(ws2, p2, target).await;
+                });
+            }
             did = true;
         }
         for x in wins.iter().skip(1) {
@@ -362,6 +416,12 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
         }
         if wins.iter().any(|x| x.has_animation_frames()) {
             deadline = Some(deadline.map_or(next_frame, |d| d.min(next_frame)));
+        }
+        for x in &wins {
+            if let Some(d) = x.paint_due() {
+                let at = now + (d - x.clock.now()).max(0.0);
+                deadline = Some(deadline.map_or(at, |y: f64| y.min(at)));
+            }
         }
         if let Some(d) = idle_deadline {
             deadline = Some(deadline.map_or(d, |x| x.min(d)));
@@ -520,6 +580,8 @@ impl Page {
                     turn: Rc::new(Notify::new()),
                     cdp: RefCell::new(None),
                     reloading: Cell::new(false),
+                    nav_history: RefCell::new(Vec::new()),
+                    nav_index: Cell::new(0),
                 });
                 if let Some(setup) = setup {
                     setup(&page);

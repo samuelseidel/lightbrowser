@@ -308,6 +308,7 @@ pub(crate) fn link_changed(w: &Rc<Window>, n: NodeId) {
         referrer,
         quirks,
         Vec::new(),
+        ("link", sb),
         Box::new(move |w, loaded| {
             w.queue_task(
                 TaskSource::Networking,
@@ -347,6 +348,7 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
     } else {
         blocking(w, n, false)
     };
+    let imports_blocking = sb;
     let seq = begin(w, n, false, text.clone(), sb, pb);
     {
         let mut st = w.css.borrow_mut();
@@ -383,7 +385,15 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
             }
         });
         match url {
-            Some(u) => load_sheet(w, u, referrer.clone(), quirks, Vec::new(), done),
+            Some(u) => load_sheet(
+                w,
+                u,
+                referrer.clone(),
+                quirks,
+                Vec::new(),
+                ("css", imports_blocking),
+                done,
+            ),
             None => {
                 let bad = failed(referrer.clone());
                 done(w, bad)
@@ -636,6 +646,9 @@ fn load_sheet(
     referrer: Url,
     quirks: bool,
     chain: Vec<String>,
+    // Resource Timing: the initiator type and whether the load blocks
+    // rendering.
+    timeline: (&'static str, bool),
     done: Box<dyn FnOnce(&Rc<Window>, Loaded)>,
 ) {
     let doc_origin = w.url().origin();
@@ -659,6 +672,7 @@ fn load_sheet(
                 doc_origin,
                 quirks,
                 chain,
+                timeline.1,
                 done,
             );
         }));
@@ -671,7 +685,9 @@ fn load_sheet(
         }));
         return;
     }
-    let req = NetRequest::get(url.clone(), Destination::Style, Some(referrer));
+    let mut req = NetRequest::get(url.clone(), Destination::Style, Some(referrer));
+    req.initiator_type = timeline.0;
+    req.render_blocking = timeline.1;
     w.in_flight.set(w.in_flight.get() + 1);
     let fut = w.net_fetch(req);
     let weak = Rc::downgrade(w);
@@ -682,7 +698,7 @@ fn load_sheet(
         if w.is_closed() {
             return;
         }
-        got_sheet(&w, url, r, doc_origin, quirks, chain, done);
+        got_sheet(&w, url, r, doc_origin, quirks, chain, timeline.1, done);
     }));
 }
 
@@ -693,6 +709,7 @@ fn got_sheet(
     doc_origin: url::Origin,
     quirks: bool,
     mut chain: Vec<String>,
+    blocking: bool,
     done: Box<dyn FnOnce(&Rc<Window>, Loaded)>,
 ) {
     let resp = match r {
@@ -765,7 +782,15 @@ fn got_sheet(
         let target = base.join(imp.url.trim()).ok();
         match target {
             Some(t) if chain.len() < MAX_DEPTH && !chain.contains(&t.to_string()) => {
-                load_sheet(w, t, base.clone(), quirks, chain.clone(), child_done)
+                load_sheet(
+                    w,
+                    t,
+                    base.clone(),
+                    quirks,
+                    chain.clone(),
+                    ("css", blocking),
+                    child_done,
+                )
             }
             Some(t) => {
                 // A cycle or too deep: Chrome ignores the import.
