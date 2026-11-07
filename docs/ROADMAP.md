@@ -3462,8 +3462,10 @@ favour of the CDP coverage package's. Checks of the merged tree on rtx-dev (2026
 suite, the Firefox-family tests, the detect-bench unit tests and the
 Playwright suite all pass, except that `perf::worker_shared` (entry order in
 a shared worker's timeline) failed once under parallel load and passes alone
-five times out of five. Not run on the merged tree: the WPT subset, T-010
-over the eight reference personas, the crawl bench.
+five times out of five. T-010 over CDP with the wave 2 detector rules scores fp 0 for two
+reference personas (macOS 15 M2, Fedora 42 Wayland). Not run on the merged
+tree: the WPT subset, T-010 for the other six personas and with
+`--input human`, the crawl bench.
 
 Findings about our own code, for the owners:
 - The detector's `cdp_runtime` probe tests a getter path V8 closed in
