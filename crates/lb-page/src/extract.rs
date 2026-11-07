@@ -82,7 +82,7 @@ fn trailing_backslashes(s: &str) -> usize {
 /// not escaped.
 fn ends_unescaped(s: &str, suffix: &str) -> bool {
     let t = s.trim_end_matches(SENT);
-    t.ends_with(suffix) && trailing_backslashes(&t[..t.len() - suffix.len()]) % 2 == 0
+    t.ends_with(suffix) && trailing_backslashes(&t[..t.len() - suffix.len()]).is_multiple_of(2)
 }
 
 /// A closing sequence of `#` ends an ATX heading: escape the first of a
@@ -575,7 +575,7 @@ impl Inline {
     fn raw(&mut self, t: &str) {
         if t.starts_with('[')
             && self.s.ends_with('!')
-            && trailing_backslashes(&self.s[..self.s.len() - 1]) % 2 == 0
+            && trailing_backslashes(&self.s[..self.s.len() - 1]).is_multiple_of(2)
         {
             self.s.pop();
             self.s.push_str("\\!");
