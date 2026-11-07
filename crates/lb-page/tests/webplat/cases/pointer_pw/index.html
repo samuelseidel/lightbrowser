@@ -12,5 +12,6 @@ function brief(e) { return e.type + ' ' + e.clientX + ',' + e.clientY + ' btn=' 
       + ' sc=' + (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents));
   });
 });
+function reset() { L.length = 0; }
 function after() { end(); }
 </script>

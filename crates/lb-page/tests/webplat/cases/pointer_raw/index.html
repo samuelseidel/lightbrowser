@@ -19,16 +19,18 @@ function brief(e) {
   document.addEventListener(type, function (e) {
     var line = brief(e) + ' id=' + e.pointerId + ' ' + e.pointerType + ' primary=' + e.isPrimary + ' sc=' + sc(e);
     if (e.getCoalescedEvents) {
-      var c = e.getCoalescedEvents(), p = e.getPredictedEvents();
-      line += ' coalesced=[' + c.map(function (x) { return brief(x) + ' sc=' + sc(x); }).join(' ; ') + '] predicted=' + p.length;
+      var c = e.getCoalescedEvents();
+      line += ' coalesced=[' + c.map(function (x) { return brief(x) + ' sc=' + sc(x); }).join(' ; ') + '] predicted=' + pred(e);
       line += ' again=' + (e.getCoalescedEvents() === c) + '/' + (e.getCoalescedEvents()[0] === c[0]);
       saved.push(e);
     }
     log(line);
   }, true);
 });
+function pred(e) { return e.type == 'pointermove' || e.type == 'pointerrawupdate' ? '-' : e.getPredictedEvents().length; }
+function reset() { L.length = 0; saved = []; sameSC = []; lastSC = null; }
 function after() {
-  log('saved events later: ' + saved.map(function (e) { return e.type + ':' + e.getCoalescedEvents().length + '/' + e.getPredictedEvents().length; }).join(' '));
+  log('saved events later: ' + saved.map(function (e) { return e.type + ':' + e.getCoalescedEvents().length + '/' + pred(e); }).join(' '));
   log('same sourceCapabilities object: ' + sameSC.every(Boolean) + ' (' + sameSC.length + ' compared)');
   end();
 }

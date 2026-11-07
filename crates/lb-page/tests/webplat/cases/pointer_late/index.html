@@ -2,11 +2,13 @@
 // pointerrawupdate is made only while somebody listens: the listener is
 // added by the first pointermove, the second move gets one.
 var n = 0;
+function raw(r) { log('pointerrawupdate ' + r.clientX + ' coalesced=' + r.getCoalescedEvents().length); }
 document.addEventListener('pointermove', function (e) {
   log('pointermove ' + e.clientX);
-  if (++n == 1) window.addEventListener('pointerrawupdate', function (r) {
-    log('pointerrawupdate ' + r.clientX + ' coalesced=' + r.getCoalescedEvents().length);
-  });
+  if (++n == 1) window.addEventListener('pointerrawupdate', raw);
 });
+// (Chrome moves the pointer to 0,0 by itself when the page loads: the
+// steps start with a move there and this.)
+function reset() { L.length = 0; n = 0; window.removeEventListener('pointerrawupdate', raw); }
 function after() { end(); }
 </script>

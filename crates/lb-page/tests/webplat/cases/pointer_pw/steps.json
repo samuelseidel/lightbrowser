@@ -1,4 +1,7 @@
 [
+ {"pw": "move", "args": [0, 0]},
+ {"wait": 300},
+ {"eval": "reset()"},
  {"pw": "move", "args": [100, 100, {"steps": 4}]},
  {"pw": "down", "args": []},
  {"pw": "move", "args": [140, 120, {"steps": 2}]},

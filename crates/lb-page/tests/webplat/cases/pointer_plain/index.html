@@ -3,9 +3,13 @@
 // events a script makes.
 var box = document.getElementById('box');
 function brief(e) { return e.type + ' ' + e.clientX + ',' + e.clientY; }
+// (Chrome's predictor adds predicted events to a move now and then, from
+// its own state and the event times: only the other types are counted.)
+function pred(e) { return e.type == 'pointermove' ? '-' : e.getPredictedEvents().length; }
+function reset() { L.length = 0; }
 ['pointermove', 'pointerdown', 'pointerup'].forEach(function (type) {
   box.addEventListener(type, function (e) {
-    log(brief(e) + ' coalesced=[' + e.getCoalescedEvents().map(brief).join(' ; ') + '] predicted=' + e.getPredictedEvents().length);
+    log(brief(e) + ' coalesced=[' + e.getCoalescedEvents().map(brief).join(' ; ') + '] predicted=' + pred(e));
   });
 });
 function after() {

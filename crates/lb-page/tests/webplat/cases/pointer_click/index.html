@@ -1,0 +1,22 @@
+<!doctype html><!--LOG--><body style="margin:0"><div id=box style="width:400px;height:300px;background:#ccc"></div><script>
+// The pointer fields of the click-like events of a trusted left, middle
+// and right click (their order differs by platform and is not compared:
+// each type is logged once, sorted; the moment of contextmenu is the
+// platform's, so its `buttons` are not compared).
+var seen = {};
+['click', 'auxclick', 'contextmenu', 'dblclick', 'pointerdown', 'pointerup'].forEach(function (type) {
+  document.addEventListener(type, function (e) {
+    var line = e.type + ' ' + e.constructor.name + ' id=' + e.pointerId + ' ' + e.pointerType + ' primary=' + e.isPrimary
+      + ' wh=' + e.width + 'x' + e.height + ' press=' + e.pressure + ' tilt=' + e.tiltX + ',' + e.tiltY + ' btn=' + e.button + (e.type == 'contextmenu' ? '' : '/' + e.buttons)
+      + ' detail=' + e.detail + ' sc=' + (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents);
+    (seen[e.type] = seen[e.type] || []).push(line);
+  }, true);
+});
+function flush(name) {
+  log('--- ' + name);
+  Object.keys(seen).sort().forEach(function (k) { seen[k].forEach(log); });
+  seen = {};
+}
+function reset() { L.length = 0; seen = {}; }
+function after() { end(); }
+</script>

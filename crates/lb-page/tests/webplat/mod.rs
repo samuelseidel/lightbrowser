@@ -289,6 +289,7 @@ cases!(
 // over a CDP session in Chrome.
 cases!(
     false;
+    pointer_click,
     pointer_kinds,
     pointer_late,
     pointer_plain,

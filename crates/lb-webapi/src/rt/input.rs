@@ -777,7 +777,18 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     else {
         return;
     };
-    let extra = || mouse_extra(w, ev.x, ev.y, b, buttons, ev.modifiers, detail, None, true);
+    // click, auxclick and contextmenu are PointerEvents of a pointer that
+    // is not primary (Chrome 153); contextmenu has no `detail`.
+    let extra_with = |detail: i32| {
+        let mut e = mouse_extra(w, ev.x, ev.y, b, buttons, ev.modifiers, detail, None, true);
+        if let EventExtra::Mouse(m) = &mut e
+            && let Some(p) = &mut m.pointer
+        {
+            p.primary = false;
+        }
+        e
+    };
+    let extra = || extra_with(detail);
     match ev.button {
         MouseButton::Left => {
             let id = new_event(w, "PointerEvent", "click", true, true, extra());
@@ -814,7 +825,7 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
                 extra(),
             );
             if ev.button == MouseButton::Right {
-                fire(js, w, t, "PointerEvent", "contextmenu", true, true, extra());
+                fire(js, w, t, "PointerEvent", "contextmenu", true, true, extra_with(0));
             }
         }
     }
@@ -2463,7 +2474,11 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     mouse_num!("movementX", |w, e, m| m.movement_x);
     mouse_num!("movementY", |w, e, m| m.movement_y);
     mouse_num!("button", |w, e, m| f64::from(
-        m.button.max(if e.type_ == "pointermove" { -1 } else { 0 })
+        m.button.max(if matches!(e.type_.as_str(), "pointermove" | "pointerrawupdate") {
+            -1
+        } else {
+            0
+        })
     ));
     mouse_num!("buttons", |w, e, m| f64::from(m.buttons));
     mouse_num!("pageX", |w, e, m| m.client_x
