@@ -76,10 +76,7 @@ fn normalize(log: &str, ports: (u16, u16)) -> String {
 async fn run(case: &str) {
     let srv = PyServer::start();
     let (b, ctx) = (browser(), context(false));
-    let url = format!(
-        "http://127.0.0.1:{}/{case}/?x={}",
-        srv.ports.0, srv.ports.1
-    );
+    let url = format!("http://127.0.0.1:{}/{case}/?x={}", srv.ports.0, srv.ports.1);
     let page = open(&b, &ctx, &url, WaitUntil::Load).await;
     let t0 = Instant::now();
     let got = loop {
@@ -100,7 +97,10 @@ async fn run(case: &str) {
         let (g, w): (Vec<_>, Vec<_>) = (got.lines().collect(), want.lines().collect());
         let mut diff = String::new();
         for i in 0..g.len().max(w.len()) {
-            let (a, b) = (g.get(i).copied().unwrap_or("<none>"), w.get(i).copied().unwrap_or("<none>"));
+            let (a, b) = (
+                g.get(i).copied().unwrap_or("<none>"),
+                w.get(i).copied().unwrap_or("<none>"),
+            );
             if a != b {
                 diff.push_str(&format!("line {i}\n  chrome: {b}\n  lb:     {a}\n"));
             }

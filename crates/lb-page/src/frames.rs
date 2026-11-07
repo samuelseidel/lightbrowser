@@ -210,7 +210,10 @@ async fn navigate_frame(
         nav_type: "navigate",
         status: resp.status,
         headers: resp.headers.clone(),
-        encoded: resp.timing.as_ref().map_or(resp.body.len() as u64, |t| t.encoded_body_size),
+        encoded: resp
+            .timing
+            .as_ref()
+            .map_or(resp.body.len() as u64, |t| t.encoded_body_size),
         decoded: resp.body.len() as u64,
     });
     w.set_worker_host(parent.worker_host());

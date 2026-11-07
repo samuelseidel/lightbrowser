@@ -781,17 +781,15 @@ fn got_sheet(
         });
         let target = base.join(imp.url.trim()).ok();
         match target {
-            Some(t) if chain.len() < MAX_DEPTH && !chain.contains(&t.to_string()) => {
-                load_sheet(
-                    w,
-                    t,
-                    base.clone(),
-                    quirks,
-                    chain.clone(),
-                    ("css", blocking),
-                    child_done,
-                )
-            }
+            Some(t) if chain.len() < MAX_DEPTH && !chain.contains(&t.to_string()) => load_sheet(
+                w,
+                t,
+                base.clone(),
+                quirks,
+                chain.clone(),
+                ("css", blocking),
+                child_done,
+            ),
             Some(t) => {
                 // A cycle or too deep: Chrome ignores the import.
                 let mut l = failed(t);

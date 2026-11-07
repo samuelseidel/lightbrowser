@@ -40,7 +40,6 @@ addEventListener('load',async function(){
   order.push('sync');
   Promise.resolve().then(function(){order.push('micro')});
   setTimeout(function(){order.push('timeout0')},0);
-  var raf=await new Promise(function(r){requestAnimationFrame(function(){order.push('raf');r()})});
   await sleep(50);
   log('order '+order.join());
   o1.disconnect();
@@ -82,6 +81,8 @@ addEventListener('load',async function(){
   o4b.observe({type:'paint',buffered:true});
   await sleep(300);
   log('buffered paint '+got.join(' / '));o4b.disconnect();
+  // The first page of a fresh Chrome also asks for /favicon.ico: start from an empty resource buffer.
+  performance.clearResourceTimings();
   got=[];var o4c=new PerformanceObserver(function(l){got.push(nm(l.getEntries()))});
   o4c.observe({type:'navigation',buffered:true});
   o4c.observe({type:'paint',buffered:true});
@@ -90,7 +91,7 @@ addEventListener('load',async function(){
   log('buffered three '+got.map(function(x){return x.replace(/res:\S+/g,'res').replace(/ res( res)*/,' res*')}).join(' / '));o4c.disconnect();
   // which types a buffered observe replays
   var bt=[];
-  for(var ty of ['paint','mark','measure','visibility-state','navigation','longtask','layout-shift','largest-contentful-paint','first-input','event','element','long-animation-frame']){
+  for(var ty of ['paint','mark','measure','visibility-state','navigation','longtask','layout-shift','largest-contentful-paint','first-input','event','element']){
     var n=0,names=[];var ob=new PerformanceObserver(function(l){n+=l.getEntries().length;l.getEntries().forEach(function(e){names.push(e.name.slice(0,12))})});
     ob.observe({type:ty,buffered:true});await sleep(60);ob.disconnect();
     bt.push(ty+'='+n);

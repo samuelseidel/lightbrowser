@@ -93,7 +93,11 @@ impl PageState {
                 s[i] = url.clone();
             }
             _ => {
-                let keep = if s.is_empty() { 0 } else { self.nav_index.get() + 1 };
+                let keep = if s.is_empty() {
+                    0
+                } else {
+                    self.nav_index.get() + 1
+                };
                 s.truncate(keep);
                 s.push(url.clone());
                 self.nav_index.set(s.len() - 1);
@@ -360,7 +364,10 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
         }
         // The first frame after content exists: first paint entries
         // (ADR 0046).
-        for x in wins.iter().filter(|x| x.paint_due().is_some_and(|d| d <= x.clock.now())) {
+        for x in wins
+            .iter()
+            .filter(|x| x.paint_due().is_some_and(|d| d <= x.clock.now()))
+        {
             x.run_paint();
             did = true;
         }

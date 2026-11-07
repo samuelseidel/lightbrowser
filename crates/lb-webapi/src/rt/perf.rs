@@ -462,29 +462,26 @@ impl Window {
 
     /// Text, an image, a canvas or an SVG in the body.
     fn has_paintable_content(&self) -> bool {
-        use lb_dom::{Document, NodeType, local_name};
+        use lb_dom::{NodeType, local_name};
         self.with_doc(|d| {
             let Some(body) = d.body() else { return false };
             d.descendants(body).any(|n| match d.node_type(n) {
-                NodeType::Text => d
-                    .text_content(n)
-                    .is_some_and(|t| t.chars().any(|c| !c.is_whitespace()))
-                    && d.parent(n).is_none_or(|p| {
-                        !d.is_html_element_named(p, &local_name!("script"))
-                            && !d.is_html_element_named(p, &local_name!("style"))
-                    }),
+                NodeType::Text => {
+                    d.character_data(n)
+                        .is_some_and(|t| t.chars().any(|c| !c.is_whitespace()))
+                        && d.parent(n).is_none_or(|p| {
+                            !d.is_html_element_named(p, &local_name!("script"))
+                                && !d.is_html_element_named(p, &local_name!("style"))
+                        })
+                }
                 NodeType::Element => {
                     d.is_html_element_named(n, &local_name!("img"))
                         || d.is_html_element_named(n, &local_name!("canvas"))
                         || d.is_html_element_named(n, &local_name!("video"))
-                        || d.is_html_element_named(n, &local_name!("svg"))
-                        || d.local_name(n).is_some_and(|l| &*l == "svg")
+                        || d.local_name(n).is_some_and(|l| &**l == "svg")
                 }
                 _ => false,
-            }) && {
-                let _ = Document::DOCUMENT;
-                true
-            }
+            })
         })
     }
 
@@ -671,7 +668,13 @@ fn parse_server_timing(headers: &[(String, String)]) -> Vec<ServerMetric> {
 fn mime_of(headers: &[(String, String)]) -> String {
     header_values(headers, "content-type")
         .next()
-        .map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+        .map(|v| {
+            v.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+        })
         .unwrap_or_default()
 }
 
@@ -783,9 +786,7 @@ pub(crate) fn finish(w: &Rc<Window>, p: Pending, r: Result<&NetResponse, &String
                 && !super::net::cors_ok(&origin, resp)
                 && p.initiator != "other";
             let m = match &resp.timing {
-                Some(t) => {
-                    measure(w, t, now_ms, now, allowed && !cors_failed)
-                }
+                Some(t) => measure(w, t, now_ms, now, allowed && !cors_failed),
                 None => {
                     // Not from the network stack (a CDP-fulfilled answer, a
                     // service worker's): sizes from the body, the steps
@@ -838,7 +839,13 @@ pub(crate) fn finish(w: &Rc<Window>, p: Pending, r: Result<&NetResponse, &String
         }
     }
     let nav_id = w.perf.borrow().nav_id;
-    let mut e = Entry::new(Kind::Resource, p.url.to_string(), start, end - start, nav_id);
+    let mut e = Entry::new(
+        Kind::Resource,
+        p.url.to_string(),
+        start,
+        end - start,
+        nav_id,
+    );
     e.res = Some(data);
     add_resource(w, Rc::new(e));
 }
@@ -918,8 +925,6 @@ fn nav_data(w: &Window) -> ResData {
         return d;
     }
     let info = w.perf.borrow().nav_info.clone();
-    let now_ms = w.clock.now();
-    let now = Instant::now();
     let dom_loading = w.perf.borrow().marks_nav.dom_loading.unwrap_or(0.0);
     let d = match info {
         Some(info) => {
@@ -927,7 +932,7 @@ fn nav_data(w: &Window) -> ResData {
             let url = url.unwrap_or_else(|| w.url());
             let origin = url.origin();
             let origin_s = origin.ascii_serialization();
-            let (data, redirects_ok) = match &info.timing {
+            let data = match &info.timing {
                 Some(t) => {
                     let mut ok = true;
                     for (u, tao) in &t.redirects {
@@ -939,12 +944,8 @@ fn nav_data(w: &Window) -> ResData {
                     // origin: the clock was started at the fetch.
                     let t0 = t.start;
                     let ms = |i: Instant| {
-                        coarse_time(
-                            w,
-                            i.saturating_duration_since(t0).as_secs_f64() * 1000.0,
-                        )
+                        coarse_time(w, i.saturating_duration_since(t0).as_secs_f64() * 1000.0)
                     };
-                    let _ = (now_ms, now);
                     let (rs, re) = match t.redirect {
                         Some((s, e)) if ok => (ms(s), ms(e)),
                         _ => (0.0, 0.0),
@@ -970,39 +971,32 @@ fn nav_data(w: &Window) -> ResData {
                     let request_start = ms(t.request_start).max(connect_end);
                     let response_start = ms(t.response_start).max(request_start);
                     let response_end = ms(t.response_end).max(response_start);
-                    (
-                        ResData {
-                            protocol: t.protocol.to_owned(),
-                            redirect_start: rs,
-                            redirect_end: re,
-                            fetch_start,
-                            dns_start,
-                            dns_end,
-                            connect_start,
-                            secure_start: secure.unwrap_or(0.0),
-                            connect_end,
-                            request_start,
-                            response_start,
-                            response_end,
-                            transfer: info.encoded + 300,
-                            encoded: info.encoded,
-                            decoded: info.decoded,
-                            redirect_count: if ok { t.redirects.len() as u32 } else { 0 },
-                            ..ResData::default()
-                        },
-                        ok,
-                    )
-                }
-                None => (
                     ResData {
-                        response_start: dom_loading.min(1.0),
-                        response_end: dom_loading.min(1.0),
+                        protocol: t.protocol.to_owned(),
+                        redirect_start: rs,
+                        redirect_end: re,
+                        fetch_start,
+                        dns_start,
+                        dns_end,
+                        connect_start,
+                        secure_start: secure.unwrap_or(0.0),
+                        connect_end,
+                        request_start,
+                        response_start,
+                        response_end,
+                        transfer: info.encoded + 300,
+                        encoded: info.encoded,
+                        decoded: info.decoded,
+                        redirect_count: if ok { t.redirects.len() as u32 } else { 0 },
                         ..ResData::default()
-                    },
-                    true,
-                ),
+                    }
+                }
+                None => ResData {
+                    response_start: dom_loading.min(1.0),
+                    response_end: dom_loading.min(1.0),
+                    ..ResData::default()
+                },
             };
-            let _ = redirects_ok;
             ResData {
                 initiator: "navigation",
                 content_type: mime_of(&info.headers),
@@ -1308,8 +1302,9 @@ fn clone_detail(
     prefix: &str,
 ) -> Result<Option<lb_js::Serialized>, HostError> {
     let Some(h) = h else { return Ok(None) };
-    let mut writer =
-        |_: HostRef, class: &str| -> Result<u32, String> { Err(format!("{class} object could not be cloned.")) };
+    let mut writer = |_: HostRef, class: &str| -> Result<u32, String> {
+        Err(format!("{class} object could not be cloned."))
+    };
     let r = cx.serialize(h, &[], &mut writer);
     cx.release(h);
     match r {
@@ -1480,18 +1475,20 @@ fn do_measure(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<Rc<Entry>,
                     "If a non-empty PerformanceMeasureOptions object was passed, it must not have all of its 'start', 'duration', and 'end' properties defined",
                 ));
             }
-            let num = |cx: &mut CallCtx<'_, '_, '_>, h: Option<Handle>, prop: &str| {
-                match h {
-                    Some(h) if cx.handle_kind(h) == ValueKind::Number => {
-                        let n = to_number(cx, h);
-                        if !n.is_finite() {
-                            cx.release(h);
-                            return Err(non_finite("Failed to execute 'measure' on 'Performance': ", prop, "PerformanceMeasureOptions"));
-                        }
-                        Ok((Some(h), Some(n)))
+            let num = |cx: &mut CallCtx<'_, '_, '_>, h: Option<Handle>, prop: &str| match h {
+                Some(h) if cx.handle_kind(h) == ValueKind::Number => {
+                    let n = to_number(cx, h);
+                    if !n.is_finite() {
+                        cx.release(h);
+                        return Err(non_finite(
+                            "Failed to execute 'measure' on 'Performance': ",
+                            prop,
+                            "PerformanceMeasureOptions",
+                        ));
                     }
-                    other => Ok((other, None)),
+                    Ok((Some(h), Some(n)))
                 }
+                other => Ok((other, None)),
             };
             let (s, sn) = num(cx, s, "start")?;
             let (e, en) = num(cx, e, "end")?;
@@ -1500,7 +1497,11 @@ fn do_measure(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<Rc<Entry>,
                     let n = to_number(cx, h);
                     cx.release(h);
                     if !n.is_finite() {
-                        return Err(non_finite("Failed to execute 'measure' on 'Performance': ", "duration", "PerformanceMeasureOptions"));
+                        return Err(non_finite(
+                            "Failed to execute 'measure' on 'Performance': ",
+                            "duration",
+                            "PerformanceMeasureOptions",
+                        ));
                     }
                     Some(n)
                 }
@@ -1720,7 +1721,14 @@ fn res_value(w: &Window, e: &Entry, name: &str) -> V {
         "initiatorType" => V::S(d.initiator.to_owned()),
         "nextHopProtocol" => V::S(d.protocol),
         "deliveryType" => V::S(String::new()),
-        "renderBlockingStatus" => V::S(if d.blocking { "blocking" } else { "non-blocking" }.into()),
+        "renderBlockingStatus" => V::S(
+            if d.blocking {
+                "blocking"
+            } else {
+                "non-blocking"
+            }
+            .into(),
+        ),
         "contentType" => V::S(d.content_type),
         "contentEncoding" => V::S(d.content_encoding),
         "workerMatchedSourceType" | "workerFinalSourceType" => V::S(String::new()),
@@ -1775,7 +1783,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         this_obj(cx)?;
         need_args(cx, 1, "getEntriesByType", "Performance")?;
         let t = cx.arg_string(0)?;
-        let v = Kind::of_type(&t).map(|k| entries_of(w, k)).unwrap_or_default();
+        let v = Kind::of_type(&t)
+            .map(|k| entries_of(w, k))
+            .unwrap_or_default();
         cx.ret(entries_arg(w, &v))
     });
     method(reg, rt, "Performance", "getEntriesByName", |cx, w| {
@@ -1835,13 +1845,19 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         w.perf.borrow_mut().resources.clear();
         Ok(())
     });
-    method(reg, rt, "Performance", "setResourceTimingBufferSize", |cx, w| {
-        this_obj(cx)?;
-        need_args(cx, 1, "setResourceTimingBufferSize", "Performance")?;
-        let n = cx.arg_u32(0)?;
-        w.perf.borrow_mut().limit = n as usize;
-        Ok(())
-    });
+    method(
+        reg,
+        rt,
+        "Performance",
+        "setResourceTimingBufferSize",
+        |cx, w| {
+            this_obj(cx)?;
+            need_args(cx, 1, "setResourceTimingBufferSize", "Performance")?;
+            let n = cx.arg_u32(0)?;
+            w.perf.borrow_mut().limit = n as usize;
+            Ok(())
+        },
+    );
     method(reg, rt, "Performance", "toJSON", |cx, w| {
         this_obj(cx)?;
         let origin = (w.clock.time_origin * 10.0).floor() / 10.0;
@@ -1851,7 +1867,8 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         // `{timeOrigin, timing, navigation}` with the live `PerformanceTiming`
         // and `PerformanceNavigation` objects (they serialize themselves).
         let obj = cx.make_handle(Arg::Json(format!("{{\"timeOrigin\":{}}}", num(origin))))?;
-        let timing = super::navigator::single_nav(w, "nav:timing", super::navigator::NavObj::Timing);
+        let timing =
+            super::navigator::single_nav(w, "nav:timing", super::navigator::NavObj::Timing);
         let nav =
             super::navigator::single_nav(w, "nav:navigation", super::navigator::NavObj::Navigation);
         cx.set_property(obj, "timing", timing)?;
@@ -1947,28 +1964,37 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             cx.ret(res_value(w, &e, name))
         });
     }
-    getter(reg, rt, "PerformanceResourceTiming", "serverTiming", |cx, w| {
-        let e = this_entry(cx, w)?;
-        let metrics = if e.kind == Kind::Navigation {
-            nav_data(w).server_timing
-        } else {
-            e.res.as_ref().map(|r| r.server_timing.clone()).unwrap_or_default()
-        };
-        let ids = {
-            let mut objs = e.server_objs.borrow_mut();
-            if objs.len() != metrics.len() {
-                objs.clear();
-                for m in &metrics {
-                    objs.push(w.new_obj(Obj::Perf(Box::new(PerfObj::ServerTiming(m.clone())))));
+    getter(
+        reg,
+        rt,
+        "PerformanceResourceTiming",
+        "serverTiming",
+        |cx, w| {
+            let e = this_entry(cx, w)?;
+            let metrics = if e.kind == Kind::Navigation {
+                nav_data(w).server_timing
+            } else {
+                e.res
+                    .as_ref()
+                    .map(|r| r.server_timing.clone())
+                    .unwrap_or_default()
+            };
+            let ids = {
+                let mut objs = e.server_objs.borrow_mut();
+                if objs.len() != metrics.len() {
+                    objs.clear();
+                    for m in &metrics {
+                        objs.push(w.new_obj(Obj::Perf(Box::new(PerfObj::ServerTiming(m.clone())))));
+                    }
                 }
-            }
-            objs.clone()
-        };
-        let arr = frozen_array(cx, w, ids.into_iter().map(|i| w.obj_arg(i)).collect())?;
-        let r = cx.ret(Arg::Handle(arr));
-        cx.release(arr);
-        r
-    });
+                objs.clone()
+            };
+            let arr = frozen_array(cx, w, ids.into_iter().map(|i| w.obj_arg(i)).collect())?;
+            let r = cx.ret(Arg::Handle(arr));
+            cx.release(arr);
+            r
+        },
+    );
     for (name, kind) in [("name", 0), ("duration", 1), ("description", 2)] {
         getter(reg, rt, "PerformanceServerTiming", name, move |cx, w| {
             let id = this_obj(cx)?;
@@ -2001,7 +2027,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             })
             .flatten()
             .ok_or_else(illegal)?;
-        cx.ret(Arg::Json(server_json(&[m])[1..].trim_end_matches(']').to_owned()))
+        cx.ret(Arg::Json(
+            server_json(&[m])[1..].trim_end_matches(']').to_owned(),
+        ))
     });
     // Navigation timing.
     for name in [
@@ -2014,38 +2042,62 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         "loadEventStart",
         "loadEventEnd",
     ] {
-        getter(reg, rt, "PerformanceNavigationTiming", name, move |cx, w| {
-            let e = this_entry(cx, w)?;
-            if e.kind != Kind::Navigation {
-                return Err(illegal());
-            }
-            cx.ret(nav_point(w, name).unwrap_or(0.0))
-        });
+        getter(
+            reg,
+            rt,
+            "PerformanceNavigationTiming",
+            name,
+            move |cx, w| {
+                let e = this_entry(cx, w)?;
+                if e.kind != Kind::Navigation {
+                    return Err(illegal());
+                }
+                cx.ret(nav_point(w, name).unwrap_or(0.0))
+            },
+        );
     }
     getter(reg, rt, "PerformanceNavigationTiming", "type", |cx, w| {
         this_entry(cx, w)?;
         cx.ret(nav_data(w).nav_type)
     });
-    getter(reg, rt, "PerformanceNavigationTiming", "redirectCount", |cx, w| {
-        this_entry(cx, w)?;
-        cx.ret(nav_data(w).redirect_count)
-    });
+    getter(
+        reg,
+        rt,
+        "PerformanceNavigationTiming",
+        "redirectCount",
+        |cx, w| {
+            this_entry(cx, w)?;
+            cx.ret(nav_data(w).redirect_count)
+        },
+    );
     for name in ["activationStart", "criticalCHRestart"] {
         getter(reg, rt, "PerformanceNavigationTiming", name, |cx, w| {
             this_entry(cx, w)?;
             cx.ret(0)
         });
     }
-    getter(reg, rt, "PerformanceNavigationTiming", "notRestoredReasons", |cx, w| {
-        this_entry(cx, w)?;
-        cx.ret(Arg::Null)
-    });
-    getter(reg, rt, "PerformanceNavigationTiming", "confidence", |cx, w| {
-        this_entry(cx, w)?;
-        cx.ret(Arg::Json(
-            "{\"randomizedTriggerRate\":0.4994798,\"value\":\"low\"}".into(),
-        ))
-    });
+    getter(
+        reg,
+        rt,
+        "PerformanceNavigationTiming",
+        "notRestoredReasons",
+        |cx, w| {
+            this_entry(cx, w)?;
+            cx.ret(Arg::Null)
+        },
+    );
+    getter(
+        reg,
+        rt,
+        "PerformanceNavigationTiming",
+        "confidence",
+        |cx, w| {
+            this_entry(cx, w)?;
+            cx.ret(Arg::Json(
+                "{\"randomizedTriggerRate\":0.4994798,\"value\":\"low\"}".into(),
+            ))
+        },
+    );
     for name in ["paintTime", "presentationTime"] {
         getter(reg, rt, "PerformancePaintTiming", name, |cx, w| {
             let e = this_entry(cx, w)?;
@@ -2081,7 +2133,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         }))));
         cx.init_this(HostRef::new(K_OBJ, id))
     });
-    method(reg, rt, "PerformanceObserver", "observe", |cx, w| observe(cx, w));
+    method(reg, rt, "PerformanceObserver", "observe", |cx, w| {
+        observe(cx, w)
+    });
     method(reg, rt, "PerformanceObserver", "disconnect", |cx, w| {
         let id = this_obj(cx)?;
         w.with_obj(id, |o| match o {
@@ -2151,40 +2205,61 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         .flatten()
         .ok_or_else(illegal)
     }
-    method(reg, rt, "PerformanceObserverEntryList", "getEntries", |cx, w| {
-        let v = list_of(cx, w)?;
-        cx.ret(entries_arg(w, &v))
-    });
-    method(reg, rt, "PerformanceObserverEntryList", "getEntriesByType", |cx, w| {
-        let v = list_of(cx, w)?;
-        need_args(cx, 1, "getEntriesByType", "PerformanceObserverEntryList")?;
-        let t = cx.arg_string(0)?;
-        let v: Vec<_> = v.into_iter().filter(|e| e.kind.type_name() == t).collect();
-        cx.ret(entries_arg(w, &v))
-    });
-    method(reg, rt, "PerformanceObserverEntryList", "getEntriesByName", |cx, w| {
-        let v = list_of(cx, w)?;
-        need_args(cx, 1, "getEntriesByName", "PerformanceObserverEntryList")?;
-        let name = cx.arg_string(0)?;
-        let ty = if cx.len() > 1 && cx.arg_kind(1) != ValueKind::Undefined {
-            Some(cx.arg_string(1)?)
-        } else {
-            None
-        };
-        let v: Vec<_> = v
-            .into_iter()
-            .filter(|e| e.name == name && ty.as_ref().is_none_or(|t| e.kind.type_name() == t))
-            .collect();
-        cx.ret(entries_arg(w, &v))
-    });
+    method(
+        reg,
+        rt,
+        "PerformanceObserverEntryList",
+        "getEntries",
+        |cx, w| {
+            let v = list_of(cx, w)?;
+            cx.ret(entries_arg(w, &v))
+        },
+    );
+    method(
+        reg,
+        rt,
+        "PerformanceObserverEntryList",
+        "getEntriesByType",
+        |cx, w| {
+            let v = list_of(cx, w)?;
+            need_args(cx, 1, "getEntriesByType", "PerformanceObserverEntryList")?;
+            let t = cx.arg_string(0)?;
+            let v: Vec<_> = v.into_iter().filter(|e| e.kind.type_name() == t).collect();
+            cx.ret(entries_arg(w, &v))
+        },
+    );
+    method(
+        reg,
+        rt,
+        "PerformanceObserverEntryList",
+        "getEntriesByName",
+        |cx, w| {
+            let v = list_of(cx, w)?;
+            need_args(cx, 1, "getEntriesByName", "PerformanceObserverEntryList")?;
+            let name = cx.arg_string(0)?;
+            let ty = if cx.len() > 1 && cx.arg_kind(1) != ValueKind::Undefined {
+                Some(cx.arg_string(1)?)
+            } else {
+                None
+            };
+            let v: Vec<_> = v
+                .into_iter()
+                .filter(|e| e.name == name && ty.as_ref().is_none_or(|t| e.kind.type_name() == t))
+                .collect();
+            cx.ret(entries_arg(w, &v))
+        },
+    );
 
     // ----- EventCounts (a read-only map, all zero: no Event Timing) -----
     fn ec_this(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(), HostError> {
         let id = this_obj(cx)?;
-        w.with_obj(id, |o| matches!(o, Obj::Perf(p) if matches!(**p, PerfObj::EventCounts)))
-            .filter(|b| *b)
-            .map(|_| ())
-            .ok_or_else(illegal)
+        w.with_obj(
+            id,
+            |o| matches!(o, Obj::Perf(p) if matches!(**p, PerfObj::EventCounts)),
+        )
+        .filter(|b| *b)
+        .map(|_| ())
+        .ok_or_else(illegal)
     }
     getter(reg, rt, "EventCounts", "size", |cx, w| {
         ec_this(cx, w)?;

@@ -664,11 +664,8 @@ impl ConnectionPool {
             }
             None => {
                 let tcp = params.tcp_profile.as_deref();
-                let (tcp, dns_start, dns_end, end) = self
-                    .inner
-                    .dialer
-                    .connect_timed(host, key.port, tcp)
-                    .await?;
+                let (tcp, dns_start, dns_end, end) =
+                    self.inner.dialer.connect_timed(host, key.port, tcp).await?;
                 (
                     tcp,
                     ConnTiming {

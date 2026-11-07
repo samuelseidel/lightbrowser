@@ -310,7 +310,10 @@ pub(crate) async fn navigate_committed(
         nav_type,
         status: resp.status,
         headers: resp.headers.clone(),
-        encoded: resp.timing.as_ref().map_or(resp.body.len() as u64, |t| t.encoded_body_size),
+        encoded: resp
+            .timing
+            .as_ref()
+            .map_or(resp.body.len() as u64, |t| t.encoded_body_size),
         decoded: resp.body.len() as u64,
     };
     let w = Window::new_at(

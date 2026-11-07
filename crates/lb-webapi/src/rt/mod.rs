@@ -108,9 +108,9 @@ use crate::registry::{Registry, host_fn};
 
 pub use canvas::{CanvasTarget, ContextFactory, ExternalContext, canvas_size};
 pub use chrome::LoadInfo;
-pub use perf::{NavInfo, NavMark};
 pub use events::{EventData, EventExtra, fire_event, fire_event_with};
 pub use image::load_visible_lazy_images;
+pub use perf::{NavInfo, NavMark};
 pub use script::ScriptKind;
 pub(crate) use webgl::{extension_names, extension_spec};
 pub use worker::{

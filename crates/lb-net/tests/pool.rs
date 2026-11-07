@@ -486,7 +486,10 @@ async fn fetch_timing_tells_new_connections_from_reused_ones() {
         let first = get(&pool, Request::get(base.clone())).await;
         let t = &first.timing;
         let c = t.conn.expect("a new connection has its setup measured");
-        assert!(t.start <= t.fetch_start && t.fetch_start <= c.dns_start, "tls={tls}");
+        assert!(
+            t.start <= t.fetch_start && t.fetch_start <= c.dns_start,
+            "tls={tls}"
+        );
         assert!(c.dns_start <= c.dns_end && c.dns_end <= c.connect_start);
         match c.secure_start {
             Some(s) => {
@@ -503,7 +506,10 @@ async fn fetch_timing_tells_new_connections_from_reused_ones() {
 
         let second = get(&pool, Request::get(base.join("/next").unwrap())).await;
         let t2 = &second.timing;
-        assert!(t2.conn.is_none(), "tls={tls}: a reused connection has no setup");
+        assert!(
+            t2.conn.is_none(),
+            "tls={tls}: a reused connection has no setup"
+        );
         assert!(t2.fetch_start <= t2.request_start && t2.request_start <= t2.response_end);
         assert!(t2.start >= t.response_end);
     }
