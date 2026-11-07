@@ -300,6 +300,7 @@ pub(crate) async fn page_fetch(
         .window()
         .map(|w| w.url().to_string())
         .unwrap_or_else(|| req.url.to_string());
+    let (doc_url_hops, req_hops) = (doc_url.clone(), req.clone());
     agent.emit(PageEvent::RequestWillBeSent(Box::new(RequestWillBeSent {
         request_id: id.clone(),
         loader_id: loader.clone(),
@@ -412,6 +413,7 @@ pub(crate) async fn page_fetch(
             }
         }
     }
+    let mut hops: Vec<lb_net::RedirectHop> = Vec::new();
     let r = match fulfilled {
         Some(r) => Ok(r),
         None => {
@@ -430,12 +432,48 @@ pub(crate) async fn page_fetch(
             } else if offline && !matches!(req.url.scheme(), "data" | "blob" | "about") {
                 Err("net::ERR_INTERNET_DISCONNECTED".to_string())
             } else {
-                fetch_answering_auth(&agent, page, req, top_frame, rtype, interception).await
+                fetch_answering_auth(&agent, page, req, top_frame, rtype, interception)
+                    .await
+                    .map(|(r, h)| {
+                        hops = h;
+                        r
+                    })
             }
         }
     };
     match &r {
         Ok(resp) => {
+            // Each redirect the network stack followed: the same request
+            // id, now for the next URL, with the redirect's response.
+            for h in &hops {
+                let mut next = req_hops.clone();
+                next.url = h.target.clone();
+                agent.emit(PageEvent::RequestWillBeSent(Box::new(RequestWillBeSent {
+                    request_id: id.clone(),
+                    loader_id: loader.clone(),
+                    document_url: if rtype == "Document" {
+                        h.target.to_string()
+                    } else {
+                        doc_url_hops.clone()
+                    },
+                    request: cdp_request(&agent, page, &next),
+                    timestamp: agent.mono(),
+                    wall_time: wall_secs(),
+                    initiator: serde_json::json!({ "type": "other" }),
+                    redirect_has_extra_info: false,
+                    redirect_response: Some(cdp_response(&NetResponse {
+                        status: h.status.as_u16(),
+                        status_text: h.status.canonical_reason().unwrap_or("").to_owned(),
+                        headers: h.response_headers.clone(),
+                        body: bytes::Bytes::new(),
+                        url: h.url.clone(),
+                        redirected: false,
+                    })),
+                    resource_type: rtype.into(),
+                    frame_id: Some(frame.clone()),
+                    has_user_gesture: false,
+                })));
+            }
             agent.emit(PageEvent::ResponseReceived(Box::new(ResponseReceived {
                 request_id: id.clone(),
                 loader_id: loader,
@@ -627,7 +665,7 @@ async fn fetch_answering_auth(
     top_frame: Option<url::Url>,
     rtype: &str,
     interception: Option<String>,
-) -> Result<NetResponse, String> {
+) -> Result<(NetResponse, Vec<lb_net::RedirectHop>), String> {
     const DENIED: &str = "net::ERR_INVALID_AUTH_CREDENTIALS";
     let iid = interception.unwrap_or_else(|| {
         format!(

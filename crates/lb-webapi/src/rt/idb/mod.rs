@@ -1300,6 +1300,29 @@ fn register_request(reg: &mut Registry, rt: &Runtime) {
     });
 }
 
+/// The strings of a `DOMStringList`-like object (an indexed list with a
+/// numeric `length`; arrays are the caller's), or `None`.
+fn string_list(cx: &mut CallCtx<'_, '_, '_>, h: Handle) -> Result<Option<Vec<String>>, HostError> {
+    if cx.handle_is_array(h) {
+        return Ok(None);
+    }
+    let lh = cx.get_property(h, "length")?;
+    let len = match cx.handle_value(lh) {
+        JsValue::Number(n) if n >= 0.0 && n.fract() == 0.0 => Some(n as usize),
+        _ => None,
+    };
+    cx.release(lh);
+    let Some(len) = len else { return Ok(None) };
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let e = cx.get_property(h, &i.to_string())?;
+        let s = cx.handle_string(e);
+        cx.release(e);
+        out.push(s?);
+    }
+    Ok(Some(out))
+}
+
 fn is_db(o: &IdbObj) -> bool {
     matches!(o, IdbObj::Database(_))
 }
@@ -1364,10 +1387,16 @@ fn register_database(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "IDBDatabase", "transaction", |cx, w| {
         let id = this_of(cx, w, is_db)?;
         need_args(cx, 1, "transaction", "IDBDatabase")?;
-        // storeNames: a string or a sequence of strings.
+        // storeNames: a string or a sequence of strings. A `DOMStringList`
+        // (`db.objectStoreNames`) is iterable, so it is a sequence too.
         let names: Vec<String> = if cx.arg_kind(0) == ValueKind::Object {
             let h = cx.arg_handle(0);
-            let r = key::key_path_arg(cx, h, false);
+            let list = string_list(cx, h);
+            let r = match list {
+                Ok(Some(l)) => Ok(Some(KeyPath::Array(l))),
+                Ok(None) => key::key_path_arg(cx, h, false),
+                Err(e) => Err(e),
+            };
             cx.release(h);
             match r? {
                 Some(KeyPath::Array(a)) => a,

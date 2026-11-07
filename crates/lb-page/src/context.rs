@@ -378,10 +378,10 @@ impl BrowserContext {
         &self,
         req: NetRequest,
         top_frame: Option<Url>,
-    ) -> Result<NetResponse, Result<lb_net::ProxyChallenge, String>> {
+    ) -> Result<(NetResponse, Vec<RedirectHop>), Result<lb_net::ProxyChallenge, String>> {
         self.fetch_raw(req, None, top_frame)
             .await
-            .map(|(r, _)| r)
+            .map(|(r, t)| (r, t.redirects))
             .map_err(|e| match e {
                 Ok(lb_net::NetError::ProxyAuth(ch)) => Ok(ch),
                 Ok(e) => Err(e.to_string()),
