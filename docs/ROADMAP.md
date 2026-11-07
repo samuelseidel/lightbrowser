@@ -3423,6 +3423,60 @@ private memory). Bench on a quiet machine (3 x 50 pages, Chromium 1243):
 | private after crawl | | 8.7 MB | 1,325 MB |
 | new page | | 1.7 ms | 33.6 ms |
 
+## Borrowed ideas: what we took from other browsers (2026-11-07)
+
+We studied Camoufox, Scrapling, Obscura, Lightpanda, the Chromium
+automation tools, the open-source detector suites (FingerprintJS/BotD,
+CreepJS, rebrowser's bot detector), the TLS libraries (wreq, curl-impersonate,
+utls) and the hosted and anti-detect browser products. Only ideas and facts
+were used (licences range from MIT to AGPL; no code or data was copied);
+nothing was run from those projects and nothing was pointed at a third-party
+site. The full ledger, with what was left out and why, is in
+[borrowing.md](borrowing.md).
+
+Scope: LightBrowser validates our own detector. We took detector-side work,
+tooling, safety and web-platform conformance. We did not add features whose
+purpose is to avoid detection (see "Not taken" in the ledger).
+
+Seven packages, each implemented on its own branch, checked by independent
+verifiers on rtx-dev (Chrome 153 recordings for browser behaviour), and
+squash-merged on `integrate/borrow`:
+
+| Package | ADR | What |
+|---|---|---|
+| Egress policy | 0044 | `--egress loopback`, `--allow-host`: the internal-use rule enforced per connection, redirects and proxies included; open by default |
+| Extract | 0042 | `fetch --dump markdown`, `links`, `json` |
+| MCP server | 0041 | `lightbrowser mcp`: nine tools over stdio, loopback-only unless `--allow-host` |
+| Detector wave 2 | 0043 | `referer_context_mismatch`, `declared_agent` (RFC 9421 headers), `fleet_fingerprint_reuse`, `beh_path_repeat`, `beh_click_offset_repeat`, `worker_measure_mismatch`, `fonts_overclaim`, `webrtc_candidates` (info) |
+| CDP coverage | 0045 | session history (`goBack`, `navigateToHistoryEntry`), `Page.navigate` referrer, `Audits.enable` and other missing methods, raw CDP replay against Chrome |
+| Performance Timeline | 0046 | navigation, resource, paint, user timing, `PerformanceObserver` |
+| Web-platform items | 0047 | history rate limit, coalesced pointer events, `sourceCapabilities`, StorageManager, speech events |
+
+State at merge time: each package passed its own tests and one to three
+rounds of verification; the verifiers still listed open low and medium
+items per package (their reports are in the branches' ADRs under "Open
+items"). Integration changes: the MCP server's own URL filter was replaced by
+the egress policy; the timeline package's session history was dropped in
+favour of the CDP coverage package's. Full workspace checks of the merged
+tree are recorded below once run.
+
+Findings about our own code, for the owners:
+- The detector's `cdp_runtime` probe tests a getter path V8 closed in
+  Chrome 137, so it no longer fires on a stock Chrome driven by Playwright.
+  Replacing it is in the backlog.
+- The recorded TLS profile (`profiles/tls/chrome_153_linux.json`) may differ
+  from stock Chrome 153 in ECH GREASE and `server_padding`; re-capture with
+  the documented process before relying on JA4 equality.
+- Puppeteer's default viewport is still refused by the persona checks of
+  ADR 0009 (Playwright's implicit viewport is accepted).
+
+Backlog (defender side, not started): `cdp_runtime` v2, `Sec-Fetch-*` value
+validation, `stack_markers`, `arch_nan`, probes for JS-shim browsers, a TLS
+front so the bench can score JA4 and HTTP/2 against the claimed browser,
+signed-agent (Web Bot Auth) mode, script deadlines and a soak test, an HTTP
+cache. The drafted workflow is `borrow-workflow-3.js` in the session
+scratchpad.
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from

@@ -84,6 +84,13 @@ CDP wall 0.67 vs 0.77 / 0.76 s, `fetch` peak RSS 23.72 / 23.79 vs 24.36 /
 | 0036 | JavaScript dialogs are reported over CDP and block the page's worker until `Page.handleJavaScriptDialog` (only while a session has the Page domain on) |
 | 0037 | Playwright file uploads, permission overrides per context, geolocation, HTML drag and drop with drag interception, `Page.printToPDF` as images of a print-width layout |
 | 0025 | Web Crypto on BoringSSL with Blink's normalization and Chromium's status texts (randomness from the OS CSPRNG); WebSocket through lb-net's own client with Chrome's handshake and an http/1.1-only ClientHello; dynamic `import()` through an engine hook sharing the module map; `blob:`/`data:` in `fetch()`/XHR; synchronous XHR blocking the calling thread |
+| 0041 | `lightbrowser mcp`: MCP server over stdio, driven through an in-process CDP connection; loopback-only by default (egress policy, `--allow-host`) |
+| 0042 | `fetch --dump markdown \| links \| json` from the post-script DOM and computed style |
+| 0043 | Detector rules wave 2: Referer/Fetch-Metadata consistency, declared agents (RFC 9421), fleet and path repetition, worker measurement, font over-claim, WebRTC info probe |
+| 0044 | Egress policy at the transport (`--egress loopback`, `--allow-host`): the internal-use rule in code, open by default |
+| 0045 | CDP coverage for stock clients: session history, `Page.navigate` referrer, Audits and other missing methods, raw CDP replay against Chrome |
+| 0046 | Performance Timeline (navigation, resource, paint, user timing, observers) from the loader's own measurements |
+| 0047 | History rate limit, pointer events (coalesced, `sourceCapabilities`, `pointerrawupdate`), StorageManager, speech synthesis events |
 
 ## Layers
 

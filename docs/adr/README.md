@@ -43,6 +43,13 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0035](0035-worker-threads-on-demand.md) | Page worker threads start on demand | Accepted (2026-11-07) |
 | [0036](0036-javascript-dialogs.md) | JavaScript dialogs wait on the page's worker for the CDP client | Accepted (2026-11-07) |
 | [0037](0037-playwright-uploads-permissions-dnd-pdf.md) | File uploads, permissions, geolocation, drag and drop and PDF for Playwright | Accepted (2026-11-07) |
+| [0041](0041-mcp-server.md) | `lightbrowser mcp`: MCP server over stdio, driven through an in-process CDP connection; loopback-only by default (egress policy, `--allow-host`) | Accepted (2026-11-07) |
+| [0042](0042-extract-dumps.md) | `fetch --dump markdown \| links \| json` from the post-script DOM and computed style | Accepted (2026-11-07) |
+| [0043](0043-detector-rules-wave-2.md) | Detector rules wave 2: Referer/Fetch-Metadata consistency, declared agents (RFC 9421), fleet and path repetition, worker measurement, font over-claim, WebRTC info probe | Accepted (2026-11-07) |
+| [0044](0044-egress-policy.md) | Egress policy at the transport (`--egress loopback`, `--allow-host`): the internal-use rule in code, open by default | Accepted (2026-11-07) |
+| [0045](0045-cdp-coverage.md) | CDP coverage for stock clients: session history, `Page.navigate` referrer, Audits and other missing methods, raw CDP replay against Chrome | Accepted (2026-11-07) |
+| [0046](0046-performance-timeline.md) | Performance Timeline (navigation, resource, paint, user timing, observers) from the loader's own measurements | Accepted (2026-11-07) |
+| [0047](0047-web-platform-small-items.md) | History rate limit, pointer events (coalesced, `sourceCapabilities`, `pointerrawupdate`), StorageManager, speech synthesis events | Accepted (2026-11-07) |
 
 ## Adding an ADR
 
