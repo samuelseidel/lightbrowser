@@ -182,7 +182,29 @@ patterns: [{urlPattern: '*', requestStage: 'Request'}]}`,
 | `browser` | permissions, downloads, window, `Page.setDocumentContent`, `Audits` |
 | `close` | `Page.close`, `Target.closeTarget`, `Target.disposeBrowserContext` |
 
+## Playwright against Chrome
+
+`tests/playwright` takes the browser from `LIGHTBROWSER_BIN` and starts it as
+`<bin> serve --port 0`, waiting for the `DevTools listening on` line. A
+wrapper that ignores its arguments runs the same specs against Chrome 153,
+to check that a new expectation is Chrome's:
+
+```sh
+cat > /tmp/chrome-wrap.sh <<'EOF'
+#!/bin/sh
+exec "$CHROME" --no-sandbox --remote-debugging-port=19263 --user-data-dir="$(mktemp -d)" \
+  --no-first-run --disable-background-networking --no-proxy-server about:blank
+EOF
+chmod +x /tmp/chrome-wrap.sh
+CHROME=~/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell \
+  LIGHTBROWSER_BIN=/tmp/chrome-wrap.sh node --test tests/playwright/session.spec.mjs
+```
+
+`session.spec.mjs` passes (12 tests) against both. Specs that test persona
+behaviour (`stealth`, `smoke`) are LightBrowser-only.
+
 ## Before and after
 
 See `docs/adr/0045-cdp-coverage.md` for the list of methods that failed
-before this package and the state after it.
+before this package and the state after it. Differences from Chrome that
+were kept are in `KNOWN` of `replay.mjs`, each with its reason.

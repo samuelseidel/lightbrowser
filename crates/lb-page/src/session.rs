@@ -127,7 +127,11 @@ impl Session {
             }
             NavKind::Reload | NavKind::ReloadBypassingCache => {
                 // `history.go(0)` keeps the entry's transition (no value).
-                let transition = if c.transition.is_empty() { "typed" } else { c.transition };
+                let transition = if c.transition.is_empty() {
+                    "typed"
+                } else {
+                    c.transition
+                };
                 if let Some(e) = self.entries.get_mut(self.current) {
                     e.url = c.url.clone();
                     if !c.transition.is_empty() {
@@ -136,7 +140,12 @@ impl Session {
                     e.title = String::new();
                     e.doc = c.doc;
                 } else {
-                    self.push(c.url.clone(), c.user_typed.to_string(), transition.into(), c.doc);
+                    self.push(
+                        c.url.clone(),
+                        c.user_typed.to_string(),
+                        transition.into(),
+                        c.doc,
+                    );
                 }
             }
             NavKind::History(id) => {
@@ -317,7 +326,9 @@ pub(crate) fn traverse_to(
     ws: &Rc<WorkerState>,
     page: &Rc<PageState>,
     id: i64,
-    committed: Option<tokio::sync::oneshot::Sender<Result<crate::NavResult, crate::context::PageError>>>,
+    committed: Option<
+        tokio::sync::oneshot::Sender<Result<crate::NavResult, crate::context::PageError>>,
+    >,
 ) -> bool {
     let (url, state, same_doc) = {
         let s = page.history.borrow();
@@ -412,7 +423,13 @@ mod tests {
     fn view(s: &Session) -> Vec<(String, String, String)> {
         s.entries
             .iter()
-            .map(|e| (e.url.path().to_string(), e.title.clone(), e.transition.clone()))
+            .map(|e| {
+                (
+                    e.url.path().to_string(),
+                    e.title.clone(),
+                    e.transition.clone(),
+                )
+            })
             .collect()
     }
 
@@ -424,7 +441,13 @@ mod tests {
         let mut s = Session::new(false);
         commit(&mut s, &NavKind::New, "about:blank", "typed", 1);
         for (i, path) in ["a", "b", "c"].iter().enumerate() {
-            commit(&mut s, &NavKind::New, &format!("http://h.test/{path}"), "typed", 2 + i as u64);
+            commit(
+                &mut s,
+                &NavKind::New,
+                &format!("http://h.test/{path}"),
+                "typed",
+                2 + i as u64,
+            );
             s.sync_title(&format!("Page {}", path.to_uppercase()));
         }
         assert_eq!(s.current, 3);
@@ -435,7 +458,10 @@ mod tests {
         let b = s.entries[2].id;
         commit(&mut s, &NavKind::History(b), "http://h.test/b", "typed", 9);
         assert_eq!(s.current, 2);
-        assert_eq!(s.entries[2].title, "", "the new document brings its own title");
+        assert_eq!(
+            s.entries[2].title, "",
+            "the new document brings its own title"
+        );
         s.sync_title("Page B");
         commit(&mut s, &NavKind::New, "http://h.test/c", "typed", 10);
         s.sync_title("Page C");
@@ -467,7 +493,13 @@ mod tests {
 
         // A reload keeps the position and marks the entry `reload`; the
         // reset leaves only the current entry.
-        commit(&mut s, &NavKind::Reload, "http://h.test/hashpage", "reload", 12);
+        commit(
+            &mut s,
+            &NavKind::Reload,
+            "http://h.test/hashpage",
+            "reload",
+            12,
+        );
         assert_eq!(s.entries[4].transition, "reload");
         assert_eq!(s.entries.len(), 7);
         s.reset();
@@ -478,15 +510,28 @@ mod tests {
     #[test]
     fn same_url_replaces_and_state_stays_with_its_entry() {
         let mut s = Session::new(true);
-        assert_eq!((s.entries.len(), s.entries[0].url.as_str()), (1, "about:blank"));
+        assert_eq!(
+            (s.entries.len(), s.entries[0].url.as_str()),
+            (1, "about:blank")
+        );
         commit(&mut s, &NavKind::New, "http://h.test/a", "typed", 1);
         commit(&mut s, &NavKind::New, "http://h.test/a", "typed", 2);
-        assert_eq!(s.entries.len(), 2, "a navigation to the URL the page is on replaces its entry");
+        assert_eq!(
+            s.entries.len(),
+            2,
+            "a navigation to the URL the page is on replaces its entry"
+        );
         s.record(&u("http://h.test/p"), Some("{\"n\":1}".into()), false, "");
         s.record(&u("http://h.test/q"), Some("{\"n\":2}".into()), false, "");
-        assert_eq!(s.current_entry().unwrap().state.as_deref(), Some("{\"n\":2}"));
+        assert_eq!(
+            s.current_entry().unwrap().state.as_deref(),
+            Some("{\"n\":2}")
+        );
         s.current = 2;
-        assert_eq!(s.current_entry().unwrap().state.as_deref(), Some("{\"n\":1}"));
+        assert_eq!(
+            s.current_entry().unwrap().state.as_deref(),
+            Some("{\"n\":1}")
+        );
         assert_eq!(s.entries[1].state, None);
         // Entries of one document share it; a load makes a new one.
         assert_eq!(s.entries[2].doc, s.entries[1].doc);

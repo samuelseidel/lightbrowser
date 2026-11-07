@@ -500,13 +500,13 @@ fn request_meta(req: &NetRequest, kind: Option<RequestKind>) -> RequestMeta {
     let mut meta = RequestMeta::new(kind, req.initiator.clone());
     meta.mode = req.mode.to_owned();
     meta.user_activated |= req.user_activated;
-    meta.referrer = req
-        .referrer
-        .as_ref()
-        .map(|(url, policy)| lb_net::header_profile::ReferrerOverride {
-            url: url.clone(),
-            policy: policy.clone(),
-        });
+    meta.referrer =
+        req.referrer
+            .as_ref()
+            .map(|(url, policy)| lb_net::header_profile::ReferrerOverride {
+                url: url.clone(),
+                policy: policy.clone(),
+            });
     meta.form_post = matches!(kind, RequestKind::Document | RequestKind::Iframe)
         && req.method.eq_ignore_ascii_case("POST");
     meta

@@ -159,7 +159,11 @@ impl Target {
 
     /// A navigation a document asked for (`location`, form submission).
     pub(crate) fn from_script(nav: lb_webapi::rt::NavRequest, initiator: Url) -> Target {
-        let transition = if nav.post.is_some() { "form_submit" } else { "link" };
+        let transition = if nav.post.is_some() {
+            "form_submit"
+        } else {
+            "link"
+        };
         Target {
             url: nav.url,
             initiator: Some(initiator),

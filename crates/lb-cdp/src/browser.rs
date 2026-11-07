@@ -2444,12 +2444,8 @@ fn fetch_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpErro
                     "Unknown errorReason",
                 ));
             }
-            host.fail_request(
-                &t,
-                str_param(c.p, "requestId")?,
-                reason,
-            )
-            .map_err(host_err)?;
+            host.fail_request(&t, str_param(c.p, "requestId")?, reason)
+                .map_err(host_err)?;
             Ok(json!({}))
         }
         _ => Err(CdpError::method_not_found(c.method)),
@@ -2514,9 +2510,9 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
             req_bool(c.p, "isScreenUnlocked")?;
         }
         "Emulation.clearIdleOverride" => {}
-        "Emulation.clearGeolocationOverride" => host
-            .set_geolocation_override(&t, None)
-            .map_err(host_err)?,
+        "Emulation.clearGeolocationOverride" => {
+            host.set_geolocation_override(&t, None).map_err(host_err)?
+        }
         "Emulation.setEmulatedMedia" => {
             let o = emulation::parse_emulated_media(&params(c.p)?)?;
             host.set_emulated_media(&t, o).map_err(host_err)?;
@@ -2648,13 +2644,12 @@ fn misc_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError
             Ok(json!({}))
         }
         "Security.enable" | "Log.enable" | "Performance.enable" | "Audits.enable"
-        | "WebMCP.enable" => {
-            c.enable(c.method.split('.').next().unwrap_or(""), true)
-        }
-        "Security.disable" | "Log.disable" | "Performance.disable" | "Audits.disable"
-        | "WebMCP.disable" => {
-            c.enable(c.method.split('.').next().unwrap_or(""), false)
-        }
+        | "WebMCP.enable" => c.enable(c.method.split('.').next().unwrap_or(""), true),
+        "Security.disable"
+        | "Log.disable"
+        | "Performance.disable"
+        | "Audits.disable"
+        | "WebMCP.disable" => c.enable(c.method.split('.').next().unwrap_or(""), false),
         "Log.clear" => Ok(json!({})),
         _ => Err(CdpError::method_not_found(c.method)),
     }
