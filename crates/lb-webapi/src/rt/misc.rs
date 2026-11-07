@@ -264,6 +264,7 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
         super::sheets::style_changed(w, n);
     }
     loop {
+        super::range::before_drain(w);
         let batch = std::mem::take(&mut *w.mutations.borrow_mut());
         if batch.is_empty() {
             // Elements made without a tree change (cloneNode, importNode)

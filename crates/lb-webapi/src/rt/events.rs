@@ -780,6 +780,15 @@ pub(crate) fn report_error_value(js: &mut dyn Js, w: &Rc<Window>, message: &str,
 }
 
 pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
+    // Host faults (a realm already gone, e.g. a task of a removed frame;
+    // a stale handle) are ours, not the page's: Chrome shows nothing, so
+    // no `error` event, console message or CDP exception.
+    if e.kind == lb_js::JsErrorKind::Host {
+        if cfg!(debug_assertions) {
+            eprintln!("lightbrowser: host error in {}: {}", w.url(), e.message);
+        }
+        return;
+    }
     if e.kind == lb_js::JsErrorKind::Terminated || e.kind == lb_js::JsErrorKind::OutOfMemory {
         w.log(crate::host::ConsoleMessage {
             level: "error".into(),

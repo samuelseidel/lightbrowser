@@ -7,7 +7,7 @@ use cssparser::{CowRcStr, ParseError, Parser, ParserState, Token};
 use lb_dom::SelectorList;
 
 use crate::media::{MediaEnv, MediaQueryList};
-use crate::props::{DeclarationBlock, parse_property};
+use crate::props::DeclarationBlock;
 use crate::values::{PResult, bad};
 
 /// Where a stylesheet comes from, for cascade order.
@@ -142,7 +142,9 @@ impl<'i> cssparser::AtRuleParser<'i> for RuleParser<'_> {
         let name = name.to_ascii_lowercase();
         Ok(match name.as_str() {
             "media" => AtPrelude::Media(MediaQueryList::parse_from(input)),
-            "supports" => AtPrelude::Supports(supports_condition(input).unwrap_or(false)),
+            "supports" => {
+                AtPrelude::Supports(crate::supports::supports_prelude(input).unwrap_or(false))
+            }
             "layer" | "container" | "scope" | "starting-style" | "document" | "-moz-document" => {
                 while input.next().is_ok() {}
                 AtPrelude::Transparent
@@ -243,50 +245,6 @@ impl<'i> cssparser::QualifiedRuleParser<'i> for RuleParser<'_> {
             });
         }
         Ok(())
-    }
-}
-
-/// Evaluates an `@supports` condition: declarations are supported if we
-/// parse them; `selector()` is assumed supported.
-fn supports_condition<'i>(p: &mut Parser<'i>) -> PResult<bool> {
-    if p.try_parse(|p| p.expect_ident_matching("not")).is_ok() {
-        return Ok(!supports_in_parens(p)?);
-    }
-    let mut result = supports_in_parens(p)?;
-    while let Ok(op) = p.try_parse(|p| p.expect_ident().map(|i| i.to_ascii_lowercase())) {
-        let rhs = supports_in_parens(p)?;
-        match op.as_str() {
-            "and" => result = result && rhs,
-            "or" => result = result || rhs,
-            _ => return bad(p),
-        }
-    }
-    Ok(result)
-}
-
-fn supports_in_parens<'i>(p: &mut Parser<'i>) -> PResult<bool> {
-    match p.next()?.clone() {
-        Token::ParenthesisBlock => p.parse_nested_block(|p| {
-            if let Ok(r) = p.try_parse(supports_condition) {
-                return Ok(r);
-            }
-            let name = p.expect_ident()?.to_ascii_lowercase();
-            p.expect_colon()?;
-            let start = p.position();
-            while p.next().is_ok() {}
-            let value = p.slice_from(start).trim();
-            let name = crate::props::normalize_name(&name);
-            Ok(name.starts_with("--") || parse_property(&name, value).is_some())
-        }),
-        Token::Function(f) => {
-            let f = f.to_ascii_lowercase();
-            p.parse_nested_block(|p| {
-                while p.next().is_ok() {}
-                Ok::<_, ParseError<()>>(())
-            })?;
-            Ok(f == "selector")
-        }
-        _ => bad(p),
     }
 }
 

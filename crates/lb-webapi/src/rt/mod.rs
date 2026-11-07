@@ -48,10 +48,12 @@
 mod audio;
 mod audio_dsp;
 mod bgimage;
+mod broadcast;
 pub mod canvas;
 mod chrome;
 mod coll;
 mod crypto;
+mod css_supports;
 mod custom;
 mod dom;
 mod events;
@@ -68,6 +70,7 @@ mod misc;
 pub mod modules;
 mod navigator;
 mod net;
+mod range;
 mod rtc;
 pub mod screenshot;
 pub mod script;
@@ -75,6 +78,7 @@ mod serializer;
 mod shadow;
 mod sheets;
 mod style;
+mod svg;
 pub mod sw;
 mod table;
 mod tags;
@@ -499,6 +503,10 @@ impl Runtime {
         crypto::register(reg, &rt);
         websocket::register(reg, &rt);
         idb::register(reg, &rt);
+        broadcast::register(reg, &rt);
+        css_supports::register(reg, &rt);
+        svg::register(reg, &rt);
+        range::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -770,6 +778,9 @@ pub(crate) struct History {
     /// Entries before this document (`history.length` counts them).
     pub before: u32,
     pub scroll_restoration: String,
+    /// Blink's `NavigationRateLimiter`: (count, start of window in ms,
+    /// warning sent).
+    pub rate: (u32, f64, bool),
 }
 
 /// Event handler storage (`onclick`), see `events`.
@@ -891,6 +902,8 @@ pub struct Window {
     /// Exceptions listeners threw (IndexedDB aborts a transaction whose
     /// request event handler threw).
     pub(crate) uncaught: Cell<u32>,
+    /// Live ranges and their pending notes (`range.rs`).
+    pub(crate) ranges: RefCell<range::RangeState>,
 }
 
 impl std::fmt::Debug for Window {
@@ -957,6 +970,7 @@ impl Window {
                 index: 0,
                 before: init.history_len,
                 scroll_restoration: "auto".into(),
+                rate: (0, 0.0, false),
             }),
             observers: RefCell::new(Vec::new()),
             mo_queued: Cell::new(false),
@@ -987,6 +1001,7 @@ impl Window {
             sw: sw::SwSide::default(),
             idb: idb::IdbSide::default(),
             uncaught: Cell::new(0),
+            ranges: RefCell::default(),
         });
         rt.register_doc(key, &w, 0, &doc);
         w
@@ -1350,6 +1365,34 @@ impl Window {
     }
 
     /// Log a warning to the console (parser, loader messages).
+    /// Blink's `NavigationRateLimiter::CanProceed`: at most 200 history
+    /// and location navigations per 10 s; later ones are dropped silently,
+    /// with one console warning per window.
+    pub(crate) fn nav_can_proceed(&self) -> bool {
+        let now = self.clock.now();
+        let warn = {
+            let mut h = self.history.borrow_mut();
+            let (count, first, sent) = &mut h.rate;
+            *count += 1;
+            if *count <= 200 {
+                return true;
+            }
+            if now - *first > 10_000.0 {
+                *first = now;
+                *count = 1;
+                *sent = false;
+                return true;
+            }
+            !std::mem::replace(sent, true)
+        };
+        if warn {
+            self.warn(
+                "Throttling navigation to prevent the browser from hanging. See https://crbug.com/1038223. Command line switch --disable-ipc-flooding-protection can be used to bypass the protection",
+            );
+        }
+        false
+    }
+
     pub fn warn(&self, text: impl Into<String>) {
         self.log(ConsoleMessage {
             level: "warning".into(),
@@ -1821,8 +1864,14 @@ pub(crate) enum Obj {
     Crypto(Box<crypto::CryptoObj>),
     /// `WebSocket`.
     WebSocket(Box<websocket::WsState>),
+    /// `BroadcastChannel`.
+    Broadcast(Box<broadcast::BcState>),
     /// IndexedDB objects and `DOMStringList` (ADR 0028).
     Idb(Box<idb::IdbObj>),
+    /// `SVGRect`, `SVGPoint` and `SVGMatrix` values (`svg`).
+    Svg(Box<svg::SvgObj>),
+    /// `Range` and `StaticRange`.
+    Range(Box<range::RangeObj>),
     /// `CSSStyleRule.style`: the declarations of a rule.
     RuleStyle {
         sheet: u32,
@@ -1883,7 +1932,10 @@ impl Obj {
             Obj::Css(c) => c.iface_name(),
             Obj::Crypto(c) => c.iface_name(),
             Obj::WebSocket(_) => "WebSocket",
+            Obj::Broadcast(_) => "BroadcastChannel",
             Obj::Idb(x) => x.iface_name(),
+            Obj::Svg(x) => x.iface_name(),
+            Obj::Range(r) => r.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
         }
     }

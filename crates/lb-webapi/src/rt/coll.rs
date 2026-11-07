@@ -574,11 +574,59 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         w.after_mutation(cx);
         cx.ret(true)
     });
+    // Supported tokens as in Blink's `RelList` and `HTMLIFrameElementSandbox`
+    // (recorded in Chrome, `lb-page` tests `public_bench`). Other lists (`classList`, `htmlFor`, `sizes`) have none.
     method(reg, rt, "DOMTokenList", "supports", |cx, w| {
-        tl(cx, w)?;
-        Err(HostError::type_error(
-            "Failed to execute 'supports' on 'DOMTokenList': DOMTokenList has no supported tokens.",
-        ))
+        need_args(cx, 1, "supports", "DOMTokenList")?;
+        let (slot, n, attr) = tl(cx, w)?;
+        let token = cx.arg_string(0)?.to_ascii_lowercase();
+        let tag = w.doc_slot(slot, |d| {
+            d.local_name(n).map(|l| l.to_string()).unwrap_or_default()
+        });
+        const LINK_REL: &[&str] = &[
+            "preload",
+            "preconnect",
+            "dns-prefetch",
+            "stylesheet",
+            "icon",
+            "alternate",
+            "prefetch",
+            "prerender",
+            "next",
+            "manifest",
+            "apple-touch-icon",
+            "apple-touch-icon-precomposed",
+            "canonical",
+            "modulepreload",
+            "compression-dictionary",
+        ];
+        const ANCHOR_REL: &[&str] = &["noreferrer", "noopener", "opener"];
+        const SANDBOX: &[&str] = &[
+            "allow-downloads",
+            "allow-forms",
+            "allow-modals",
+            "allow-orientation-lock",
+            "allow-pointer-lock",
+            "allow-popups",
+            "allow-popups-to-escape-sandbox",
+            "allow-presentation",
+            "allow-same-origin",
+            "allow-scripts",
+            "allow-storage-access-by-user-activation",
+            "allow-top-navigation",
+            "allow-top-navigation-by-user-activation",
+        ];
+        let supported: &[&str] = match (attr, tag.as_str()) {
+            ("rel", "link") => LINK_REL,
+            ("rel", "a" | "area") => ANCHOR_REL,
+            ("sandbox", _) => SANDBOX,
+            _ => {
+                return Err(HostError::type_error(
+                    "Failed to execute 'supports' on 'DOMTokenList': DOMTokenList has no supported tokens.",
+                ));
+            }
+        };
+        cx.ret(supported.contains(&token.as_str()))
     });
 
     // NamedNodeMap / Attr

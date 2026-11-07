@@ -465,7 +465,13 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     });
     method(reg, rt, "Node", "normalize", |cx, w| {
         let (slot, n) = this_node(cx, w)?;
-        w.doc_slot_mut(slot, |d| normalize(d, n));
+        let merges = w.doc_slot_mut(slot, |d| normalize(d, n));
+        for (from, into, off, added) in merges {
+            match from {
+                Some(from) => super::range::note_merge(w, slot, from, into, off),
+                None => super::range::note_replace(w, slot, into, off, 0, added),
+            }
+        }
         w.after_mutation(cx);
         Ok(())
     });
@@ -659,7 +665,13 @@ fn register_node(reg: &mut Registry, rt: &Runtime) {
     });
 }
 
-fn normalize(d: &mut Document, n: NodeId) {
+/// `node.normalize()`. For live ranges, the merges as (removed node,
+/// node merged into, UTF-16 length before its data, 0) and the appends as
+/// (None, node, old length, units added).
+type Merge = (Option<NodeId>, NodeId, u32, u32);
+
+fn normalize(d: &mut Document, n: NodeId) -> Vec<Merge> {
+    let mut merges = Vec::new();
     let texts: Vec<NodeId> = d
         .inclusive_descendants(n)
         .filter(|&x| d.node_type(x) == NodeType::Text)
@@ -683,11 +695,14 @@ fn normalize(d: &mut Document, n: NodeId) {
             if d.node_type(x) != NodeType::Text {
                 break;
             }
+            merges.push((Some(x), t, utf16_len(&merged) as u32, 0));
             merged.push_str(d.character_data(x).unwrap_or(""));
             to_remove.push(x);
             next = d.next_sibling(x);
         }
         if merged != data {
+            let (old, new) = (utf16_len(&data) as u32, utf16_len(&merged) as u32);
+            merges.push((None, t, old, new - old));
             d.set_character_data(t, &merged);
         }
         for x in to_remove {
@@ -696,6 +711,7 @@ fn normalize(d: &mut Document, n: NodeId) {
             }
         }
     }
+    merges
 }
 
 fn nodes_equal(d: &Document, a: NodeId, b: NodeId) -> bool {
@@ -1746,10 +1762,6 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         }
         Ok(())
     });
-    method(reg, rt, "Document", "getSelection", |cx, w| {
-        this_node(cx, w)?;
-        cx.ret(Arg::Null)
-    });
     method(reg, rt, "Document", "execCommand", |cx, w| {
         this_node(cx, w)?;
         cx.ret(false)
@@ -1879,7 +1891,10 @@ fn register_chardata(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "CharacterData", "appendData", |cx, w| {
         need_args(cx, 1, "appendData", "CharacterData")?;
         let (slot, n, mut s) = data(cx, w)?;
-        s.push_str(&cx.arg_string(0)?);
+        let add = cx.arg_string(0)?;
+        let len = utf16_len(&s) as u32;
+        super::range::note_replace(w, slot, n, len, 0, utf16_len(&add) as u32);
+        s.push_str(&add);
         w.doc_slot_mut(slot, |d| d.set_character_data(n, &s));
         w.after_mutation(cx);
         Ok(())
@@ -1893,14 +1908,14 @@ fn register_chardata(reg: &mut Registry, rt: &Runtime) {
             if off > len {
                 return Err(index_err(w, name, off, len));
             }
-            let new = match name {
-                "insertData" => utf16_splice(&s, off, 0, &cx.arg_string(1)?),
-                "deleteData" => utf16_splice(&s, off, cx.arg_u32(1)? as usize, ""),
-                _ => {
-                    let count = cx.arg_u32(1)? as usize;
-                    utf16_splice(&s, off, count, &cx.arg_string(2)?)
-                }
+            let (count, data) = match name {
+                "insertData" => (0, cx.arg_string(1)?),
+                "deleteData" => (cx.arg_u32(1)? as usize, String::new()),
+                _ => (cx.arg_u32(1)? as usize, cx.arg_string(2)?),
             };
+            let new = utf16_splice(&s, off, count, &data);
+            let count = count.min(len - off) as u32;
+            super::range::note_replace(w, slot, n, off as u32, count, utf16_len(&data) as u32);
             w.doc_slot_mut(slot, |d| d.set_character_data(n, &new));
             w.after_mutation(cx);
             Ok(())
@@ -1916,8 +1931,11 @@ fn register_chardata(reg: &mut Registry, rt: &Runtime) {
         }
         let tail = utf16_sub(&s, off, len - off);
         let head = utf16_sub(&s, 0, off);
+        let new = w.doc_slot_mut(slot, |d| d.create_text(&tail));
+        super::range::note_split(w, slot, n, new, off as u32);
+        super::range::note_replace(w, slot, n, off as u32, (len - off) as u32, 0);
         let new = w.doc_slot_mut(slot, |d| {
-            let t = d.create_text(&tail);
+            let t = new;
             if let Some(p) = d.parent(n) {
                 let next = d.next_sibling(n);
                 let _ = d.insert_before(p, t, next);

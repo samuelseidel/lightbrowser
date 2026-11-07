@@ -109,13 +109,45 @@ fn is_font_data(b: &[u8]) -> bool {
     )
 }
 
+/// `local()` resolves a family of the persona or, on macOS 26, any face
+/// name (full or PostScript) Chrome resolves on a default install
+/// (`profiles/local_fonts/macos_26.json`, recorded from Chrome).
 fn installed(w: &Window, name: &str) -> bool {
     w.profile.as_ref().is_some_and(|p| {
         p.fonts
             .available
             .iter()
             .any(|f| f.eq_ignore_ascii_case(name))
+            || (p.os.name == "macOS" && os_major(&p.os.version) >= 26 && mac26_face(name))
     })
+}
+
+fn os_major(version: &str) -> u32 {
+    version
+        .split('.')
+        .next()
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Bundled table data (not persona values): the persona's OS picks it.
+fn mac26_face(name: &str) -> bool {
+    static FACES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let faces = FACES.get_or_init(|| {
+        let f: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../profiles/local_fonts/macos_26.json"
+        ))
+        .expect("local_fonts/macos_26.json");
+        let mut v: Vec<String> = f["faces"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.as_str().map(str::to_lowercase))
+            .collect();
+        v.sort();
+        v
+    });
+    faces.binary_search(&name.to_lowercase()).is_ok()
 }
 
 /// Families of a CSS `font` shorthand, `None` when it does not parse.

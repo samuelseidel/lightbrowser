@@ -371,6 +371,28 @@ impl std::fmt::Debug for IdbBackend {
     }
 }
 
+/// Names the browser context of an [`IdbBackend`] without keeping it
+/// alive (`BroadcastChannel` groups channels by context with it).
+#[derive(Clone)]
+pub(crate) struct ContextToken(std::sync::Weak<Mutex<State>>);
+
+impl ContextToken {
+    /// Whether `b` is the (still live) backend this token names.
+    pub(crate) fn is(&self, b: &IdbBackend) -> bool {
+        self.0.upgrade().is_some_and(|a| Arc::ptr_eq(&a, &b.0))
+    }
+
+    pub(crate) fn alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+}
+
+impl IdbBackend {
+    pub(crate) fn token(&self) -> ContextToken {
+        ContextToken(Arc::downgrade(&self.0))
+    }
+}
+
 const MAX_GENERATED: f64 = 9_007_199_254_740_992.0;
 
 fn store_meta_list(db: &Database) -> Vec<StoreMeta> {

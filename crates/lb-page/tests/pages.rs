@@ -6,6 +6,7 @@ mod common;
 mod frames;
 mod idb;
 mod images;
+mod public_bench;
 mod report;
 mod service_workers;
 mod shadow;

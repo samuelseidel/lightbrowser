@@ -70,6 +70,11 @@ impl Inbox {
     pub fn is_closed(&self) -> bool {
         self.0.is_closed()
     }
+
+    /// Whether both send to the same window.
+    pub(crate) fn same(&self, other: &Inbox) -> bool {
+        self.0.same_channel(&other.0)
+    }
 }
 
 /// Dedicated or shared.
@@ -281,6 +286,7 @@ pub fn resolve_blob_url(url: &str) -> Option<(Vec<u8>, String)> {
 // ---------------------------------------------------------------------------
 
 /// What a host object in a clone stream stands for.
+#[derive(Clone)]
 enum HostEntry {
     /// `ports[i]`.
     Port(usize),
@@ -294,6 +300,18 @@ pub struct Payload {
     data: Serialized,
     entries: Vec<HostEntry>,
     ports: Vec<Arc<PortCore>>,
+}
+
+impl Payload {
+    /// A copy for one more receiver (`BroadcastChannel`); transferred
+    /// ports cannot be copied, so they are left out.
+    pub(crate) fn copy_without_ports(&self) -> Payload {
+        Payload {
+            data: self.data.clone(),
+            entries: self.entries.clone(),
+            ports: Vec::new(),
+        }
+    }
 }
 
 /// The shared state of one end of a message channel.
@@ -540,37 +558,7 @@ pub(crate) fn serialize_args(
     let ports: Vec<Arc<PortCore>> = port_ids.iter().filter_map(|id| port_core(w, *id)).collect();
     let mut entries: Vec<HostEntry> = Vec::new();
     let result = {
-        let mut writer = |h: HostRef, class: &str| -> Result<u32, String> {
-            if h.kind == K_OBJ {
-                if let Some(core) = port_core(w, h.id) {
-                    return match ports.iter().position(|p| Arc::ptr_eq(p, &core)) {
-                        Some(i) => {
-                            entries.push(HostEntry::Port(i));
-                            Ok((entries.len() - 1) as u32)
-                        }
-                        None => Err(
-                            "A MessagePort could not be cloned because it was not transferred."
-                                .into(),
-                        ),
-                    };
-                }
-                let blob = w
-                    .with_obj(h.id, |o| match o {
-                        Obj::Blob(b) => Some((b.bytes.clone(), b.type_.clone())),
-                        _ => None,
-                    })
-                    .flatten();
-                if let Some((bytes, ty)) = blob {
-                    entries.push(HostEntry::Blob(bytes, ty));
-                    return Ok((entries.len() - 1) as u32);
-                }
-                if let Some(k) = super::crypto::clone_key(w, h) {
-                    entries.push(HostEntry::Key(k));
-                    return Ok((entries.len() - 1) as u32);
-                }
-            }
-            Err(format!("{class} object could not be cloned."))
-        };
+        let mut writer = |h: HostRef, class: &str| write_host(w, &ports, &mut entries, h, class);
         cx.serialize(value, &buffers, &mut writer)
     };
     cx.release(value);
@@ -600,6 +588,73 @@ pub(crate) fn serialize_args(
         data,
         entries,
         ports,
+    })
+}
+
+/// How a host object travels in a clone stream (see [`HostEntry`]).
+fn write_host(
+    w: &Rc<Window>,
+    ports: &[Arc<PortCore>],
+    entries: &mut Vec<HostEntry>,
+    h: HostRef,
+    class: &str,
+) -> Result<u32, String> {
+    if h.kind == K_OBJ {
+        if let Some(core) = port_core(w, h.id) {
+            return match ports.iter().position(|p| Arc::ptr_eq(p, &core)) {
+                Some(i) => {
+                    entries.push(HostEntry::Port(i));
+                    Ok((entries.len() - 1) as u32)
+                }
+                None => {
+                    Err("A MessagePort could not be cloned because it was not transferred.".into())
+                }
+            };
+        }
+        let blob = w
+            .with_obj(h.id, |o| match o {
+                Obj::Blob(b) => Some((b.bytes.clone(), b.type_.clone())),
+                _ => None,
+            })
+            .flatten();
+        if let Some((bytes, ty)) = blob {
+            entries.push(HostEntry::Blob(bytes, ty));
+            return Ok((entries.len() - 1) as u32);
+        }
+        if let Some(k) = super::crypto::clone_key(w, h) {
+            entries.push(HostEntry::Key(k));
+            return Ok((entries.len() - 1) as u32);
+        }
+    }
+    Err(format!("{class} object could not be cloned."))
+}
+
+/// Argument 0 as a payload without a transfer list (`BroadcastChannel`).
+pub(crate) fn serialize_value(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Rc<Window>,
+    op: &str,
+    iface: &str,
+) -> Result<Payload, HostError> {
+    need_args(cx, 1, op, iface)?;
+    let value = cx.arg_handle(0);
+    let mut entries: Vec<HostEntry> = Vec::new();
+    let result = {
+        let mut writer = |h: HostRef, class: &str| write_host(w, &[], &mut entries, h, class);
+        cx.serialize(value, &[], &mut writer)
+    };
+    cx.release(value);
+    let data = result.map_err(|m| match m {
+        Some(m) => w.rt.err(
+            "DataCloneError",
+            format!("Failed to execute '{op}' on '{iface}': {m}"),
+        ),
+        None => HostError::Thrown,
+    })?;
+    Ok(Payload {
+        data,
+        entries,
+        ports: Vec::new(),
     })
 }
 
@@ -796,6 +851,9 @@ impl Window {
 
     /// Workers and blob URLs of this window end with it.
     pub(crate) fn close_workers(&self) {
+        if let Some(i) = self.wk.inbox.borrow().as_ref() {
+            super::broadcast::forget_inbox(i);
+        }
         for c in self.wk.children.borrow_mut().drain(..) {
             c.terminate();
         }

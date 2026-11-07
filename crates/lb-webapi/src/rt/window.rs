@@ -498,6 +498,9 @@ pub(crate) fn submit_form(w: &Window, form: NodeId) {
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
 pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
+    if !w.nav_can_proceed() {
+        return;
+    }
     let cur = w.url();
     let same_doc = url.fragment().is_some() && {
         let (mut a, mut b) = (cur.clone(), url.clone());
@@ -910,9 +913,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "Window", "confirm", |cx, _w| cx.ret(false));
     method(reg, rt, "Window", "prompt", |cx, _w| cx.ret(Arg::Null));
     method(reg, rt, "Window", "open", |cx, _w| cx.ret(Arg::Null));
-    method(reg, rt, "Window", "getSelection", |cx, _w| {
-        cx.ret(Arg::Null)
-    });
     method(reg, rt, "Window", "btoa", |cx, w| {
         btoa_impl(cx, w, "Window")
     });
@@ -1068,6 +1068,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 }
                 _ => w.url(),
             };
+            if !w.nav_can_proceed() {
+                return Ok(());
+            }
             {
                 let mut h = w.history.borrow_mut();
                 let entry = HistEntry {
@@ -1101,6 +1104,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                         replace: true,
                     });
                 }
+                return Ok(());
+            }
+            if !w.nav_can_proceed() {
                 return Ok(());
             }
             let target = {

@@ -140,7 +140,11 @@ impl<'a> Builder<'a> {
         let local = self
             .doc
             .element(el)
-            .filter(|e| e.name.ns == ns!(html))
+            // An outermost `svg` is a replaced element (300x150 by default,
+            // sized by its width/height presentation attributes).
+            .filter(|e| {
+                e.name.ns == ns!(html) || (e.name.ns == ns!(svg) && &*e.name.local == "svg")
+            })
             .map(|e| e.name.local.to_string())
             .unwrap_or_default();
         let in_run = parent_mode == Mode::Inline;

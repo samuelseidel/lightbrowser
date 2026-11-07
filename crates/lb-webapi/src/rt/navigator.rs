@@ -27,7 +27,9 @@ use std::rc::Rc;
 use lb_js::{Arg, CallCtx, HostError, HostRef, JsValue, ValueKind};
 use lb_persona::PersonaProfile;
 
-use super::{Dict, Obj, Runtime, Window, getter, illegal, method, need_args, this_obj, wf};
+use super::{
+    Dict, Obj, Runtime, TaskSource, Window, getter, illegal, method, need_args, this_obj, wf,
+};
 use crate::registry::{ImplKind, Registry};
 
 // ---------------------------------------------------------------------------
@@ -1302,6 +1304,62 @@ fn register_media(reg: &mut Registry, rt: &Runtime) {
                 return cx.reject_promise(r, w.rt.err("NotAllowedError", "Permission denied"));
             }
             Ok(())
+        });
+    }
+    // The legacy callback forms (Chrome 153 keeps both): arguments are
+    // checked in order, then the audio/video check throws; a denied
+    // permission calls the error callback, otherwise neither runs (the
+    // prompt is left unanswered, as above).
+    for name in ["getUserMedia", "webkitGetUserMedia"] {
+        method(reg, rt, "Navigator", name, move |cx, w| {
+            need_args(cx, 3, name, "Navigator")?;
+            this_obj(cx)?;
+            let op = format!("Failed to execute '{name}' on 'Navigator'");
+            if !matches!(
+                cx.arg_kind(0),
+                ValueKind::Object | ValueKind::Function | ValueKind::Undefined | ValueKind::Null
+            ) {
+                return Err(HostError::type_error(format!(
+                    "{op}: The provided value is not of type 'MediaStreamConstraints'."
+                )));
+            }
+            let d = Dict::arg(cx, 0);
+            let audio = d.bool(cx, "audio")?;
+            let video = d.bool(cx, "video")?;
+            d.release(cx);
+            for i in [1, 2] {
+                if cx.arg_kind(i) != ValueKind::Function {
+                    return Err(HostError::type_error(format!(
+                        "{op}: parameter {} is not of type 'Function'.",
+                        i + 1
+                    )));
+                }
+            }
+            if !video && !audio {
+                return Err(HostError::type_error(format!(
+                    "{op}: At least one of audio and video must be requested"
+                )));
+            }
+            let state = |k| persona_state(w, k, "prompt");
+            let denied = (video && state("camera") == "denied")
+                || (audio && state("microphone") == "denied");
+            if denied && let HostError::Throw(a) = w.rt.err("NotAllowedError", "Permission denied")
+            {
+                let f = cx.arg_handle(2);
+                w.queue_task(
+                    TaskSource::DomManipulation,
+                    Box::new(move |js, w| {
+                        if let Some(h) = js.make(a) {
+                            if let Err(e) = js.call(f, Arg::Undefined, &[Arg::Handle(h)]) {
+                                w.report_exception(js, &e);
+                            }
+                            js.release(h);
+                        }
+                        js.release(f);
+                    }),
+                );
+            }
+            cx.ret(Arg::Undefined)
         });
     }
     fn dev<R>(

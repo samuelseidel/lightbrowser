@@ -292,14 +292,14 @@ pub fn import_specifiers(src: &str) -> Vec<String> {
         Some((src[j + 1..end].to_owned(), end + 1))
     };
     while i < b.len() {
-        let rest = &src[i..];
+        let rest = &b[i..];
         let word_start =
             i == 0 || !(b[i - 1] as char).is_alphanumeric() && b[i - 1] != b'_' && b[i - 1] != b'.';
         let kw = if !word_start {
             0
-        } else if rest.starts_with("from") {
+        } else if rest.starts_with(b"from") {
             4
-        } else if rest.starts_with("import") {
+        } else if rest.starts_with(b"import") {
             6
         } else {
             0
