@@ -2155,6 +2155,37 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
         let (slot, n) = this_elem(cx, w)?;
         cx.ret(w.doc_slot(slot, |d| input_type(d, n)))
     });
+    // A file input's chosen files (`files.rs`); null for other types.
+    getter(reg, rt, "HTMLInputElement", "files", |cx, w| {
+        let (slot, n) = this_elem(cx, w)?;
+        if !w.doc_slot(slot, |d| input_type(d, n) == "file") {
+            return cx.ret(Arg::Null);
+        }
+        let id = super::files::input_file_list(w, slot, n);
+        cx.ret(w.obj_arg(id))
+    });
+    setter(reg, rt, "HTMLInputElement", "files", |cx, w| {
+        let (slot, n) = this_elem(cx, w)?;
+        if matches!(cx.arg_kind(0), ValueKind::Null | ValueKind::Undefined) {
+            return Ok(());
+        }
+        let h = cx.arg_handle(0);
+        let list = cx
+            .handle_host(h)
+            .filter(|h| h.kind == super::K_OBJ)
+            .map(|h| h.id)
+            .filter(|&id| w.with_obj(id, |o| matches!(o, Obj::FileList(_))) == Some(true));
+        cx.release(h);
+        let Some(list) = list else {
+            return Err(HostError::type_error(
+                "Failed to set the 'files' property on 'HTMLInputElement': The provided value is not of type 'FileList'.",
+            ));
+        };
+        if w.doc_slot(slot, |d| input_type(d, n) == "file") {
+            w.input_files.borrow_mut().insert((slot, n), list);
+        }
+        Ok(())
+    });
     setter(reg, rt, "HTMLInputElement", "type", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;
         let v = cx.arg_string(0)?;
@@ -2165,6 +2196,9 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
     for iface in ["HTMLInputElement", "HTMLTextAreaElement"] {
         getter(reg, rt, iface, "value", |cx, w| {
             let (slot, n) = this_elem(cx, w)?;
+            if w.doc_slot(slot, |d| input_type(d, n) == "file") {
+                return cx.ret(super::files::input_value(w, slot, n));
+            }
             if let Some(v) = w.values.borrow().get(&(slot, n)) {
                 return cx.ret(v.clone());
             }
@@ -2189,6 +2223,9 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
             } else {
                 cx.arg_string(0)?
             };
+            if w.doc_slot(slot, |d| input_type(d, n) == "file") {
+                return super::files::set_input_value(w, slot, n, &v);
+            }
             w.values.borrow_mut().insert((slot, n), v);
             // A value set by script puts the caret at the end.
             w.selections.borrow_mut().remove(&(slot, n));

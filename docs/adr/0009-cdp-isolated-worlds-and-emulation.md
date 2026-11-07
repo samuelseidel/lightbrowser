@@ -1,6 +1,6 @@
 # ADR 0009: CDP bindings only in isolated worlds; Emulation must match the persona
 
-Status: Accepted (2026-11-03)
+Status: Accepted (2026-11-03); revision 2 (2026-11-07): Playwright's implicit viewport defaults accepted; revision 3 (2026-11-07): media emulation applied as asked
 
 ## Context
 
@@ -96,3 +96,39 @@ isolated worlds (`BindingScope`: `AllIsolatedWorlds`, `World(name)` or one
 - Open: the real page host (`lb_page::CdpHost`) must keep the rule for
   `Page.addScriptToEvaluateOnNewDocument` without a world name: it runs in
   the main world by protocol, so only clients that ask for it get it.
+
+## Revision 2: Playwright's implicit defaults (2026-11-07)
+
+User decision. A plain `browser.newContext()` failed on every page,
+because Playwright sends its default 1280x720 viewport as the screen too
+(`screenWidth`/`screenHeight` equal to `width`/`height`) and a
+`deviceScaleFactor` of 1, which contradicted every persona.
+
+Now `check_device_metrics` treats exactly that shape as "no screen and no
+ratio given": when the requested screen equals the requested viewport and
+the scale factor is 1 (or 0), the viewport is applied (if it fits the
+persona screen, as before) and the page keeps the persona's screen and
+device pixel ratio: a non-maximized window on the persona's own screen.
+`viewport: null` is no longer needed. A `screen` or `deviceScaleFactor`
+the client chose that contradicts the persona is still refused, as are
+the other checks above.
+
+Unchanged by the same decision: bindings stay out of the main world, so
+Playwright's `exposeFunction` / `exposeBinding` (which need one there
+since Playwright 1.65) keep failing.
+
+## Revision 3: media emulation is applied as asked (2026-11-07)
+
+User decision. `Emulation.setEmulatedMedia` (`page.emulateMedia`, the
+`colorScheme`, `reducedMotion`, `forcedColors` and `contrast` context
+options) was refused when it differed from the persona, so a dark-mode
+test needed a dark persona. Now what the client asks for is applied, as
+Chrome applies it: the persona's preferences are only the defaults, like
+a user who switches to dark mode. `lb-cdp` parses the request into
+`lb_css::MediaOverrides` (unknown features and values are errors), the
+page keeps them for its next documents, and `lb-layout` applies them on
+top of the persona's media environment (`print` included: `@media print`
+matches and `screen` does not). An empty value returns to the persona's.
+The results equal Chrome's (`tests/playwright/media.spec.mjs`). Not done:
+`change` events on `MediaQueryList`s (none fire for viewport changes
+either); frames other than the main one keep the persona's media.

@@ -18,9 +18,13 @@ use super::{FormBody, NavRequest, Window};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Value {
     Text(String),
-    /// A file input: no file chosen (the empty file, as Chrome sends it).
+    /// A chosen file of a file input; with no file chosen, one with an
+    /// empty name and no bytes (as Chrome sends it).
     File {
         filename: String,
+        data: Vec<u8>,
+        /// The file's type; empty is sent as `application/octet-stream`.
+        content_type: String,
     },
 }
 
@@ -139,9 +143,31 @@ fn entry_list(
                         Value::Text(attr_or(d, c, "value", "Submit"))
                     }
                     "button" | "reset" | "image" => continue,
-                    "file" => Value::File {
-                        filename: String::new(),
-                    },
+                    "file" => {
+                        let files: Vec<_> = super::files::input_files(w, 0, c)
+                            .into_iter()
+                            .filter_map(|f| super::files::file_parts(w, f))
+                            .collect();
+                        if files.is_empty() {
+                            Value::File {
+                                filename: String::new(),
+                                data: Vec::new(),
+                                content_type: String::new(),
+                            }
+                        } else {
+                            for (data, content_type, filename, _) in files {
+                                out.push((
+                                    name.to_owned(),
+                                    Value::File {
+                                        filename,
+                                        data,
+                                        content_type,
+                                    },
+                                ));
+                            }
+                            continue;
+                        }
+                    }
                     "hidden" if name.eq_ignore_ascii_case("_charset_") => {
                         Value::Text("UTF-8".into())
                     }
@@ -230,7 +256,7 @@ fn crlf(s: &str) -> String {
 fn text_of(v: &Value) -> &str {
     match v {
         Value::Text(s) => s,
-        Value::File { filename } => filename,
+        Value::File { filename, .. } => filename,
     }
 }
 
@@ -275,14 +301,24 @@ pub(crate) fn multipart(entries: &[(String, Value)], boundary: &str) -> Vec<u8> 
                 out.extend_from_slice(b"\r\n\r\n");
                 out.extend_from_slice(crlf(t).as_bytes());
             }
-            Value::File { filename } => {
+            Value::File {
+                filename,
+                data,
+                content_type,
+            } => {
+                let ct = if content_type.is_empty() {
+                    "application/octet-stream"
+                } else {
+                    content_type
+                };
                 out.extend_from_slice(
                     format!(
-                        "; filename=\"{}\"\r\nContent-Type: application/octet-stream\r\n\r\n",
+                        "; filename=\"{}\"\r\nContent-Type: {ct}\r\n\r\n",
                         quote(filename)
                     )
                     .as_bytes(),
                 );
+                out.extend_from_slice(data);
             }
         }
         out.extend_from_slice(b"\r\n");
@@ -372,6 +408,8 @@ mod tests {
             "a\"b\nc".to_owned(),
             Value::File {
                 filename: String::new(),
+                data: Vec::new(),
+                content_type: String::new(),
             },
         )];
         let body = String::from_utf8(multipart(&e, "X")).unwrap();

@@ -51,6 +51,8 @@ pub enum EventExtra {
     PageTransition {
         persisted: bool,
     },
+    /// `BeforeUnloadEvent.returnValue` (a non-empty string cancels).
+    BeforeUnload(String),
     /// `MouseEvent`, `PointerEvent`, `WheelEvent` (see `input`).
     Mouse(Box<super::input::MouseData>),
     /// `KeyboardEvent`.
@@ -613,6 +615,28 @@ fn call_listener(js: &mut dyn Js, w: &Rc<Window>, t: HostRef, ev: u32, l: &Liste
                 vec![ev_arg]
             };
             match js.call(f, this, &args) {
+                // `onbeforeunload` returning anything but null or undefined
+                // cancels, with that value as the message (HTML's
+                // OnBeforeUnloadEventHandler).
+                Ok(v) if name == "onbeforeunload" => {
+                    if !matches!(v, JsValue::Undefined | JsValue::Null) {
+                        let text = match &v {
+                            JsValue::String(s) => s.clone(),
+                            JsValue::Bool(b) => b.to_string(),
+                            JsValue::Number(n) => n.to_string(),
+                            _ => String::new(),
+                        };
+                        with_ev(w, ev, |e| {
+                            if e.cancelable {
+                                e.canceled = true;
+                            }
+                            if matches!(&e.extra, EventExtra::BeforeUnload(s) if s.is_empty()) {
+                                e.extra = EventExtra::BeforeUnload(text);
+                            }
+                        });
+                    }
+                    Ok(())
+                }
                 Ok(v) => {
                     let cancel = if is_error {
                         v == JsValue::Bool(true)
@@ -1417,6 +1441,32 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }));
     extra_get!("PageTransitionEvent", "persisted", |cx, x| cx
         .ret(matches!(x, EventExtra::PageTransition { persisted: true })));
+    // `BeforeUnloadEvent.returnValue` is a string; a non-empty one cancels
+    // the event (asks the user to confirm leaving).
+    getter(reg, rt, "BeforeUnloadEvent", "returnValue", |cx, w| {
+        let id = this_event(cx, w)?;
+        let v = with_ev(w, id, |e| match &e.extra {
+            EventExtra::BeforeUnload(s) => s.clone(),
+            _ => String::new(),
+        })
+        .unwrap_or_default();
+        cx.ret(v)
+    });
+    setter(reg, rt, "BeforeUnloadEvent", "returnValue", |cx, w| {
+        let id = this_event(cx, w)?;
+        let v = if cx.arg_kind(0) == ValueKind::Null {
+            String::new()
+        } else {
+            cx.arg_string(0)?
+        };
+        with_ev(w, id, |e| {
+            if !v.is_empty() && e.cancelable {
+                e.canceled = true;
+            }
+            e.extra = EventExtra::BeforeUnload(v);
+        });
+        Ok(())
+    });
     extra_get!("ErrorEvent", "message", |cx, x| cx.ret(match x {
         EventExtra::Error { message, .. } => message,
         _ => String::new(),

@@ -3222,6 +3222,147 @@ The three failures above are fixed:
   `cargo test --workspace` 687 passed after the persona fix; firefox
   package tests 15 passed. Playwright, the bench and T-010 were not run.
 
+## macOS: lazy ICU data, workers on demand, bench and Playwright (2026-11-07)
+
+First full run on macOS (Apple silicon, 10 cores, 16 GB, macOS 26.4,
+Node 26, Playwright 1.65 (npm) and 1.64.1 (PyPI, the newest there)). It
+found two memory costs that only macOS paid or that grew with the core
+count, and three gaps in what stock Playwright needs.
+
+**Memory and CPU.**
+- ICU data was decompressed whole on macOS (the lazy path needed `mremap`
+  and 4 KiB pages). It is now paged in lazily there too (ADR 0013
+  revision 5: a `mach_vm_remap` double mapping, one 16 KiB page per
+  fault, `SIGBUS`). 5 interleaved runs x 50 pages, release, before →
+  after: `fetch` peak RSS 39.8 → 25.6 MB, peak footprint 22.8 →
+  13.0 MB, CPU 3.36 → 1.53 s, wall 4.40 → 2.32 s; CDP crawl peak RSS
+  44.4 → 30.6 MB, peak footprint 28.4 → 19.0 MB, footprint after the
+  crawl 27.8 → 17.1 MB.
+- Page worker threads start on demand (ADR 0035): `serve` held one tokio
+  runtime per core before its first page. Idle `serve`: 1 thread instead
+  of 11, RSS 5.59 → 4.94 MB, footprint 3.25 → 2.69 MB (5 runs); after a
+  50-page crawl 12-13 threads instead of 21. Pages land on the same
+  workers as before.
+- A live-allocation trace after a crawl (`malloc_history`, all pages and
+  the context closed) found nothing else of ours that leaks: what stays
+  is V8's isolate and heap pages, the bindings' interface table and the
+  spare realm.
+
+**Playwright.**
+- `page.setContent` hung: `document.write` after `document.open()` was
+  refused (the parser took writes only while stopped at a script), and
+  nothing ran the end of parsing after `document.close()`. Now writes go
+  to the script-created parser, `document.open()` erases the document's
+  and window's listeners and handlers and sets readiness `loading`, and
+  `close()` runs the end of parsing inside the call, as in Chrome:
+  `interactive`, `DOMContentLoaded`, `complete`, `load` before `close()`
+  returns (recorded in local Chrome for Testing 1243 headless shell),
+  with their lifecycle events; loads the written markup started delay
+  `load` as in a navigation. Scripts written or inserted from an isolated
+  world run in the document's main world.
+- JavaScript dialogs: `alert`/`confirm`/`prompt` were silent no-ops, so
+  `page.on('dialog')` never fired. While a session attached to the page
+  has the Page domain on, a dialog sends `Page.javascriptDialogOpening`
+  and the page's worker waits until `Page.handleJavaScriptDialog`
+  answers it from the CDP thread (`Shared::dialogs`), then
+  `Page.javascriptDialogClosed`. Closing the page or losing the last such
+  session dismisses it. Without one, dialogs return at once as before.
+- Playwright 1.65 answers a proxy's 407 from `proxy.username/password`
+  instead of `httpCredentials`; `proxy.spec.mjs` and the Chrome recorder
+  pass both. Node 26 no longer resolves `node --test DIR` through
+  `package.json` `main`: the entry is `all.test.mjs`, which both find.
+- `tests/playwright/content.spec.mjs` (5 tests): `setContent` on
+  `about:blank` and after a navigation, readiness and event order,
+  erased listeners, `waitUntil: 'domcontentloaded'`, `document.write`,
+  all three dialogs accepted and dismissed, a dialog from a click
+  handler, auto-dismiss without a listener, closing a page with an open
+  dialog.
+
+**Bench on macOS.** `bench/run.py` measures through `libproc`
+(`bench/README.md`, "macOS"): footprint replaces PSS, peak RSS is
+sampled, `fetch` peaks come from `wait4` (bytes on macOS) and the exited
+child's lifetime peak footprint. Release binary with all of the above,
+3 runs x 50 pages, against headless Chromium 1243 on the same Mac,
+medians:
+
+| | `fetch` | CDP | Chromium (CDP) |
+|---|---|---|---|
+| crawl | 0.64 s | 0.26 s | 6.81 s |
+| page median | 11.1 ms | 5.0 ms | 137.5 ms |
+| CPU | 0.49 s | 0.23 s | 20.4 s |
+| peak RSS | 25.4 MB | 30.2 MB | 3,513 MB (summed) |
+| peak footprint | 12.8 MB | 17.2 MB | 2,178 MB |
+| idle RSS / footprint | | 5.0 / 2.7 MB | 1,154 / 477 MB |
+| footprint after crawl | | 16.5 MB | 1,822 MB |
+| new page | | 1.4 ms | 92 ms |
+
+Before this work on the same Mac (the first run of this section's
+bench, other builds running): `fetch` 29-39 ms per page and 1.4-1.9 s
+CPU, CDP peak footprint 27.6 MB. Binary 44.86 MB. No Lightpanda build
+here, so those checks are skipped.
+
+**Checks on macOS** (first pass). Playwright 29/29 (debug and release
+binaries); WPT 11737/12465 subtests (11734 before), 295/450 files; `lb-page` (108
+`pages` cases, every target), `lb-cdp`, `lb-webapi`, `lb-js` (with the
+lazy ICU tests on macOS), `lightbrowser`; firefox package tests and
+clippy; workspace clippy and fmt; bench tooling tests (the `/proc`
+parser test skips off Linux). Not run: T-010, Lightpanda.
+
+**Playwright, second pass** (ADR 0037, ADR 0009 revision 2). A probe of
+29 common Playwright calls beyond the suite found more gaps; all but the
+two deliberate refusals below now work, each checked against Chrome for
+Testing 1243 where a page can observe it:
+- `setInputFiles` with in-memory files and with local paths: `File`,
+  `FileList`, `DataTransfer` (Chrome's `files`/`items` identity), a file
+  input's `files` and `C:\fakepath\` value, `DOM.setFileInputFiles`
+  (`input`, `change`), multipart form posts with the bytes.
+- `grantPermissions` / `clearPermissions`: per-context overrides before
+  the persona's states, granted for the origin and the rest denied as in
+  Chrome (`Browser.grantPermissions`, `resetPermissions`,
+  `setPermission`).
+- `navigator.geolocation` (it did not exist) and
+  `Emulation.setGeolocationOverride`, so the `geolocation` context option
+  works: position, `watchPosition`, `toJSON` and the timeout error match
+  Chrome; an unanswered `prompt` waits (the headless shell denies).
+- `dragAndDrop`: `dragstart`, `pointercancel`, `Input.dragIntercepted`,
+  `Input.dispatchDragEvent`; the event logs of an accepted drop, a
+  rejected drop and a dragged link equal Chrome's. Drags also run on plain
+  mouse input when the client does not intercept them.
+- `page.pdf`: `Page.printToPDF` lays the page out at the paper's width,
+  paints page slices at about 150 dpi and embeds them as JPEGs (no
+  selectable text); `IO.read` / `IO.close` for the stream.
+- A plain `browser.newContext()` works (user decision): Playwright's
+  implicit screen and scale factor 1 keep the persona's screen and ratio;
+  an explicit contradicting `screen` or `deviceScaleFactor` is still
+  refused.
+
+New specs: `files.spec.mjs` (3), `permissions.spec.mjs` (2),
+`dnd.spec.mjs` (2, Chrome's logs as expectations), `pdf.spec.mjs` (1), one
+more in `smoke.spec.mjs`: **38/38** with debug and release binaries. WPT
+**11739/12471** (more subtests run now that `File` and `DataTransfer`
+exist). Binary 44.98 MB (+0.12 MB). Bench after these, with the machine
+under load (load average 12 on 10 cores; Chromium's crawl took 16 s
+instead of 6.8 s): CDP peak footprint 16.9 MB, idle RSS 4.94 MB, footprint
+after the crawl 16.3 MB, the same as before them; times are not
+comparable to the quiet run.
+
+**Playwright, third pass.** Also equal to Chrome now: `beforeunload`
+(`page.close({ runBeforeUnload: true })` through `Page.close`, and before
+every navigation; a dialog only after a user gesture; staying aborts a
+navigation with `net::ERR_ABORTED`), `watchPosition` updates on every new
+position until `clearWatch`, permission overrides in workers, and media
+emulation as the client asks (user decision, ADR 0009 revision 3:
+`emulateMedia` color scheme, reduced motion, print, kept across
+navigations). New tests in `content.spec.mjs`, `permissions.spec.mjs`
+and `media.spec.mjs`.
+
+**Still open (Playwright).** By decision: `exposeFunction` /
+`exposeBinding` (Playwright 1.65 needs a main-world binding; ADR 0009
+keeps bindings out of the main world, confirmed by the user). Missing:
+`change` events on `MediaQueryList`s, media emulation in child frames,
+`beforeunload` in child frames, vector text in PDFs. Console calls made
+in an isolated world are reported with the main world's context id.
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from

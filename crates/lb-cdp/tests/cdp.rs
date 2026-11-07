@@ -923,12 +923,23 @@ fn emulation_is_checked_against_the_persona() {
         let (ws, _) = start(host()).await;
         let (mut c, _, _, s) = new_page(&ws).await;
         let sid = Some(s.as_str());
-        // Playwright's default 1280x720 context contradicts a 1920x1080 screen.
+        // Playwright's default context (its viewport as the screen, scale
+        // factor 1): a 1280x720 window on the persona's own screen.
+        c.ok(
+            "Emulation.setDeviceMetricsOverride",
+            json!({"mobile": false, "width": 1280, "height": 720, "screenWidth": 1280, "screenHeight": 720,
+                   "deviceScaleFactor": 1, "screenOrientation": {"angle": 0, "type": "landscapePrimary"}}),
+            sid,
+        )
+        .await;
+        let m = c.ok("Page.getLayoutMetrics", json!({}), sid).await;
+        assert_eq!(m["cssLayoutViewport"]["clientWidth"], 1280);
+        // A screen the client chose that contradicts the persona is refused.
         let e = c
             .call(
                 "Emulation.setDeviceMetricsOverride",
-                json!({"mobile": false, "width": 1280, "height": 720, "screenWidth": 1280, "screenHeight": 720,
-                       "deviceScaleFactor": 1, "screenOrientation": {"angle": 0, "type": "landscapePrimary"}}),
+                json!({"mobile": false, "width": 1280, "height": 720, "screenWidth": 1366, "screenHeight": 768,
+                       "deviceScaleFactor": 1}),
                 sid,
             )
             .await
@@ -962,10 +973,13 @@ fn emulation_is_checked_against_the_persona() {
         c.ok("Emulation.setLocaleOverride", json!({"locale": "en-US"}), sid).await;
         assert!(c.call("Emulation.setTimezoneOverride", json!({"timezoneId": "Asia/Tokyo"}), sid).await.is_err());
         c.ok("Emulation.setTimezoneOverride", json!({"timezoneId": "America/New_York"}), sid).await;
+        // Media the client asks for is applied (ADR 0009 revision 3); the
+        // mock host has no pages to apply it to.
         let e = c
-            .call("Emulation.setEmulatedMedia", json!({"features": [{"name": "prefers-color-scheme", "value": "dark"}]}), sid)
+            .call("Emulation.setEmulatedMedia", json!({"features": [{"name": "prefers-color-scheme", "value": "blue"}]}), sid)
             .await;
         assert!(e.is_err());
+        c.ok("Emulation.setEmulatedMedia", json!({"features": [{"name": "prefers-color-scheme", "value": ""}]}), sid).await;
         assert!(c.call("Emulation.setTouchEmulationEnabled", json!({"enabled": true}), sid).await.is_err());
         c.ok("Emulation.setTouchEmulationEnabled", json!({"enabled": false}), sid).await;
         assert!(c.call("Emulation.setGeolocationOverride", json!({"latitude": 1, "longitude": 2}), sid).await.is_err());

@@ -19,15 +19,16 @@
 //! byte-identical to the archive's (`icu_data` tests in `tests/v8.rs`), so
 //! Intl behaviour is unchanged.
 //!
-//! On Linux the 10.9 MB package is reserved as inaccessible memory and
-//! each chunk is decompressed the first time ICU touches it (see `lazy`),
-//! like a file mapping that pages in on demand: a page load reads about
-//! 120 KB of it (the table of contents and a few items such as the root
-//! locale and time zone data), so about 27 chunks of 4 KiB (0.1 MB, < 1 ms)
+//! On Linux and macOS the 10.9 MB package is reserved as inaccessible
+//! memory and each page of it is decompressed the first time ICU touches
+//! it (see `lazy`), like a file mapping that pages in on demand: a page
+//! load reads about 120 KB of it (the table of contents and a few items
+//! such as the root locale and time zone data), so about 27 chunks of
+//! 4 KiB (0.1 MB, < 1 ms; on Apple silicon's 16 KiB pages about 0.3 MB)
 //! become resident instead of all of it (10.9 MB, ~15 ms). If the
-//! reservation or the fault handler cannot be set up, if the system's page
-//! size does not divide [`CHUNK`], or on other systems, the whole package
-//! is decompressed into the heap at once. `LB_ICU_EAGER=1` asks for that
+//! reservation or the fault handler cannot be set up, if the page size
+//! and [`CHUNK`] have no common unit, or on other systems, the whole
+//! package is decompressed into the heap at once. `LB_ICU_EAGER=1` asks for that
 //! too: valgrind's callgrind does not retry a faulting load correctly after
 //! the handler filled the page in, so `tools/hot_symbols` sets it.
 
@@ -173,11 +174,12 @@ pub fn empty_package_bytes() -> &'static [u8] {
 static DATA: OnceLock<&'static [u8]> = OnceLock::new();
 
 /// The ICU data, for the life of the process (as ICU requires). 16-byte
-/// aligned. On Linux its chunks are decompressed when first read (see the
-/// module docs); elsewhere, or if that cannot be set up, all at once here.
+/// aligned. On Linux and macOS its pages are decompressed when first read
+/// (see the module docs); elsewhere, or if that cannot be set up, all at
+/// once here.
 pub fn data() -> &'static [u8] {
     DATA.get_or_init(|| {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if std::env::var_os("LB_ICU_EAGER").is_none()
             && let Some(d) = lazy::map(Packed::get())
         {
@@ -240,66 +242,139 @@ pub fn decompress_all() -> Box<[u128]> {
     words
 }
 
-/// Decompress-on-first-touch backing for [`data`] (Linux).
+/// Decompress-on-first-touch backing for [`data`] (Linux and macOS).
 ///
 /// [`map`] reserves the package's size as `PROT_NONE` memory and installs
-/// a `SIGSEGV` handler. A read of a chunk that is not there yet faults; the
-/// handler decompresses that chunk into a fresh scratch mapping and moves
-/// it over the reserved range with `mremap` (one atomic step: another
-/// thread either faults too and waits for the lock, or sees the whole
-/// chunk), then returns, and the read is retried. Faults anywhere else go
-/// to the handler that was installed before (Rust's stack-overflow check,
-/// else the default action), so crashes stay crashes.
+/// a fault handler (`SIGSEGV`; on macOS also `SIGBUS`, which it raises for
+/// protected pages). A read of a page that is not there yet faults; the
+/// handler decompresses the chunks of that page and makes the page
+/// readable in one atomic step, then returns, and the read is retried.
+/// Another thread that reads the same page meanwhile faults too and waits
+/// for the lock, or sees the whole page. Faults anywhere else go to the
+/// handler that was installed before (Rust's stack-overflow check, else
+/// the default action), so crashes stay crashes.
+///
+/// A fault makes one *unit* resident: the larger of a [`CHUNK`] and an OS
+/// page (4 KiB on x86-64 Linux, so one chunk; 16 KiB on Apple silicon,
+/// four chunks). The atomic step:
+/// - Linux: decompress into a fresh scratch mapping and move it over the
+///   reservation with `mremap(MREMAP_FIXED)`.
+/// - macOS (no `mremap`): the reservation is a second mapping of the same
+///   memory as a private writable view (`mach_vm_remap` without copy, once
+///   at setup). The handler decompresses into the writable view, where no
+///   reader looks, then `mprotect`s the reader's page to `PROT_READ`.
+///   Pages ICU never reads are never touched in either view, so they cost
+///   no memory.
 ///
 /// The handler runs on the faulting thread's own stack (no `SA_ONSTACK`:
 /// Rust's alternate signal stacks are a few KB, too small for zstd's
 /// decoder). A stack overflow therefore ends the process with a plain
-/// `SIGSEGV` instead of Rust's "has overflowed its stack" message. Nothing
+/// signal instead of Rust's "has overflowed its stack" message. Nothing
 /// in the handler allocates or takes a lock other than its own spin lock:
 /// the zstd context is created up front, and single-shot decompression
 /// into a buffer does not allocate. It saves and restores `errno`. ICU
 /// never hands its data to a system call, which would get `EFAULT`
 /// instead of a fault. Debuggers stop on these faults; in gdb use
-/// `handle SIGSEGV nostop noprint pass`.
-#[cfg(target_os = "linux")]
+/// `handle SIGSEGV nostop noprint pass`; lldb stops on the Mach exception
+/// before any signal, so set `LB_ICU_EAGER=1` there.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod lazy {
     use super::{CHUNK, Packed};
     use std::cell::UnsafeCell;
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
-    /// More than enough for the 10.9 MB package (2,656 chunks).
+    /// More than enough for the 10.9 MB package (2,656 chunks); there are
+    /// never more units than chunks.
     const MAX_CHUNKS: usize = 4096;
+
+    /// The signals a read of a `PROT_NONE` page raises.
+    #[cfg(target_os = "linux")]
+    const SIGNALS: [libc::c_int; 1] = [libc::SIGSEGV];
+    #[cfg(target_os = "macos")]
+    const SIGNALS: [libc::c_int; 2] = [libc::SIGBUS, libc::SIGSEGV];
 
     static BASE: AtomicUsize = AtomicUsize::new(0);
     static SPAN: AtomicUsize = AtomicUsize::new(0);
     static LOCK: AtomicBool = AtomicBool::new(false);
+    /// One flag per unit.
     static FILLED: [AtomicU8; MAX_CHUNKS] = [const { AtomicU8::new(0) }; MAX_CHUNKS];
-    static PREV: OnceLock<libc::sigaction> = OnceLock::new();
+    /// The handlers that were installed before, by index in [`SIGNALS`].
+    static PREV: [OnceLock<libc::sigaction>; SIGNALS.len()] =
+        [const { OnceLock::new() }; SIGNALS.len()];
     static STATE: OnceLock<State> = OnceLock::new();
 
     struct State {
         packed: Packed,
+        /// Bytes per unit: a multiple of both [`CHUNK`] and the page size.
+        unit: usize,
+        /// macOS: start of the writable view of the reservation.
+        #[cfg(target_os = "macos")]
+        write_base: usize,
         /// Only used with [`LOCK`] held.
         dctx: UnsafeCell<zstd::bulk::Decompressor<'static>>,
     }
 
     // SAFETY: `dctx` is only touched by `fill`, with `LOCK` held, so never
-    // from two threads at once; `packed` is read-only.
+    // from two threads at once; the other fields are read-only.
     unsafe impl Sync for State {}
     // SAFETY: as above; the decompressor owns plain heap memory.
     unsafe impl Send for State {}
 
-    /// Reserve the package and install the fault handler. `None` if either
-    /// fails (the caller decompresses eagerly instead).
-    pub(super) fn map(packed: Packed) -> Option<&'static [u8]> {
-        // SAFETY: sysconf has no preconditions.
-        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-        if packed.count > MAX_CHUNKS || page <= 0 || !CHUNK.is_multiple_of(page as usize) {
-            return None;
+    impl State {
+        fn chunks_per_unit(&self) -> usize {
+            self.unit / CHUNK
         }
-        let dctx = zstd::bulk::Decompressor::new().ok()?;
-        let span = packed.count * CHUNK;
+
+        /// Chunks of unit `u` that hold data (the last unit may hold fewer).
+        fn chunks_in(&self, u: usize) -> std::ops::Range<usize> {
+            let first = u * self.chunks_per_unit();
+            first..(first + self.chunks_per_unit()).min(self.packed.count)
+        }
+
+        /// Decompress the chunks of unit `u` into `out` (the unit's bytes).
+        fn decompress_unit(&self, u: usize, out: &mut [u8]) -> bool {
+            // SAFETY: only called by `place`, with LOCK held, so this is
+            // the only user of `dctx`.
+            let dctx = unsafe { &mut *self.dctx.get() };
+            let first = u * self.chunks_per_unit();
+            self.chunks_in(u).all(|i| {
+                let at = (i - first) * CHUNK;
+                let len = self.packed.chunk_len(i);
+                matches!(dctx.decompress_to_buffer(self.packed.frame(i), &mut out[at..at + len]), Ok(n) if n == len)
+            })
+        }
+    }
+
+    /// `VM_FLAGS_ANYWHERE` from <mach/vm_statistics.h> (the libc crate's
+    /// Mach items are deprecated in favour of another crate).
+    #[cfg(target_os = "macos")]
+    const VM_FLAGS_ANYWHERE: libc::c_int = 1;
+
+    #[cfg(target_os = "macos")]
+    unsafe extern "C" {
+        /// The task port that `mach_task_self()` (a macro) reads.
+        static mach_task_self_: libc::mach_port_t;
+        // <mach/mach_vm.h>; not in the libc crate.
+        fn mach_vm_remap(
+            target_task: libc::vm_map_t,
+            target_address: *mut libc::mach_vm_address_t,
+            size: libc::mach_vm_size_t,
+            mask: libc::mach_vm_offset_t,
+            flags: libc::c_int,
+            src_task: libc::vm_map_t,
+            src_address: libc::mach_vm_address_t,
+            copy: libc::boolean_t,
+            cur_protection: *mut libc::vm_prot_t,
+            max_protection: *mut libc::vm_prot_t,
+            inheritance: libc::vm_inherit_t,
+        ) -> libc::kern_return_t;
+    }
+
+    /// Reserve `span` bytes that read as `PROT_NONE`. Returns the
+    /// reservation and, on macOS, its writable view.
+    #[cfg(target_os = "linux")]
+    fn reserve(span: usize) -> Option<(usize, usize)> {
         // SAFETY: a fresh private anonymous reservation; nothing else
         // refers to it. It is never unmapped (ICU keeps pointers into it).
         let base = unsafe {
@@ -312,52 +387,156 @@ mod lazy {
                 0,
             )
         };
-        if base == libc::MAP_FAILED {
+        (base != libc::MAP_FAILED).then_some((base as usize, 0))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reserve(span: usize) -> Option<(usize, usize)> {
+        // SAFETY: a fresh private anonymous mapping (the writable view),
+        // then a second mapping of the same memory (`copy` false) made
+        // `PROT_NONE` (the reservation). Nothing else refers to either;
+        // both live for the process once this returns them.
+        unsafe {
+            let write = libc::mmap(
+                std::ptr::null_mut(),
+                span,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANON,
+                -1,
+                0,
+            );
+            if write == libc::MAP_FAILED {
+                return None;
+            }
+            let mut base: libc::mach_vm_address_t = 0;
+            let (mut cur, mut max): (libc::vm_prot_t, libc::vm_prot_t) = (0, 0);
+            let kr = mach_vm_remap(
+                mach_task_self_,
+                &mut base,
+                span as libc::mach_vm_size_t,
+                0,
+                VM_FLAGS_ANYWHERE,
+                mach_task_self_,
+                write as libc::mach_vm_address_t,
+                0,
+                &mut cur,
+                &mut max,
+                libc::VM_INHERIT_NONE as libc::vm_inherit_t,
+            );
+            if kr != libc::KERN_SUCCESS {
+                libc::munmap(write, span);
+                return None;
+            }
+            if libc::mprotect(base as *mut libc::c_void, span, libc::PROT_NONE) != 0 {
+                libc::munmap(base as *mut libc::c_void, span);
+                libc::munmap(write, span);
+                return None;
+            }
+            Some((base as usize, write as usize))
+        }
+    }
+
+    /// Undo [`reserve`] (setup failed after it).
+    fn unreserve(base: usize, _write: usize, span: usize) {
+        // SAFETY: the mappings made by `reserve`, not yet published.
+        unsafe {
+            libc::munmap(base as *mut libc::c_void, span);
+            #[cfg(target_os = "macos")]
+            libc::munmap(_write as *mut libc::c_void, span);
+        }
+    }
+
+    /// Reserve the package and install the fault handler. `None` if either
+    /// fails (the caller decompresses eagerly instead).
+    pub(super) fn map(packed: Packed) -> Option<&'static [u8]> {
+        // SAFETY: sysconf has no preconditions.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if packed.count > MAX_CHUNKS || page <= 0 {
             return None;
         }
+        let page = page as usize;
+        let unit = page.max(CHUNK);
+        if !unit.is_multiple_of(page) || !unit.is_multiple_of(CHUNK) {
+            return None;
+        }
+        let dctx = zstd::bulk::Decompressor::new().ok()?;
+        let span = (packed.count * CHUNK).next_multiple_of(unit);
+        let (base, write) = reserve(span)?;
         let state = State {
             packed,
+            unit,
+            #[cfg(target_os = "macos")]
+            write_base: write,
             dctx: UnsafeCell::new(dctx),
         };
         if STATE.set(state).is_err() {
+            unreserve(base, write, span);
             return None;
         }
         // SAFETY: plain sigaction calls with zeroed, then filled structs.
         // The handler only acts on addresses inside the reservation, which
         // is published (BASE/SPAN) before the handler is installed.
         unsafe {
-            let mut old: libc::sigaction = std::mem::zeroed();
-            if libc::sigaction(libc::SIGSEGV, std::ptr::null(), &mut old) != 0 {
-                libc::munmap(base, span);
-                return None;
+            for (k, &sig) in SIGNALS.iter().enumerate() {
+                let mut old: libc::sigaction = std::mem::zeroed();
+                if libc::sigaction(sig, std::ptr::null(), &mut old) != 0 {
+                    unreserve(base, write, span);
+                    return None;
+                }
+                let _ = PREV[k].set(old);
             }
-            let _ = PREV.set(old);
             SPAN.store(span, Ordering::Release);
-            BASE.store(base as usize, Ordering::Release);
+            BASE.store(base, Ordering::Release);
             let mut sa: libc::sigaction = std::mem::zeroed();
             sa.sa_sigaction = on_fault as *const () as libc::sighandler_t;
             sa.sa_flags = libc::SA_SIGINFO;
             libc::sigemptyset(&mut sa.sa_mask);
-            if libc::sigaction(libc::SIGSEGV, &sa, std::ptr::null_mut()) != 0 {
-                BASE.store(0, Ordering::Release);
-                libc::munmap(base, span);
-                return None;
+            for (k, &sig) in SIGNALS.iter().enumerate() {
+                if libc::sigaction(sig, &sa, std::ptr::null_mut()) != 0 {
+                    // Put back the handlers already replaced; then nothing
+                    // can reach the reservation any more.
+                    for (j, &s) in SIGNALS.iter().enumerate().take(k) {
+                        if let Some(p) = PREV[j].get() {
+                            libc::sigaction(s, p, std::ptr::null_mut());
+                        }
+                    }
+                    BASE.store(0, Ordering::Release);
+                    unreserve(base, write, span);
+                    return None;
+                }
             }
-            Some(std::slice::from_raw_parts(base.cast::<u8>(), packed.len))
+            Some(std::slice::from_raw_parts(base as *const u8, packed.len))
+        }
+    }
+
+    /// This thread's `errno`.
+    fn errno() -> *mut libc::c_int {
+        // SAFETY: both return this thread's errno slot; no preconditions.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            libc::__errno_location()
+        }
+        #[cfg(target_os = "macos")]
+        unsafe {
+            libc::__error()
         }
     }
 
     extern "C" fn on_fault(sig: libc::c_int, info: *mut libc::siginfo_t, ctx: *mut libc::c_void) {
-        // SAFETY: the kernel passes a valid siginfo for SIGSEGV.
+        // SAFETY: the kernel passes a valid siginfo for SIGSEGV and SIGBUS.
         let addr = unsafe { (*info).si_addr() } as usize;
         let base = BASE.load(Ordering::Acquire);
         let span = SPAN.load(Ordering::Acquire);
-        if base != 0 && addr >= base && addr < base + span {
+        if base != 0
+            && addr >= base
+            && addr < base + span
+            && let Some(state) = STATE.get()
+        {
             // SAFETY: errno is thread-local; restored before returning.
-            let errno = unsafe { *libc::__errno_location() };
-            let ok = fill((addr - base) / CHUNK, base);
+            let saved = unsafe { *errno() };
+            let ok = fill(state, (addr - base) / state.unit, base);
             // SAFETY: as above.
-            unsafe { *libc::__errno_location() = errno };
+            unsafe { *errno() = saved };
             if ok {
                 return;
             }
@@ -373,7 +552,10 @@ mod lazy {
 
     /// Hand a fault outside the package to the previous handler.
     fn forward(sig: libc::c_int, info: *mut libc::siginfo_t, ctx: *mut libc::c_void) {
-        let prev = PREV.get().copied();
+        let prev = SIGNALS
+            .iter()
+            .position(|&s| s == sig)
+            .and_then(|k| PREV[k].get().copied());
         match prev {
             Some(p)
                 if p.sa_sigaction != libc::SIG_DFL
@@ -403,12 +585,9 @@ mod lazy {
         }
     }
 
-    /// Make chunk `i` resident. Returns false if it cannot be.
-    fn fill(i: usize, base: usize) -> bool {
-        let Some(state) = STATE.get() else {
-            return false;
-        };
-        if i >= state.packed.count {
+    /// Make unit `u` resident. Returns false if it cannot be.
+    fn fill(state: &State, u: usize, base: usize) -> bool {
+        if u * state.chunks_per_unit() >= state.packed.count {
             return false;
         }
         while LOCK
@@ -417,37 +596,30 @@ mod lazy {
         {
             std::hint::spin_loop();
         }
-        let ok = FILLED[i].load(Ordering::Acquire) == 1 || {
-            // SAFETY: LOCK is held, so this is the only user of `dctx`.
-            let dctx = unsafe { &mut *state.dctx.get() };
-            // SAFETY: see `place`.
-            let placed = unsafe { place(i, base, &state.packed, dctx) };
-            if placed {
-                FILLED[i].store(1, Ordering::Release);
-            }
-            placed
-        };
+        // SAFETY: LOCK is held, and `u` is a unit of the reservation at
+        // `base` made by `map`.
+        let ok = FILLED[u].load(Ordering::Acquire) == 1 || unsafe { place(state, u, base) };
+        if ok {
+            FILLED[u].store(1, Ordering::Release);
+        }
         LOCK.store(false, Ordering::Release);
         ok
     }
 
-    /// Decompress chunk `i` into a scratch mapping and move it over the
-    /// reservation at `base + i * CHUNK`.
+    /// Decompress unit `u` into a scratch mapping and move it over the
+    /// reservation at `base + u * unit`.
     ///
     /// # Safety
-    /// `base` is the reservation made by `map`, `i` a chunk index of it, and
-    /// the caller holds `LOCK`.
-    unsafe fn place(
-        i: usize,
-        base: usize,
-        packed: &Packed,
-        dctx: &mut zstd::bulk::Decompressor<'static>,
-    ) -> bool {
+    /// `base` is the reservation made by `map`, `u` a unit of it, and the
+    /// caller holds `LOCK`.
+    #[cfg(target_os = "linux")]
+    unsafe fn place(state: &State, u: usize, base: usize) -> bool {
+        let unit = state.unit;
         // SAFETY: fresh private anonymous mapping, only used here.
         let scratch = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
-                CHUNK,
+                unit,
                 libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
                 -1,
@@ -457,33 +629,57 @@ mod lazy {
         if scratch == libc::MAP_FAILED {
             return false;
         }
-        let len = packed.chunk_len(i);
-        // SAFETY: `scratch` is CHUNK >= len writable bytes owned here.
-        let out = unsafe { std::slice::from_raw_parts_mut(scratch.cast::<u8>(), len) };
-        let ok = matches!(dctx.decompress_to_buffer(packed.frame(i), out), Ok(n) if n == len);
+        // SAFETY: `scratch` is `unit` writable bytes owned here.
+        let out = unsafe { std::slice::from_raw_parts_mut(scratch.cast::<u8>(), unit) };
+        let ok = state.decompress_unit(u, out);
         // SAFETY: `scratch` is ours; on success it replaces the reserved
-        // pages of chunk i (MREMAP_FIXED unmaps them in the same step);
+        // pages of unit u (MREMAP_FIXED unmaps them in the same step);
         // ICU only ever reads the package, so it is made read-only first.
         unsafe {
-            if !ok || libc::mprotect(scratch, CHUNK, libc::PROT_READ) != 0 {
-                libc::munmap(scratch, CHUNK);
+            if !ok || libc::mprotect(scratch, unit, libc::PROT_READ) != 0 {
+                libc::munmap(scratch, unit);
                 return false;
             }
             super::release_packed();
-            let target = (base + i * CHUNK) as *mut libc::c_void;
+            let target = (base + u * unit) as *mut libc::c_void;
             let moved = libc::mremap(
                 scratch,
-                CHUNK,
-                CHUNK,
+                unit,
+                unit,
                 libc::MREMAP_MAYMOVE | libc::MREMAP_FIXED,
                 target,
             );
             if moved != target {
-                libc::munmap(scratch, CHUNK);
+                libc::munmap(scratch, unit);
                 return false;
             }
         }
         true
+    }
+
+    /// Decompress unit `u` through the writable view, then make the
+    /// reservation's page readable.
+    ///
+    /// # Safety
+    /// As for the Linux `place`.
+    #[cfg(target_os = "macos")]
+    unsafe fn place(state: &State, u: usize, base: usize) -> bool {
+        let unit = state.unit;
+        // SAFETY: the writable view of unit u: `unit` bytes that no reader
+        // can see until the mprotect below, and only written with LOCK held.
+        let out = unsafe {
+            std::slice::from_raw_parts_mut((state.write_base + u * unit) as *mut u8, unit)
+        };
+        // SAFETY: a page-aligned range inside the reservation; mprotect is
+        // async-signal-safe.
+        state.decompress_unit(u, out)
+            && unsafe {
+                libc::mprotect(
+                    (base + u * unit) as *mut libc::c_void,
+                    unit,
+                    libc::PROT_READ,
+                )
+            } == 0
     }
 
     /// Whether [`map`] succeeded.
@@ -493,19 +689,24 @@ mod lazy {
 
     /// Chunks made resident so far.
     pub(super) fn resident() -> usize {
+        let Some(state) = STATE.get() else {
+            return 0;
+        };
         FILLED
             .iter()
-            .filter(|f| f.load(Ordering::Acquire) == 1)
-            .count()
+            .enumerate()
+            .filter(|(_, f)| f.load(Ordering::Acquire) == 1)
+            .map(|(u, _)| state.chunks_in(u).len())
+            .sum()
     }
 }
 
 /// How many [`CHUNK`]s of [`data`] are resident: `Some` when the lazy
-/// path is in use (Linux), `None` when the package was decompressed at
-/// once.
+/// path is in use (Linux, macOS), `None` when the package was
+/// decompressed at once.
 pub fn resident_chunks() -> Option<usize> {
     let _ = data();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if lazy::active() {
         return Some(lazy::resident());
     }

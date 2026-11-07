@@ -1,6 +1,6 @@
 # ADR 0013: V8 startup snapshot made in memory; binary budget follows the V8 floor
 
-Status: Accepted (2026-11-03); budget back to < 40 MB in revision 2; ICU data paged lazily in revision 3; budget raised to < 50 MB by user decision in revision 4
+Status: Accepted (2026-11-03); budget back to < 40 MB in revision 2; ICU data paged lazily in revision 3; budget raised to < 50 MB by user decision in revision 4; ICU data paged lazily on macOS too in revision 5
 
 ## Context
 
@@ -292,3 +292,38 @@ garbage pointer); with 4 KiB chunks that broke every
 and `gen.py` sets it. Plain valgrind needs
 `--vex-iropt-register-updates=allregs-at-mem-access` for the same reason.
 
+## Revision 5: ICU data paged in lazily on macOS (2026-11-07)
+
+The lazy path was Linux-only: it moves each decompressed chunk into place
+with `mremap`, which macOS lacks, and it needed the page size to divide
+the 4 KiB chunk, which Apple silicon's 16 KiB pages do not. So every
+macOS process decompressed the whole package on its first engine:
+10.4 MB of the 22.8 MB peak footprint of a `fetch` process, and about
+15 ms of CPU per process.
+
+Now `icu_data.rs` `lazy` serves Linux and macOS:
+
+- A fault makes one *unit* resident: the larger of a chunk and an OS
+  page (one chunk on 4 KiB-page Linux, four on Apple silicon). The chunk
+  size and `icudt78.dat.zch` are unchanged.
+- macOS reserves the package as two mappings of the same memory: a
+  private writable view, and (from `mach_vm_remap` without copy, once at
+  setup) the `PROT_NONE` view ICU reads. The handler decompresses a unit
+  through the writable view, which no reader sees, then `mprotect`s the
+  reader's page to `PROT_READ`: the same all-or-nothing step for other
+  threads that `mremap` gives on Linux, with only `mprotect` in the
+  handler. Pages ICU never reads are never touched in either view.
+- macOS raises `SIGBUS` for a protected page, so the handler takes
+  `SIGBUS` and `SIGSEGV` and forwards faults outside the package to the
+  previous handler of that signal. Tests on macOS: the archive's bytes,
+  8 threads reading scattered chunks, and both signals still crashing
+  outside the package.
+- lldb stops on the Mach exception before any signal; `LB_ICU_EAGER=1`
+  decompresses eagerly for debugging, as for valgrind.
+
+Measured on an M-series Mac (10 cores, macOS 26.4, release, 5 interleaved
+runs x 50 corpus pages, `bench/run.py` helpers): `fetch` peak RSS 39.8 →
+25.6 MB, peak footprint 22.8 → 13.0 MB, CPU 3.36 → 1.53 s, wall 4.40 →
+2.32 s; CDP crawl peak RSS 44.4 → 30.6 MB, peak footprint 28.4 →
+19.0 MB, footprint after the crawl 27.8 → 17.1 MB. Linux behaviour is
+unchanged.

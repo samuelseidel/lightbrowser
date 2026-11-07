@@ -71,6 +71,13 @@ pub(crate) struct Shared {
     /// Inspected workers by target id (ADR 0029).
     pub workers: Mutex<HashMap<String, Arc<workers::WorkerEntry>>>,
     pub next_worker: AtomicU64,
+    /// Pages with a session that has the Page domain on: their JavaScript
+    /// dialogs wait for `Page.handleJavaScriptDialog`.
+    pub dialog_targets: Mutex<std::collections::HashSet<String>>,
+    /// The open dialog of a page, by target: the answer goes here from the
+    /// CDP thread while the page's worker waits in `alert`/`confirm`/
+    /// `prompt`. Dropping the sender dismisses it.
+    pub dialogs: Mutex<HashMap<String, std::sync::mpsc::Sender<lb_webapi::rt::DialogAnswer>>>,
 }
 
 impl Shared {
@@ -220,6 +227,8 @@ impl CdpHost {
                 seed,
                 workers: Mutex::new(HashMap::new()),
                 next_worker: AtomicU64::new(1),
+                dialog_targets: Mutex::new(std::collections::HashSet::new()),
+                dialogs: Mutex::new(HashMap::new()),
             }),
             contexts: RefCell::new(HashMap::new()),
             pages: RefCell::new(HashMap::new()),
@@ -479,6 +488,12 @@ impl PageHost for CdpHost {
         }
         let entry = self.pages.borrow_mut().remove(target_id);
         if let Some(e) = entry {
+            // A dialog still open is dismissed, so the worker can close it.
+            self.shared
+                .dialogs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(target_id);
             // Release requests still waiting for a decision.
             self.shared
                 .paused
@@ -941,6 +956,76 @@ impl PageHost for CdpHost {
         .await
     }
 
+    fn set_intercept_drags(&self, target_id: &str, enabled: bool) -> HostResult<()> {
+        self.post(target_id, move |_, _, a| {
+            a.st.borrow_mut().intercept_drags = enabled;
+        })
+    }
+
+    async fn dispatch_drag_event(
+        &self,
+        target_id: &str,
+        kind: String,
+        x: f64,
+        y: f64,
+        data: serde_json::Value,
+        modifiers: u32,
+    ) -> HostResult<()> {
+        use lb_webapi::rt::input::{DragData, DragKind};
+        let kind = match kind.as_str() {
+            "dragEnter" => DragKind::Enter,
+            "dragOver" => DragKind::Over,
+            "drop" => DragKind::Drop,
+            _ => DragKind::Cancel,
+        };
+        let items = data
+            .get("items")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|i| {
+                        Some((
+                            i.get("mimeType")?.as_str()?.to_owned(),
+                            i.get("data")?.as_str()?.to_owned(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Files dropped from outside are read here: only paths the client
+        // sends.
+        let mut files = Vec::new();
+        for f in data
+            .get("files")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let Some(path) = f.as_str() else { continue };
+            let p = std::path::Path::new(path);
+            let bytes = std::fs::read(p)
+                .map_err(|e| HostError::new(format!("Cannot read file {path}: {e}")))?;
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            files.push((bytes, mime_from_name(&name).to_owned(), name, 0.0));
+        }
+        let operations = data
+            .get("dragOperationsMask")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(19) as u32;
+        let data = DragData {
+            items,
+            files,
+            operations,
+        };
+        self.on_worker(target_id, move |ws, p| async move {
+            input::drag(&ws, &p, kind, x, y, data, modifiers)
+        })
+        .await
+    }
+
     async fn dispatch_key_event(&self, target_id: &str, ev: KeyEvent) -> HostResult<()> {
         self.on_worker(
             target_id,
@@ -1210,6 +1295,35 @@ impl PageHost for CdpHost {
         Ok(out)
     }
 
+    async fn run_before_unload(&self, target_id: &str) -> HostResult<bool> {
+        self.on_worker(target_id, move |ws, p| async move {
+            let Some(w) = p.window() else {
+                return Ok(true);
+            };
+            let realm = w.realm();
+            let go_on = ws.with_engine(|engine| {
+                let mut js = lb_webapi::rt::EngineJs { engine, realm };
+                w.before_unload(&mut js)
+            });
+            Ok(go_on.unwrap_or(true))
+        })
+        .await
+    }
+
+    fn print_to_pdf(&self, target_id: &str, params: &serde_json::Value) -> HostResult<String> {
+        let req = screenshot::PrintRequest::parse(params)?;
+        for _ in 0..250 {
+            if !self.blocking(target_id, |_, _, w| Ok(screenshot::images_pending(w)))? {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let bytes = self.blocking(target_id, move |_, _, w| screenshot::print_pdf(w, &req))?;
+        let mut out = String::with_capacity(bytes.len() * 4 / 3 + 4);
+        lb_paint::encode::base64_into(&bytes, &mut out);
+        Ok(out)
+    }
+
     fn page_metrics(&self, target_id: &str) -> HostResult<Option<lb_cdp::PageMetrics>> {
         self.blocking(target_id, |_, _, w| Ok(Some(screenshot::metrics(w))))
     }
@@ -1222,6 +1336,172 @@ impl PageHost for CdpHost {
         self.post(target_id, move |_, _, a| {
             a.st.borrow_mut().screenshot_bg = color;
         })
+    }
+
+    fn set_file_input_files(
+        &self,
+        target_id: &str,
+        node: &NodeRef,
+        files: Vec<String>,
+    ) -> HostResult<()> {
+        // Read on this thread: the paths come from the client, nothing is
+        // read unless it sends them.
+        let mut chosen = Vec::with_capacity(files.len());
+        for p in &files {
+            let path = std::path::Path::new(p);
+            let bytes = std::fs::read(path)
+                .map_err(|e| HostError::new(format!("Cannot read file {p}: {e}")))?;
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let modified = std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0.0, |d| d.as_millis() as f64);
+            chosen.push((bytes, mime_from_name(&name).to_owned(), name, modified));
+        }
+        let node = node.clone();
+        self.blocking(target_id, move |ws, a, w| {
+            let n = a.node(ws, w, &node)?;
+            let file_input = w.with_doc(|d| {
+                d.is_html_element_named(n, &lb_dom::local_name!("input"))
+                    && d.get_attribute(n, "type")
+                        .is_some_and(|t| t.trim().eq_ignore_ascii_case("file"))
+            });
+            if !file_input {
+                return Err(HostError::new("Node is not a file input element"));
+            }
+            lb_webapi::rt::files::set_input_files(w, 0, n, chosen);
+            // `input`, then `change`, as Blink's file input fires them.
+            let target = w.node_ref(0, n);
+            let realm = w.realm();
+            ws.with_engine(|engine| {
+                let mut js = lb_webapi::rt::EngineJs { engine, realm };
+                lb_webapi::rt::fire_event(&mut js, w, target, "input", true, false);
+                lb_webapi::rt::fire_event(&mut js, w, target, "change", true, false);
+            });
+            agent::settle(ws, w);
+            Ok(())
+        })
+    }
+
+    fn handle_javascript_dialog(
+        &self,
+        target_id: &str,
+        accept: bool,
+        prompt_text: Option<&str>,
+    ) -> HostResult<()> {
+        // Runs on the CDP thread: the page's worker is waiting in the
+        // dialog, so the answer goes straight to it.
+        let tx = self
+            .shared
+            .dialogs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(target_id)
+            .ok_or_else(|| HostError::new("No dialog is showing"))?;
+        let _ = tx.send(lb_webapi::rt::DialogAnswer {
+            accept,
+            text: prompt_text.map(str::to_owned),
+        });
+        Ok(())
+    }
+
+    fn set_emulated_media(&self, target_id: &str, media: lb_css::MediaOverrides) -> HostResult<()> {
+        self.post(target_id, move |_, p, a| {
+            if let Some(w) = p.window() {
+                w.with_layout_engine(|l, _| l.set_media_overrides(&media));
+            }
+            a.st.borrow_mut().media = media;
+        })
+    }
+
+    fn set_geolocation_override(
+        &self,
+        target_id: &str,
+        position: Option<(f64, f64, f64)>,
+    ) -> HostResult<()> {
+        let pos = position.map(
+            |(latitude, longitude, accuracy)| lb_webapi::rt::GeoOverride {
+                latitude,
+                longitude,
+                accuracy,
+            },
+        );
+        let page = self.page(target_id)?;
+        page.set_geolocation(pos)
+            .map_err(|e| HostError::new(e.to_string()))
+    }
+
+    fn grant_permissions(
+        &self,
+        context: &str,
+        origin: Option<&str>,
+        permissions: &[String],
+    ) -> HostResult<()> {
+        let mut names = Vec::new();
+        for p in permissions {
+            names.extend(
+                permission_names(p)
+                    .ok_or_else(|| HostError::new(format!("Unknown permission type: {p}")))?,
+            );
+        }
+        let ctx = self.context(context)?;
+        ctx.permissions()
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .grant(origin, &names);
+        Ok(())
+    }
+
+    fn set_permission(
+        &self,
+        context: &str,
+        origin: Option<&str>,
+        name: &str,
+        setting: &str,
+    ) -> HostResult<()> {
+        if !matches!(setting, "granted" | "denied" | "prompt") {
+            return Err(HostError::new(format!(
+                "Unknown permission setting: {setting}"
+            )));
+        }
+        let ctx = self.context(context)?;
+        ctx.permissions()
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .set(origin, name, setting);
+        Ok(())
+    }
+
+    fn reset_permissions(&self, context: &str) -> HostResult<()> {
+        let ctx = self.context(context)?;
+        ctx.permissions()
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .reset();
+        Ok(())
+    }
+
+    fn set_dialog_handling(&self, target_id: &str, on: bool) {
+        let mut targets = self
+            .shared
+            .dialog_targets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if on {
+            targets.insert(target_id.to_owned());
+        } else {
+            targets.remove(target_id);
+            // Nobody can answer an open dialog any more: dismiss it.
+            self.shared
+                .dialogs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(target_id);
+        }
     }
 
     // ---- Accessibility ----
@@ -1283,4 +1563,100 @@ fn child_trees(a: &agent::Agent, w: &lb_webapi::rt::Window) -> Vec<FrameTree> {
             }
         })
         .collect()
+}
+
+/// The type Chrome gives a chosen file, from its extension (the common
+/// part of `net::GetWellKnownMimeTypeFromExtension`); "" otherwise.
+fn mime_from_name(name: &str) -> &'static str {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("txt" | "text") => "text/plain",
+        Some("html" | "htm" | "shtml" | "shtm") => "text/html",
+        Some("css") => "text/css",
+        Some("js" | "mjs") => "text/javascript",
+        Some("json") => "application/json",
+        Some("xml") => "text/xml",
+        Some("csv") => "text/csv",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg" | "jfif" | "pjpeg" | "pjp") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg" | "svgz") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        Some("ico") => "image/vnd.microsoft.icon",
+        Some("avif") => "image/avif",
+        Some("pdf") => "application/pdf",
+        Some("zip") => "application/zip",
+        Some("gz" | "tgz") => "application/gzip",
+        Some("wasm") => "application/wasm",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("ogg" | "oga" | "opus") => "audio/ogg",
+        Some("woff") => "application/font-woff",
+        Some("woff2") => "font/woff2",
+        _ => "",
+    }
+}
+
+/// The Permissions API names a CDP `PermissionType` grants (Chrome's
+/// `PermissionDescriptorToPermissionType` in reverse); `None` if unknown.
+fn permission_names(cdp: &str) -> Option<Vec<String>> {
+    let names: &[&str] = match cdp {
+        "audioCapture" => &["microphone"],
+        "videoCapture" => &["camera"],
+        "clipboardReadWrite" => &["clipboard-read", "clipboard-write"],
+        "clipboardSanitizedWrite" => &["clipboard-write"],
+        "durableStorage" => &["persistent-storage"],
+        "midiSysex" | "midi" => &["midi"],
+        "sensors" => &[
+            "accelerometer",
+            "gyroscope",
+            "magnetometer",
+            "ambient-light-sensor",
+        ],
+        "wakeLockScreen" => &["screen-wake-lock"],
+        "wakeLockSystem" => &["system-wake-lock"],
+        "automaticFullscreen" => &["fullscreen"],
+        "accessibilityEvents"
+        | "backgroundFetch"
+        | "backgroundSync"
+        | "capturedSurfaceControl"
+        | "displayCapture"
+        | "geolocation"
+        | "handTracking"
+        | "idleDetection"
+        | "keyboardLock"
+        | "localFonts"
+        | "localNetworkAccess"
+        | "nfc"
+        | "notifications"
+        | "paymentHandler"
+        | "periodicBackgroundSync"
+        | "pointerLock"
+        | "protectedMediaIdentifier"
+        | "smartCard"
+        | "speakerSelection"
+        | "storageAccess"
+        | "topLevelStorageAccess"
+        | "vr"
+        | "webAppInstallation"
+        | "webPrinting"
+        | "windowManagement" => {
+            // camelCase to the API's kebab-case name.
+            let mut out = String::new();
+            for c in cdp.chars() {
+                if c.is_ascii_uppercase() {
+                    out.push('-');
+                    out.push(c.to_ascii_lowercase());
+                } else {
+                    out.push(c);
+                }
+            }
+            return Some(vec![out]);
+        }
+        _ => return None,
+    };
+    Some(names.iter().map(|s| (*s).to_owned()).collect())
 }

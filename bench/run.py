@@ -53,7 +53,11 @@ import gen_corpus  # noqa: E402
 
 CORPUS = HERE / "corpus"
 RESULTS = HERE / "results"
-DEFAULT_CHROMIUM = "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome"
+IS_MAC = sys.platform == "darwin"
+DEFAULT_CHROMIUM = (
+    str(Path.home() / "Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")
+    if IS_MAC else "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome"
+)
 MARK = "data-bench-rendered"
 CLK = os.sysconf("SC_CLK_TCK")
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -149,12 +153,102 @@ def io_write_bytes(pid: int) -> int:
     return 0
 
 
+# --- macOS: the same probes through libproc ---------------------------------
+#
+# No /proc on macOS. `proc_pid_rusage(RUSAGE_INFO_V4)` gives a process's
+# resident size, its physical footprint (private dirty memory plus
+# compressed, what Activity Monitor shows as "Memory"), the footprint's
+# lifetime peak, CPU times in Mach ticks and bytes written to storage;
+# `proc_listchildpids` gives its children. macOS has no PSS and no
+# resident-size high-water mark: the footprint takes their place, and
+# resident size is sampled.
+
+if IS_MAC:
+    import ctypes
+
+    _LIBPROC = ctypes.CDLL("/usr/lib/libproc.dylib")
+
+    class _RUsageV4(ctypes.Structure):
+        _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [(n, ctypes.c_uint64) for n in (
+            "user_time system_time pkg_idle_wkups interrupt_wkups pageins wired_size resident_size "
+            "phys_footprint proc_start_abstime proc_exit_abstime child_user_time child_system_time "
+            "child_pkg_idle_wkups child_interrupt_wkups child_pageins child_elapsed_abstime "
+            "diskio_bytesread diskio_byteswritten cpu_time_qos_default cpu_time_qos_maintenance "
+            "cpu_time_qos_background cpu_time_qos_utility cpu_time_qos_legacy "
+            "cpu_time_qos_user_initiated cpu_time_qos_user_interactive billed_system_time "
+            "serviced_system_time logical_writes lifetime_max_phys_footprint instructions cycles "
+            "billed_energy serviced_energy interval_max_phys_footprint runnable_time").split()]
+
+    class _Timebase(ctypes.Structure):
+        _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+    _TB = _Timebase()
+    ctypes.CDLL("/usr/lib/libSystem.dylib").mach_timebase_info(ctypes.byref(_TB))
+    _TICK_S = _TB.numer / _TB.denom / 1e9
+
+    def mac_rusage(pid: int):
+        r = _RUsageV4()
+        return r if _LIBPROC.proc_pid_rusage(pid, 4, ctypes.byref(r)) == 0 else None  # 4 = RUSAGE_INFO_V4
+
+    def mac_children(pid: int) -> list[int]:
+        buf = (ctypes.c_int * 1024)()
+        n = _LIBPROC.proc_listchildpids(pid, buf, ctypes.sizeof(buf))
+        return [p for p in buf[: max(n, 0)] if p > 0]
+
+    def _mac_proc_tree(root: int) -> list[int]:
+        out, todo = [], [root]
+        while todo:
+            p = todo.pop()
+            if mac_rusage(p) is not None:
+                out.append(p)
+                todo.extend(mac_children(p))
+        return out
+
+    def _ru_kb(pid: int, field: str) -> int:
+        r = mac_rusage(pid)
+        return getattr(r, field) // 1024 if r else 0
+
+    def _mac_status_kb(pid: int, key: str) -> int:
+        """VmRSS only: macOS has no resident-size high-water mark."""
+        return _ru_kb(pid, "resident_size") if key == "VmRSS:" else 0
+
+    def _mac_pss_kb(pid: int) -> int:
+        return 0
+
+    def footprint_kb(pid: int) -> int:
+        return _ru_kb(pid, "phys_footprint")
+
+    def footprint_peak_kb(pid: int) -> int:
+        return _ru_kb(pid, "lifetime_max_phys_footprint")
+
+    def _mac_cpu_s(pid: int) -> float:
+        r = mac_rusage(pid)
+        return (r.user_time + r.system_time + r.child_user_time + r.child_system_time) * _TICK_S if r else 0.0
+
+    def _mac_io_write_bytes(pid: int) -> int:
+        r = mac_rusage(pid)
+        return r.diskio_byteswritten if r else 0
+
+    proc_tree, status_kb, pss_kb, cpu_s, io_write_bytes = _mac_proc_tree, _mac_status_kb, _mac_pss_kb, _mac_cpu_s, _mac_io_write_bytes
+else:
+
+    def footprint_kb(pid: int) -> int:
+        return 0
+
+    def footprint_peak_kb(pid: int) -> int:
+        return 0
+
+
 def tree_rss_mb(root: int) -> float:
     return sum(status_kb(p, "VmRSS:") for p in proc_tree(root)) / 1024
 
 
 def tree_pss_mb(root: int) -> float:
     return sum(pss_kb(p) for p in proc_tree(root)) / 1024
+
+
+def tree_footprint_mb(root: int) -> float:
+    return sum(footprint_kb(p) for p in proc_tree(root)) / 1024
 
 
 def tree_cpu_s(root: int) -> float:
@@ -174,6 +268,7 @@ class Sampler(threading.Thread):
         self.peak_mb = 0.0
         self.hwm_mb = 0.0  # largest sum of the tree's own VmHWM
         self.peak_pss_mb = 0.0  # PSS counts shared pages once; sampled less often (it is costly)
+        self.peak_fp_mb = 0.0  # macOS: largest sum of the tree's lifetime peak footprints
         self._halt = threading.Event()
 
     def run(self) -> None:
@@ -185,6 +280,8 @@ class Sampler(threading.Thread):
             tick += 1
             self.peak_mb = max(self.peak_mb, sum(status_kb(p, "VmRSS:") for p in pids) / 1024)
             self.hwm_mb = max(self.hwm_mb, sum(status_kb(p, "VmHWM:") for p in pids) / 1024)
+            if IS_MAC:
+                self.peak_fp_mb = max(self.peak_fp_mb, sum(footprint_peak_kb(p) for p in pids) / 1024)
             self._halt.wait(self.interval)
 
     def finish(self) -> None:
@@ -379,10 +476,31 @@ def lightpanda_target(binary: str) -> Target:
 # run) every `fetch` process "peaked" at this process's size. This helper
 # stays small (~10 MB, below any browser measured here), so the peak is the
 # browser's own. Protocol: one argv per line (NUL-separated, hex-encoded);
-# reply "exit utime stime maxrss_kb nbytes\n" plus the child's stdout.
+# reply "exit utime stime maxrss_kb footprint_kb nbytes\n" plus the child's
+# stdout. macOS reports ru_maxrss in bytes (Linux in KB); the spawner
+# replies in KB on both. On macOS it also reads the exited child's lifetime
+# peak footprint before reaping it (kqueue NOTE_EXIT, then
+# proc_pid_rusage); on Linux footprint_kb is 0.
 SPAWNER = r"""
 import os, sys
 inp, out = sys.stdin.buffer, sys.stdout.buffer
+MAC = sys.platform == "darwin"
+if MAC:
+    import ctypes, select
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+    RU = (ctypes.c_uint64 * 64)  # rusage_info_v4 is 16 + 36 * 8 bytes; read words by index
+    def peak_fp_kb(pid):
+        kq = select.kqueue()
+        try:
+            kq.control([select.kevent(pid, select.KQ_FILTER_PROC, select.KQ_EV_ADD | select.KQ_EV_ONESHOT, select.KQ_NOTE_EXIT)], 0)
+            kq.control(None, 1, None)
+        except ProcessLookupError:
+            pass  # already exited: a zombie until wait4, rusage is still there
+        finally:
+            kq.close()
+        r = RU()
+        # word 2 + 28: lifetime_max_phys_footprint (after the 16-byte uuid)
+        return r[2 + 28] // 1024 if libproc.proc_pid_rusage(pid, 4, ctypes.byref(r)) == 0 else 0
 for line in inp:
     argv = bytes.fromhex(line.strip().decode()).split(b"\0")
     r, w = os.pipe()
@@ -399,9 +517,11 @@ for line in inp:
             break
         chunks.append(b)
     os.close(r)
+    fp = peak_fp_kb(pid) if MAC else 0
     _, status, ru = os.wait4(pid, 0)
     data = b"".join(chunks)
-    out.write(f"{os.waitstatus_to_exitcode(status)} {ru.ru_utime} {ru.ru_stime} {ru.ru_maxrss} {len(data)}\n".encode())
+    maxrss_kb = ru.ru_maxrss // 1024 if MAC else ru.ru_maxrss
+    out.write(f"{os.waitstatus_to_exitcode(status)} {ru.ru_utime} {ru.ru_stime} {maxrss_kb} {fp} {len(data)}\n".encode())
     out.write(data)
     out.flush()
 """
@@ -410,7 +530,7 @@ for line in inp:
 def run_fetch(t: Target, urls: list[str], expect: list[int]) -> dict:
     """One process per page. Exact CPU and peak RSS come from wait4 rusage,
     taken in a small spawner process (see `SPAWNER`)."""
-    walls, cpus, rss, verified, errors = [], [], [], 0, []
+    walls, cpus, rss, fps, verified, errors = [], [], [], [], 0, []
     with tempfile.TemporaryDirectory(prefix="lbbench-") as tmp:
         env = clean_env(tmp)
         sp = subprocess.Popen([sys.executable, "-I", "-S", "-c", SPAWNER], env=env, cwd=tmp,
@@ -425,11 +545,12 @@ def run_fetch(t: Target, urls: list[str], expect: list[int]) -> dict:
                 sp.stdin.write("\0".join(argv).encode().hex().encode() + b"\n")
                 sp.stdin.flush()
                 head = sp.stdout.readline().split()
-                code, utime, stime, maxrss_kb, n = int(head[0]), float(head[1]), float(head[2]), int(head[3]), int(head[4])
+                code, utime, stime, maxrss_kb, fp_kb, n = int(head[0]), float(head[1]), float(head[2]), int(head[3]), int(head[4]), int(head[5])
                 out = sp.stdout.read(n)
                 walls.append((time.perf_counter() - t0) * 1e3)
                 cpus.append(utime + stime)
-                rss.append(maxrss_kb / 1024)  # KB on Linux
+                rss.append(maxrss_kb / 1024)
+                fps.append(fp_kb / 1024)
                 if code != 0:
                     errors.append(f"{url}: exit {code}")
                 elif f'{MARK}="{want}"'.encode() in out:
@@ -441,13 +562,16 @@ def run_fetch(t: Target, urls: list[str], expect: list[int]) -> dict:
             sp.stdin.close()
             sp.wait()
         leftovers = tree_files(tmp)
-    return {
+    res = {
         "pages": len(urls), "verified": verified, "errors": errors[:5],
         "pages_ms": [round(w, 1) for w in walls],
         "crawl_total_s": total, "page_median_ms": statistics.median(walls), "page_p90_ms": pctl(walls, 90),
         "peak_rss_mb": max(rss), "proc_peak_rss_median_mb": statistics.median(rss),
         "cpu_s": sum(cpus), "disk_files_created": len(leftovers),
     }
+    if IS_MAC:
+        res["peak_footprint_mb"] = max(fps)
+    return res
 
 
 def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: int = 15, settle: float = 1.0) -> dict:
@@ -474,7 +598,10 @@ def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: in
             res["listen_ms"] = (sp.t_listen - sp.t0) * 1e3
             time.sleep(settle)
             res["idle_rss_mb"] = tree_rss_mb(pid)
-            res["idle_pss_mb"] = tree_pss_mb(pid)
+            if IS_MAC:
+                res["idle_footprint_mb"] = tree_footprint_mb(pid)
+            else:
+                res["idle_pss_mb"] = tree_pss_mb(pid)
             tc = time.perf_counter()
             browser = pw.chromium.connect_over_cdp(ws)
             res["connect_ms"] = res["listen_ms"] + (time.perf_counter() - tc) * 1e3
@@ -522,6 +649,8 @@ def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: in
             res["disk_write_bytes"] = tree_write_bytes(pid) - write0
             time.sleep(settle)
             res["after_crawl_rss_mb"] = tree_rss_mb(pid)
+            if IS_MAC:
+                res["after_crawl_footprint_mb"] = tree_footprint_mb(pid)
             res.update(
                 verified=verified, errors=errors[:5], crawl_total_s=total, pages_ms=[round(c, 1) for c in cycle],
                 page_median_ms=statistics.median(cycle) if cycle else None, page_p90_ms=pctl(cycle, 90) if cycle else None,
@@ -538,7 +667,10 @@ def run_cdp(t: Target, pw, urls: list[str], expect: list[int], new_page_reps: in
             # single process and unaffected by the sampling interval; the plain simultaneous sum is kept too.
             res["peak_rss_mb"] = max(sampler.hwm_mb, sampler.peak_mb)
             res["peak_rss_sampled_mb"] = sampler.peak_mb
-            res["peak_pss_mb"] = sampler.peak_pss_mb
+            if IS_MAC:
+                res["peak_footprint_mb"] = sampler.peak_fp_mb
+            else:
+                res["peak_pss_mb"] = sampler.peak_pss_mb
             if browser is not None:
                 try:
                     browser.close()
@@ -600,12 +732,15 @@ def versions(lb: Target, chrome: Target | None, lp: Target | None) -> dict:
     try:
         cpu = next(l.split(":", 1)[1].strip() for l in Path("/proc/cpuinfo").read_text().splitlines() if l.startswith("model name"))
     except (OSError, StopIteration):
-        pass
+        cpu = sh(["sysctl", "-n", "machdep.cpu.brand_string"]) if IS_MAC else ""
     try:
         pw_ver = importlib.metadata.version("playwright")
     except importlib.metadata.PackageNotFoundError:
         pw_ver = "unknown"
-    mem_kb = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1))
+    if IS_MAC:
+        mem_kb = int(sh(["sysctl", "-n", "hw.memsize"]) or 0) // 1024
+    else:
+        mem_kb = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1))
     v = {
         "lightbrowser_git_sha": sha,
         "git_dirty": dirty,
@@ -616,6 +751,7 @@ def versions(lb: Target, chrome: Target | None, lp: Target | None) -> dict:
         "rustc": sh(["rustc", "--version"], ROOT),
         "python": platform.python_version(),
         "kernel": platform.release(),
+        "os": f"{platform.system()} {platform.mac_ver()[0] or platform.release()} {platform.machine()}",
         "cpu": cpu,
         "cores": os.cpu_count(),
         "mem_mb": mem_kb // 1024,
@@ -658,7 +794,7 @@ def budgets(summary: dict, lb_bin_mb: float, realm: dict | None) -> list[dict]:
         add("disk writes (default run)", "none", None, None, "not measured")
     else:
         bad = (files[0] or 0) + (files[1] or 0) + (wb or 0)
-        add("disk writes (default run)", "none", f"files {files[0]}/{files[1]}, write_bytes {wb}", bad == 0, "files left in cwd/HOME/TMPDIR; /proc/PID/io write_bytes during crawl")
+        add("disk writes (default run)", "none", f"files {files[0]}/{files[1]}, write_bytes {wb}", bad == 0, "files left in cwd/HOME/TMPDIR; bytes written to storage during crawl (/proc/PID/io, or proc_pid_rusage on macOS)")
     for mode in ("fetch", "cdp"):
         lb, lp = summary.get(f"{mode}:lightbrowser"), summary.get(f"{mode}:lightpanda")
         for key, label in (("crawl_total_s", "crawl wall time"), ("peak_rss_mb", "peak RSS"), ("cpu_s", "CPU time")):
@@ -675,7 +811,9 @@ def budgets(summary: dict, lb_bin_mb: float, realm: dict | None) -> list[dict]:
 
 REPORT_KEYS = [
     ("crawl_total_s", "crawl total (s)"), ("page_median_ms", "page median (ms)"), ("page_p90_ms", "page p90 (ms)"),
-    ("peak_rss_mb", "peak RSS (MB)"), ("peak_pss_mb", "peak PSS (MB, sampled)"), ("cpu_s", "CPU (s)"), ("idle_rss_mb", "idle RSS (MB)"), ("idle_pss_mb", "idle PSS (MB)"),
+    ("peak_rss_mb", "peak RSS (MB)"), ("peak_pss_mb", "peak PSS (MB, sampled)"), ("peak_footprint_mb", "peak footprint (MB, macOS)"),
+    ("cpu_s", "CPU (s)"), ("idle_rss_mb", "idle RSS (MB)"), ("idle_pss_mb", "idle PSS (MB)"), ("idle_footprint_mb", "idle footprint (MB, macOS)"),
+    ("after_crawl_rss_mb", "RSS after crawl (MB)"), ("after_crawl_footprint_mb", "footprint after crawl (MB, macOS)"),
     ("listen_ms", "start to listening (ms)"), ("connect_ms", "start to CDP connect (ms)"),
     ("first_page_ms", "first new page (ms)"), ("new_page_ms", "new page, median (ms)"),
 ]
@@ -700,7 +838,7 @@ def render_readme(result: dict, history: list[dict]) -> str:
         f"Latest: `{result['file']}` -- {result['date']}, LightBrowser `{v['lightbrowser_git_sha']}`"
         f"{' (dirty tree)' if v['git_dirty'] else ''}, binary sha256 `{v['lightbrowser_binary_sha256']}`, "
         f"{result['runs']} runs x {result['pages']} pages.", "",
-        f"Machine: {v['cpu']}, {v['cores']} cores, {v['mem_mb']} MB RAM, kernel {v['kernel']}. "
+        f"Machine: {v['cpu']}, {v['cores']} cores, {v['mem_mb']} MB RAM, {v.get('os', 'kernel ' + v['kernel'])}. "
         f"Chromium `{v.get('chromium', 'n/a')}`, Playwright (python) {v['playwright_python']}, {v['rustc']}."
         + (f" Lightpanda `{v['lightpanda']}` (binary sha256 `{v.get('lightpanda_binary_sha256', '?')}`), run with telemetry disabled."
            if v.get("lightpanda") else ""), "",
@@ -711,7 +849,9 @@ def render_readme(result: dict, history: list[dict]) -> str:
             L.append(f"| {label} | " + " | ".join(fmt(s[c].get(key)) for c in cols) + " |")
     L.append("| pages verified | " + " | ".join(f"{s[c].get('verified_min', '-')}/{result['pages']}" for c in cols) + " |")
     L += ["", "Fetch rows time one process per page, so they include process start. "
-          "RSS sums over Chromium's processes count shared pages once per process; PSS counts them once. Peak RSS for fetch is the largest single process; for CDP it is the sum of the process tree's own high-water marks (`VmHWM`, read every 50 ms from spawn), which is exact for LightBrowser's single process.", "",
+          "RSS sums over Chromium's processes count shared pages once per process; PSS counts them once. Peak RSS for fetch is the largest single process; for CDP it is the sum of the process tree's own high-water marks (`VmHWM`, read every 50 ms from spawn), which is exact for LightBrowser's single process."
+          + (" On macOS there is no PSS or VmHWM: peak RSS is the sampled sum, and the footprint rows (private memory, as Activity Monitor shows it) use each process's lifetime peak footprint."
+             if any(c in s and "peak_footprint_mb" in s[c] for c in cols) else ""), "",
           "## Binary size", "", "| target | MB |", "|---|---|"]
     for name, mb in result["binary_mb"].items():
         L.append(f"| {name} | {mb:.1f} |")

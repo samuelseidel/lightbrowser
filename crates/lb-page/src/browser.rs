@@ -1,11 +1,12 @@
 //! The browser process: worker threads, each with a `current_thread`
-//! tokio runtime, a `LocalSet` and one JS engine.
+//! tokio runtime, a `LocalSet` and one JS engine. Threads start on demand,
+//! up to [`BrowserOptions::workers`].
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use lb_js::{Engine, EngineOptions};
@@ -20,7 +21,9 @@ use crate::page::{Page, PageState};
 /// Browser-wide options.
 #[derive(Debug, Clone)]
 pub struct BrowserOptions {
-    /// Worker threads (default: available cores).
+    /// Most worker threads (default: available cores). A thread starts when
+    /// a page needs one: the first page, then a page opened while every
+    /// running worker has a page.
     pub workers: usize,
     /// JS heap cap per engine (worker).
     pub max_heap_bytes: Option<usize>,
@@ -129,46 +132,61 @@ impl WorkerState {
 
 /// The browser: worker threads that host pages.
 pub struct Browser {
+    pool: Mutex<Pool>,
+    opts: BrowserOptions,
+    next_page: Arc<AtomicU64>,
+}
+
+/// The worker threads started so far.
+#[derive(Default)]
+struct Pool {
     workers: Vec<WorkerHandle>,
     threads: Vec<JoinHandle<()>>,
-    next_page: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for Browser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Browser")
-            .field("workers", &self.workers.len())
+            .field("workers", &self.started_workers())
+            .field("max_workers", &self.opts.workers)
             .finish()
     }
 }
 
 impl Browser {
-    /// Start the worker threads.
-    pub fn new(opts: BrowserOptions) -> Result<Browser, PageError> {
-        let n = opts.workers.max(1);
-        let mut workers = Vec::with_capacity(n);
-        let mut threads = Vec::with_capacity(n);
-        for i in 0..n {
-            let (tx, rx) = mpsc::unbounded_channel::<Job>();
-            let handle = WorkerHandle {
-                tx,
-                pages: Arc::new(AtomicUsize::new(0)),
-            };
-            let count = handle.pages.clone();
-            let max_heap = opts.max_heap_bytes;
-            let snapshot = opts.startup_snapshot;
-            let t = std::thread::Builder::new()
-                .name(format!("lb-worker-{i}"))
-                .spawn(move || worker_main(rx, count, max_heap, snapshot))
-                .map_err(|e| PageError::Setup(e.to_string()))?;
-            workers.push(handle);
-            threads.push(t);
-        }
+    /// A browser with no worker threads yet: they start as pages need
+    /// them (see [`BrowserOptions::workers`]). An idle browser, such as
+    /// `serve` before its first page, then holds no runtimes, engines or
+    /// thread stacks of its own.
+    pub fn new(mut opts: BrowserOptions) -> Result<Browser, PageError> {
+        opts.workers = opts.workers.max(1);
         Ok(Browser {
-            workers,
-            threads,
+            pool: Mutex::new(Pool::default()),
+            opts,
             next_page: Arc::new(AtomicU64::new(1)),
         })
+    }
+
+    /// Worker threads started so far.
+    pub fn started_workers(&self) -> usize {
+        self.pool.lock().map_or(0, |p| p.workers.len())
+    }
+
+    /// Start worker thread `i`.
+    fn spawn_worker(&self, i: usize) -> Result<(WorkerHandle, JoinHandle<()>), PageError> {
+        let (tx, rx) = mpsc::unbounded_channel::<Job>();
+        let handle = WorkerHandle {
+            tx,
+            pages: Arc::new(AtomicUsize::new(0)),
+        };
+        let count = handle.pages.clone();
+        let max_heap = self.opts.max_heap_bytes;
+        let snapshot = self.opts.startup_snapshot;
+        let t = std::thread::Builder::new()
+            .name(format!("lb-worker-{i}"))
+            .spawn(move || worker_main(rx, count, max_heap, snapshot))
+            .map_err(|e| PageError::Setup(e.to_string()))?;
+        Ok((handle, t))
     }
 
     /// Open a page in `ctx`, pinned to the least loaded worker.
@@ -187,13 +205,29 @@ impl Browser {
         Page::open_unstarted(worker, id, ctx.clone()).await
     }
 
+    /// The least loaded worker (the first of equals). A new thread starts
+    /// only when every running worker has a page and fewer than the
+    /// maximum run, so pages land where they would if all threads had
+    /// started at once.
     fn pick_worker(&self) -> Result<WorkerHandle, PageError> {
-        let worker = self
+        let mut pool = self.pool.lock().map_err(|_| PageError::Closed)?;
+        let least = pool
             .workers
             .iter()
             .min_by_key(|w| w.pages.load(Ordering::Relaxed))
-            .ok_or(PageError::Closed)?
-            .clone();
+            .filter(|w| {
+                w.pages.load(Ordering::Relaxed) == 0 || pool.workers.len() >= self.opts.workers
+            })
+            .cloned();
+        let worker = match least {
+            Some(w) => w,
+            None => {
+                let (w, t) = self.spawn_worker(pool.workers.len())?;
+                pool.workers.push(w.clone());
+                pool.threads.push(t);
+                w
+            }
+        };
         worker.pages.fetch_add(1, Ordering::Relaxed);
         Ok(worker)
     }
@@ -216,10 +250,11 @@ impl Browser {
     }
 
     fn stop(&mut self) {
-        for w in self.workers.drain(..) {
+        let pool = std::mem::take(self.pool.get_mut().unwrap_or_else(|e| e.into_inner()));
+        for w in pool.workers {
             let _ = w.send(Box::new(|ws| ws.stop.set(true)));
         }
-        for t in self.threads.drain(..) {
+        for t in pool.threads {
             let _ = t.join();
         }
     }

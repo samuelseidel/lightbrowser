@@ -181,6 +181,14 @@ pub(crate) async fn navigate_committed(
         post,
         user_activated,
     } = target;
+    // `beforeunload` of the document being left: if the user chose to stay
+    // (a dismissed dialog), the navigation stops here.
+    if let Some(old) = page.window()
+        && !with_js(&ws, &old, |js| old.before_unload(js)).unwrap_or(true)
+    {
+        let _ = committed.send(Err(PageError::Aborted));
+        return Err(PageError::Aborted);
+    }
     let seq = page.nav_seq.get() + 1;
     page.nav_seq.set(seq);
     page.loading.set(true);
@@ -310,6 +318,11 @@ pub(crate) async fn navigate_committed(
         },
     );
     w.set_console_sink(Some(page.console_sink()));
+    w.set_opened_parser_end(Some(opened_parser_end(&ws, &page, Doc::Main(seq))));
+    w.set_dialog_host(Some(page.dialog_host()));
+    w.set_permissions(Some(page.ctx.permissions().clone()));
+    w.set_geolocation(Some(page.geolocation.clone()));
+    w.set_drag_intercept(Some(page.drag_intercept()));
     w.set_worker_host(Some(crate::worker::Workers::host(
         &page.ctx,
         page.agent().map(|a| a.target.clone()),
@@ -458,6 +471,47 @@ fn current(page: &PageState, w: &Rc<Window>, doc: Doc) -> bool {
         Doc::Frame(_) => true,
     };
     seq_ok && !w.is_closed() && !page.closed.get()
+}
+
+/// The end of parsing for a document that `document.open()` emptied and
+/// `document.close()` finished: `close()` fires its events (as in Chrome),
+/// this reports each as a lifecycle event (Playwright's `setContent`
+/// writes the page this way and waits for them) and, when loads the
+/// written markup started still delay the load event, finishes the load
+/// once they are done.
+pub(crate) fn opened_parser_end(
+    ws: &Rc<WorkerState>,
+    page: &Rc<PageState>,
+    doc: Doc,
+) -> lb_webapi::rt::OpenedParserEnd {
+    use lb_webapi::rt::OpenedEnd;
+    let (ws, page) = (Rc::downgrade(ws), Rc::downgrade(page));
+    Rc::new(move |w: &Rc<Window>, point| {
+        let Some(p) = page.upgrade() else {
+            return;
+        };
+        match point {
+            OpenedEnd::DomContentLoaded => doc_event(&p, doc, "DOMContentLoaded"),
+            OpenedEnd::Load => {
+                doc_event(&p, doc, "load");
+                p.notify.notify_one();
+            }
+            OpenedEnd::LoadsPending => {
+                let Some(ws) = ws.upgrade() else {
+                    return;
+                };
+                let w = w.clone();
+                tokio::task::spawn_local(async move {
+                    if wait_for(&p, &w, doc, |w| w.pending_loads.get() == 0)
+                        .await
+                        .is_ok()
+                    {
+                        with_js(&ws, &w, |js| script::finish_opened_load(js, &w));
+                    }
+                });
+            }
+        }
+    })
 }
 
 /// A lifecycle point of `doc`.

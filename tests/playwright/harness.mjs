@@ -103,8 +103,8 @@ after(async () => {
 /** A fresh context (persona viewport) and page. */
 export async function newPage() {
   const { browser } = await env();
-  // viewport: null keeps the persona's own window size; Playwright's
-  // default 1280x720 screen would contradict the persona and be refused.
+  // viewport: null keeps the persona's own window size (Playwright's
+  // default 1280x720 viewport also works: ADR 0009, revision 2).
   const context = await browser.newContext({ viewport: null });
   const page = await context.newPage();
   return { context, page };

@@ -71,6 +71,12 @@ pub(crate) enum NavObj {
     Bluetooth,
     /// WebGPU objects (`gpu`).
     Gpu(Box<super::gpu::GpuObj>),
+    /// `navigator.geolocation`.
+    Geolocation,
+    /// A `GeolocationPosition` (its coordinates and timestamp).
+    GeoPosition(super::GeoOverride, f64),
+    GeoCoordinates(super::GeoOverride),
+    GeoError(u16, &'static str),
 }
 
 impl NavObj {
@@ -105,6 +111,10 @@ impl NavObj {
             NavObj::KeyboardLayoutMap => "KeyboardLayoutMap",
             NavObj::Bluetooth => "Bluetooth",
             NavObj::Gpu(g) => g.iface_name(),
+            NavObj::Geolocation => "Geolocation",
+            NavObj::GeoPosition(..) => "GeolocationPosition",
+            NavObj::GeoCoordinates(_) => "GeolocationCoordinates",
+            NavObj::GeoError(..) => "GeolocationPositionError",
         }
     }
 }
@@ -802,6 +812,10 @@ fn persona_state(w: &Window, name: &str, default: &str) -> String {
     } else {
         name
     };
+    // A state a CDP client granted or set comes first.
+    if let Some(s) = w.permission_override(key) {
+        return s;
+    }
     profile(w)
         .and_then(|p| p.permissions.get(key))
         .filter(|s| matches!(s.as_str(), "granted" | "denied" | "prompt"))
@@ -1782,6 +1796,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_ua_data(reg, rt);
     register_connection(reg, rt);
     register_permissions(reg, rt);
+    register_geolocation(reg, rt);
     register_battery(reg, rt);
     register_media(reg, rt);
     register_speech(reg, rt);
@@ -2055,6 +2070,276 @@ fn register_os_apis(reg: &mut Registry, rt: &Runtime) {
                 "User cancelled the requestDevice() chooser.",
             ),
         )
+    });
+}
+
+/// What a request answered now ends in (see `register_geolocation`).
+fn geo_outcome(w: &Window, timeout: f64) -> GeoOutcome {
+    if !super::is_secure_url(&w.url()) {
+        return GeoOutcome::Error(
+            1,
+            "Only secure origins are allowed (see: https://goo.gl/Y0ZkNV).",
+        );
+    }
+    match persona_state(w, "geolocation", "prompt").as_str() {
+        "granted" => match w.geolocation.borrow().as_ref().and_then(|c| c.get()) {
+            Some(p) => GeoOutcome::Position(p),
+            None if timeout.is_finite() => GeoOutcome::TimeoutAfter(timeout.max(0.0)),
+            None => GeoOutcome::Pending,
+        },
+        "denied" => GeoOutcome::Error(1, "User denied Geolocation"),
+        _ => GeoOutcome::Pending,
+    }
+}
+
+/// Call a success or error callback with a position or an error.
+fn geo_call(
+    js: &mut dyn super::Js,
+    w: &Rc<Window>,
+    success: lb_js::Handle,
+    error_cb: Option<lb_js::Handle>,
+    result: Result<super::GeoOverride, (u16, &'static str)>,
+) {
+    let call = match result {
+        Ok(p) => {
+            let now = (w.clock.time_origin + w.clock.now()).floor();
+            Some((success, new_nav_obj(w, NavObj::GeoPosition(p, now))))
+        }
+        Err((code, msg)) => error_cb.map(|e| (e, new_nav_obj(w, NavObj::GeoError(code, msg)))),
+    };
+    if let Some((f, arg)) = call
+        && let Err(e) = js.call(f, Arg::Undefined, &[arg])
+    {
+        w.report_exception(js, &e);
+    }
+}
+
+/// The page's position changed: every watch of `w` that may see it gets
+/// the new one.
+pub(crate) fn geo_moved(w: &Rc<Window>, p: super::GeoOverride) {
+    if w.geo_watches.borrow().is_empty()
+        || !matches!(geo_outcome(w, f64::INFINITY), GeoOutcome::Position(_))
+    {
+        return;
+    }
+    w.queue_task(
+        super::TaskSource::Networking,
+        Box::new(move |js, w| {
+            let watches: Vec<_> = w.geo_watches.borrow().values().copied().collect();
+            for (s, e) in watches {
+                geo_call(js, w, s, e, Ok(p));
+            }
+        }),
+    );
+}
+
+/// What a geolocation request ends in.
+enum GeoOutcome {
+    Position(super::GeoOverride),
+    Error(u16, &'static str),
+    /// After `timeout` ms: a `TIMEOUT` error.
+    TimeoutAfter(f64),
+    /// No answer, as when a permission prompt is never answered.
+    Pending,
+}
+
+/// `navigator.geolocation` as Chrome answers it: insecure origins and a
+/// denied permission get `PERMISSION_DENIED`; while the permission is
+/// still `prompt` the request waits (a prompt nobody answers); when it is
+/// granted (`Browser.grantPermissions`) the position is the page's
+/// `Emulation.setGeolocationOverride`, and without one the request ends
+/// in `TIMEOUT` after its `timeout` (the persona has no position).
+fn register_geolocation(reg: &mut Registry, rt: &Runtime) {
+    getter(reg, rt, "Navigator", "geolocation", |cx, w| {
+        this_obj(cx)?;
+        cx.ret(single(w, "nav:geolocation", 0, || NavObj::Geolocation))
+    });
+    fn request(
+        cx: &mut CallCtx<'_, '_, '_>,
+        w: &Rc<Window>,
+        op: &str,
+        watch: bool,
+    ) -> Result<u32, HostError> {
+        this_nav(cx, w, |o| matches!(o, NavObj::Geolocation).then_some(()))?;
+        need_args(cx, 1, op, "Geolocation")?;
+        if cx.arg_kind(0) != ValueKind::Function {
+            return Err(HostError::type_error(format!(
+                "Failed to execute '{op}' on 'Geolocation': parameter 1 is not of type 'Function'."
+            )));
+        }
+        let error_cb = match cx.len().gt(&1).then(|| cx.arg_kind(1)) {
+            None | Some(ValueKind::Undefined | ValueKind::Null) => None,
+            Some(ValueKind::Function) => Some(cx.arg_handle(1)),
+            Some(_) => {
+                return Err(HostError::type_error(format!(
+                    "Failed to execute '{op}' on 'Geolocation': parameter 2 is not of type 'Function'."
+                )));
+            }
+        };
+        let d = Dict::arg(cx, 2);
+        let timeout = d.number(cx, "timeout")?.unwrap_or(f64::INFINITY);
+        d.release(cx);
+        let success = cx.arg_handle(0);
+        // A watch keeps its callbacks until clearWatch and hears about every
+        // new position (see `geo_moved`).
+        let id = if watch {
+            let id = w.geo_next_watch.get();
+            w.geo_next_watch.set(id + 1);
+            w.geo_watches.borrow_mut().insert(id, (success, error_cb));
+            if let Some(c) = w.geolocation.borrow().as_ref() {
+                c.watch(w);
+            }
+            id
+        } else {
+            0
+        };
+        let outcome = geo_outcome(w, timeout);
+        let deliver =
+            move |js: &mut dyn super::Js,
+                  w: &Rc<Window>,
+                  result: Result<super::GeoOverride, (u16, &'static str)>| {
+                let (success, error_cb) = if watch {
+                    match w.geo_watches.borrow().get(&id).copied() {
+                        Some(cbs) => cbs,
+                        None => return,
+                    }
+                } else {
+                    (success, error_cb)
+                };
+                geo_call(js, w, success, error_cb, result);
+                if !watch {
+                    js.release(success);
+                    if let Some(e) = error_cb {
+                        js.release(e);
+                    }
+                }
+            };
+        match outcome {
+            GeoOutcome::Position(p) => w.queue_task(
+                super::TaskSource::Networking,
+                Box::new(move |js, w| deliver(js, w, Ok(p))),
+            ),
+            GeoOutcome::Error(code, msg) => w.queue_task(
+                super::TaskSource::Networking,
+                Box::new(move |js, w| deliver(js, w, Err((code, msg)))),
+            ),
+            GeoOutcome::TimeoutAfter(ms) => {
+                w.add_timer(
+                    super::TimerCallback::Task(Some(Box::new(move |js, w| {
+                        deliver(js, w, Err((3, "Timeout expired")))
+                    }))),
+                    ms,
+                    Vec::new(),
+                    false,
+                );
+            }
+            GeoOutcome::Pending if !watch => {
+                cx.release(success);
+                if let Some(e) = error_cb {
+                    cx.release(e);
+                }
+            }
+            GeoOutcome::Pending => {}
+        }
+        Ok(id)
+    }
+    method(reg, rt, "Geolocation", "getCurrentPosition", |cx, w| {
+        request(cx, w, "getCurrentPosition", false)?;
+        Ok(())
+    });
+    method(reg, rt, "Geolocation", "watchPosition", |cx, w| {
+        let id = request(cx, w, "watchPosition", true)?;
+        cx.ret(f64::from(id))
+    });
+    method(reg, rt, "Geolocation", "clearWatch", |cx, w| {
+        this_nav(cx, w, |o| matches!(o, NavObj::Geolocation).then_some(()))?;
+        need_args(cx, 1, "clearWatch", "Geolocation")?;
+        let id = cx.arg_f64(0)?;
+        if id.is_finite() && id >= 0.0 {
+            let cbs = w.geo_watches.borrow_mut().remove(&(id as u32));
+            if let Some((s, e)) = cbs {
+                cx.release(s);
+                if let Some(e) = e {
+                    cx.release(e);
+                }
+            }
+        }
+        Ok(())
+    });
+    getter(reg, rt, "GeolocationPosition", "coords", |cx, w| {
+        let p = this_nav(cx, w, |o| match o {
+            NavObj::GeoPosition(p, _) => Some(*p),
+            _ => None,
+        })?;
+        cx.ret(new_nav_obj(w, NavObj::GeoCoordinates(p)))
+    });
+    getter(reg, rt, "GeolocationPosition", "timestamp", |cx, w| {
+        let t = this_nav(cx, w, |o| match o {
+            NavObj::GeoPosition(_, t) => Some(*t),
+            _ => None,
+        })?;
+        cx.ret(t)
+    });
+    for (name, field) in [
+        ("latitude", 0u8),
+        ("longitude", 1),
+        ("accuracy", 2),
+        ("altitude", 3),
+        ("altitudeAccuracy", 3),
+        ("heading", 3),
+        ("speed", 3),
+    ] {
+        getter(reg, rt, "GeolocationCoordinates", name, move |cx, w| {
+            let p = this_nav(cx, w, |o| match o {
+                NavObj::GeoCoordinates(p) => Some(*p),
+                _ => None,
+            })?;
+            match field {
+                0 => cx.ret(p.latitude),
+                1 => cx.ret(p.longitude),
+                2 => cx.ret(p.accuracy),
+                _ => cx.ret(Arg::Null),
+            }
+        });
+    }
+    // `toJSON`, with Chrome's member order.
+    fn coords_json(p: &super::GeoOverride) -> String {
+        format!(
+            "{{\"accuracy\":{},\"latitude\":{},\"longitude\":{},\"altitude\":null,\"altitudeAccuracy\":null,\"heading\":null,\"speed\":null}}",
+            p.accuracy, p.latitude, p.longitude
+        )
+    }
+    method(reg, rt, "GeolocationCoordinates", "toJSON", |cx, w| {
+        let p = this_nav(cx, w, |o| match o {
+            NavObj::GeoCoordinates(p) => Some(*p),
+            _ => None,
+        })?;
+        cx.ret(Arg::Json(coords_json(&p)))
+    });
+    method(reg, rt, "GeolocationPosition", "toJSON", |cx, w| {
+        let (p, t) = this_nav(cx, w, |o| match o {
+            NavObj::GeoPosition(p, t) => Some((*p, *t)),
+            _ => None,
+        })?;
+        // Chrome lists `timestamp` first.
+        cx.ret(Arg::Json(format!(
+            "{{\"timestamp\":{t},\"coords\":{}}}",
+            coords_json(&p)
+        )))
+    });
+    getter(reg, rt, "GeolocationPositionError", "code", |cx, w| {
+        let c = this_nav(cx, w, |o| match o {
+            NavObj::GeoError(c, _) => Some(*c),
+            _ => None,
+        })?;
+        cx.ret(f64::from(c))
+    });
+    getter(reg, rt, "GeolocationPositionError", "message", |cx, w| {
+        let m = this_nav(cx, w, |o| match o {
+            NavObj::GeoError(_, m) => Some(*m),
+            _ => None,
+        })?;
+        cx.ret(m)
     });
 }
 

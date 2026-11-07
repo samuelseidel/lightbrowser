@@ -55,7 +55,7 @@ CDP wall 0.67 vs 0.77 / 0.76 s, `fetch` peak RSS 23.72 / 23.79 vs 24.36 /
 | 0006 | Two browser families, one binary per family |
 | 0007 | Our own local detection bench (`tests/detect-bench`) is the detection engine for M4/M5 |
 | 0008 | Host objects are `(kind, id)` pairs with a per-realm wrapper cache (no weak wrappers yet); node refs revised by 0017 |
-| 0009 | CDP bindings only in isolated worlds; `Emulation.*` must match the persona (clients pass `viewport: null`) |
+| 0009 | CDP bindings only in isolated worlds; `Emulation.*` must match the persona (Playwright's implicit 1280x720 viewport keeps the persona's screen and ratio, revision 2; media emulation applied as the client asks, revision 3) |
 | 0010 | Own box tree over taffy; font metric tables compiled in from `profiles/fonts` |
 | 0011 | Request headers per destination from `profiles/headers`, captured from local Chromium; own HTTP/1.1 writer |
 | 0012 | Each frame is a realm in the page's engine, built synchronously through `lb_js::RealmOps`; origins via V8 security tokens |
@@ -80,6 +80,9 @@ CDP wall 0.67 vs 0.77 / 0.76 s, `fetch` peak RSS 23.72 / 23.79 vs 24.36 /
 | 0032 | Shape the whole connection (IP ID, SYN retransmits), not only the SYN |
 | 0033 | Public data is the source of truth for TCP profiles |
 | 0034 | Console calls run the page code Chrome runs, and no other |
+| 0035 | Page worker threads start on demand, up to one per core: a new one only when every running worker has a page |
+| 0036 | JavaScript dialogs are reported over CDP and block the page's worker until `Page.handleJavaScriptDialog` (only while a session has the Page domain on) |
+| 0037 | Playwright file uploads, permission overrides per context, geolocation, HTML drag and drop with drag interception, `Page.printToPDF` as images of a print-width layout |
 | 0025 | Web Crypto on BoringSSL with Blink's normalization and Chromium's status texts (randomness from the OS CSPRNG); WebSocket through lb-net's own client with Chrome's handshake and an http/1.1-only ClientHello; dynamic `import()` through an engine hook sharing the module map; `blob:`/`data:` in `fetch()`/XHR; synchronous XHR blocking the calling thread |
 
 ## Layers
@@ -226,8 +229,10 @@ personas (ROADMAP, Risks).
 
 ## Process and threading model
 
-- **One process.** It has N worker threads (default: number of cores), the
-  CDP I/O thread and, started on first use, one network thread
+- **One process.** It has up to N worker threads (default: number of
+  cores), started as pages need them (ADR 0035: the first page starts
+  one, a page opened while every running worker has a page starts
+  another), the CDP I/O thread and, started on first use, one network thread
   (`lb_net::pool::net_runtime`) that drives every pooled connection, as
   Chrome's network service does, so pages of one context on different
   workers share connections (ADR 0018). `lightbrowser fetch` (one page)
@@ -349,14 +354,15 @@ Steps are in `tests/README.md`. Both modes use our own local server only.
 
 ## CDP surface (what Playwright needs)
 
-- **Browser:** getVersion, close, setDownloadBehavior
+- **Browser:** getVersion, close, setDownloadBehavior, grantPermissions, resetPermissions, setPermission (overrides per context, ADR 0037)
 - **Target:** setAutoAttach (flatten), createBrowserContext, disposeBrowserContext, createTarget, attachToTarget, closeTarget, getTargets, setDiscoverTargets
-- **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014)
+- **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014), javascriptDialogOpening / Closed and handleJavaScriptDialog (ADR 0036), printToPDF (images of a print-width layout, ADR 0037)
 - **Runtime:** enable, evaluate, callFunctionOn, getProperties, releaseObject, executionContextCreated / Destroyed, consoleAPICalled
-- **DOM:** getDocument, describeNode, resolveNode, getBoxModel, getContentQuads, scrollIntoViewIfNeeded, setFileInputFiles
-- **Input:** dispatchMouseEvent, dispatchKeyEvent, insertText
+- **DOM:** getDocument, describeNode, resolveNode, getBoxModel, getContentQuads, scrollIntoViewIfNeeded, setFileInputFiles (ADR 0037)
+- **Input:** dispatchMouseEvent, dispatchKeyEvent, insertText, setInterceptDrags, dispatchDragEvent, dragIntercepted (ADR 0037)
+- **IO:** read, close (streams of `Page.printToPDF`)
 - **Network / Fetch:** enable, setExtraHTTPHeaders, getCookies, setCookies, requestPaused, continueRequest, fulfillRequest
-- **Emulation:** setDeviceMetricsOverride, setUserAgentOverride, setTimezoneOverride, setLocaleOverride. These are checked against the persona, and conflicts are rejected. setDefaultBackgroundColorOverride only affects screenshots.
+- **Emulation:** setDeviceMetricsOverride, setUserAgentOverride, setTimezoneOverride, setLocaleOverride, setGeolocationOverride (ADR 0037), setEmulatedMedia (applied as asked, ADR 0009 revision 3). These are checked against the persona, and conflicts are rejected. setDefaultBackgroundColorOverride only affects screenshots.
 - **Accessibility:** getFullAXTree, queryAXTree (for `getByRole`)
 - **Custom `LightBrowser.*`:** setPersona, humanMove, humanClick, humanType, humanScroll (page sessions; generated by lb-behavior, replayed as trusted input on the real or virtual clock, selectors resolved from Rust), fingerprintReport (live surface vs persona, collected in a throwaway isolated world; also `lightbrowser fingerprint-report`)
 
@@ -381,7 +387,7 @@ process and is controlled over CDP.
 - No paint layers or compositor. A screenshot builds a display list from the current layout, paints it and drops it (ADR 0014).
 - JS heap cap per engine (512 MB). The engine gets a low-memory notification when a page's event loop has been quiet for 2 s, and one memory-reducing full GC (V8's critical memory-pressure path) when a worker's queue drains after a page closed.
 - Window realms come from the startup snapshot: about 1.6 MB of V8 heap each, with far less garbage than building them. A realm built without the snapshot (one-page `fetch`) defines the global's ~1,200 members after context creation, which is linear; V8's template instantiation of them was O(n²).
-- ICU data (10.9 MB) is paged in by 128 KiB chunk when ICU first reads it; a page load makes about 0.6 MB resident.
+- ICU data (10.9 MB) is paged in when ICU first reads it, on Linux and macOS (ADR 0013 revisions 3-5): one 4 KiB chunk per fault, or one 16 KiB page (four chunks) on Apple silicon; a page load makes about 0.1 MB resident on Linux. Elsewhere it is decompressed at once.
 - Font metric tables and the UA stylesheet are parsed once per worker and OS (`lb_layout::LayoutBase`), not per document.
 - HTTP cache in memory, bounded LRU, partitioned per context. Nothing goes to disk unless `--cache-dir` is given.
 - Fonts: metric tables only (advance widths, ascent/descent) for persona fonts. Glyph outline packs (205 KB, compiled in) are parsed only when a canvas draws or measures text.

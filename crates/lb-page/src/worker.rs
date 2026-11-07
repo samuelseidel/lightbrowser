@@ -324,6 +324,8 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
     }
     w.set_sw_host(Some(crate::sw::host(&ctx)));
     w.set_idb_backend(Some(ctx.idb().clone()));
+    // Permission states a CDP client granted apply to workers too.
+    w.set_permissions(Some(ctx.permissions().clone()));
     let sw_version = service.as_ref().map(|s| s.version);
     let evaluated = service.map(|s| {
         w.init_sw_scope(s.version, s.registration);

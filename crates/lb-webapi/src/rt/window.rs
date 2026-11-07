@@ -912,8 +912,47 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         Ok(())
     });
     getter(reg, rt, "Window", "status", |cx, _w| cx.ret(""));
+    // Dialogs: shown by the dialog host (a CDP client that handles them,
+    // see `Window::set_dialog_host`); WebIDL defaults for the messages
+    // (`alert()` shows "", `undefined` is "" for `confirm` and `prompt`).
+    method(reg, rt, "Window", "alert", |cx, w| {
+        let message = if cx.is_empty() {
+            String::new()
+        } else {
+            cx.arg_string(0)?
+        };
+        w.dialog(&super::DialogRequest {
+            kind: "alert",
+            message,
+            default_prompt: None,
+        });
+        Ok(())
+    });
+    method(reg, rt, "Window", "confirm", |cx, w| {
+        let message = super::opt_string(cx, 0)?.unwrap_or_default();
+        let accepted = w
+            .dialog(&super::DialogRequest {
+                kind: "confirm",
+                message,
+                default_prompt: None,
+            })
+            .is_some_and(|a| a.accept);
+        cx.ret(accepted)
+    });
+    method(reg, rt, "Window", "prompt", |cx, w| {
+        let message = super::opt_string(cx, 0)?.unwrap_or_default();
+        let default = super::opt_string(cx, 1)?.unwrap_or_default();
+        let answer = w.dialog(&super::DialogRequest {
+            kind: "prompt",
+            message,
+            default_prompt: Some(default.clone()),
+        });
+        match answer {
+            Some(a) if a.accept => cx.ret(a.text.unwrap_or(default)),
+            _ => cx.ret(Arg::Null),
+        }
+    });
     for name in [
-        "alert",
         "print",
         "stop",
         "focus",
@@ -924,8 +963,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     ] {
         method(reg, rt, "Window", name, |_cx, _w| Ok(()));
     }
-    method(reg, rt, "Window", "confirm", |cx, _w| cx.ret(false));
-    method(reg, rt, "Window", "prompt", |cx, _w| cx.ret(Arg::Null));
     method(reg, rt, "Window", "open", |cx, _w| cx.ret(Arg::Null));
     method(reg, rt, "Window", "getSelection", |cx, _w| {
         cx.ret(Arg::Null)

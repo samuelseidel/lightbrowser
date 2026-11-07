@@ -620,7 +620,11 @@ pub(crate) fn unpack(
                 HostRef::new(K_OBJ, port_ids.get(i).copied().unwrap_or(0)),
             ),
             HostEntry::Blob(bytes, type_) => {
-                let id = w.new_obj(Obj::Blob(Box::new(BlobData { bytes, type_ })));
+                let id = w.new_obj(Obj::Blob(Box::new(BlobData {
+                    bytes,
+                    type_,
+                    file: None,
+                })));
                 (w.rt.iface("Blob"), HostRef::new(K_OBJ, id))
             }
             HostEntry::Key(k) => {
@@ -1377,7 +1381,11 @@ fn structured_clone(
                 HostRef::new(K_OBJ, port_ids.get(i).copied().unwrap_or(0)),
             ),
             HostEntry::Blob(bytes, type_) => {
-                let id = w.new_obj(Obj::Blob(Box::new(BlobData { bytes, type_ })));
+                let id = w.new_obj(Obj::Blob(Box::new(BlobData {
+                    bytes,
+                    type_,
+                    file: None,
+                })));
                 (w.rt.iface("Blob"), HostRef::new(K_OBJ, id))
             }
             HostEntry::Key(k) => {

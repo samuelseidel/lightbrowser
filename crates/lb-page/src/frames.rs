@@ -223,6 +223,15 @@ async fn navigate_frame(
             return;
         }
     }
+    w.set_dialog_host(Some(page.dialog_host()));
+    w.set_permissions(Some(page.ctx.permissions().clone()));
+    w.set_geolocation(Some(page.geolocation.clone()));
+    w.set_drag_intercept(Some(page.drag_intercept()));
+    w.set_opened_parser_end(Some(crate::nav::opened_parser_end(
+        &ws,
+        &page,
+        crate::nav::Doc::Frame(id),
+    )));
     w.start_parser();
     if let Some(a) = page.agent() {
         a.frame_lifecycle(id, "init");

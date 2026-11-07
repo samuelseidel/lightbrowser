@@ -49,6 +49,9 @@ pub(crate) struct PageState {
     pub id: u64,
     pub ctx: BrowserContext,
     pub window: RefCell<Option<Rc<Window>>>,
+    /// The page's geolocation override, shared by all its windows
+    /// (`Emulation.setGeolocationOverride`).
+    pub geolocation: lb_webapi::rt::GeoCell,
     /// Wakes the event loop.
     pub notify: Rc<Notify>,
     /// Wakes code waiting for subresource loads.
@@ -156,6 +159,39 @@ impl PageState {
         Rc::new(move || {
             n.notify_one();
             l.notify_waiters();
+        })
+    }
+
+    /// Shows this page's JavaScript dialogs through its CDP agent (see
+    /// `Agent::dialog`); without an agent they return at once.
+    pub(crate) fn dialog_host(self: &Rc<Self>) -> lb_webapi::rt::DialogHost {
+        let me = Rc::downgrade(self);
+        Rc::new(move |w, req| me.upgrade()?.agent()?.dialog(w, req))
+    }
+
+    /// Sends a drag that started to the CDP client when it intercepts drags
+    /// (`Input.dragIntercepted`); otherwise the drag runs on mouse input.
+    pub(crate) fn drag_intercept(self: &Rc<Self>) -> lb_webapi::rt::input::DragIntercept {
+        let me = Rc::downgrade(self);
+        Rc::new(move |data| {
+            let Some(a) = me.upgrade().and_then(|p| p.agent()) else {
+                return false;
+            };
+            if !a.st.borrow().intercept_drags {
+                return false;
+            }
+            let items: Vec<serde_json::Value> = data
+                .items
+                .iter()
+                .map(|(t, d)| serde_json::json!({ "mimeType": t, "data": d }))
+                .collect();
+            a.emit(lb_cdp::PageEvent::DragIntercepted {
+                data: serde_json::json!({
+                    "items": items,
+                    "dragOperationsMask": data.operations,
+                }),
+            });
+            true
         })
     }
 
@@ -444,6 +480,7 @@ impl Page {
                     id,
                     ctx: c2,
                     window: RefCell::new(None),
+                    geolocation: Rc::default(),
                     notify: Rc::new(Notify::new()),
                     loads: Rc::new(Notify::new()),
                     life: life_tx,
@@ -542,6 +579,15 @@ impl Page {
                 f(ws, &p);
             }
         }))
+    }
+
+    /// Set or clear the page's geolocation (every window of it, and the
+    /// documents it loads later).
+    pub(crate) fn set_geolocation(
+        &self,
+        pos: Option<lb_webapi::rt::GeoOverride>,
+    ) -> Result<(), PageError> {
+        self.post(move |_, p| p.geolocation.set(pos))
     }
 
     /// The context this page belongs to.

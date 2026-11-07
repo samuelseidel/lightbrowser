@@ -451,6 +451,7 @@ fn host_entries(w: &Window, v: &Value) -> Vec<(InterfaceId, HostRef)> {
             let id = w.new_obj(Obj::Blob(Box::new(BlobData {
                 bytes: bytes.clone(),
                 type_: type_.clone(),
+                file: None,
             })));
             (w.rt.iface("Blob"), HostRef::new(K_OBJ, id))
         })

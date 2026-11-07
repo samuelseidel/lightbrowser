@@ -252,6 +252,22 @@ impl LayoutEngine {
         self.stats
     }
 
+    /// Media a CDP client asked for, on top of the persona's environment
+    /// (an empty set restores the persona's values).
+    pub fn set_media_overrides(&mut self, o: &lb_css::MediaOverrides) {
+        let mut env = match &self.persona {
+            Some(p) => MediaEnv::from_persona(p),
+            None => self.styles.env().clone(),
+        };
+        env.viewport_width = self.viewport.0;
+        env.viewport_height = self.viewport.1;
+        o.apply(&mut env);
+        if *self.styles.env() != env {
+            self.styles.set_env(env);
+            self.state = None;
+        }
+    }
+
     /// Resizes the viewport (and media environment).
     pub fn set_viewport(&mut self, width: f32, height: f32) {
         self.viewport = (width, height);

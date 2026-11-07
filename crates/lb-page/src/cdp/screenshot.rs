@@ -358,3 +358,272 @@ mod tests {
         assert_eq!(e.0, "Cannot take screenshot with 0 width.");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Page.printToPDF
+// ---------------------------------------------------------------------------
+
+/// Parsed `Page.printToPDF` parameters (inches, as in CDP).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PrintRequest {
+    pub paper: (f64, f64),
+    /// Top, right, bottom, left.
+    pub margins: [f64; 4],
+    pub scale: f64,
+    pub ranges: Option<String>,
+}
+
+impl PrintRequest {
+    pub(crate) fn parse(p: &Value) -> HostResult<PrintRequest> {
+        let num = |k: &str, default: f64| p.get(k).and_then(Value::as_f64).unwrap_or(default);
+        // Letter and Chrome's default margins (1 cm).
+        let (mut w, mut h) = (num("paperWidth", 8.5), num("paperHeight", 11.0));
+        if p.get("landscape").and_then(Value::as_bool) == Some(true) {
+            std::mem::swap(&mut w, &mut h);
+        }
+        let m = |k: &str| num(k, 0.393_700_787_4);
+        let margins = [
+            m("marginTop"),
+            m("marginRight"),
+            m("marginBottom"),
+            m("marginLeft"),
+        ];
+        let scale = num("scale", 1.0);
+        if !(0.1..=2.0).contains(&scale) {
+            return Err(HostError::new("scale is outside of range [0.1, 2]"));
+        }
+        if w <= 0.0 || h <= 0.0 {
+            return Err(HostError::new(
+                "invalid print parameters: content area is empty",
+            ));
+        }
+        if margins[1] + margins[3] >= w || margins[0] + margins[2] >= h {
+            return Err(HostError::new(
+                "invalid print parameters: content area is empty",
+            ));
+        }
+        let ranges = p
+            .get("pageRanges")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_owned);
+        Ok(PrintRequest {
+            paper: (w, h),
+            margins,
+            scale,
+            ranges,
+        })
+    }
+}
+
+/// The 1-based pages of `ranges` ("1-3, 5, 8-") out of `count`, in order.
+fn page_ranges(ranges: &str, count: usize) -> HostResult<Vec<usize>> {
+    let invalid = || HostError::new("Page range syntax error");
+    let mut out = Vec::new();
+    for part in ranges.split(',') {
+        let part = part.trim();
+        let (a, b) = match part.split_once('-') {
+            Some((a, b)) => (a.trim(), b.trim()),
+            None => (part, part),
+        };
+        let parse = |s: &str, d: usize| {
+            if s.is_empty() {
+                Ok(d)
+            } else {
+                s.parse::<usize>().map_err(|_| invalid())
+            }
+        };
+        let (from, to) = (parse(a, 1)?, parse(b, count)?);
+        if from == 0 || from > to {
+            return Err(invalid());
+        }
+        if from > count {
+            return Err(HostError::new("Page range exceeds page count"));
+        }
+        out.extend(from..=to.min(count));
+    }
+    out.sort_unstable();
+    out.dedup();
+    Ok(out)
+}
+
+/// Prints `w`'s main document. The page is laid out again at the paper's
+/// content width (divided by `scale`), as Chrome does, then restored; the
+/// page sees no `resize` and runs nothing meanwhile. Media queries still
+/// answer `screen`. Content wider than the paper is scaled down to fit.
+/// The layout is cut into page-high slices, painted beyond the viewport
+/// and embedded as one JPEG per page, so the PDF looks like the page but
+/// its text is not selectable. Backgrounds are kept.
+pub(crate) fn print_pdf(w: &Rc<Window>, req: &PrintRequest) -> HostResult<Vec<u8>> {
+    const CSS_PER_IN: f64 = 96.0;
+    let fonts = FontSet::new(w.profile.as_deref());
+    let [mt, mr, mb, ml] = req.margins;
+    let content_in = (req.paper.0 - ml - mr, req.paper.1 - mt - mb);
+    let saved = w.with_layout_engine(|l, _| l.viewport());
+    let print_vp = (
+        (content_in.0 * CSS_PER_IN / req.scale) as f32,
+        (content_in.1 * CSS_PER_IN / req.scale) as f32,
+    );
+    w.with_layout_engine(|l, _| l.set_viewport(print_vp.0, print_vp.1));
+    let result = print_laid_out(w, req, &fonts, content_in, (mt, ml));
+    w.with_layout_engine(|l, _| l.set_viewport(saved.0, saved.1));
+    result
+}
+
+fn print_laid_out(
+    w: &Rc<Window>,
+    req: &PrintRequest,
+    fonts: &FontSet,
+    content_in: (f64, f64),
+    (mt, ml): (f64, f64),
+) -> HostResult<Vec<u8>> {
+    const PT_PER_IN: f64 = 72.0;
+    const CSS_PER_IN: f64 = 96.0;
+    let list = w.with_layout_engine(|l, d| l.display_list(d));
+    let (doc_w, doc_h) = w.with_layout_engine(|l, d| l.document_size(d));
+    let (doc_w, doc_h) = (f64::from(doc_w.max(1.0)), f64::from(doc_h.max(1.0)));
+    // CSS px of the page across the content width.
+    let fit = (content_in.0 * CSS_PER_IN / req.scale / doc_w).min(1.0);
+    let slice_h = content_in.1 * CSS_PER_IN / (fit * req.scale);
+    let count = ((doc_h / slice_h).ceil() as usize).max(1);
+    let pages = match &req.ranges {
+        Some(r) => page_ranges(r, count)?,
+        None => (1..=count).collect(),
+    };
+    // One CSS px covers `fit * scale / 96` in of paper: device pixels per
+    // CSS px for about 150 dpi.
+    let px_scale = (150.0 * fit * req.scale / CSS_PER_IN) as f32;
+    let mut images = Vec::with_capacity(pages.len());
+    for i in pages {
+        let y = (i - 1) as f64 * slice_h;
+        let h = slice_h.min(doc_h - y).max(1.0);
+        let cap = Capture {
+            clip: Rect::new(0.0, y as f32, doc_w as f32, h as f32),
+            scale: px_scale.max(0.25),
+            base: None,
+            visible: None,
+        };
+        let pixmap = paint(w, &list, &cap, fonts, 0).map_err(|e| HostError::new(e.to_string()))?;
+        let jpeg = lb_paint::encode_screenshot(&pixmap, ImageFormat::Jpeg(90));
+        // Placement of the slice on the page, in points from the bottom left.
+        let draw_w = doc_w * fit * req.scale / CSS_PER_IN * PT_PER_IN;
+        let draw_h = h * fit * req.scale / CSS_PER_IN * PT_PER_IN;
+        let x0 = ml * PT_PER_IN;
+        let y0 = (req.paper.1 - mt) * PT_PER_IN - draw_h;
+        images.push((
+            jpeg,
+            pixmap.width(),
+            pixmap.height(),
+            [x0, y0, draw_w, draw_h],
+        ));
+    }
+    Ok(pdf(
+        &images,
+        req.paper.0 * PT_PER_IN,
+        req.paper.1 * PT_PER_IN,
+    ))
+}
+
+/// A PDF with one page per JPEG, each drawn at `[x, y, w, h]` (points).
+fn pdf(images: &[(Vec<u8>, u32, u32, [f64; 4])], page_w: f64, page_h: f64) -> Vec<u8> {
+    let mut out: Vec<u8> = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n".to_vec();
+    let mut offsets: Vec<usize> = Vec::new();
+    let n = images.len();
+    // Objects: 1 catalog, 2 pages, then per page: page, content, image.
+    let page_obj = |i: usize| 3 + i * 3;
+    let obj = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]| {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", offsets.len()).as_bytes());
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\nendobj\n");
+    };
+    obj(&mut out, &mut offsets, b"<< /Type /Catalog /Pages 2 0 R >>");
+    let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", page_obj(i))).collect();
+    obj(
+        &mut out,
+        &mut offsets,
+        format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")).as_bytes(),
+    );
+    for (i, (jpeg, pw, ph, [x, y, w, h])) in images.iter().enumerate() {
+        let (content, image) = (page_obj(i) + 1, page_obj(i) + 2);
+        obj(
+            &mut out,
+            &mut offsets,
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_w:.2} {page_h:.2}] \
+                 /Resources << /XObject << /Im0 {image} 0 R >> >> /Contents {content} 0 R >>"
+            )
+            .as_bytes(),
+        );
+        let ops = format!("q {w:.3} 0 0 {h:.3} {x:.3} {y:.3} cm /Im0 Do Q");
+        obj(
+            &mut out,
+            &mut offsets,
+            format!("<< /Length {} >>\nstream\n{ops}\nendstream", ops.len()).as_bytes(),
+        );
+        let mut body = format!(
+            "<< /Type /XObject /Subtype /Image /Width {pw} /Height {ph} /ColorSpace /DeviceRGB \
+             /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
+            jpeg.len()
+        )
+        .into_bytes();
+        body.extend_from_slice(jpeg);
+        body.extend_from_slice(b"\nendstream");
+        obj(&mut out, &mut offsets, &body);
+    }
+    let xref = out.len();
+    out.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes(),
+    );
+    for o in &offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            offsets.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+#[cfg(test)]
+mod print_tests {
+    use super::*;
+
+    #[test]
+    fn ranges() {
+        assert_eq!(page_ranges("1-3, 5", 6).unwrap(), vec![1, 2, 3, 5]);
+        assert_eq!(page_ranges("4-", 6).unwrap(), vec![4, 5, 6]);
+        assert_eq!(page_ranges("-2", 6).unwrap(), vec![1, 2]);
+        assert!(page_ranges("7", 6).is_err());
+        assert!(page_ranges("3-1", 6).is_err());
+        assert!(page_ranges("x", 6).is_err());
+    }
+
+    #[test]
+    fn pdf_structure() {
+        let doc = pdf(
+            &[(vec![0xff, 0xd8, 0xff, 0xd9], 1, 1, [10.0, 20.0, 30.0, 40.0])],
+            612.0,
+            792.0,
+        );
+        let s = String::from_utf8_lossy(&doc);
+        assert!(s.starts_with("%PDF-1.4"));
+        assert!(s.contains("/Count 1"));
+        assert!(s.contains("/Filter /DCTDecode"));
+        assert!(s.ends_with("%%EOF\n"));
+        // The xref offset points at "xref" (in bytes: the header and the
+        // JPEG are not UTF-8).
+        let at = doc.windows(10).rposition(|w| w == b"startxref\n").unwrap();
+        let start: usize = std::str::from_utf8(&doc[at + 10..])
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(doc[start..].starts_with(b"xref"));
+    }
+}

@@ -101,7 +101,16 @@ pub fn execute_classic(
     line: u32,
 ) {
     let saved = w.current_script.replace(node);
-    let r = js.eval(source, ScriptOrigin::new(url).at(line, 0));
+    // A document's scripts run in its main world, also when an isolated
+    // world inserted or wrote them (Playwright's `setContent` writes from
+    // its utility world), as in Chrome.
+    let origin = ScriptOrigin::new(url).at(line, 0);
+    let main = w.realm();
+    let r = if js.realm() == main {
+        js.eval(source, origin)
+    } else {
+        js.realm_ops().evaluate(main, source, origin)
+    };
     w.current_script.set(saved);
     if let Err(e) = r {
         w.report_exception(js, &e);
@@ -205,6 +214,14 @@ pub(crate) fn document_write(js: &mut dyn Js, w: &Rc<Window>, text: &str) {
     };
     match wrote {
         Some(true) => {}
+        // A parser `document.open()` started, not stopped at a script: the
+        // insertion point is the end of its input.
+        Some(false) if w.opened.get() => {
+            if let Some(parser) = w.parser.borrow_mut().as_mut() {
+                parser.push_str(text);
+            }
+            run_script_parser(js, w, false);
+        }
         Some(false) => {
             w.warn("Failed to execute 'write' on 'Document': It isn't possible to write into a document from an asynchronously-loaded external script unless it is explicitly opened.");
         }
@@ -224,11 +241,24 @@ pub(crate) fn document_write(js: &mut dyn Js, w: &Rc<Window>, text: &str) {
     w.after_mutation(js);
 }
 
-/// `document.open()` on a loaded document: empty it and start a parser.
+/// `document.open()` on a loaded document (HTML "document open steps", as
+/// Blink runs them): erase the event listeners and handlers of the
+/// document's nodes and of its window, empty the document, start a
+/// script-created parser and set the readiness to `loading`.
 pub(crate) fn document_open(w: &Window) {
+    let doc_kind = w.node_ref(0, Document::DOCUMENT).kind;
+    let erased = |h: &lb_js::HostRef| h.kind == doc_kind || *h == super::WINDOW_REF;
+    w.listeners.borrow_mut().retain(|h, ls| {
+        if erased(h) {
+            ls.iter().for_each(|l| l.removed.set(true));
+        }
+        !erased(h)
+    });
+    w.handlers.borrow_mut().retain(|(h, _), _| !erased(h));
     w.with_doc_mut(|d| d.remove_all_children(Document::DOCUMENT));
     *w.parser.borrow_mut() = Some(HtmlParser::new());
     w.opened.set(true);
+    w.set_ready_state(super::ReadyState::Loading);
 }
 
 /// `document.close()`: finish a parser started by `document.open()`.
@@ -243,6 +273,31 @@ pub(crate) fn document_close(js: &mut dyn Js, w: &Rc<Window>) {
     *w.parser.borrow_mut() = None;
     w.opened.set(false);
     w.after_mutation(js);
+    // The end of parsing, inside close() as in Chrome (Blink's
+    // `Document::close` finishes the parser and runs `CheckCompleted`):
+    // `interactive`, `DOMContentLoaded`, then `complete` and `load`
+    // unless loads the written markup started still delay it.
+    w.set_ready_state(super::ReadyState::Interactive);
+    let doc = w.node_ref(0, Document::DOCUMENT);
+    fire_event(js, w, doc, "readystatechange", false, false);
+    fire_event(js, w, doc, "DOMContentLoaded", true, false);
+    w.opened_parser_point(super::OpenedEnd::DomContentLoaded);
+    if w.pending_loads.get() == 0 {
+        finish_opened_load(js, w);
+    } else {
+        w.opened_parser_point(super::OpenedEnd::LoadsPending);
+    }
+}
+
+/// The last step of an opened document's end of parsing: readiness
+/// `complete` and `load` at the window. `document.close()` runs it, or the
+/// page layer once loads no longer delay the load event.
+pub fn finish_opened_load(js: &mut dyn Js, w: &Rc<Window>) {
+    w.set_ready_state(super::ReadyState::Complete);
+    let doc = w.node_ref(0, Document::DOCUMENT);
+    fire_event(js, w, doc, "readystatechange", false, false);
+    fire_event(js, w, super::WINDOW_REF, "load", false, false);
+    w.opened_parser_point(super::OpenedEnd::Load);
 }
 
 /// Drive a script-created parser; inline classic scripts in the written

@@ -91,6 +91,10 @@ pub(crate) struct AgentState {
     pub human: super::human::HumanState,
     /// `Emulation.setDefaultBackgroundColorOverride` (screenshots only).
     pub screenshot_bg: Option<lb_cdp::Rgba>,
+    /// `Input.setInterceptDrags`: drags go to the client.
+    pub intercept_drags: bool,
+    /// `Emulation.setEmulatedMedia`, kept for the page's next documents.
+    pub media: lb_css::MediaOverrides,
 }
 
 /// Responses kept for `Network.getResponseBody`.
@@ -152,6 +156,69 @@ impl Agent {
 
     pub(crate) fn emit(&self, ev: PageEvent) {
         self.shared.emit(&self.target, ev);
+    }
+
+    /// A JavaScript dialog of this page (any frame). When a session has the
+    /// Page domain on, report it (`Page.javascriptDialogOpening`) and wait
+    /// on this worker thread for `Page.handleJavaScriptDialog`, which the
+    /// CDP thread answers through [`Shared::dialogs`], as Chrome pauses the
+    /// page. Dismissed when the page closes or no session handles dialogs
+    /// any more. `None` when nobody handles dialogs.
+    pub(crate) fn dialog(
+        &self,
+        w: &lb_webapi::rt::Window,
+        req: &lb_webapi::rt::DialogRequest,
+    ) -> Option<lb_webapi::rt::DialogAnswer> {
+        let handled = |s: &Shared| {
+            s.dialog_targets
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&self.target)
+        };
+        if !handled(&self.shared) {
+            return None;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.shared
+            .dialogs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(self.target.clone(), tx);
+        self.emit(PageEvent::JavascriptDialogOpening {
+            url: w.url().to_string(),
+            message: req.message.clone(),
+            kind: req.kind.to_string(),
+            default_prompt: req.default_prompt.clone(),
+        });
+        let answer = loop {
+            match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(a) => break Some(a),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if handled(&self.shared) => {}
+                Err(_) => break None,
+            }
+        };
+        self.shared
+            .dialogs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.target);
+        let accept = answer.as_ref().is_some_and(|a| a.accept);
+        let user_input = match &answer {
+            Some(a) if a.accept && req.kind == "prompt" => a
+                .text
+                .clone()
+                .or_else(|| req.default_prompt.clone())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        self.emit(PageEvent::JavascriptDialogClosed {
+            result: accept,
+            user_input,
+        });
+        Some(answer.unwrap_or(lb_webapi::rt::DialogAnswer {
+            accept: false,
+            text: None,
+        }))
     }
 
     /// Monotonic seconds (CDP `timestamp`).
@@ -232,6 +299,10 @@ impl Agent {
         let viewport = self.st.borrow().viewport;
         if let Some((vw, vh)) = viewport {
             w.with_layout_engine(|l, _| l.set_viewport(vw as f32, vh as f32));
+        }
+        let media = self.st.borrow().media.clone();
+        if media != lb_css::MediaOverrides::default() {
+            w.with_layout_engine(|l, _| l.set_media_overrides(&media));
         }
         // Main world.
         let main = self.register_world(Some(w.realm()), None, &url, 0);
