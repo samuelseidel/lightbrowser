@@ -1,6 +1,7 @@
 //! `lightbrowser mcp` end to end: spawns the binary with pipes, serves test
 //! pages from loopback and speaks JSON-RPC to it. No network beyond
-//! 127.0.0.1 (one test resolves a `.invalid` name, which never exists).
+//! 127.0.0.1: hosts the policy allows by flag are reached through a proxy
+//! that is a loopback server of the test.
 #![cfg(feature = "chrome")]
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -23,6 +24,44 @@ const FORM: &str = r#"<!doctype html><html><head><title>Smoke form</title></head
 
 const TWO: &str =
     "<!doctype html><html><head><title>Two</title></head><body><p>second page</p></body></html>";
+
+const TITLE_SUBSTRING: &str = "<!doctype html><title>Hello World</title><h1>Heading</h1>\
+<p>Hello</p><p>World</p><p>o</p><button>Hello</button>";
+
+const EDIT: &str = r#"<!doctype html><title>Edit</title>
+<input aria-label="RO field" readonly value="r"><input aria-label="DIS field" disabled value="d">
+<a href="/two">link L</a><select aria-label="select S"><option>a</option><option>b</option></select>
+<div id="ce" aria-label="editable E" contenteditable>abc</div>
+<textarea id="ta" aria-label="area A"></textarea><input type="checkbox" aria-label="check C">
+<input id="gone" aria-label="gone G" value="g">
+<button onclick="document.getElementById('gone').remove()">remove R</button>"#;
+
+const HASH: &str = "<!doctype html><title>Hash</title><a href=\"#x\">jump</a><div id=\"x\">x</div>";
+
+/// 60 text fields, then enough buttons for several 100 KB snapshot parts.
+fn many_page() -> String {
+    let mut h = String::from("<!doctype html><title>Many</title>");
+    for i in 0..60 {
+        h.push_str(&format!(
+            "<input aria-label=\"field {i}\" value=\"attr{i}\">"
+        ));
+    }
+    for i in 0..3000 {
+        h.push_str(&format!(
+            "<button onclick=\"document.title='picked {i}'\">Button {i:04} with a name that makes the line long enough</button>"
+        ));
+    }
+    h
+}
+
+/// `depth` nested elements around one button.
+fn deep_page(open: &str, close: &str, depth: usize) -> String {
+    format!(
+        "<!doctype html><title>deep</title>{}<button>deepbtn</button>{}",
+        open.repeat(depth),
+        close.repeat(depth)
+    )
+}
 
 /// Serves the test pages on a free loopback port until the process ends.
 fn page_server() -> u16 {
@@ -50,15 +89,30 @@ fn serve(mut stream: TcpStream) {
         }
     }
     let path = first.split_whitespace().nth(1).unwrap_or("/");
+    let html = "Content-Type: text/html\r\n";
     let (status, extra, body) = match path {
-        "/" => ("200 OK", "Content-Type: text/html\r\n", FORM),
-        "/two" => ("200 OK", "Content-Type: text/html\r\n", TWO),
+        "/" => ("200 OK", html, FORM.to_owned()),
+        "/two" => ("200 OK", html, TWO.to_owned()),
+        "/title-substring" => ("200 OK", html, TITLE_SUBSTRING.to_owned()),
+        "/edit" => ("200 OK", html, EDIT.to_owned()),
+        "/hash" => ("200 OK", html, HASH.to_owned()),
+        "/many" => ("200 OK", html, many_page()),
+        "/deep-div" => ("200 OK", html, deep_page("<div>", "</div>", 3000)),
+        "/deep-group" => (
+            "200 OK",
+            html,
+            deep_page("<div role=group>", "</div>", 3000),
+        ),
         "/redir" => (
             "302 Found",
             "Location: http://blocked.example/landing\r\n",
-            "",
+            String::new(),
         ),
-        _ => ("404 Not Found", "Content-Type: text/plain\r\n", "nope"),
+        _ => (
+            "404 Not Found",
+            "Content-Type: text/plain\r\n",
+            "nope".to_owned(),
+        ),
     };
     let resp = format!(
         "HTTP/1.1 {status}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -213,6 +267,33 @@ fn ref_of(snapshot: &str, needle: &str) -> String {
         + 5;
     let end = line[start..].find(']').unwrap() + start;
     line[start..end].to_owned()
+}
+
+/// Every part of a snapshot, following the `start_line` it names; returns
+/// the text and the number of parts.
+fn snapshot_all(m: &mut Mcp) -> (String, usize) {
+    let mut text = String::new();
+    let mut start = 1u64;
+    let mut parts = 0;
+    loop {
+        let part = m.ok("browser_snapshot", json!({"start_line": start}));
+        parts += 1;
+        text.push_str(&part);
+        let Some(i) = part
+            .rfind("start_line=")
+            .filter(|_| part.contains("[snapshot cut"))
+        else {
+            return (text, parts);
+        };
+        let n: String = part[i + 11..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        let n: u64 = n.parse().unwrap();
+        assert!(n > start, "the next part moves forward");
+        start = n;
+        assert!(parts < 40, "runs away");
+    }
 }
 
 fn base64_decode(s: &str) -> Vec<u8> {
@@ -539,25 +620,67 @@ fn blocks_hosts_outside_the_policy() {
     m.finish();
 }
 
+/// A forward proxy on loopback: answers every absolute-form request with a
+/// page and records the request lines it saw.
+fn proxy_server() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let log = log.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut first = String::new();
+                if reader.read_line(&mut first).unwrap_or(0) == 0 {
+                    return;
+                }
+                loop {
+                    let mut l = String::new();
+                    if reader.read_line(&mut l).unwrap_or(0) <= 2 {
+                        break;
+                    }
+                }
+                log.lock().unwrap().push(first.trim_end().to_owned());
+                let body = "<!doctype html><title>Via proxy</title><p>proxied</p>";
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            });
+        }
+    });
+    (port, seen)
+}
+
 #[test]
 fn allow_host_adds_hosts() {
-    let mut m = Mcp::start(&["--allow-host", "*.invalid", "--timeout", "20"]);
+    // Hermetic: the allowed host is reached through a loopback proxy, so no
+    // name is ever looked up and nothing leaves the machine.
+    let (pport, seen) = proxy_server();
+    let proxy = format!("http://127.0.0.1:{pport}");
+    let mut m = Mcp::start(&["--allow-host", "*.example", "--proxy", &proxy]);
     m.initialize("2025-06-18");
-    // Allowed by the flag, so the policy lets it through; the name never
-    // resolves, which is a navigation failure, not a policy block.
-    // (If no resolver answers, the navigation times out instead.)
-    let e = m.fails(
+    let nav = m.ok(
         "browser_navigate",
-        json!({"url": "http://nothing.invalid/"}),
+        json!({"url": "http://corp.example/page"}),
     );
-    assert!(!e.contains("host policy"), "{e}");
+    assert!(nav.contains("Title: Via proxy"), "{nav}");
     assert!(
-        e.contains("navigation to") || e.contains("timed out"),
-        "{e}"
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|l| l == "GET http://corp.example/page HTTP/1.1"),
+        "{:?}",
+        seen.lock().unwrap()
     );
-    // Still blocked: a host the flag does not cover.
+    // Still blocked: a host the flag does not cover, and the proxy never sees it.
+    let before = seen.lock().unwrap().len();
     let e = m.fails("browser_navigate", json!({"url": "http://example.com/"}));
     assert!(e.contains("host policy"), "{e}");
+    assert_eq!(seen.lock().unwrap().len(), before);
     m.finish();
 }
 
@@ -590,6 +713,15 @@ fn bad_options_exit_with_usage() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
+    // A timeout that overflows the clock is refused up front (it used to
+    // panic at the first navigation).
+    let out = Command::new(env!("CARGO_BIN_EXE_lightbrowser"))
+        .args(["mcp", "--timeout", "18446744073709551615"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--timeout"));
 }
 
 /// The server must not listen on any socket (Linux: look at the process's
@@ -635,5 +767,195 @@ fn listens_on_nothing() {
             }
         }
     }
+    m.finish();
+}
+
+#[test]
+fn snapshot_keeps_text_that_is_part_of_an_ancestors_name() {
+    let port = page_server();
+    let mut m = Mcp::start(&[]);
+    m.initialize("2025-06-18");
+    m.ok(
+        "browser_navigate",
+        json!({"url": format!("http://127.0.0.1:{port}/title-substring")}),
+    );
+    let snap = m.ok("browser_snapshot", json!({}));
+    // The page title "Hello World" contains these texts; they are content.
+    assert!(snap.contains("- RootWebArea \"Hello World\""), "{snap}");
+    for t in ["Hello", "World", "o"] {
+        assert!(snap.contains(&format!("- text \"{t}\"")), "{t}: {snap}");
+    }
+    // A heading or button named by its text does not repeat it.
+    assert!(snap.contains("heading \"Heading\""), "{snap}");
+    assert!(!snap.contains("text \"Heading\""), "{snap}");
+    assert_eq!(snap.matches("text \"Hello\"").count(), 1, "{snap}");
+    m.finish();
+}
+
+/// A page nested thousands deep killed the server with a stack overflow.
+#[test]
+fn deeply_nested_pages_are_snapshotted() {
+    let port = page_server();
+    let mut m = Mcp::start(&[]);
+    m.initialize("2025-06-18");
+    for page in ["deep-div", "deep-group"] {
+        m.ok(
+            "browser_navigate",
+            json!({"url": format!("http://127.0.0.1:{port}/{page}")}),
+        );
+        // The first part is within the limit; the button comes in a later
+        // part when the groups before it fill the first.
+        let first = m.ok("browser_snapshot", json!({}));
+        assert!(
+            first.len() < 100 * 1024 + 200,
+            "{page}: {} bytes",
+            first.len()
+        );
+        let (snap, _) = snapshot_all(&mut m);
+        assert!(snap.contains("button \"deepbtn\" [ref="), "{page}");
+        // The server is still there.
+        assert_eq!(m.request("ping", json!({}))["result"], json!({}));
+    }
+    m.finish();
+}
+
+#[test]
+fn browser_type_refuses_what_cannot_take_text() {
+    let port = page_server();
+    let mut m = Mcp::start(&[]);
+    m.initialize("2025-06-18");
+    m.ok(
+        "browser_navigate",
+        json!({"url": format!("http://127.0.0.1:{port}/edit")}),
+    );
+    let snap = m.ok("browser_snapshot", json!({}));
+    let eval = |m: &mut Mcp, js: &str| m.ok("browser_evaluate", json!({"expression": js}));
+    for (name, why) in [
+        ("RO field", "read-only"),
+        ("DIS field", "disabled"),
+        ("link L", "not editable"),
+        ("select S", "cannot be typed into"),
+        ("check C", "does not take typed text"),
+    ] {
+        let r = ref_of(&snap, &format!("\"{name}\""));
+        let e = m.fails("browser_type", json!({"ref": r, "text": "zzz"}));
+        assert!(e.contains(why) && e.contains(&r), "{name}: {e}");
+    }
+    // Nothing was typed anywhere.
+    assert_eq!(
+        eval(&mut m, "document.querySelector('[readonly]').value"),
+        "\"r\""
+    );
+    assert_eq!(
+        eval(&mut m, "document.querySelector('[disabled]').value"),
+        "\"d\""
+    );
+
+    // A contenteditable element's content is replaced, not appended to.
+    let ce = ref_of(&snap, "\"editable E\"");
+    m.ok("browser_type", json!({"ref": ce, "text": "XY"}));
+    assert_eq!(
+        eval(&mut m, "document.getElementById('ce').textContent"),
+        "\"XY\""
+    );
+
+    // One line break per CRLF pair (and per lone CR).
+    let ta = ref_of(&snap, "\"area A\"");
+    m.ok("browser_type", json!({"ref": ta, "text": "a\r\nb\rc\n"}));
+    assert_eq!(
+        eval(&mut m, "document.getElementById('ta').value"),
+        "\"a\\nb\\nc\\n\""
+    );
+
+    // An element the page removed is a stale ref, as for browser_click.
+    let gone = ref_of(&snap, "\"gone G\"");
+    m.ok(
+        "browser_click",
+        json!({"ref": ref_of(&snap, "\"remove R\"")}),
+    );
+    let e = m.fails("browser_type", json!({"ref": gone, "text": "x"}));
+    assert!(e.contains("no longer usable"), "{e}");
+    let e = m.fails("browser_click", json!({"ref": gone}));
+    assert!(
+        e.contains("no longer usable") || e.contains("no visible box"),
+        "{e}"
+    );
+    m.finish();
+}
+
+/// Every node and every live field value is reachable: the part limit moves
+/// the rest to `start_line`.
+#[test]
+fn long_snapshots_come_in_parts() {
+    let port = page_server();
+    let mut m = Mcp::start(&[]);
+    m.initialize("2025-06-18");
+    m.ok(
+        "browser_navigate",
+        json!({"url": format!("http://127.0.0.1:{port}/many")}),
+    );
+    let first = m.ok("browser_snapshot", json!({}));
+    assert!(first.len() <= 100 * 1024 + 200, "{} bytes", first.len());
+    assert!(first.contains("button \"Button 0000"), "{}", &first[..400]);
+    assert!(!first.contains("Button 2999"));
+    // Type into the 56th field, past what the old 50-field limit covered.
+    let f55 = ref_of(&first, "\"field 55\"");
+    m.ok("browser_type", json!({"ref": f55, "text": "typed55"}));
+
+    let (text, parts) = snapshot_all(&mut m);
+    assert!(parts >= 3, "{parts} parts");
+    assert!(text.contains("value=\"typed55\""), "live value of field 55");
+    assert!(text.contains("value=\"attr54\""));
+    for i in [0, 1500, 2999] {
+        assert!(text.contains(&format!("Button {i:04} ")), "button {i}");
+    }
+    // A ref from a late part works.
+    let r = ref_of(
+        text.lines()
+            .find(|l| l.contains("Button 2999"))
+            .map(|_| text.as_str())
+            .unwrap(),
+        "Button 2999",
+    );
+    m.ok("browser_click", json!({"ref": r}));
+    assert_eq!(
+        m.ok("browser_evaluate", json!({"expression": "document.title"})),
+        "\"picked 2999\""
+    );
+    let e = m.fails("browser_snapshot", json!({"start_line": 999_999}));
+    assert!(e.contains("past the end"), "{e}");
+    let e = m.fails("browser_snapshot", json!({"start_line": 0}));
+    assert!(e.contains("start_line"), "{e}");
+    m.finish();
+}
+
+/// A `#fragment` navigation starts no document; the URL still has to be
+/// right in the result of the navigation and of the click that caused it.
+#[test]
+fn same_document_navigations_report_the_new_url() {
+    let port = page_server();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut m = Mcp::start(&[]);
+    m.initialize("2025-06-18");
+    m.ok("browser_navigate", json!({"url": format!("{base}/hash")}));
+    let nav = m.ok("browser_navigate", json!({"url": format!("{base}/hash#y")}));
+    assert!(
+        nav.contains(&format!("Navigated to: {base}/hash#y")),
+        "{nav}"
+    );
+    let snap = m.ok("browser_snapshot", json!({}));
+    assert!(snap.contains(&format!("Page URL: {base}/hash#y")), "{snap}");
+    let link = ref_of(&snap, "link \"jump\"");
+    let click = m.ok("browser_click", json!({"ref": link}));
+    assert!(
+        click.contains(&format!("The URL changed to {base}/hash#x")),
+        "{click}"
+    );
+    assert!(click.contains("refs are still valid"), "{click}");
+    // The ref still works: nothing was reloaded.
+    m.ok(
+        "browser_click",
+        json!({"ref": ref_of(&snap, "link \"jump\"")}),
+    );
     m.finish();
 }

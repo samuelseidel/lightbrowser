@@ -169,9 +169,31 @@ pub struct Field {
     pub fallback: String,
 }
 
-/// ` value="..."` for a line.
-pub fn value_suffix(v: &str) -> String {
-    format!(" value={}", quote(v))
+/// ` value="..."` for a line; a value longer than `max_chars` is cut.
+pub fn value_suffix(v: &str, max_chars: usize) -> String {
+    match v.char_indices().nth(max_chars) {
+        Some((cut, _)) => format!(
+            " value={} [value cut: {} characters in all]",
+            quote(&v[..cut]),
+            v.chars().count()
+        ),
+        None => format!(" value={}", quote(v)),
+    }
+}
+
+/// The lines `[from, to)` of one snapshot part: from line index `from` on,
+/// as many as fit in `budget` bytes, and at least one.
+pub fn window(lines: &[String], from: usize, budget: usize) -> (usize, usize) {
+    let mut used = 0;
+    let mut to = from;
+    while to < lines.len() {
+        used += lines[to].len() + 1;
+        if used > budget && to > from {
+            break;
+        }
+        to += 1;
+    }
+    (from, to)
 }
 
 const FIELDS: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton", "slider"];
@@ -233,14 +255,15 @@ impl<'a> Walk<'a> {
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             // Children go on the stack reversed, so the first is popped first.
-            let mut push_kids = |stack: &mut Vec<(&'a Value, usize, String)>, depth: usize, named: &str| {
-                for id in ids.iter().rev() {
-                    let child = id.as_str().and_then(|i| self.by_id.get(i).copied());
-                    if let Some(child) = child {
-                        stack.push((child, depth, named.to_owned()));
+            let push_kids =
+                |stack: &mut Vec<(&'a Value, usize, String)>, depth: usize, named: &str| {
+                    for id in ids.iter().rev() {
+                        let child = id.as_str().and_then(|i| self.by_id.get(i).copied());
+                        if let Some(child) = child {
+                            stack.push((child, depth, named.to_owned()));
+                        }
                     }
-                }
-            };
+                };
             if ignored {
                 push_kids(&mut stack, depth, &named);
                 continue;
@@ -282,7 +305,7 @@ impl<'a> Walk<'a> {
                     node: b,
                     fallback: value,
                 }),
-                _ if !value.is_empty() => line.push_str(&value_suffix(&value)),
+                _ if !value.is_empty() => line.push_str(&value_suffix(&value, 2000)),
                 _ => {}
             }
             self.lines.push(line);
@@ -424,6 +447,90 @@ mod tests {
         let nodes = vec![node("1", "RootWebArea", "T", 10, &["2"]), hidden, text];
         let out = render(&nodes, &mut Refs::default()).0.join("\n");
         assert_eq!(out, "- RootWebArea \"T\"");
+    }
+
+    /// Text that is a substring of the page title (or of a landmark's
+    /// name) is page content, not a repeat of a name.
+    #[test]
+    fn text_inside_a_named_ancestor_that_is_not_its_name_stays() {
+        let nodes = vec![
+            node("1", "RootWebArea", "Hello World", 10, &["2", "4", "6", "8"]),
+            node("2", "paragraph", "", 20, &["3"]),
+            node("3", "StaticText", "Hello", 21, &[]),
+            node("4", "paragraph", "", 40, &["5"]),
+            node("5", "StaticText", "o", 41, &[]),
+            node("6", "navigation", "Menu", 60, &["7"]),
+            node("7", "StaticText", "Men", 61, &[]),
+            node("8", "link", "Hello World", 80, &["9", "10"]),
+            node("9", "StaticText", "Hello ", 81, &[]),
+            node("10", "StaticText", "World", 82, &[]),
+        ];
+        let out = render(&nodes, &mut Refs::default()).0.join("\n");
+        let expect = [
+            "- RootWebArea \"Hello World\"",
+            "  - paragraph",
+            "    - text \"Hello\"",
+            "  - paragraph",
+            "    - text \"o\"",
+            "  - navigation \"Menu\" [ref=e1]",
+            "    - text \"Men\"",
+            // The link's name is made of its text: the text is not repeated.
+            "  - link \"Hello World\" [ref=e2]",
+        ]
+        .join("\n");
+        assert_eq!(out, expect);
+    }
+
+    /// A page nested far deeper than any thread stack allows recursion for.
+    #[test]
+    fn a_very_deep_tree_renders_without_recursing() {
+        let depth = 200_000;
+        let mut nodes = Vec::new();
+        for i in 1..=depth {
+            let kids = [(i + 1).to_string()];
+            let kids: Vec<&str> = if i < depth {
+                vec![kids[0].as_str()]
+            } else {
+                vec![]
+            };
+            let role = if i == 1 { "RootWebArea" } else { "group" };
+            nodes.push(node(&i.to_string(), role, "", i as i64, &kids));
+        }
+        let (lines, _) = render(&nodes, &mut Refs::default());
+        assert_eq!(lines.len(), depth);
+        // Indentation stops growing: no line is thousands of bytes long.
+        assert!(lines.iter().all(|l| l.len() < 2 * MAX_INDENT + 16));
+    }
+
+    #[test]
+    fn windows_cover_the_lines_in_order_and_always_advance() {
+        let lines: Vec<String> = (0..10).map(|i| format!("line{i}")).collect(); // 6 bytes + 1
+        assert_eq!(window(&lines, 0, 100), (0, 10));
+        assert_eq!(window(&lines, 0, 21), (0, 3));
+        assert_eq!(window(&lines, 3, 21), (3, 6));
+        assert_eq!(window(&lines, 9, 21), (9, 10));
+        // One line longer than the budget still comes out whole.
+        assert_eq!(window(&lines, 4, 3), (4, 5));
+        // The parts tile the lines.
+        let mut at = 0;
+        let mut parts = 0;
+        while at < lines.len() {
+            let (from, to) = window(&lines, at, 15);
+            assert_eq!(from, at);
+            assert!(to > from);
+            at = to;
+            parts += 1;
+        }
+        assert_eq!(parts, 5);
+    }
+
+    #[test]
+    fn long_values_are_cut_by_characters() {
+        assert_eq!(value_suffix("abc", 10), " value=\"abc\"");
+        let s = "é".repeat(20);
+        let v = value_suffix(&s, 5);
+        assert!(v.starts_with(" value=\"ééééé\""));
+        assert!(v.contains("20 characters in all"));
     }
 
     #[test]

@@ -28,8 +28,44 @@ use super::tools::{self, ToolResult};
 /// The isolated world every tool evaluates in.
 const WORLD: &str = "lightbrowser-mcp";
 
-/// Text fields whose live value a snapshot reads (one round trip each).
-const MAX_LIVE_FIELDS: usize = 50;
+/// Bytes of node lines in one snapshot part, leaving room under the 100 KB
+/// output limit for the header, live values and the continuation note.
+const SNAPSHOT_BUDGET: usize = snapshot::MAX_OUTPUT - 4096;
+
+/// Run on an element before typing into it: refuses what cannot take text
+/// (the result's `error`), else focuses it and selects its content so the
+/// typed text replaces it.
+const FOCUS_FOR_TYPING: &str = r#"function() {
+  if (!this.isConnected) return {error: 'detached'};
+  const tag = this.tagName ? this.tagName.toLowerCase() : '';
+  let field = false;
+  if (tag === 'input') {
+    const t = (this.type || 'text').toLowerCase();
+    if (['checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file', 'range', 'color', 'hidden'].includes(t))
+      return {error: 'an <input type=' + t + '> does not take typed text'};
+    field = true;
+  } else if (tag === 'textarea') {
+    field = true;
+  } else if (tag === 'select') {
+    return {error: 'a <select> cannot be typed into (typing does not choose an option)'};
+  } else if (!this.isContentEditable) {
+    return {error: 'a <' + tag + '> element is not editable'};
+  }
+  if (field && this.disabled) return {error: 'the field is disabled'};
+  if (field && this.readOnly) return {error: 'the field is read-only'};
+  if (this.scrollIntoView) this.scrollIntoView({block: 'center'});
+  this.focus();
+  if (field) {
+    try { this.select(); } catch (e) {}
+  } else {
+    const sel = this.ownerDocument.defaultView.getSelection();
+    if (sel && sel.selectAllChildren) sel.selectAllChildren(this); else this.textContent = '';
+  }
+  return {};
+}"#;
+
+/// Longest live field value shown in a snapshot, in characters.
+const MAX_VALUE_CHARS: usize = 2000;
 
 /// Page state kept current by the reader task.
 #[derive(Default)]
@@ -313,11 +349,14 @@ impl Driver {
                 .await;
         }
         let title = self.eval_string("document.title").await.unwrap_or_default();
-        let (final_url, status) = {
+        // The document's own URL: a `#fragment` navigation starts no document
+        // and the host sends no event for it, so the frame URL can be stale.
+        let (frame_url, status) = {
             let st = self.shared.st.borrow();
             let status = loader.as_ref().and_then(|l| st.statuses.get(l)).copied();
             (st.url.clone(), status)
         };
+        let final_url = self.href().await.unwrap_or(frame_url);
         let mut text = format!("Navigated to: {final_url}\n");
         if final_url != parsed.as_str() && final_url != url {
             text.push_str(&format!("Requested: {url}\n"));
@@ -336,7 +375,7 @@ impl Driver {
         Ok(self.finish(text))
     }
 
-    async fn snapshot(&self) -> Result<ToolResult, String> {
+    async fn snapshot(&self, start_line: usize) -> Result<ToolResult, String> {
         self.ensure_page().await?;
         let r = self
             .page_cmd("Accessibility.getFullAXTree", json!({}))
@@ -347,30 +386,58 @@ impl Driver {
             let (lines, fields) = snapshot::render(&nodes, &mut st.refs);
             (st.url.clone(), lines, fields)
         };
-        // What was typed lives in the DOM property, not in the AX tree.
-        let world = if fields.is_empty() {
+        let url = self.href().await.unwrap_or(url);
+        let total = lines.len();
+        if start_line > total.max(1) {
+            return Err(format!(
+                "start_line {start_line} is past the end: the snapshot has {total} lines"
+            ));
+        }
+        // The part of the tree this call returns: the rest is reached with
+        // `start_line`, so nothing is out of reach behind the size limit.
+        let (from, to) = snapshot::window(&lines, start_line - 1, SNAPSHOT_BUDGET);
+        // What was typed lives in the DOM property, not in the AX tree. Only
+        // the fields shown are read.
+        let shown: Vec<&snapshot::Field> = fields
+            .iter()
+            .filter(|f| (from..to).contains(&f.line))
+            .collect();
+        let world = if shown.is_empty() {
             None
         } else {
             self.world().await.ok()
         };
-        for (i, f) in fields.iter().enumerate() {
+        for f in shown {
             let live = match world {
-                Some(w) if i < MAX_LIVE_FIELDS => self.live_value(f.node, w).await,
-                _ => None,
+                Some(w) => self.live_value(f.node, w).await,
+                None => None,
             };
             let v = live.unwrap_or_else(|| f.fallback.clone());
             if !v.is_empty() {
-                lines[f.line].push_str(&snapshot::value_suffix(&v));
+                lines[f.line].push_str(&snapshot::value_suffix(&v, MAX_VALUE_CHARS));
             }
         }
         let title = nodes
             .first()
             .and_then(|n| n["name"]["value"].as_str())
             .unwrap_or_default();
-        let text = format!(
-            "Page URL: {url}\nPage Title: {title}\n\n{}",
-            lines.join("\n")
-        );
+        let mut text = format!("Page URL: {url}\nPage Title: {title}\n");
+        if from > 0 || to < total {
+            text.push_str(&format!(
+                "Showing node lines {}-{} of {total}\n",
+                from + 1,
+                to
+            ));
+        }
+        text.push('\n');
+        text.push_str(&lines[from..to].join("\n"));
+        if to < total {
+            text.push_str(&format!(
+                "\n\n[snapshot cut: call browser_snapshot with start_line={} for the rest ({} more lines)]",
+                to + 1,
+                total - to
+            ));
+        }
         Ok(self.finish(snapshot::truncate(text)))
     }
 
@@ -441,8 +508,21 @@ impl Driver {
         ))
     }
 
+    /// The document's URL (`location.href`), which also follows `#fragment`
+    /// and `pushState` navigations.
+    async fn href(&self) -> Option<String> {
+        self.eval_string("location.href").await.ok()
+    }
+
+    /// Where the page is now: the document generation and its URL.
+    async fn mark(&self) -> (u64, String) {
+        let href = self.href().await.unwrap_or_default();
+        (self.shared.st.borrow().doc_gen, href)
+    }
+
     /// After input: wait for a navigation the input started, and say so.
-    async fn settle(&self, gen_before: u64) -> String {
+    async fn settle(&self, before: (u64, String)) -> String {
+        let gen_before = before.0;
         self.wait_for(Duration::from_millis(150), move |s| {
             s.loading || s.doc_gen != gen_before
         })
@@ -454,18 +534,19 @@ impl Driver {
             let st = self.shared.st.borrow();
             (st.doc_gen, st.url.clone())
         };
-        if gen_now != gen_before {
+        if gen_now != before.0 {
             let title = self.eval_string("document.title").await.unwrap_or_default();
             format!(
                 "\nThe page navigated to {url} (title {title:?}). Refs were reset: take a new snapshot."
             )
         } else {
-            String::new()
+            match self.href().await {
+                Some(h) if !before.1.is_empty() && h != before.1 => format!(
+                    "\nThe URL changed to {h} without loading a new document; refs are still valid."
+                ),
+                _ => String::new(),
+            }
         }
-    }
-
-    fn doc_gen(&self) -> u64 {
-        self.shared.st.borrow().doc_gen
     }
 
     async fn mouse(
@@ -492,7 +573,7 @@ impl Driver {
         let node = self.node_for(r)?;
         self.ensure_page().await?;
         let (x, y) = self.center_of(r, node).await?;
-        let gen_before = self.doc_gen();
+        let gen_before = self.mark().await;
         self.mouse("mouseMoved", x, y, "none", 0, 0).await?;
         self.mouse("mousePressed", x, y, "left", 1, 1).await?;
         self.mouse("mouseReleased", x, y, "left", 0, 1).await?;
@@ -527,7 +608,7 @@ impl Driver {
                 "Runtime.callFunctionOn",
                 json!({
                     "objectId": object_id,
-                    "functionDeclaration": "function() { if (this.scrollIntoView) this.scrollIntoView({block: 'center'}); this.focus(); if (typeof this.select === 'function' && this.tagName !== 'SELECT') { try { this.select(); } catch (e) {} } }",
+                    "functionDeclaration": FOCUS_FOR_TYPING,
                     "returnByValue": true,
                 }),
             )
@@ -535,7 +616,18 @@ impl Driver {
         if let Some(e) = focus.get("exceptionDetails") {
             return Err(format!("could not focus {r}: {}", exception_text(e)));
         }
-        let gen_before = self.doc_gen();
+        match focus["result"]["value"]["error"].as_str() {
+            Some("detached") => return Err(Self::stale(r, "it is not in the document")),
+            Some(why) => {
+                return Err(format!(
+                    "cannot type into {r}: {why}. browser_type works on text fields, textareas and contenteditable elements; use browser_click for buttons, links, checkboxes and selects"
+                ));
+            }
+            None => {}
+        }
+        let gen_before = self.mark().await;
+        // A line break is one Enter, whether the text has \n, \r or \r\n.
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
         // Characters on the US layout are key presses; the rest is inserted.
         let mut pending = String::new();
         for c in text.chars() {
@@ -590,7 +682,7 @@ impl Driver {
     async fn press_key(&self, key: &str) -> Result<ToolResult, String> {
         let events = keys::press_events(key)?;
         self.ensure_page().await?;
-        let gen_before = self.doc_gen();
+        let gen_before = self.mark().await;
         self.key_events(events).await?;
         let after = self.settle(gen_before).await;
         Ok(self.finish(format!("Pressed {key}.{after}")))
@@ -668,7 +760,10 @@ impl ToolHost for Driver {
                 }
                 Err(e) => Err(e),
             },
-            "browser_snapshot" => self.snapshot().await,
+            "browser_snapshot" => match tools::uint_arg(&args, "start_line") {
+                Ok(n) => self.snapshot(n.unwrap_or(1)).await,
+                Err(e) => Err(e),
+            },
             "browser_click" => match tools::str_arg(&args, "ref") {
                 Ok(r) => self.click(r).await,
                 Err(e) => Err(e),
@@ -755,6 +850,11 @@ fn on_event(cdp: &InProcess<CdpHost>, shared: &Shared, msg: &Value) {
             if f.get("parentId").is_none() && ours(&f["id"], &st) {
                 st.url = f["url"].as_str().unwrap_or_default().to_owned();
                 st.loader = f["loaderId"].as_str().unwrap_or_default().to_owned();
+                // Only the current document's entries are ever read again
+                // (its own events can arrive before this one, and stay).
+                let keep = st.loader.clone();
+                st.lifecycle.retain(|l, _| *l == keep);
+                st.statuses.retain(|l, _| *l == keep);
                 st.doc_gen += 1;
                 st.world = None;
                 st.refs.reset();

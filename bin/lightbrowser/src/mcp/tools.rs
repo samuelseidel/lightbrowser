@@ -72,7 +72,7 @@ pub fn list() -> Value {
             "name": "browser_navigate",
             "description": "Open a URL in the browser and wait for it to load. Returns the page title, the final URL after redirects and the HTTP status. Only loopback, localhost, *.localhost and *.test are allowed unless the server was started with --allow-host.",
             "inputSchema": obj(json!({
-                "url": {"type": "string", "description": "The URL to open (http, https, about:blank or data:)."},
+                "url": {"type": "string", "description": "The URL to open (http, https or about:blank)."},
                 "wait_until": {
                     "type": "string",
                     "enum": ["load", "domcontentloaded", "networkidle"],
@@ -82,8 +82,10 @@ pub fn list() -> Value {
         },
         {
             "name": "browser_snapshot",
-            "description": "Return the page's accessibility tree as indented text: one node per line with role, name, state flags and a ref such as [ref=e12] on interactive and landmark nodes. Pass those refs to browser_click and browser_type. Refs stay valid until the next navigation.",
-            "inputSchema": obj(json!({}), &[]),
+            "description": "Return the page's accessibility tree as indented text: one node per line with role, name, state flags and a ref such as [ref=e12] on interactive and landmark nodes. Pass those refs to browser_click and browser_type. Refs stay valid until the next navigation. A long page is returned in parts of about 100 KB; the end of a part says which start_line continues it. Content of iframes is not included.",
+            "inputSchema": obj(json!({
+                "start_line": {"type": "integer", "minimum": 1, "description": "First node line to return (default 1); use the value a cut-off snapshot names to read the rest."}
+            }), &[]),
         },
         {
             "name": "browser_click",
@@ -94,7 +96,7 @@ pub fn list() -> Value {
         },
         {
             "name": "browser_type",
-            "description": "Focus an element by its snapshot ref and type text into it with trusted key events, replacing the current content of a text field. Optionally press Enter afterwards.",
+            "description": "Focus a text field, textarea or contenteditable element by its snapshot ref and type text into it with trusted key events, replacing its current content. Fails for elements that cannot take text (disabled, read-only, links, buttons, checkboxes, selects). Optionally press Enter afterwards.",
             "inputSchema": obj(json!({
                 "ref": {"type": "string", "description": "Element ref from browser_snapshot, such as e3."},
                 "text": {"type": "string", "description": "The text to type."},
@@ -158,6 +160,18 @@ pub fn str_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str, String> {
     }
 }
 
+/// An optional positive integer argument.
+pub fn uint_arg(args: &Value, name: &str) -> Result<Option<usize>, String> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .filter(|n| *n >= 1)
+            .map(|n| Some(n as usize))
+            .ok_or_else(|| format!("argument {name:?} must be an integer of at least 1")),
+    }
+}
+
 /// An optional boolean argument.
 pub fn bool_arg(args: &Value, name: &str) -> Result<bool, String> {
     match args.get(name) {
@@ -197,6 +211,12 @@ mod tests {
         assert_eq!(bool_arg(&a, "b"), Ok(true));
         assert_eq!(bool_arg(&a, "none"), Ok(false));
         assert!(bool_arg(&a, "s").is_err());
+        let n = json!({"a": 3, "z": 0, "f": 1.5, "s": "2"});
+        assert_eq!(uint_arg(&n, "a"), Ok(Some(3)));
+        assert_eq!(uint_arg(&n, "none"), Ok(None));
+        assert!(uint_arg(&n, "z").is_err());
+        assert!(uint_arg(&n, "f").is_err());
+        assert!(uint_arg(&n, "s").is_err());
     }
 
     #[test]

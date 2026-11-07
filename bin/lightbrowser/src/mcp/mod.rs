@@ -38,6 +38,9 @@ pub struct McpArgs {
     pub allow_hosts: Vec<String>,
 }
 
+/// The longest `--timeout` (one day): a larger value overflows the clock.
+const MAX_TIMEOUT_SECS: u64 = 24 * 60 * 60;
+
 pub fn parse_args(args: &[String]) -> Result<McpArgs, String> {
     let mut out = McpArgs {
         timeout: 30,
@@ -72,8 +75,10 @@ pub fn parse_args(args: &[String]) -> Result<McpArgs, String> {
                 out.timeout = value("--timeout")?
                     .parse()
                     .ok()
-                    .filter(|t| *t > 0)
-                    .ok_or_else(|| "--timeout needs a number of seconds above 0".to_owned())?
+                    .filter(|t| (1..=MAX_TIMEOUT_SECS).contains(t))
+                    .ok_or_else(|| {
+                        format!("--timeout needs a number of seconds from 1 to {MAX_TIMEOUT_SECS}")
+                    })?
             }
             other => return Err(format!("unknown option: {other}")),
         }
@@ -250,5 +255,12 @@ mod tests {
         assert!(parse_args(&args(&["--allow-host", " "])).is_err());
         assert!(parse_args(&args(&["--timeout", "0"])).is_err());
         assert!(parse_args(&args(&["--timeout", "soon"])).is_err());
+        // Used to be accepted and then panic on the first navigation.
+        assert!(parse_args(&args(&["--timeout", "18446744073709551615"])).is_err());
+        assert!(parse_args(&args(&["--timeout", "86401"])).is_err());
+        assert_eq!(
+            parse_args(&args(&["--timeout", "86400"])).unwrap().timeout,
+            86400
+        );
     }
 }
