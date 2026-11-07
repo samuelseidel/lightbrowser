@@ -154,6 +154,52 @@ impl<H: PageHost + 'static> Server<H> {
     }
 }
 
+/// A CDP browser connection inside this process: the same protocol state,
+/// sessions and commands as [`Server`], with channels instead of a
+/// listener. Nothing is bound and no socket exists, so a client in the same
+/// process (`lightbrowser mcp`, ADR 0041) can drive the browser like a
+/// DevTools client without exposing it on the network.
+///
+/// Create it inside a `LocalSet` ([`block_on_local`]); replies and events
+/// arrive as JSON text on the receiver [`InProcess::connect`] returns, in
+/// the order a WebSocket client would see them.
+pub struct InProcess<H> {
+    shared: Rc<Shared<H>>,
+    conn: ConnId,
+}
+
+impl<H: PageHost + 'static> InProcess<H> {
+    /// Creates the browser (default context) on `host` and one browser
+    /// connection. Must run inside a `LocalSet`.
+    pub fn connect(host: Rc<H>) -> Result<(Self, mpsc::UnboundedReceiver<String>), HostError> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let shared = Shared::new(host, tx)?;
+        let pump = shared.clone();
+        tokio::task::spawn_local(async move {
+            while let Some(item) = rx.recv().await {
+                pump.process(item);
+            }
+        });
+        let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let conn = shared.open_conn(out_tx, None);
+        Ok((InProcess { shared, conn }, out_rx))
+    }
+
+    /// Sends one command (a JSON text frame). Its reply and the events it
+    /// causes come back on the receiver; a command that has to wait (a
+    /// navigation) continues on its own task, as for a socket.
+    pub fn send(&self, text: String) {
+        let (shared, conn) = (self.shared.clone(), self.conn);
+        tokio::task::spawn_local(run_command(shared, conn, text));
+    }
+
+    /// Closes the connection like a closed socket: its sessions end and the
+    /// contexts it created are disposed.
+    pub fn close(&self) {
+        self.shared.close_conn(self.conn);
+    }
+}
+
 /// A parsed HTTP request head.
 struct RequestHead {
     method: String,

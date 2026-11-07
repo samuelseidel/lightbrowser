@@ -95,7 +95,7 @@ impl Shared {
 }
 
 /// How to build a [`CdpHost`].
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CdpHostOptions {
     /// The persona of the default context and of new contexts.
     pub profile: Arc<PersonaProfile>,
@@ -112,6 +112,23 @@ pub struct CdpHostOptions {
     /// use it (ADR 0027).
     pub proxy_server: Option<String>,
     pub proxy_bypass_list: Option<String>,
+    /// Applied to every context (`lightbrowser mcp` host policy, ADR 0041).
+    pub url_filter: Option<lb_net::UrlFilter>,
+}
+
+impl std::fmt::Debug for CdpHostOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CdpHostOptions")
+            .field("profile", &self.profile.profile_id)
+            .field("tls_dir", &self.tls_dir)
+            .field("accept_invalid_certs", &self.accept_invalid_certs)
+            .field("virtual_time", &self.virtual_time)
+            .field("workers", &self.workers)
+            .field("proxy_server", &self.proxy_server)
+            .field("proxy_bypass_list", &self.proxy_bypass_list)
+            .field("url_filter", &self.url_filter.is_some())
+            .finish()
+    }
 }
 
 impl CdpHostOptions {
@@ -124,6 +141,7 @@ impl CdpHostOptions {
             workers: BrowserOptions::default().workers,
             proxy_server: None,
             proxy_bypass_list: None,
+            url_filter: None,
         }
     }
 }
@@ -299,6 +317,9 @@ impl CdpHost {
         let ctx = BrowserContext::new(opts).map_err(page_err)?;
         if let Some(p) = proxy {
             ctx.set_proxy(p);
+        }
+        if let Some(f) = &self.opts.url_filter {
+            ctx.set_url_filter(f.clone());
         }
         Ok(ctx)
     }

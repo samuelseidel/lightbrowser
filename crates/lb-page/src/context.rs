@@ -70,6 +70,10 @@ struct Shared {
     /// (`Target.createBrowserContext` `proxyServer`, `--proxy`). It caches
     /// the credentials that answered its challenges.
     proxy: std::sync::OnceLock<Arc<lb_net::Proxy>>,
+    /// Which URLs the context may request (`lightbrowser mcp` host policy,
+    /// ADR 0041): set once, before the first request. Asked for every
+    /// request and redirect hop of pages, workers and service workers.
+    url_filter: std::sync::OnceLock<lb_net::UrlFilter>,
     /// The context's TCP/IP SYN profile (ADR 0031): set once, before the
     /// first request (`fetch --tcp-profile`). `None` sends the host's SYN.
     tcp_profile: std::sync::OnceLock<Arc<lb_net::tcpfp::TcpProfile>>,
@@ -190,6 +194,7 @@ impl BrowserContext {
             favicons: Mutex::new(HashSet::new()),
             connections: ConnectionPool::new(),
             proxy: std::sync::OnceLock::new(),
+            url_filter: std::sync::OnceLock::new(),
             tcp_profile: std::sync::OnceLock::new(),
             permissions: Default::default(),
             #[cfg(feature = "chrome")]
@@ -272,6 +277,14 @@ impl BrowserContext {
         let _ = self.0.proxy.set(proxy);
     }
 
+    /// Only let this context request the URLs `filter` accepts (checked per
+    /// request and per redirect hop, before any DNS lookup; a refused request
+    /// fails with `net::ERR_BLOCKED_BY_CLIENT`). Only the first call counts;
+    /// call it before the first request.
+    pub fn set_url_filter(&self, filter: lb_net::UrlFilter) {
+        let _ = self.0.url_filter.set(filter);
+    }
+
     /// Shape the SYN of this context's direct connections with `tcp`
     /// (ADR 0031). Fails when the profile's OS is not the User-Agent's, or
     /// when it needs the packet shim and the shim's rule is missing (see
@@ -333,6 +346,7 @@ impl BrowserContext {
         net.danger_accept_invalid_certs = self.0.opts.accept_invalid_certs;
         net.pool = Some(self.0.connections.clone());
         net.proxy = self.0.proxy.get().cloned();
+        net.url_filter = self.0.url_filter.get().cloned();
         net.tcp_profile = self.0.tcp_profile.get().cloned();
         Ok(net)
     }

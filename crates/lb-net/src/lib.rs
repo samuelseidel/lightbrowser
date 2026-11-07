@@ -43,7 +43,7 @@ pub mod websocket;
 
 pub use client_hints::{ClientHintsStore, UaHint};
 pub use error::NetError;
-pub use fetch::{RedirectHop, Request, Response, fetch};
+pub use fetch::{RedirectHop, Request, Response, UrlFilter, fetch};
 pub use header_profile::{HeaderProfile, RequestKind, RequestMeta};
 pub use pool::ConnectionPool;
 pub use profile::ClientHelloProfile;

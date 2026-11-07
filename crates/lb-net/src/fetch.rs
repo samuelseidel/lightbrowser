@@ -119,6 +119,9 @@ impl Response {
     }
 }
 
+/// Decides whether a URL may be requested (see [`NetContext::url_filter`]).
+pub type UrlFilter = Arc<dyn Fn(&Url) -> bool + Send + Sync>;
+
 /// Per-context networking state: persona, TLS profile and cookies.
 pub struct NetContext {
     pub persona: Arc<Persona>,
@@ -149,6 +152,12 @@ pub struct NetContext {
     /// the wire. Set it with [`NetContext::with_tcp_profile`]. It shapes
     /// direct connections only; a proxy hop uses the host's stack.
     pub tcp_profile: Option<Arc<TcpProfile>>,
+    /// Asked before every request and every redirect hop of [`fetch`], and
+    /// before a WebSocket handshake; `false` fails the request with
+    /// [`NetError::Blocked`] before any DNS lookup or connection. `None`
+    /// (the default) allows everything. `lightbrowser mcp` uses it to keep
+    /// the browser on loopback unless told otherwise (ADR 0041).
+    pub url_filter: Option<UrlFilter>,
     /// Lazily built, then reused for every https request of this context. The
     /// flag records the `danger_accept_invalid_certs` it was built with.
     connector: Option<(bool, Arc<TlsConnector>)>,
@@ -188,9 +197,19 @@ impl NetContext {
             pool: None,
             proxy: None,
             tcp_profile: None,
+            url_filter: None,
             connector: None,
             dialer: Arc::new(Dialer::default()),
         })
+    }
+
+    /// `Err(NetError::Blocked)` when the context's [`url_filter`](Self::url_filter)
+    /// refuses `url`.
+    pub fn check_url(&self, url: &Url) -> Result<(), NetError> {
+        match &self.url_filter {
+            Some(f) if !f(url) => Err(NetError::Blocked),
+            _ => Ok(()),
+        }
     }
 
     /// Shape the SYN of every direct connection from this context with `tcp`.
@@ -238,6 +257,7 @@ impl NetContext {
             pool: self.pool.clone(),
             proxy: self.proxy.clone(),
             tcp_profile: self.tcp_profile.clone(),
+            url_filter: self.url_filter.clone(),
             connector: self.connector.clone(),
             dialer: Arc::clone(&self.dialer),
         }
@@ -356,6 +376,8 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
     let mut restart = false;
     let mut restarted = false;
     loop {
+        // Before DNS and before any socket: the first URL and every hop.
+        ctx.check_url(&req.url)?;
         // Distance of the chain so far, including this hop's URL.
         site = site.max(Site::between(initiator.as_ref(), &req.url));
         let hints = if hints_on {
@@ -1078,6 +1100,33 @@ Content-Length: 0\r\nConnection: close\r\n\r\n"
             .unwrap_err();
         assert!(err.to_string().contains("too many redirects"), "{err}");
         assert_eq!(seen.lock().unwrap().len(), MAX_REDIRECTS + 1);
+    }
+
+    #[tokio::test]
+    async fn url_filter_stops_the_first_request_and_every_redirect_hop() {
+        let (base, seen) = serve_http().await;
+        let mut ctx = chrome_ctx();
+        // Refuse the redirect's target: the server sees `/start` and no more.
+        ctx.url_filter = Some(Arc::new(|u: &Url| u.path() != "/final"));
+        let err = fetch(&mut ctx, Request::get(url(&format!("{base}/start"))))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, NetError::Blocked), "{err}");
+        assert_eq!(err.to_string(), "net::ERR_BLOCKED_BY_CLIENT");
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        // Refuse everything: nothing reaches the server.
+        ctx.url_filter = Some(Arc::new(|_: &Url| false));
+        let err = fetch(&mut ctx, Request::get(url(&format!("{base}/x"))))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, NetError::Blocked), "{err}");
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        // A filter that accepts changes nothing.
+        ctx.url_filter = Some(Arc::new(|_: &Url| true));
+        let resp = fetch(&mut ctx, Request::get(url(&format!("{base}/start"))))
+            .await
+            .unwrap();
+        assert_eq!(resp.final_url.path(), "/final");
     }
 
     #[tokio::test]

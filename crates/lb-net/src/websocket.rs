@@ -208,6 +208,8 @@ async fn handshake(
     req: &WsConnect,
 ) -> Result<(Box<dyn Io>, Opened), String> {
     let url = &req.url;
+    ctx.check_url(url)
+        .map_err(|_| "Error in connection establishment: net::ERR_BLOCKED_BY_CLIENT".to_owned())?;
     let host = url
         .host_str()
         .ok_or_else(|| "Invalid URL".to_owned())?

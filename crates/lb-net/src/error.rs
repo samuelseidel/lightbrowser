@@ -4,6 +4,10 @@
 pub enum NetError {
     #[error("invalid url: {0}")]
     Url(#[from] url::ParseError),
+    /// The context's URL filter refused the request (Chrome's text for a
+    /// request a client blocked).
+    #[error("net::ERR_BLOCKED_BY_CLIENT")]
+    Blocked,
     #[error("unsupported scheme: {0}")]
     UnsupportedScheme(String),
     #[error("dns: {0}")]
