@@ -671,8 +671,7 @@ fn load_sheet(
                 r.ok_or_else(String::new),
                 doc_origin,
                 quirks,
-                chain,
-                timeline.1,
+                (chain, timeline.1),
                 done,
             );
         }));
@@ -698,7 +697,7 @@ fn load_sheet(
         if w.is_closed() {
             return;
         }
-        got_sheet(&w, url, r, doc_origin, quirks, chain, timeline.1, done);
+        got_sheet(&w, url, r, doc_origin, quirks, (chain, timeline.1), done);
     }));
 }
 
@@ -708,8 +707,8 @@ fn got_sheet(
     r: Result<NetResponse, String>,
     doc_origin: url::Origin,
     quirks: bool,
-    mut chain: Vec<String>,
-    blocking: bool,
+    // The import chain so far, and whether the load blocks rendering.
+    (mut chain, blocking): (Vec<String>, bool),
     done: Box<dyn FnOnce(&Rc<Window>, Loaded)>,
 ) {
     let resp = match r {

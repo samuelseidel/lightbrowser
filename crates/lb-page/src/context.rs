@@ -427,7 +427,7 @@ impl BrowserContext {
         let r = lb_net::fetch(&mut net, wire).await;
         self.put_back(net);
         let resp = r.map_err(Ok)?;
-        let timing = Some(net_timing(&resp.timing, resp.version));
+        let timing = Some(Box::new(net_timing(&resp.timing, resp.version)));
         let trace = FetchTrace {
             redirects: resp.redirects,
             method: resp.method.to_string(),

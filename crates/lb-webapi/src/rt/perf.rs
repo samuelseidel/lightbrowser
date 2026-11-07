@@ -250,7 +250,7 @@ impl Entry {
 pub struct NavInfo {
     /// The network's measurements of the document request (`None` for
     /// `about:blank`, `srcdoc` and responses a CDP client fulfilled).
-    pub timing: Option<NetTiming>,
+    pub timing: Option<Box<NetTiming>>,
     /// `navigate`, `reload` or `back_forward`.
     pub nav_type: &'static str,
     pub status: u16,

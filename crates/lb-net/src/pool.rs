@@ -261,7 +261,7 @@ pub struct Conn {
     pub id: u64,
     pub stream: Stream,
     /// How the connection was set up (Resource Timing).
-    pub timing: crate::timing::ConnTiming,
+    pub timing: Box<crate::timing::ConnTiming>,
 }
 
 /// A usable HTTP/2 session.
@@ -684,7 +684,7 @@ impl ConnectionPool {
                 Conn {
                     id,
                     stream: Stream::Plain(tcp),
-                    timing,
+                    timing: Box::new(timing),
                 },
                 HttpVersion::Http1,
             )),
@@ -698,7 +698,7 @@ impl ConnectionPool {
                     Conn {
                         id,
                         stream: Stream::Tls(Box::new(s)),
-                        timing,
+                        timing: Box::new(timing),
                     },
                     version,
                 ))

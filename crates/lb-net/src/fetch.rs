@@ -696,7 +696,7 @@ async fn pooled_exchange(
             Lease::H1 { mut conn, reused } => {
                 let req = wire(HttpVersion::Http1);
                 let mut guard = SocketGuard::new(pool, key, params, false);
-                let opened = (!reused).then_some(conn.timing);
+                let opened = (!reused).then_some(*conn.timing);
                 let request_start = Instant::now();
                 match h1::send_on_form(&mut conn.stream, &req, max_body, absolute).await {
                     Ok((raw, reusable)) => {
@@ -716,7 +716,7 @@ async fn pooled_exchange(
                 let req = wire(HttpVersion::Http2);
                 let mut guard = SocketGuard::new(pool, key, params, true);
                 let id = conn.id;
-                let opened = Some(conn.timing);
+                let opened = Some(*conn.timing);
                 let request_start = Instant::now();
                 let started = h2::start(conn.stream, &req, &params.profile).await?;
                 let (send, driver, first) = started.split();

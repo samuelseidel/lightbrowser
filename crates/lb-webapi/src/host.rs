@@ -101,7 +101,7 @@ pub struct NetResponse {
     /// What the network layer measured (Resource and Navigation Timing,
     /// ADR 0046). `None` for responses that did not come from the network
     /// stack: `data:`, `blob:`, a service worker's, CDP `Fetch.fulfillRequest`.
-    pub timing: Option<NetTiming>,
+    pub timing: Option<Box<NetTiming>>,
 }
 
 /// Setup of the connection a request used when it was opened for it.
