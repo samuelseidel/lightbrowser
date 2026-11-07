@@ -462,3 +462,49 @@ async fn non_persistent_responses_close() {
     assert!(!next.connection_reused);
     assert_eq!(srv.records().len(), 2);
 }
+
+/// What a fetch measured for Resource Timing (ADR 0046): the request on a
+/// new connection carries that connection's DNS, connect and (https) TLS
+/// steps in order, one on a reused connection or HTTP/2 session carries
+/// none (`conn: None`), and the instants of the fetch run in order. Chrome
+/// reports a reused connection's `domainLookup*` and `connect*` equal to
+/// `fetchStart`, which the page layer does from `conn: None`.
+#[tokio::test]
+async fn fetch_timing_tells_new_connections_from_reused_ones() {
+    for tls in [false, true] {
+        let srv = SiteServer::bind(
+            "127.0.0.1:0",
+            SiteConfig::subresource_page(tls, 0, 0, 0, Duration::ZERO),
+        )
+        .await
+        .unwrap();
+        let scheme = if tls { "https" } else { "http" };
+        let base: Url = format!("{scheme}://127.0.0.1:{}/", srv.local_addr().port())
+            .parse()
+            .unwrap();
+        let pool = ConnectionPool::new();
+        let first = get(&pool, Request::get(base.clone())).await;
+        let t = &first.timing;
+        let c = t.conn.expect("a new connection has its setup measured");
+        assert!(t.start <= t.fetch_start && t.fetch_start <= c.dns_start, "tls={tls}");
+        assert!(c.dns_start <= c.dns_end && c.dns_end <= c.connect_start);
+        match c.secure_start {
+            Some(s) => {
+                assert!(tls);
+                assert!(c.connect_start <= s && s <= c.connect_end);
+            }
+            None => assert!(!tls),
+        }
+        assert!(c.connect_end <= t.request_start);
+        assert!(t.request_start <= t.response_start && t.response_start <= t.response_end);
+        assert!(t.redirect.is_none());
+        assert_eq!(t.encoded_body_size, first.body.len() as u64);
+        assert_eq!(t.decoded_body_size, first.body.len() as u64);
+
+        let second = get(&pool, Request::get(base.join("/next").unwrap())).await;
+        let t2 = &second.timing;
+        assert!(t2.conn.is_none(), "tls={tls}: a reused connection has no setup");
+        assert!(t2.fetch_start <= t2.request_start && t2.request_start <= t2.response_end);
+        assert!(t2.start >= t.response_end);
+    }
+}
