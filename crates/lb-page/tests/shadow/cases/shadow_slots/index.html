@@ -1,0 +1,60 @@
+<!doctype html><!--LOG--><body><div id=host><span id=a slot=one>A</span>text<b id=b>B</b><i id=c slot=missing>C</i><!--c--></div><script>
+var host = document.getElementById('host'), a = document.getElementById('a'), b = document.getElementById('b'), c = document.getElementById('c');
+var sr = host.attachShadow({ mode: 'open' });
+var ev = [];
+function rec(s) { s.addEventListener('slotchange', e => ev.push('slotchange ' + d(e.target) + ' cur=' + d(e.currentTarget) + ' bubbles=' + e.bubbles + ' composed=' + e.composed + ' path=' + ds(e.composedPath()))); }
+sr.addEventListener('slotchange', e => ev.push('sr got ' + d(e.target)));
+sr.innerHTML = '<slot id=s1 name=one><em id=fb1>fb1</em></slot><div id=wrap><slot id=s0><em id=fb0>fb0</em></slot></div><slot id=s2 name=two>fb2</slot>';
+var s0 = sr.getElementById('s0'), s1 = sr.getElementById('s1'), s2 = sr.getElementById('s2');
+[s0, s1, s2].forEach(rec);
+ev.push('sync');
+Promise.resolve().then(() => ev.push('micro'));
+new MutationObserver(() => ev.push('mo')).observe(host, { childList: true, attributes: true, subtree: true });
+t('assigned', () => [ds(s0.assignedNodes()), ds(s1.assignedNodes()), ds(s2.assignedNodes()), ds(s2.assignedNodes({ flatten: true })), ds(s0.assignedElements()), d(a.assignedSlot), d(b.assignedSlot), d(c.assignedSlot), d(host.lastChild.assignedSlot), String(s1.name)].join(' '));
+t('slot attr', () => [a.slot, b.slot, 'assignedSlot' in Text.prototype].join());
+setTimeout(() => {
+  log('initial ' + ev.join(' | ')); ev = [];
+  b.slot = 'two';
+  ev.push('sync');
+  Promise.resolve().then(() => ev.push('micro'));
+  setTimeout(() => {
+    log('slot attr change ' + ev.join(' | ')); ev = [];
+    t('after', () => [ds(s0.assignedNodes()), ds(s2.assignedNodes())].join(' '));
+    s2.name = 'one';
+    host.appendChild(document.createElement('u'));
+    s1.remove();
+    setTimeout(() => {
+      log('rename+append+remove ' + ev.join(' | ')); ev = [];
+      t('after2', () => [ds(s0.assignedNodes()), ds(s2.assignedNodes()), ds(s1.assignedNodes()), d(a.assignedSlot)].join(' '));
+      // nested: a slot slotted into another shadow tree
+      var outer = document.createElement('div'); document.body.appendChild(outer);
+      var inner = document.createElement('div'); outer.attachShadow({ mode: 'open' }).appendChild(inner);
+      var is = inner.attachShadow({ mode: 'open' }); is.innerHTML = '<slot id=deep>deep fb</slot>';
+      var mid = document.createElement('slot'); mid.id = 'mid'; inner.appendChild(mid);
+      var leaf = document.createElement('span'); leaf.id = 'leaf'; outer.appendChild(leaf);
+      var deep = is.getElementById('deep');
+      t('nested', () => [ds(deep.assignedNodes()), ds(deep.assignedNodes({ flatten: true })), ds(mid.assignedNodes()), d(leaf.assignedSlot), d(mid.assignedSlot)].join(' '));
+      rec(deep); rec(mid);
+      setTimeout(() => {
+        log('nested events ' + ev.join(' | ')); ev = [];
+        // manual assignment
+        var mh = document.createElement('div'); mh.innerHTML = '<p id=m1>1</p><p id=m2>2</p>'; document.body.appendChild(mh);
+        var ms = mh.attachShadow({ mode: 'open', slotAssignment: 'manual' });
+        ms.innerHTML = '<slot id=ma></slot><slot id=mb></slot>';
+        var ma = ms.getElementById('ma'), mb = ms.getElementById('mb'), m1 = mh.children[0], m2 = mh.children[1];
+        rec(ma); rec(mb);
+        t('manual before', () => [ds(ma.assignedNodes()), d(m1.assignedSlot)].join(' '));
+        ma.assign(m2, m1);
+        t('manual', () => [ds(ma.assignedNodes()), d(m1.assignedSlot), ds(ma.assignedElements())].join(' '));
+        mb.assign(m1);
+        t('manual move', () => [ds(ma.assignedNodes()), ds(mb.assignedNodes())].join(' '));
+        t('assign foreign', () => { var f = document.createElement('p'); ma.assign(f); return ds(ma.assignedNodes()); });
+        t('assign text', () => ma.assign(document.createTextNode('x')));
+        t('assign non-node', () => ma.assign({}));
+        t('assign named', () => { s0.assign(a); return ds(s0.assignedNodes()); });
+        setTimeout(() => { log('manual events ' + ev.join(' | ')); end(); }, 20);
+      }, 20);
+    }, 20);
+  }, 20);
+}, 20);
+</script>

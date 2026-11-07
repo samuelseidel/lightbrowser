@@ -1,0 +1,18 @@
+<!doctype html><title>clone</title><!--LOG-->
+<script>
+function t(label, f) { try { log(label + ' ' + f()); } catch (e) { log(label + ' threw ' + e.name + ' ' + e.code + ': ' + e.message); } }
+t('map', () => { var m = structuredClone(new Map([[1, {a: 2}]])); return m instanceof Map && m.get(1).a; });
+t('cycle', () => { var o = {}; o.o = o; var c = structuredClone(o); return c.o === c; });
+t('date', () => structuredClone(new Date(3)).getTime());
+t('undefined', () => typeof structuredClone(undefined));
+t('error', () => { var e = structuredClone(new TypeError('m')); return e.constructor.name + ' ' + e.message; });
+t('typed', () => { var u = structuredClone(new Float32Array([1.5])); return u.constructor.name + ' ' + u[0]; });
+t('fn', () => structuredClone(() => 1));
+t('symbol', () => structuredClone(Symbol('s')));
+t('node', () => structuredClone(document));
+t('transfer', () => { var b = new ArrayBuffer(4); var c = structuredClone(b, {transfer: [b]}); return b.byteLength + ' ' + c.byteLength; });
+t('blob', () => { var b = structuredClone(new Blob(['xy'])); return b.constructor.name + ' ' + b.size; });
+t('noargs', () => structuredClone());
+t('getter', () => structuredClone({get x() { throw new RangeError('g'); }}));
+end();
+</script>

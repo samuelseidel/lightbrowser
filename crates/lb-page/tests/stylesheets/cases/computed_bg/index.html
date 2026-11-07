@@ -1,0 +1,14 @@
+<!doctype html><html><head><!--LOG--></head><body>
+<div id=a1 style="background: url(img/a.png) no-repeat 10px 20% / 30px auto, linear-gradient(red, blue) #eee"></div>
+<div id=a2 style="background-image: linear-gradient(to right, red 10%, rgba(0,0,255,0.5) 80%); background-position: right 5px bottom; background-size: cover; background-repeat: repeat-x; background-origin: content-box; background-clip: padding-box"></div>
+<div id=a3 style="background-image: radial-gradient(circle, red, blue 50px); background-position: center; background-size: 50% 25px; background-repeat: space round"></div>
+<div id=a4 style="background-image: radial-gradient(ellipse at top left, red, blue), repeating-linear-gradient(45deg, red 0 10px, blue 10px 20px); background-size: contain"></div>
+<div id=a5 style="border-radius: 10px; box-shadow: 2px 3px 4px red, inset 0 0 5px 1px rgba(0,0,0,.5)"></div>
+<div id=a6 style="border-radius: 10px 20px / 5px; box-shadow: none; background: none"></div>
+<div id=a7 style="border-top-left-radius: 50%; box-shadow: 1px 1px currentColor; color: green"></div>
+<div id=a8 style="background: radial-gradient(farthest-side at 20px 30px, red, blue); background-attachment: fixed"></div>
+<div id=a9 style="background-image: linear-gradient(0.25turn, red, 30%, blue); background-position: 0 0, 10px 10px"></div>
+<script>
+var P=['background-image','background-position','background-position-x','background-position-y','background-size','background-repeat','background-origin','background-clip','background-attachment','border-top-left-radius','border-top-right-radius','border-bottom-right-radius','border-radius','box-shadow','background'];
+for (var i=1;i<=9;i++){var cs=getComputedStyle(document.getElementById('a'+i));log('a'+i+': '+P.map(function(p){return p+'='+cs.getPropertyValue(p)}).join(' | ').replace(new RegExp(location.origin,'g'),''));}
+</script></body></html>

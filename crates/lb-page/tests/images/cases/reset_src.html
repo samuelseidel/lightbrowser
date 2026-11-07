@@ -1,0 +1,10 @@
+<!doctype html><html><head><!--LOG--></head><body>
+<img id=a src="a.png">
+<script>
+var a=W(document.getElementById('a'),'a');
+addEventListener('load',function(){setTimeout(function(){
+  a.src='b.png';log('to b complete='+a.complete+' w='+a.naturalWidth);
+  setTimeout(function(){a.src='a.png';log('back to a complete='+a.complete+' w='+a.naturalWidth);},300);
+},50)});
+</script>
+</body></html>

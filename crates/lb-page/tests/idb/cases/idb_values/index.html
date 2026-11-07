@@ -1,0 +1,49 @@
+<!doctype html><!--LOG--><script>
+(async function(){
+  await fresh('val');
+  var r = indexedDB.open('val', 1);
+  r.onupgradeneeded = function(){ r.result.createObjectStore('s'); };
+  var db = await req(r);
+  var tx = db.transaction('s', 'readwrite');
+  var s = tx.objectStore('s');
+  var vals = [1, -0, NaN, 'str', true, null, undefined, [1,[2]], {a:1,b:{c:[3]}}, new Date(5), /re/gi, new Map([[1,'a']]), new Set(['x']), new Uint8Array([1,2]), new Float64Array([0.5]), new ArrayBuffer(3), new Number(4), new String('s'), new Boolean(false), 10n, Object.assign([1,2], {extra:'p'})];
+  vals.forEach(function(v, i){ s.put(v, i); });
+  var obj = {n:1}; s.put(obj, 'mut'); obj.n = 2;
+  var getter = {get g(){ log('getter called'); return 'G'; }};
+  s.put(getter, 'getter');
+  t('function', function(){return s.put(function(){}, 'f')});
+  t('symbol', function(){return s.put(Symbol('q'), 'sym')});
+  t('nested fn', function(){return s.put({f:function(){}}, 'nf')});
+  t('dom node', function(){return s.put(document.body, 'node')});
+  t('error obj', function(){return show(s.put(new TypeError('m'), 'err').readyState)});
+  var thrower = {get x(){ throw new RangeError('from getter'); }};
+  t('throwing getter', function(){return s.put(thrower, 'tg')});
+  t('bad key', function(){return s.put(1, {})});
+  t('no args', function(){return s.put()});
+  var all = await req(s.getAll());
+  log('all '+all.length);
+  all.forEach(function(v, i){ log(i+' '+show(v)+(v instanceof RegExp?' '+v.source+'/'+v.flags:'')+(v instanceof Map?' map '+JSON.stringify(Array.from(v)):'')+(v instanceof Set?' set '+JSON.stringify(Array.from(v)):'')+(v instanceof Error?' error '+v.name+' '+v.message:'')+(Array.isArray(v)&&v.extra?' extra='+v.extra:'')); });
+  var keys = await req(s.getAllKeys());
+  log('keys '+show(keys));
+  log('mut '+show(await req(s.get('mut'))));
+  var g1 = await req(s.get(8)), g2 = await req(s.get(8));
+  log('fresh copies '+(g1!==g2));
+  // getAll with ranges and counts
+  log('getAll range '+show(await req(s.getAllKeys(IDBKeyRange.bound(3, 6)))));
+  log('getAll count '+show(await req(s.getAllKeys(null, 3))));
+  log('getAll 0 '+show(await req(s.getAllKeys(null, 0))));
+  log('getAll key '+show(await req(s.getAll(2))));
+  t('getAll bad count', function(){return s.getAll(null, -1)});
+  await a('getAll opts', function(){return req(s.getAllKeys({query:IDBKeyRange.lowerBound(18), count:2, direction:'prev'})).then(show)});
+  await a('getAllRecords', function(){return req(s.getAllRecords({query:IDBKeyRange.bound(1,2)})).then(function(rs){return rs.map(function(x){return String(x)+' '+show(x.key)+' '+show(x.primaryKey)+' '+show(x.value)}).join(' ; ')})});
+  log('count '+await req(s.count()));
+  log('count range '+await req(s.count(IDBKeyRange.upperBound(5, true))));
+  log('delete range '+show(await req(s.delete(IDBKeyRange.bound(0, 10)))));
+  log('count after '+await req(s.count()));
+  log('clear '+show(await req(s.clear())));
+  log('count cleared '+await req(s.count()));
+  await done(tx);
+  db.close();
+  end();
+})();
+</script>

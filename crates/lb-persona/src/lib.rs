@@ -1,14 +1,40 @@
 //! Persona model shared by every layer: browser family, validation and
 //! deterministic fingerprint noise.
 //!
-//! The persona schema and consistency rules come from stealth-browser
-//! (`consistency/`) and are vendored here in M4.
+//! - [`Persona`]: the small network-facing summary (headers, TLS profile id).
+//! - [`PersonaProfile`]: the full persona (`persona_v2.schema.json`; v1 files
+//!   load as Firefox). [`PersonaProfile::to_network`] derives a [`Persona`].
+//! - [`consistency`]: rules R01-R26, vendored from stealth-browser
+//!   (`consistency/`, R01-R10) plus the Chrome rules (R11-R16) and the OS
+//!   rules (R17-R26, M7). [`validate_file`] backs `lightbrowser validate`.
+//! - [`os`]: the OS axis ([`OsKind`], display server, distro) and the
+//!   per-OS defaults behind the accessors on [`PersonaProfile`] (ADR 0015).
+//! - [`generate`]: builds consistent personas from `profiles/catalog/`.
+//! - [`sfc32`]: deterministic noise.
 
+pub mod consistency;
+pub mod generate;
+pub mod os;
+pub mod profile;
 pub mod sfc32;
+pub mod uach;
 
-/// The persona a browsing context presents. M1 carries only what the network
-/// layer needs; the full schema (`profiles/schemas/persona_v2.schema.json`)
-/// arrives in M4 and is validated by the vendored consistency rules.
+pub use consistency::{
+    ValidateOutcome, ValidationResult, Violation, Warning, validate, validate_file,
+};
+pub use os::{
+    AudioDefaults, Codecs, DisplayServer, Distro, FontDefaults, HighEntropyHints, OsApis, OsKind,
+    WebGpuAdapter, WheelModel, os_font_aliases, os_font_defaults,
+};
+pub use profile::{
+    BatteryInfo, BrandVersion, ClientHints, MediaDevices, PersonaError, PersonaProfile,
+    Preferences, format_brand_list,
+};
+
+/// The network-facing summary of a persona: what `lb-net` needs. The full
+/// schema (`profiles/schemas/persona_v2.schema.json`) is [`PersonaProfile`];
+/// get this from it with [`PersonaProfile::to_network`], or load it directly
+/// with [`Persona::load_json`] / [`Persona::from_path`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Persona {
     pub family: BrowserFamily,
@@ -24,8 +50,12 @@ pub struct Persona {
     pub sec_ch_ua_mobile: Option<String>,
     /// `profile_id` of the TLS/H2 profile in `profiles/tls/`.
     pub tls_profile_id: String,
-    /// `profile_id` of the TCP/IP SYN profile in `profiles/tcp/`. Its OS must
-    /// match the platform in `user_agent` (see [`Persona::ua_os`]).
+    /// Chrome only: the high-entropy `Sec-CH-UA-*` values, sent only to
+    /// origins that asked for them with `Accept-CH` (M7, ADR 0015).
+    pub high_entropy: Option<HighEntropyHints>,
+    /// `profile_id` of the TCP/IP SYN profile in `profiles/tcp/` (ADR 0031).
+    /// Its OS must match the platform in `user_agent` (see
+    /// [`Persona::ua_os`]).
     pub tcp_profile_id: String,
 }
 
@@ -50,7 +80,22 @@ impl Persona {
             sec_ch_ua_platform: Some("Windows".into()),
             sec_ch_ua_mobile: Some("?0".into()),
             tls_profile_id: "chrome_153_linux".into(),
-            tcp_profile_id: "windows_65535".into(),
+            high_entropy: Some(HighEntropyHints {
+                platform: "Windows".into(),
+                platform_version: "10.0.0".into(),
+                architecture: "x86".into(),
+                bitness: "64".into(),
+                model: String::new(),
+                wow64: false,
+                full_version_list: vec![
+                    BrandVersion::new("Google Chrome", "153.0.8010.12"),
+                    BrandVersion::new("Not_A Brand", "8.0.0.0"),
+                    BrandVersion::new("Chromium", "153.0.8010.12"),
+                ],
+                full_version: "153.0.8010.12".into(),
+                form_factors: vec!["Desktop".into()],
+            }),
+            tcp_profile_id: OsKind::Windows.default_tcp_profile_id().into(),
         }
     }
 
@@ -67,62 +112,17 @@ Firefox/128.0"
             sec_ch_ua_platform: None,
             sec_ch_ua_mobile: None,
             tls_profile_id: "firefox_128_win10".into(),
-            tcp_profile_id: "windows_65535".into(),
+            high_entropy: None,
+            tcp_profile_id: OsKind::Windows.default_tcp_profile_id().into(),
         }
     }
 
-    /// The operating system the `user_agent` claims, or `None` if the string
-    /// names none we know (Android and iOS are not supported personas).
-    pub fn ua_os(&self) -> Option<OsFamily> {
-        let ua = self.user_agent.as_str();
-        if ua.contains("Android") || ua.contains("iPhone") || ua.contains("iPad") {
-            None
-        } else if ua.contains("Windows NT") {
-            Some(OsFamily::Windows)
-        } else if ua.contains("Macintosh") || ua.contains("Mac OS X") {
-            Some(OsFamily::Macos)
-        } else if ua.contains("Linux") || ua.contains("X11") {
-            Some(OsFamily::Linux)
-        } else {
-            None
-        }
-    }
-}
-
-/// The desktop operating system a persona claims. Picks the TCP/IP stack
-/// behaviour on the wire (`profiles/tcp/`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OsFamily {
-    Windows,
-    Macos,
-    Linux,
-}
-
-impl OsFamily {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Windows => "windows",
-            Self::Macos => "macos",
-            Self::Linux => "linux",
-        }
-    }
-}
-
-impl fmt::Display for OsFamily {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for OsFamily {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "windows" | "win" => Ok(Self::Windows),
-            "macos" | "mac" | "darwin" => Ok(Self::Macos),
-            "linux" => Ok(Self::Linux),
-            _ => Err(format!("unknown os: {s:?}")),
+    /// The operating system the `user_agent` claims, or `None` if it names
+    /// none with a TCP profile (Android, iOS, Chrome OS, unknown).
+    pub fn ua_os(&self) -> Option<OsKind> {
+        match OsKind::from_user_agent(&self.user_agent) {
+            OsKind::Other => None,
+            os => Some(os),
         }
     }
 }
@@ -132,7 +132,8 @@ use std::str::FromStr;
 
 /// The real browser a persona claims to be. Each family builds its own
 /// binary with the matching JS engine, IDL set and network fingerprint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BrowserFamily {
     /// V8, Chromium IDL, BoringSSL Chrome ClientHello, Chrome H2 settings.
     Chrome,
@@ -188,25 +189,5 @@ mod tests {
             assert_eq!(f.as_str().parse::<BrowserFamily>(), Ok(f));
         }
         assert!("safari".parse::<BrowserFamily>().is_err());
-    }
-
-    #[test]
-    fn ua_os_follows_the_user_agent() {
-        let mut p = Persona::default_chrome();
-        assert_eq!(p.ua_os(), Some(OsFamily::Windows));
-        p.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36".into();
-        assert_eq!(p.ua_os(), Some(OsFamily::Macos));
-        p.user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36".into();
-        assert_eq!(p.ua_os(), Some(OsFamily::Linux));
-        p.user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36".into();
-        assert_eq!(p.ua_os(), None);
-    }
-
-    #[test]
-    fn os_family_round_trip() {
-        for o in [OsFamily::Windows, OsFamily::Macos, OsFamily::Linux] {
-            assert_eq!(o.as_str().parse::<OsFamily>(), Ok(o));
-        }
-        assert!("beos".parse::<OsFamily>().is_err());
     }
 }

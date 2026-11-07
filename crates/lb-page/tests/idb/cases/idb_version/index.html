@@ -1,0 +1,69 @@
+<!doctype html><!--LOG--><script>
+(async function(){
+  await fresh('ver');
+  // versionchange + blocked
+  var o = [];
+  var db1 = await req(indexedDB.open('ver', 1));
+  log('v1 '+db1.version);
+  db1.onversionchange = function(e){ o.push('db1 versionchange '+ev(e)); };
+  var r2 = indexedDB.open('ver', 2);
+  r2.onblocked = function(e){ o.push('blocked '+ev(e)+' ready='+r2.readyState); setTimeout(function(){ o.push('closing db1'); db1.close(); }, 10); };
+  r2.onupgradeneeded = function(e){ o.push('upgrade '+ev(e)); r2.result.createObjectStore('s'); };
+  var db2 = await req(r2);
+  o.push('db2 version '+db2.version);
+  log(o.join(' | ')); o = [];
+  // closing in versionchange: no blocked
+  db2.onversionchange = function(e){ o.push('db2 versionchange '+ev(e)); db2.close(); };
+  var r3 = indexedDB.open('ver', 3);
+  r3.onblocked = function(){ o.push('r3 blocked'); };
+  r3.onupgradeneeded = function(e){ o.push('r3 upgrade '+ev(e)); };
+  var db3 = await req(r3);
+  log(o.join(' | ')); o = [];
+  // VersionError, TypeError
+  await a('lower version', function(){return req(indexedDB.open('ver', 2))});
+  t('version 0', function(){return indexedDB.open('ver', 0)});
+  t('version -1', function(){return indexedDB.open('ver', -1)});
+  t('version NaN', function(){return indexedDB.open('ver', NaN)});
+  t('version big', function(){return indexedDB.open('ver', 2**53)});
+  t('open noargs', function(){return indexedDB.open()});
+  t('delete noargs', function(){return indexedDB.deleteDatabase()});
+  // deleteDatabase while open
+  db3.onversionchange = function(e){ o.push('db3 versionchange '+ev(e)); };
+  var del = indexedDB.deleteDatabase('ver');
+  del.onblocked = function(e){ o.push('delete blocked '+ev(e)); db3.close(); };
+  del.onsuccess = function(e){ o.push('deleted '+ev(e)+' result='+del.result); };
+  await req(del);
+  log(o.join(' | ')); o = [];
+  // abort in upgradeneeded
+  var r4 = indexedDB.open('ver', 5);
+  r4.onupgradeneeded = function(e){ var db=r4.result; db.createObjectStore('x'); o.push('r4 upgrade '+e.oldVersion+'->'+e.newVersion); r4.transaction.abort(); o.push('after abort version='+db.version+' stores='+Array.from(db.objectStoreNames)); };
+  r4.onerror = function(e){ o.push('r4 error '+ev(e)+' '+err(r4.error)+' result='+r4.result); };
+  r4.onsuccess = function(){ o.push('r4 success?'); };
+  await new Promise(function(res){ setTimeout(res, 100); });
+  log(o.join(' | ')); o = [];
+  await a('databases after abort', function(){return indexedDB.databases().then(function(l){return JSON.stringify(l.filter(function(d){return d.name==='ver'}))})});
+  // close during upgrade
+  var r5 = indexedDB.open('ver', 1);
+  r5.onupgradeneeded = function(){ var db=r5.result; db.createObjectStore('y'); db.close(); o.push('closed in upgrade'); };
+  r5.onerror = function(e){ e.preventDefault(); o.push('r5 error '+err(r5.error)); };
+  r5.onsuccess = function(){ o.push('r5 success'); };
+  r5.transaction && log('r5 tx early '+r5.transaction);
+  await new Promise(function(res){ setTimeout(res, 100); });
+  log(o.join(' | ')); o = [];
+  // open without version creates v1; databases()
+  var db6 = await req(indexedDB.open('ver'));
+  log('db6 '+db6.version);
+  var tx = db6.transaction;
+  t('versionchange tx from success', function(){return String(tx)});
+  db6.close();
+  t('event ctor', function(){var e=new IDBVersionChangeEvent('versionchange',{oldVersion:2,newVersion:null});return [e.type,e.oldVersion,e.newVersion,e.dataLoss,e.dataLossMessage,e.bubbles,e.isTrusted].join(' ')});
+  t('event ctor2', function(){var e=new IDBVersionChangeEvent('x');return [e.oldVersion,e.newVersion].join(' ')});
+  // second open in the same task: queue order
+  await fresh('ver2');
+  var q1 = indexedDB.open('ver2', 1), q2 = indexedDB.open('ver2', 2), q3 = indexedDB.open('ver2');
+  [['q1',q1],['q2',q2],['q3',q3]].forEach(function(p){ p[1].onupgradeneeded=function(e){o.push(p[0]+' upgrade '+e.oldVersion+'->'+e.newVersion)}; p[1].onsuccess=function(){o.push(p[0]+' success v'+p[1].result.version); p[1].result.onversionchange=function(e){o.push(p[0]+' vc'); e.target.close();}}; p[1].onblocked=function(){o.push(p[0]+' blocked')}; p[1].onerror=function(e){e.preventDefault();o.push(p[0]+' error '+p[1].error.name)}; });
+  await new Promise(function(res){ setTimeout(res, 200); });
+  log(o.join(' | '));
+  end();
+})();
+</script>

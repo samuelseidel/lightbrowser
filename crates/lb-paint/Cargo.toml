@@ -6,3 +6,22 @@ license.workspace = true
 publish = false
 
 [dependencies]
+lb-css = { path = "../lb-css" }
+lb-dom = { path = "../lb-dom" }
+lb-layout = { path = "../lb-layout" }
+lb-persona = { path = "../lb-persona" }
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "ico"] }
+
+# Unpacks the bundled glyph outline packs (build.rs, ADR 0013); linked
+# anyway by lb-net.
+zstd = { version = "0.13", default-features = false }
+
+[build-dependencies]
+# Compresses the bundled glyph outline packs.
+zstd = { version = "0.13", default-features = false }
+
+[dev-dependencies]
+# Only the glyph pack generator example uses skrifa; it never runs in the
+# browser.
+skrifa = "0.49"

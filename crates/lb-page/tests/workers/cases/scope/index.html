@@ -1,0 +1,5 @@
+<!doctype html><title>scope</title><!--LOG-->
+<script>
+var w = new Worker('w.js');
+w.onmessage = function (e) { e.data.forEach(log); end(); };
+</script>

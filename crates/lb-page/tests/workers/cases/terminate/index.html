@@ -1,0 +1,14 @@
+<!doctype html><title>terminate</title><!--LOG-->
+<script>
+var w = new Worker('w.js');
+var n = 0;
+w.onmessage = function (e) {
+  log('tick ' + e.data);
+  if (++n === 2) {
+    log('terminate ' + w.terminate());
+    w.postMessage('ignored');
+    w.terminate();
+    setTimeout(function () { log('after ' + n); var c = new Worker('close.js'); c.onmessage = function (e) { log('close ' + e.data); }; setTimeout(end, 400); }, 300);
+  }
+};
+</script>

@@ -1,0 +1,41 @@
+{
+ "after_load": {
+  "log": "DCL\nwindow load\nlate set complete=true w=3 h=2\ninner complete=true w=3\nother complete=false\nmicro after set complete=true\nload late complete=true w=3\nmicro late\nload c complete=true w=3\nmicro c\nload other complete=true w=5\nmicro other\nother2 complete=true w=5\nload other2 complete=true w=5\nmicro other2",
+  "hits": {
+   "": 1,
+   "a.png": 1,
+   "b.png": 1
+  }
+ },
+ "error_same": {
+  "log": "DCL\nerror m1 true\nerror m2 true\nwindow load\nlate set complete=false\nerror late complete=true\nmicro late",
+  "hits": {
+   "": 1,
+   "missing.png": 2
+  }
+ },
+ "parse_same": {
+  "log": "parsed a1:false/0 a2:false/0 a3:false/0 a4:false/0\nload b true 5\nDCL\nload a1 true 3\nload a3 true 3\nload a2 true 3\nload a4 true 3\nwindow load",
+  "hits": {
+   "": 1,
+   "b.png": 1,
+   "slow-a.png": 1,
+   "slow-a.png?q": 1
+  }
+ },
+ "reset_src": {
+  "log": "DCL\nload a complete=true w=3\nmicro a\nwindow load\nto b complete=false w=3\nload a complete=true w=5\nmicro a\nback to a complete=false w=5\nload a complete=true w=3\nmicro a",
+  "hits": {
+   "": 1,
+   "a.png": 2,
+   "b.png": 1
+  }
+ },
+ "script_same": {
+  "log": "set n0 complete=false w=0\nset n1 complete=false w=0\nset n2 complete=false w=0\nset n3 complete=false w=0\nappended d complete=false\ntimeout0\nDCL\nload n0 complete=true w=3\nmicro n0\nload n1 complete=true w=3\nmicro n1\nload n3 complete=true w=3\nmicro n3\nload n2 complete=true w=3\nmicro n2\nload d complete=true w=3\nmicro d\nwindow load",
+  "hits": {
+   "": 1,
+   "slow-a.png": 1
+  }
+ }
+}

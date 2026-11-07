@@ -1,0 +1,35 @@
+<!doctype html><title>update</title><!--LOG-->
+<script>
+var n = load(), sw = navigator.serviceWorker;
+function hits() { return fetch('hits').then(function (r) { return r.json() }).then(function (h) { log('hits sw.js=' + h['sw.js'] + ' index=' + h['']) }) }
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
+log('load ' + n + ' controller ' + (sw.controller && rel(sw.controller.scriptURL)));
+sw.oncontrollerchange = function () { log('controllerchange ' + rel(sw.controller.scriptURL)) };
+if (n === 0) {
+  sw.register('sw.js?v=1').then(function () { return sw.ready }).then(hits).then(again);
+} else if (n === 1) {
+  var reg;
+  sleep(1000).then(hits).then(function () { return sw.getRegistration() }).then(function (r) {
+    reg = r;
+    reg.onupdatefound = function () { log('updatefound installing=' + rel(reg.installing.scriptURL)) };
+    return reg.update();
+  }).then(function (v) {
+    log('update() same bytes ' + Object.prototype.toString.call(v) + ' ' + (v === reg) + ' installing=' + !!reg.installing);
+    return sw.register('sw.js?v=2');
+  }).then(function (r) {
+    log('register v2 same reg ' + (r === reg) + ' installing=' + (reg.installing && rel(reg.installing.scriptURL)) + ' active=' + rel(reg.active.scriptURL));
+    var w = reg.installing;
+    return new Promise(function (res) {
+      w.onstatechange = function () {
+        log('v2 ' + w.state + ' waiting=' + (reg.waiting === w) + ' active=' + rel(reg.active.scriptURL));
+        if (w.state === 'installed') {
+          sleep(200).then(function () { log('still waiting ' + (reg.waiting === w) + ' ' + w.state); w.postMessage('skip') });
+        }
+        if (w.state === 'activated') res();
+      };
+    });
+  }).then(function () { return sleep(50) }).then(function () { return swlog(sw.controller) }).then(hits).then(again);
+} else {
+  sw.ready.then(function (r) { log('ready ' + rel(r.active.scriptURL) + ' waiting=' + !!r.waiting); return swlog(sw.controller) }).then(end);
+}
+</script>

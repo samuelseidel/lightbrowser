@@ -1,0 +1,429 @@
+{
+ "webgl": {
+  "link": true,
+  "uniforms": [
+   [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   [
+    0,
+    0
+   ],
+   [
+    5,
+    6
+   ],
+   [
+    7,
+    8
+   ],
+   7,
+   true,
+   3
+  ],
+  "uerrs": [],
+  "wrongType": [
+   1282
+  ],
+  "wrongSize": [
+   1282
+  ],
+  "badUnit": [
+   1281
+  ],
+  "active": [
+   [
+    "b",
+    1,
+    35670
+   ],
+   [
+    "m",
+    1,
+    35675
+   ],
+   [
+    "v[0]",
+    3,
+    35664
+   ],
+   [
+    "i",
+    1,
+    5124
+   ],
+   [
+    "s",
+    1,
+    35678
+   ]
+  ],
+  "locNames": [
+   "loc",
+   "loc",
+   "loc",
+   null,
+   null,
+   null,
+   null
+  ],
+  "noBuffer": [
+   1282
+  ],
+  "tooShort": [],
+  "ok": [],
+  "badMode": [
+   1280
+  ],
+  "noElements": [
+   1282
+  ],
+  "texDefaults": [
+   9986,
+   9729,
+   10497
+  ],
+  "texParamErr": [
+   1280
+  ],
+  "formatMismatch": [
+   1282
+  ],
+  "shortData": [
+   1282
+  ],
+  "texOk": [],
+  "retarget": [
+   1282
+  ],
+  "fbEmpty": 36055,
+  "fbTex": 36053,
+  "attType": 5890,
+  "attObj": true,
+  "fbRead": [
+   255,
+   0,
+   0,
+   255,
+   0,
+   255,
+   0,
+   255,
+   0,
+   0,
+   255,
+   255,
+   255,
+   255,
+   255,
+   255
+  ],
+  "fbReadErr": [],
+  "rbParams": [
+   4,
+   4,
+   33189,
+   16
+  ],
+  "fbMismatch": 36057,
+  "clearIncomplete": [
+   1286
+  ],
+  "cleared": [
+   64,
+   128,
+   191,
+   128
+  ],
+  "rgbRead": [
+   1282
+  ],
+  "floatRead": [
+   1280
+  ],
+  "edgeRead": [
+   64,
+   128,
+   191,
+   128,
+   9,
+   9,
+   9,
+   9
+  ],
+  "badLog": "ERROR: 0:1: 'x' : undeclared identifier\nERROR: 0:1: 'assign' : l-value required (can't modify a const)\n",
+  "badLink": [
+   false,
+   "Vertex shader is not compiled.\n"
+  ],
+  "useBad": [
+   1282
+  ],
+  "params": [
+   1,
+   519,
+   513,
+   1029,
+   2305,
+   4,
+   4,
+   4,
+   1,
+   24,
+   0,
+   8,
+   6408,
+   5121
+  ],
+  "blendAfter": [
+   1,
+   1,
+   0,
+   0
+  ],
+  "end": []
+ },
+ "webgl2": {
+  "link": true,
+  "uniforms": [
+   [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   [
+    0,
+    0
+   ],
+   [
+    5,
+    6
+   ],
+   [
+    7,
+    8
+   ],
+   7,
+   true,
+   3
+  ],
+  "uerrs": [],
+  "wrongType": [
+   1282
+  ],
+  "wrongSize": [
+   1282
+  ],
+  "badUnit": [
+   1281
+  ],
+  "active": [
+   [
+    "b",
+    1,
+    35670
+   ],
+   [
+    "m",
+    1,
+    35675
+   ],
+   [
+    "v[0]",
+    3,
+    35664
+   ],
+   [
+    "i",
+    1,
+    5124
+   ],
+   [
+    "s",
+    1,
+    35678
+   ]
+  ],
+  "locNames": [
+   "loc",
+   "loc",
+   "loc",
+   null,
+   null,
+   null,
+   null
+  ],
+  "noBuffer": [
+   1282
+  ],
+  "tooShort": [],
+  "ok": [],
+  "badMode": [
+   1280
+  ],
+  "noElements": [
+   1282
+  ],
+  "texDefaults": [
+   9986,
+   9729,
+   10497
+  ],
+  "texParamErr": [
+   1280
+  ],
+  "formatMismatch": [
+   1282
+  ],
+  "shortData": [
+   1282
+  ],
+  "texOk": [],
+  "retarget": [
+   1282
+  ],
+  "fbEmpty": 36055,
+  "fbTex": 36053,
+  "attType": 5890,
+  "attObj": true,
+  "fbRead": [
+   255,
+   0,
+   0,
+   255,
+   0,
+   255,
+   0,
+   255,
+   0,
+   0,
+   255,
+   255,
+   255,
+   255,
+   255,
+   255
+  ],
+  "fbReadErr": [],
+  "rbParams": [
+   4,
+   4,
+   33189,
+   16
+  ],
+  "fbMismatch": 36057,
+  "clearIncomplete": [
+   1286
+  ],
+  "cleared": [
+   64,
+   128,
+   191,
+   128
+  ],
+  "rgbRead": [
+   1282
+  ],
+  "floatRead": [
+   1282
+  ],
+  "edgeRead": [
+   64,
+   128,
+   191,
+   128,
+   9,
+   9,
+   9,
+   9
+  ],
+  "badLog": "ERROR: 0:1: 'x' : undeclared identifier\nERROR: 0:1: 'assign' : l-value required (can't modify a const)\n",
+  "badLink": [
+   false,
+   "Vertex shader is not compiled.\n"
+  ],
+  "useBad": [
+   1282
+  ],
+  "params": [
+   1,
+   519,
+   513,
+   1029,
+   2305,
+   4,
+   4,
+   4,
+   1,
+   24,
+   0,
+   8,
+   6408,
+   5121
+  ],
+  "blendAfter": [
+   1,
+   1,
+   0,
+   0
+  ],
+  "end": []
+ },
+ "webgl2x": {
+  "link": [
+   true,
+   ""
+  ],
+  "blocks": 2,
+  "blockIdx": [
+   0,
+   1,
+   4294967295
+  ],
+  "blockSize": [
+   112,
+   16
+  ],
+  "fragLoc": [
+   0,
+   1,
+   -1
+  ],
+  "immutable": [
+   true,
+   3
+  ],
+  "respec": [
+   1282
+  ],
+  "floatNoExt": 36054,
+  "floatExt": 36053,
+  "floatRead": [
+   1.5,
+   -2,
+   0.25,
+   1
+  ],
+  "clearBuffer": [
+   0.5,
+   0.5,
+   0.5,
+   0.5
+  ],
+  "end": []
+ }
+}

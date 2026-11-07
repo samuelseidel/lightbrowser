@@ -14,9 +14,9 @@ values are checked against public traffic data but not yet against our own
 devices. Post-handshake window sizes are not shaped.
 
 Decisions are in the ADRs:
-[0007](../adr/0007-tcp-stack-fingerprint.md) (sockets plus a netfilter shim),
-[0008](../adr/0008-whole-connection-tcp-shaping.md) (IP ID, SYN retransmits),
-[0009](../adr/0009-public-data-source-of-truth.md) (public data as the source of
+[0031](../adr/0031-tcp-stack-fingerprint.md) (sockets plus a netfilter shim),
+[0032](../adr/0032-whole-connection-tcp-shaping.md) (IP ID, SYN retransmits),
+[0033](../adr/0033-public-data-source-of-truth.md) (public data as the source of
 truth). Milestone: M1b in [../ROADMAP.md](../ROADMAP.md).
 
 Internal use only: loopback and our own test servers, never third-party sites

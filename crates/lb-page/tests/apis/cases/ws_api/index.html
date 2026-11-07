@@ -1,0 +1,65 @@
+<!doctype html><!--LOG--><script>
+var base = 'ws://' + location.host + '/ws_api/ws';
+function opened(url) { return new Promise((res, rej) => { var ws = new WebSocket(url); ws.onopen = () => res(ws); ws.onerror = () => rej('error'); }); }
+function next(ws) { return new Promise(res => ws.addEventListener('message', e => res(e.data), { once: true })); }
+function closed(ws) { return new Promise(res => ws.addEventListener('close', e => res(e.code + ' ' + JSON.stringify(e.reason) + ' ' + e.wasClean), { once: true })); }
+async function show(d) { if (typeof d == 'string') return 'string ' + d.length + ' ' + d.slice(0, 20); if (d instanceof Blob) return 'Blob ' + d.size + ' ' + JSON.stringify(d.type) + ' ' + hex(await d.arrayBuffer()); return Object.prototype.toString.call(d) + ' ' + hex(d); }
+(async () => {
+  t('no args', () => new WebSocket());
+  t('bad url', () => new WebSocket('ws://['));
+  t('ftp', () => new WebSocket('ftp://127.0.0.1/'));
+  t('fragment', () => new WebSocket(base + '#frag'));
+  t('dup proto', () => new WebSocket(base, ['a', 'a']));
+  t('bad proto', () => new WebSocket(base, ['a b']));
+  t('empty proto', () => new WebSocket(base, ['']));
+  t('http scheme', () => { var w = new WebSocket('http://' + location.host + '/ws_api/ws'); var u = w.url; w.close(); return u.replace(/:\d+/, ':P'); });
+  t('relative', () => { var w = new WebSocket('/ws_api/ws?r'); var u = w.url; w.close(); return u.replace(/:\d+/, ':P'); });
+  t('constants', () => [WebSocket.CONNECTING, WebSocket.OPEN, WebSocket.CLOSING, WebSocket.CLOSED, WebSocket.prototype.OPEN].join());
+  t('send connecting', () => { var w = new WebSocket(base); try { w.send('x'); } finally { w.close(); } });
+  await a('close connecting', () => new Promise(res => { var o = []; var w = new WebSocket(base); w.onopen = () => o.push('open'); w.onerror = () => o.push('error ' + w.readyState); w.onclose = e => { o.push('close ' + e.code + ' ' + e.wasClean); res(o.join(',')); }; w.close(); o.push('after close ' + w.readyState); }));
+  var ws = await opened(base);
+  t('close bad code', () => ws.close(1001));
+  t('close 999', () => ws.close(999));
+  t('close 5000', () => ws.close(5000));
+  t('close long reason', () => ws.close(1000, 'x'.repeat(124)));
+  t('close utf8 reason', () => ws.close(1000, 'é'.repeat(62)));
+  t('state', () => ws.readyState);
+  ws.binaryType = 'nope';
+  log('binaryType ' + ws.binaryType);
+  ws.send(new Uint8Array([1, 2, 3]));
+  log('blob ' + await show(await next(ws)));
+  ws.binaryType = 'arraybuffer';
+  ws.send(new Uint8Array([4, 5]).buffer);
+  log('ab ' + await show(await next(ws)));
+  ws.send(new Blob(['hi'], { type: 'text/plain' }));
+  log('from blob ' + await show(await next(ws)));
+  ws.send(new DataView(new Uint8Array([9, 8, 7]).buffer, 1));
+  log('dataview ' + await show(await next(ws)));
+  var big = 'y'.repeat(70000) + 'é';
+  ws.send(big);
+  log('buffered ' + ws.bufferedAmount);
+  log('big ' + await show(await next(ws)));
+  log('buffered after ' + ws.bufferedAmount);
+  ws.send('');
+  log('empty ' + await show(await next(ws)));
+  t('send no args', () => ws.send());
+  ws.send(123);
+  log('number ' + await show(await next(ws)));
+  var c = closed(ws);
+  ws.close(4000, 'bye');
+  log('closing ' + ws.readyState);
+  ws.send('after');
+  log('buffered closing ' + ws.bufferedAmount);
+  log('closed ' + await c + ' ' + ws.readyState);
+  var d = await opened(base + '?deflate=1');
+  log('deflate ext ' + d.extensions);
+  d.binaryType = 'arraybuffer';
+  d.send(new Uint8Array(1000));
+  log('deflate binary ' + (await next(d)).byteLength);
+  d.send('z'.repeat(5000));
+  log('deflate text ' + (await next(d)).length);
+  d.close();
+  var w = new Worker('w.js');
+  w.onmessage = e => { log('worker ' + e.data); end(); };
+})();
+</script>

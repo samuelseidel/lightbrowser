@@ -1,0 +1,674 @@
+{
+  "schema": 1,
+  "profile_id": "chrome_153",
+
+  "family": "chrome",
+  "description": "Request header names, case and order that Chrome for Testing 153.0.8010.12 (Linux, --headless=new) sends, per request kind. Captured on loopback against a local logging server (HTTP/1.1 raw bytes, HTTPS h2 decoded). See docs/adr/0011-per-destination-headers.md and captures/chrome_153_linux.jsonl. Client hints after Accept-CH / Critical-CH: captures/chrome_153_linux_accept_ch.jsonl (tools/header_capture/accept_ch.js).",
+
+  "browser_version": "153.0.8010.12",
+  "captured": "2026-11-03",
+
+  "syntax": [
+    "Each request kind is a list of header slots in h2 wire order (names lowercase).",
+    "\"name\" = value computed from the persona or the request (user-agent, sec-ch-ua*, accept-language, host, referer, origin, cookie, content-length, sec-fetch-site, sec-fetch-mode, sec-fetch-user, access-control-request-*). A slot with no value is skipped.",
+    "\"name: value\" = fixed value.",
+    "\"@group\" = the renderer header group: user-agent, sec-ch-ua*, accept-language and the page's own headers, in Blink's hash-table order (see renderer_group).",
+    "HTTP/1.1 = the same list with `host` and `connection: keep-alive` in front and `priority` removed, names re-cased by h1.",
+    "\"sec-ch-ua-arch\", \"sec-ch-ua-platform-version\", ... (the high-entropy hints) are computed slots sent only when the origin asked for them with Accept-CH (lb_net::client_hints). document_restart is the Critical-CH retry of a navigation; captures/chrome_153_linux_accept_ch.jsonl is the evidence."
+  ],
+
+  "h1": {
+    "prefix": ["host", "connection: keep-alive"],
+    "drop": ["priority"],
+    "lowercase_prefixes": ["sec-ch-"],
+    "note": "Every other name is Title-Case (Accept-Language, Sec-Fetch-Site, ...). Names the page sets itself keep the case the page gave."
+  },
+
+  "requests": {
+    "document": [
+      "sec-ch-ua",
+      "sec-ch-ua-mobile",
+      "sec-ch-ua-full-version",
+      "sec-ch-ua-arch",
+      "sec-ch-ua-platform",
+      "sec-ch-ua-platform-version",
+      "sec-ch-ua-model",
+      "sec-ch-ua-bitness",
+      "sec-ch-ua-wow64",
+      "sec-ch-ua-full-version-list",
+      "sec-ch-ua-form-factors",
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "user-agent",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-fetch-site",
+      "sec-fetch-mode: navigate",
+      "sec-fetch-user",
+      "sec-fetch-dest: document",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "document_redirect": [
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "user-agent",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-fetch-site",
+      "sec-fetch-mode: navigate",
+      "sec-fetch-user",
+      "sec-fetch-dest: document",
+      "sec-ch-ua",
+      "sec-ch-ua-mobile",
+      "sec-ch-ua-full-version",
+      "sec-ch-ua-arch",
+      "sec-ch-ua-platform",
+      "sec-ch-ua-platform-version",
+      "sec-ch-ua-model",
+      "sec-ch-ua-bitness",
+      "sec-ch-ua-wow64",
+      "sec-ch-ua-full-version-list",
+      "sec-ch-ua-form-factors",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "document_restart": [
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "user-agent",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-ch-ua",
+      "sec-ch-ua-mobile",
+      "sec-ch-ua-full-version",
+      "sec-ch-ua-arch",
+      "sec-ch-ua-platform",
+      "sec-ch-ua-platform-version",
+      "sec-ch-ua-model",
+      "sec-ch-ua-bitness",
+      "sec-ch-ua-wow64",
+      "sec-ch-ua-full-version-list",
+      "sec-ch-ua-form-factors",
+      "sec-fetch-site",
+      "sec-fetch-mode: navigate",
+      "sec-fetch-user",
+      "sec-fetch-dest: document",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "iframe": [
+      "sec-ch-ua",
+      "sec-ch-ua-mobile",
+      "sec-ch-ua-full-version",
+      "sec-ch-ua-arch",
+      "sec-ch-ua-platform",
+      "sec-ch-ua-platform-version",
+      "sec-ch-ua-model",
+      "sec-ch-ua-bitness",
+      "sec-ch-ua-wow64",
+      "sec-ch-ua-full-version-list",
+      "sec-ch-ua-form-factors",
+      "accept-language",
+      "upgrade-insecure-requests: 1",
+      "user-agent",
+      "accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "sec-fetch-site",
+      "sec-fetch-mode: navigate",
+      "sec-fetch-dest: iframe",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0, i"
+    ],
+    "style": [
+      "@group",
+      "accept: text/css,*/*;q=0.1",
+      "sec-fetch-site",
+      "sec-fetch-mode: no-cors",
+      "sec-fetch-dest: style",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0"
+    ],
+    "script": [
+      "@group",
+      "accept: */*",
+      "sec-fetch-site",
+      "sec-fetch-mode: no-cors",
+      "sec-fetch-dest: script",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=1"
+    ],
+    "module_script": [
+      "@group+origin",
+      "accept: */*",
+      "sec-fetch-site",
+      "sec-fetch-mode: cors",
+      "sec-fetch-dest: script",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=1"
+    ],
+    "image": [
+      "@group",
+      "accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "sec-fetch-site",
+      "sec-fetch-mode: no-cors",
+      "sec-fetch-dest: image",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=2, i"
+    ],
+    "favicon": [
+      "@group",
+      "accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "sec-fetch-site",
+      "sec-fetch-mode: no-cors",
+      "sec-fetch-dest: image",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=1, i"
+    ],
+    "font": [
+      "@group+origin",
+      "accept: */*",
+      "sec-fetch-site",
+      "sec-fetch-mode: cors",
+      "sec-fetch-dest: font",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=0"
+    ],
+    "fetch": [
+      "content-length",
+      "@group",
+      "accept: */*",
+      "origin",
+      "sec-fetch-site",
+      "sec-fetch-mode",
+      "sec-fetch-dest: empty",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "cookie",
+      "priority: u=1, i"
+    ],
+    "preflight": [
+      "accept: */*",
+      "access-control-request-method",
+      "access-control-request-headers",
+      "origin",
+      "user-agent",
+      "sec-fetch-mode: cors",
+      "sec-fetch-site",
+      "sec-fetch-dest: empty",
+      "referer",
+      "accept-encoding: gzip, deflate, br, zstd",
+      "accept-language",
+      "priority: u=1, i"
+    ]
+  },
+
+  "renderer_group": {
+    "note": "Blink keeps these headers in a hash table, so the order depends on how many headers the page set and on their names. Names are matched case-insensitively. Orders below were observed; sets we have not seen use the closest observed subset and put the remaining page headers right after user-agent.",
+    "base": ["sec-ch-ua-platform", "accept-language", "sec-ch-ua", "user-agent", "sec-ch-ua-mobile"],
+    "observed": [
+      {
+        "extra": ["origin"],
+        "order": ["origin", "sec-ch-ua-platform", "accept-language", "sec-ch-ua", "user-agent", "sec-ch-ua-mobile"]
+      },
+      {
+        "extra": ["content-type"],
+        "order": [
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "content-type",
+          "sec-ch-ua-mobile",
+          "user-agent"
+        ]
+      },
+      {
+        "extra": ["authorization", "content-type"],
+        "order": [
+          "sec-ch-ua-platform",
+          "authorization",
+          "accept-language",
+          "sec-ch-ua",
+          "content-type",
+          "sec-ch-ua-mobile",
+          "user-agent"
+        ]
+      },
+      {
+        "extra": ["x-pre", "content-type"],
+        "order": [
+          "x-pre",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "content-type",
+          "sec-ch-ua-mobile",
+          "user-agent"
+        ]
+      },
+      {
+        "extra": ["pragma", "cache-control"],
+        "order": [
+          "pragma",
+          "cache-control",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "user-agent",
+          "sec-ch-ua-mobile"
+        ]
+      },
+      {
+        "extra": ["accept"],
+        "order": ["sec-ch-ua-platform", "accept-language", "accept", "sec-ch-ua", "user-agent", "sec-ch-ua-mobile"]
+      },
+      {
+        "extra": ["x-a"],
+        "order": ["sec-ch-ua-platform", "accept-language", "sec-ch-ua", "user-agent", "x-a", "sec-ch-ua-mobile"]
+      },
+      {
+        "extra": ["x-xhr-test"],
+        "order": ["sec-ch-ua-platform", "x-xhr-test", "accept-language", "sec-ch-ua", "user-agent", "sec-ch-ua-mobile"]
+      },
+      {
+        "extra": ["x-b", "x-c"],
+        "order": ["sec-ch-ua-platform", "x-c", "accept-language", "sec-ch-ua", "user-agent", "sec-ch-ua-mobile", "x-b"]
+      },
+      {
+        "extra": ["x-custom-test", "x-lower-test"],
+        "order": [
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "x-custom-test",
+          "user-agent",
+          "sec-ch-ua-mobile",
+          "x-lower-test"
+        ]
+      },
+      {
+        "extra": ["x-d", "x-e", "x-f", "x-g", "x-h"],
+        "order": [
+          "x-h",
+          "x-g",
+          "x-d",
+          "sec-ch-ua-platform",
+          "x-f",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-mobile",
+          "x-e",
+          "user-agent"
+        ]
+      }
+    ],
+    "observed_hints": [
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": [],
+        "order": [
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["accept"],
+        "order": [
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "accept",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["authorization", "content-type"],
+        "order": [
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "authorization",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "content-type",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["cache-control", "pragma"],
+        "order": [
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "cache-control",
+          "accept-language",
+          "pragma",
+          "sec-ch-ua",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["content-type"],
+        "order": [
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "content-type",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["content-type", "x-pre"],
+        "order": [
+          "x-pre",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "content-type",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["origin"],
+        "order": [
+          "origin",
+          "sec-ch-ua-platform",
+          "sec-ch-ua-full-version-list",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["x-a"],
+        "order": [
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "x-a",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["x-b", "x-c"],
+        "order": [
+          "x-b",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "x-c",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["x-custom-test", "x-lower-test"],
+        "order": [
+          "x-lower-test",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "x-custom-test",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-arch",
+          "user-agent",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": [
+          "sec-ch-ua-arch",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua-model",
+          "sec-ch-ua-platform-version",
+          "sec-ch-ua-wow64"
+        ],
+        "extra": ["x-d", "x-e", "x-f", "x-g", "x-h"],
+        "order": [
+          "x-g",
+          "sec-ch-ua-platform",
+          "sec-ch-ua-full-version-list",
+          "sec-ch-ua",
+          "sec-ch-ua-bitness",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "x-e",
+          "sec-ch-ua-wow64",
+          "sec-ch-ua-form-factors",
+          "sec-ch-ua-arch",
+          "x-h",
+          "x-d",
+          "x-f",
+          "accept-language",
+          "user-agent",
+          "sec-ch-ua-platform-version"
+        ]
+      },
+      {
+        "hints": ["sec-ch-ua-arch", "sec-ch-ua-full-version", "sec-ch-ua-model"],
+        "extra": [],
+        "order": [
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-arch",
+          "sec-ch-ua-full-version",
+          "user-agent"
+        ]
+      },
+      {
+        "hints": ["sec-ch-ua-arch", "sec-ch-ua-full-version", "sec-ch-ua-model"],
+        "extra": ["origin"],
+        "order": [
+          "origin",
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-model",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-arch",
+          "sec-ch-ua-full-version",
+          "user-agent"
+        ]
+      },
+      {
+        "hints": ["sec-ch-ua-arch", "sec-ch-ua-full-version", "sec-ch-ua-model"],
+        "extra": ["x-a"],
+        "order": [
+          "sec-ch-ua-platform",
+          "accept-language",
+          "sec-ch-ua",
+          "sec-ch-ua-model",
+          "x-a",
+          "sec-ch-ua-mobile",
+          "sec-ch-ua-arch",
+          "sec-ch-ua-full-version",
+          "user-agent"
+        ]
+      }
+    ],
+    "note_hints": "With high-entropy client hints the hint headers join the group and the hash order changes again. observed_hints lists the orders seen per hint set and page-header set (tools/header_capture/derive_groups.py over captures/chrome_153_linux_accept_ch.jsonl). A request whose hint set was not seen uses the order without hints and puts the hints right after user-agent."
+  }
+}

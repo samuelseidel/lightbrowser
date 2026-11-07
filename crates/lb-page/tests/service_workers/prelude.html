@@ -1,0 +1,5 @@
+<script>var L=[];function log(s){L.push(String(s))}function end(){log('end')}function again(){log('again')}
+var O=location.origin;function rel(u){return String(u).split(O).join('')}
+function ask(w,m){return new Promise(function(r){var c=new MessageChannel();c.port1.onmessage=function(e){r(e.data)};w.postMessage(m,[c.port2])})}
+function swlog(w){return ask(w,'log').then(function(l){l.forEach(function(x){log('sw: '+x)})})}
+function load(){var n=+(sessionStorage.n||0);sessionStorage.n=n+1;return n}</script>

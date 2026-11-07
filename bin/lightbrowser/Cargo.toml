@@ -7,14 +7,18 @@ publish = false
 
 [features]
 default = ["chrome"]
-chrome = ["lb-js/chrome"]
-firefox = ["lb-js/firefox"]
+chrome = ["lb-js/chrome", "lb-page/chrome", "lb-webapi/chrome"]
+firefox = ["lb-js/firefox", "lb-page/firefox", "lb-webapi/firefox"]
 
 [dependencies]
 lb-js = { path = "../../crates/lb-js", default-features = false }
 lb-persona = { path = "../../crates/lb-persona" }
 lb-net = { path = "../../crates/lb-net" }
+lb-page = { path = "../../crates/lb-page", default-features = false }
+lb-webapi = { path = "../../crates/lb-webapi", default-features = false }
+lb-cdp = { path = "../../crates/lb-cdp" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = "2"
 # Signal handling for `tcp-shim` (Linux only).
 libc = "0.2"
+serde_json = "1"

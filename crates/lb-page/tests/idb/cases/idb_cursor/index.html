@@ -1,0 +1,56 @@
+<!doctype html><!--LOG--><script>
+function walk(q, steps){ return new Promise(function(res){ var out=[]; var n=0; q.onsuccess=function(){ var c=q.result; if(!c){out.push('null');res(out.join(' '));return;} out.push(show(c.key)+'/'+show(c.primaryKey)+(c.value!==undefined?'='+show(c.value):'')); n++; var s=steps&&steps(c,n); if(s==='stop'){res(out.join(' '));return;} if(!s) c.continue(); }; q.onerror=function(e){e.preventDefault();out.push('error '+q.error.name);res(out.join(' '))}; }); }
+(async function(){
+  await fresh('cur');
+  var r = indexedDB.open('cur', 1);
+  r.onupgradeneeded = function(){
+    var s = r.result.createObjectStore('s');
+    s.createIndex('v', 'v');
+    [[1,'b'],[2,'a'],[3,'b'],[4,'c'],[5,'a'],[6,'b']].forEach(function(x){ s.put({v:x[1], n:x[0]}, x[0]); });
+  };
+  var db = await req(r);
+  var tx = db.transaction('s', 'readwrite');
+  var s = tx.objectStore('s'), ix = s.index('v');
+  var c0 = s.openCursor();
+  c0.onsuccess = function(){ var c=c0.result; log('cursor '+String(c)+' '+c.direction+' '+(c.source===s)+' '+(c.request===c0)+' '+Object.prototype.toString.call(c)+' keysame='+(c.key===c.key)+' valsame='+(c.value===c.value)); c0.onsuccess=null; };
+  var dirs = ['next','prev','nextunique','prevunique'];
+  for (var d of dirs) { log('store '+d+': '+await walk(s.openCursor(null, d))); }
+  for (var d of dirs) { log('index '+d+': '+await walk(ix.openCursor(null, d))); }
+  for (var d of dirs) { log('keycursor '+d+': '+await walk(ix.openKeyCursor(null, d))); }
+  log('range: '+await walk(s.openCursor(IDBKeyRange.bound(2,5,true,false))));
+  log('only: '+await walk(ix.openCursor('b')));
+  log('key arg: '+await walk(s.openCursor(4)));
+  log('advance: '+await walk(s.openCursor(), function(c,n){ if(n===1){c.advance(2);return 1} }));
+  log('continue key: '+await walk(s.openCursor(), function(c,n){ if(n===1){c.continue(5);return 1} }));
+  log('continue past: '+await walk(s.openCursor(), function(c,n){ if(n===1){c.continue(99);return 1} }));
+  log('continuePK: '+await walk(ix.openCursor(), function(c,n){ if(n===1){c.continuePrimaryKey('b', 3);return 1} }));
+  log('prev continue: '+await walk(s.openCursor(null,'prev'), function(c,n){ if(n===1){c.continue(3);return 1} }));
+  log('errors: '+await walk(s.openCursor(), function(c,n){
+    if(n===1){ t('continue back', function(){c.continue(1)}); t('advance 0', function(){c.advance(0)}); t('continuePK store', function(){c.continuePrimaryKey(1,1)}); c.continue(); t('continue twice', function(){c.continue()}); t('advance twice', function(){c.advance(1)}); return 'stop'; }
+  }));
+  log('index errors: '+await walk(ix.openCursor(null,'nextunique'), function(c,n){
+    if(n===1){ t('continuePK unique', function(){c.continuePrimaryKey('b',1)}); t('continue bad', function(){c.continue({})}); return 'stop'; }
+  }));
+  log('update: '+await walk(s.openCursor(), function(c,n){
+    if(n===2){ var u=c.update({v:'z', n:2}); u.onsuccess=function(){log('update result '+show(u.result)+' src='+(u.source===c))}; }
+    if(n===3){ var d=c.delete(); d.onsuccess=function(){log('delete result '+show(d.result))}; }
+  }));
+  log('after: '+await walk(s.openCursor()));
+  log('index update: '+await walk(ix.openCursor('z'), function(c,n){ t('update key change', function(){return c.update({v:'z', n:2})}); }));
+  log('keycursor value: '+await walk(s.openKeyCursor(null,'prev'), function(c,n){ if(n===1) log('kc '+String(c)+' value='+c.value+' '+('value' in c)); }));
+  log('dir bad: '+(function(){try{s.openCursor(null,'sideways')}catch(e){return err(e)}})());
+  log('count: '+await req(ix.count('b')));
+  var empty = await req(s.openCursor(IDBKeyRange.only(77)));
+  log('empty '+empty);
+  await done(tx).then(log, function(x){log('aborted '+err(x))});
+  // cursor after commit
+  var tx2 = db.transaction('s');
+  var keep;
+  tx2.objectStore('s').openCursor().onsuccess = function(e){ keep = e.target.result; };
+  await done(tx2);
+  t('continue after commit', function(){keep.continue()});
+  t('readonly update', function(){return keep.update(1)});
+  db.close();
+  end();
+})();
+</script>

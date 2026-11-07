@@ -3,37 +3,42 @@
 //!
 //! Owner: M1 task 5.
 
-use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Method, StatusCode};
-use lb_persona::Persona;
-use tokio::net::TcpStream;
+use lb_persona::{BrowserFamily, Persona};
 use url::Url;
 
 use crate::HttpVersion;
+use crate::client_hints::{self, ClientHintsStore, UaHint};
 use crate::cookies::CookieJar;
 use crate::error::NetError;
+use crate::header_profile::{BuildInput, HeaderProfile, RequestKind, RequestMeta, Site};
 use crate::headers::{self, OrderedHeaders};
+use crate::pool::{ConnectParams, ConnectionPool, Dialer, GroupKey, Lease};
 use crate::profile::ClientHelloProfile;
-use crate::tcpfp::{self, TcpProfile};
+use crate::proxy::{self, Proxy};
+use crate::tcpfp::TcpProfile;
 use crate::tls::TlsConnector;
 use crate::{decompress, h1, h2};
 
 /// Redirects followed before giving up.
 const MAX_REDIRECTS: usize = 10;
-/// Time allowed for one TCP connect attempt (per resolved address).
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An outgoing request. Headers are ordered.
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: Method,
     pub url: Url,
+    /// Headers the page set (`fetch` init, `setRequestHeader`), in order.
+    /// They are merged into the browser's own header set for the request
+    /// kind (see [`crate::header_profile`]).
     pub headers: OrderedHeaders,
     pub body: Bytes,
+    /// What the request is for. `None` means a typed top-level navigation.
+    pub meta: Option<RequestMeta>,
 }
 
 impl Request {
@@ -43,6 +48,16 @@ impl Request {
             url,
             headers: Vec::new(),
             body: Bytes::new(),
+            meta: None,
+        }
+    }
+
+    /// A request of the given kind (script, image, `fetch`, ...) made by
+    /// `initiator`.
+    pub fn for_kind(url: Url, meta: RequestMeta) -> Self {
+        Self {
+            meta: Some(meta),
+            ..Self::get(url)
         }
     }
 }
@@ -57,6 +72,24 @@ pub struct RawResponse {
     pub version: HttpVersion,
 }
 
+/// One redirect that was followed on the way to a [`Response`].
+#[derive(Debug, Clone)]
+pub struct RedirectHop {
+    /// The URL that was requested and answered with a redirect.
+    pub url: Url,
+    pub method: Method,
+    /// Request headers as sent on this hop.
+    pub request_headers: OrderedHeaders,
+    pub status: StatusCode,
+    /// Response headers of the redirect, as received.
+    pub response_headers: OrderedHeaders,
+    /// The `Location` value as received.
+    pub location: String,
+    /// `location` resolved against `url`: the next hop's URL.
+    pub target: Url,
+    pub version: HttpVersion,
+}
+
 /// A decoded response.
 #[derive(Debug, Clone)]
 pub struct Response {
@@ -64,7 +97,17 @@ pub struct Response {
     pub headers: OrderedHeaders,
     pub body: Bytes,
     pub version: HttpVersion,
+    /// The connection the final hop used (pool-wide id; `None` without a
+    /// [`ConnectionPool`]) and whether it had carried a request before.
+    pub connection_id: Option<u64>,
+    pub connection_reused: bool,
     pub final_url: Url,
+    /// Method of the final request (a redirect can turn `POST` into `GET`).
+    pub method: Method,
+    /// Request headers as sent on the final hop.
+    pub request_headers: OrderedHeaders,
+    /// Redirects followed, in order. Empty when there were none.
+    pub redirects: Vec<RedirectHop>,
 }
 
 impl Response {
@@ -80,10 +123,13 @@ impl Response {
 pub struct NetContext {
     pub persona: Arc<Persona>,
     pub profile: Arc<ClientHelloProfile>,
-    /// TCP/IP SYN profile (ADR 0007). `None` leaves the host's own stack on
-    /// the wire. Set it with [`NetContext::with_tcp_profile`].
-    pub tcp_profile: Option<Arc<TcpProfile>>,
+    /// Per-request-kind header sets. `None` (Firefox until M4b) falls back to
+    /// the navigation set with a small per-kind overlay.
+    pub header_profile: Option<Arc<HeaderProfile>>,
     pub cookies: CookieJar,
+    /// Per-origin `Accept-CH` sets (memory only; share it across the
+    /// contexts of one browser context like the cookie jar).
+    pub client_hints: ClientHintsStore,
     /// Maximum body size, enforced on the wire and again after decoding.
     /// Default 32 MiB.
     pub max_body: usize,
@@ -91,15 +137,38 @@ pub struct NetContext {
     /// servers with self-signed certificates. Default `false`. Changing it
     /// between requests rebuilds the cached connector.
     pub danger_accept_invalid_certs: bool,
+    /// Connection reuse (ADR 0018), shared by the contexts of one browser
+    /// context. `None`: every hop opens and closes its own connection, and
+    /// no TLS session is resumed.
+    pub pool: Option<ConnectionPool>,
+    /// The browser context's proxy (ADR 0027): `CONNECT`/SOCKS5 tunnels and
+    /// forward requests, with Chrome's bypass rules. Shared by the contexts
+    /// of one browser context (it caches the proxy credentials).
+    pub proxy: Option<Arc<Proxy>>,
+    /// TCP/IP SYN profile (ADR 0031). `None` leaves the host's own stack on
+    /// the wire. Set it with [`NetContext::with_tcp_profile`]. It shapes
+    /// direct connections only; a proxy hop uses the host's stack.
+    pub tcp_profile: Option<Arc<TcpProfile>>,
     /// Lazily built, then reused for every https request of this context. The
     /// flag records the `danger_accept_invalid_certs` it was built with.
     connector: Option<(bool, Arc<TlsConnector>)>,
-    /// Lazily built DNS resolver (system configuration).
-    resolver: Option<hickory_resolver::TokioResolver>,
+    /// DNS resolver (system configuration) and TCP connect.
+    pub(crate) dialer: Arc<Dialer>,
 }
 
 impl NetContext {
     pub fn new(persona: Arc<Persona>, profile: Arc<ClientHelloProfile>) -> Result<Self, NetError> {
+        let header_profile = HeaderProfile::builtin(persona.family).map(Arc::new);
+        Self::with_header_profile(persona, profile, header_profile)
+    }
+
+    /// Like [`NetContext::new`] with the header profile given (contexts of
+    /// one browser context share the parsed built-in one).
+    pub fn with_header_profile(
+        persona: Arc<Persona>,
+        profile: Arc<ClientHelloProfile>,
+        header_profile: Option<Arc<HeaderProfile>>,
+    ) -> Result<Self, NetError> {
         if let Some(fam) = profile.family()
             && fam != persona.family
         {
@@ -111,16 +180,20 @@ impl NetContext {
         Ok(Self {
             persona,
             profile,
-            tcp_profile: None,
+            header_profile,
             cookies: CookieJar::new(),
+            client_hints: ClientHintsStore::new(),
             max_body: 32 << 20,
             danger_accept_invalid_certs: false,
+            pool: None,
+            proxy: None,
+            tcp_profile: None,
             connector: None,
-            resolver: None,
+            dialer: Arc::new(Dialer::default()),
         })
     }
 
-    /// Shape the SYN of every connection from this context with `tcp`.
+    /// Shape the SYN of every direct connection from this context with `tcp`.
     ///
     /// Fails if the persona's `User-Agent` names a different operating system
     /// than the profile: a Windows browser with a Linux SYN is exactly the
@@ -142,7 +215,7 @@ impl NetContext {
         if tcp.needs_shim() {
             // Refuse only when we can see the rule is missing. If iptables
             // cannot be run (rules managed another way), trust the operator.
-            match tcpfp::nfq::rule_installed() {
+            match crate::tcpfp::nfq::rule_installed() {
                 Ok(false) => return Err(NetError::TcpShimMissing(tcp.profile_id.clone())),
                 Ok(true) => {}
                 Err(e) => tracing::warn!(error = %e, "cannot check for the TCP shim rule"),
@@ -152,8 +225,51 @@ impl NetContext {
         Ok(self)
     }
 
+    /// A copy for a task on the network thread (same jar, hints, pool).
+    pub(crate) fn detached(&self) -> NetContext {
+        NetContext {
+            persona: Arc::clone(&self.persona),
+            profile: Arc::clone(&self.profile),
+            header_profile: self.header_profile.clone(),
+            cookies: self.cookies.clone(),
+            client_hints: self.client_hints.clone(),
+            max_body: self.max_body,
+            danger_accept_invalid_certs: self.danger_accept_invalid_certs,
+            pool: self.pool.clone(),
+            proxy: self.proxy.clone(),
+            tcp_profile: self.tcp_profile.clone(),
+            connector: self.connector.clone(),
+            dialer: Arc::clone(&self.dialer),
+        }
+    }
+
+    /// The proxy for requests to `url`, unless a bypass rule applies.
+    pub fn proxy_for(&self, url: &Url) -> Option<Arc<Proxy>> {
+        self.proxy.as_ref().filter(|p| p.applies_to(url)).cloned()
+    }
+
+    /// TCP to `host:port` for `url`: direct, or a tunnel through the proxy
+    /// (`CONNECT` or SOCKS5).
+    pub(crate) async fn connect_tcp(
+        &self,
+        url: &Url,
+        host: &str,
+        port: u16,
+    ) -> Result<tokio::net::TcpStream, NetError> {
+        match self.proxy_for(url) {
+            Some(p) => {
+                p.tunnel(&self.dialer, host, port, &self.persona.user_agent)
+                    .await
+            }
+            None => {
+                let tcp = self.tcp_profile.as_deref();
+                self.dialer.connect(host, port, tcp).await
+            }
+        }
+    }
+
     /// The cached TLS connector for this context, built on first use.
-    fn tls_connector(&mut self) -> Result<Arc<TlsConnector>, NetError> {
+    pub(crate) fn tls_connector(&mut self) -> Result<Arc<TlsConnector>, NetError> {
         if let Some((flag, c)) = &self.connector
             && *flag == self.danger_accept_invalid_certs
         {
@@ -166,66 +282,6 @@ impl NetContext {
         self.connector = Some((self.danger_accept_invalid_certs, Arc::clone(&c)));
         Ok(c)
     }
-
-    /// Resolve `host` (no brackets) to socket addresses. IP literals skip DNS.
-    /// Uses hickory with the system configuration and falls back to the
-    /// platform resolver (`getaddrinfo`) if hickory cannot be set up or fails.
-    async fn resolve(&mut self, host: &str, port: u16) -> Result<Vec<SocketAddr>, NetError> {
-        if let Ok(ip) = host.parse::<IpAddr>() {
-            return Ok(vec![SocketAddr::new(ip, port)]);
-        }
-        if self.resolver.is_none() {
-            match hickory_resolver::TokioResolver::builder_tokio() {
-                Ok(b) => self.resolver = Some(b.build()),
-                Err(e) => tracing::debug!("hickory resolver unavailable: {e}"),
-            }
-        }
-        if let Some(r) = &self.resolver {
-            match r.lookup_ip(host).await {
-                Ok(ips) => {
-                    let addrs: Vec<_> = ips.iter().map(|ip| SocketAddr::new(ip, port)).collect();
-                    if !addrs.is_empty() {
-                        return Ok(addrs);
-                    }
-                }
-                Err(e) => tracing::debug!("hickory lookup of {host} failed: {e}"),
-            }
-        }
-        let addrs: Vec<_> = tokio::net::lookup_host((host, port))
-            .await
-            .map_err(|e| NetError::Dns(format!("{host}: {e}")))?
-            .collect();
-        if addrs.is_empty() {
-            return Err(NetError::Dns(format!("{host}: no addresses")));
-        }
-        Ok(addrs)
-    }
-
-    /// Resolve and connect, trying each address in turn.
-    async fn connect_tcp(&mut self, host: &str, port: u16) -> Result<TcpStream, NetError> {
-        let addrs = self.resolve(host, port).await?;
-        let mut last = None;
-        for addr in addrs {
-            let connect = tcpfp::connect(addr, self.tcp_profile.as_deref());
-            match tokio::time::timeout(CONNECT_TIMEOUT, connect).await {
-                Ok(Ok(tcp)) => {
-                    // Small writes (h2 preface, request headers) should not wait.
-                    let _ = tcp.set_nodelay(true);
-                    return Ok(tcp);
-                }
-                Ok(Err(e)) => last = Some(e),
-                Err(_) => {
-                    last = Some(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        format!("connect to {addr} timed out"),
-                    ));
-                }
-            }
-        }
-        Err(NetError::Connect(last.unwrap_or_else(|| {
-            std::io::Error::other("no address to connect to")
-        })))
-    }
 }
 
 /// Perform `req` in `ctx`, following up to 10 redirects.
@@ -233,61 +289,196 @@ impl NetContext {
 /// Per hop: resolve, connect, TLS (https only, profile-driven, ALPN picks
 /// h1 or h2), send, store `Set-Cookie`, then follow `301/302/303/307/308`.
 ///
-/// Request headers are the persona's navigation headers, then the `Cookie`
-/// from the jar, then `req.headers`. A caller header replaces a default of the
-/// same name in place (keeping the family's order); other caller headers are
-/// appended.
+/// Request headers are the browser's header set for the request kind
+/// (`req.meta`, a typed navigation by default), built per hop once the HTTP
+/// version is known: persona values, `Referer`/`Origin`/`Sec-Fetch-Site`
+/// derived from the initiator and the hop's URL, the jar's `Cookie`, then the
+/// page's own `req.headers`. A page header replaces a persona-owned or
+/// profile header of the same name in place; other page headers join the
+/// browser's header group (see [`crate::header_profile`]).
+///
+/// Client hints (Chrome personas): a top-level navigation's `Accept-CH`
+/// (on the final response or a redirect) is stored per origin in
+/// `ctx.client_hints`, and later requests carry the high-entropy
+/// `Sec-CH-UA-*` hints it asked for (see [`crate::client_hints`]). When a
+/// navigation's response names in `Critical-CH` a hint it asked for and the
+/// request lacked, the navigation is sent again once with the hints (the
+/// first response is dropped; its cookies are kept).
 ///
 /// Redirect rules: `303` becomes `GET` (`HEAD` stays `HEAD`), `301`/`302` on
 /// `POST` become `GET`, `307`/`308` keep method and body. When the body is
-/// dropped, the caller's `Content-*` headers go too. Caller-supplied
+/// dropped, the page's `Content-*` headers go too. Page-supplied
 /// `Authorization`, `Proxy-Authorization` and `Cookie` are dropped on a
 /// cross-origin hop (the jar supplies cookies per hop anyway).
-///
-/// Known gap: `Sec-Fetch-Site` stays at the persona default (`none`) on
-/// every hop. A browser would send `same-origin` or `cross-site` on redirects;
-/// that needs the initiator and is left for the navigation layer (M3). The
-/// caller can override it per request through `req.headers`.
+/// `Sec-Fetch-Site` is the largest distance seen on any URL of the chain.
 ///
 /// The returned body is decoded (`Content-Encoding`); the response headers are
 /// returned as received, so `content-encoding` and `content-length` still
-/// describe the wire form. `max_body` limits both sizes.
-pub async fn fetch(ctx: &mut NetContext, req: Request) -> Result<Response, NetError> {
-    let mut req = req;
-    let mut hops = 0;
-    loop {
-        let (status, resp_headers, body, version) = fetch_once(ctx, &req).await?;
+/// describe the wire form. `max_body` limits both sizes. Every redirect that
+/// was followed is in [`Response::redirects`].
+///
+/// The future is boxed here so that its state machine (and everything it
+/// polls: TLS, h1/h2, DNS) is compiled once, in this crate, instead of once
+/// per crate that awaits it (M6 binary size, ADR 0013).
+///
+/// With a [`ConnectionPool`] (`ctx.pool`), the request reuses the pool's
+/// connections: HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS
+/// resumption (ADR 0018). It runs on the network thread
+/// ([`crate::pool::net_runtime`]) and then completes even if the returned
+/// future is dropped, unless the pool
+/// [uses the calling thread](ConnectionPool::use_calling_thread).
+pub fn fetch(
+    ctx: &mut NetContext,
+    req: Request,
+) -> Pin<Box<dyn Future<Output = Result<Response, NetError>> + Send + '_>> {
+    if ctx.pool.as_ref().is_some_and(|p| !p.uses_calling_thread()) {
+        let mut owned = ctx.detached();
+        let task =
+            crate::pool::net_runtime().spawn(async move { fetch_chain(&mut owned, req).await });
+        return Box::pin(async move {
+            task.await
+                .unwrap_or_else(|e| Err(NetError::Http(format!("network task: {e}"))))
+        });
+    }
+    Box::pin(fetch_chain(ctx, req))
+}
 
-        if let Some(location) = redirect_location(status, &resp_headers) {
-            if hops >= MAX_REDIRECTS {
+async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, NetError> {
+    let mut req = req;
+    let mut redirects: Vec<RedirectHop> = Vec::new();
+    let initiator = req.meta.as_ref().and_then(|m| m.initiator.clone());
+    let meta = req.meta.clone().unwrap_or_default();
+    let top_level = meta.kind == RequestKind::Document;
+    // Only Chrome personas carry high-entropy hints.
+    let hints_on =
+        ctx.persona.family == BrowserFamily::Chrome && ctx.persona.high_entropy.is_some();
+    let mut site = Site::None;
+    let mut restart = false;
+    let mut restarted = false;
+    loop {
+        // Distance of the chain so far, including this hop's URL.
+        site = site.max(Site::between(initiator.as_ref(), &req.url));
+        let hints = if hints_on {
+            client_hints::hints_for_request(&ctx.client_hints, &meta, &req.url)
+        } else {
+            Vec::new()
+        };
+        let hop = fetch_once(ctx, &req, redirects.len(), site, &hints, restart).await?;
+        restart = false;
+        if hints_on && top_level {
+            let accept_ch = header_values(&hop.headers, "accept-ch");
+            if !accept_ch.is_empty() {
+                ctx.client_hints.accept(&req.url, &accept_ch);
+            }
+        }
+
+        if let Some(location) = redirect_location(hop.status, &hop.headers) {
+            if redirects.len() >= MAX_REDIRECTS {
                 return Err(NetError::Http(format!(
                     "too many redirects (more than {MAX_REDIRECTS})"
                 )));
             }
-            hops += 1;
             let next = req.url.join(&location)?;
             if !matches!(next.scheme(), "http" | "https") {
                 return Err(NetError::UnsupportedScheme(next.scheme().to_owned()));
             }
-            req = redirected_request(&req, status, next);
+            redirects.push(RedirectHop {
+                url: req.url.clone(),
+                method: req.method.clone(),
+                request_headers: hop.sent,
+                status: hop.status,
+                response_headers: hop.headers,
+                location,
+                target: next.clone(),
+                version: hop.version,
+            });
+            req = redirected_request(&req, hop.status, next);
+            continue;
+        }
+
+        if hints_on && top_level && !restarted && needs_restart(ctx, &req.url, &hop.headers, &hints)
+        {
+            restarted = true;
+            restart = true;
             continue;
         }
 
         return Ok(Response {
-            status,
-            headers: resp_headers,
-            body,
-            version,
+            status: hop.status,
+            headers: hop.headers,
+            body: hop.body,
+            version: hop.version,
+            connection_id: hop.connection_id,
+            connection_reused: hop.connection_reused,
             final_url: req.url,
+            method: req.method,
+            request_headers: hop.sent,
+            redirects,
         });
     }
 }
 
-/// One hop: send `req`, store cookies, decode the body.
+/// What one hop returned.
+struct Hop {
+    status: StatusCode,
+    headers: OrderedHeaders,
+    body: Bytes,
+    version: HttpVersion,
+    /// Request headers as sent.
+    sent: OrderedHeaders,
+    connection_id: Option<u64>,
+    connection_reused: bool,
+}
+
+/// `Critical-CH`: the response names a hint its origin asked for (stored
+/// `Accept-CH`) that the request did not carry.
+fn needs_restart(ctx: &NetContext, url: &Url, headers: &OrderedHeaders, sent: &[UaHint]) -> bool {
+    let critical = header_values(headers, "critical-ch");
+    if critical.is_empty() {
+        return false;
+    }
+    let asked = ctx.client_hints.get(url);
+    client_hints::parse_hint_list(critical.iter().map(String::as_str))
+        .iter()
+        .any(|h| asked.contains(h) && !sent.contains(h))
+}
+
+/// One hop: send `req`, store cookies, decode the body. A forward
+/// request's `407` is answered with the proxy's configured credentials
+/// once (Chrome sends the request again with `Proxy-Authorization`).
 async fn fetch_once(
     ctx: &mut NetContext,
     req: &Request,
-) -> Result<(StatusCode, OrderedHeaders, Bytes, HttpVersion), NetError> {
+    hop: usize,
+    site: Site,
+    hints: &[UaHint],
+    restart: bool,
+) -> Result<Hop, NetError> {
+    loop {
+        let h = fetch_once_inner(ctx, req, hop, site, hints, restart).await?;
+        if h.status.as_u16() == 407
+            && let Some(p) = ctx.proxy_for(&req.url).filter(|p| p.forwards(&req.url))
+        {
+            let sent = h
+                .sent
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("proxy-authorization"));
+            if proxy::forward_challenge(&p, &h.headers, sent)? {
+                continue;
+            }
+        }
+        return Ok(h);
+    }
+}
+
+async fn fetch_once_inner(
+    ctx: &mut NetContext,
+    req: &Request,
+    hop: usize,
+    site: Site,
+    hints: &[UaHint],
+    restart: bool,
+) -> Result<Hop, NetError> {
     let https = match req.url.scheme() {
         "https" => true,
         "http" => false,
@@ -305,45 +496,107 @@ async fn fetch_once(
     // `host_str` brackets IPv6 literals; resolution wants them bare.
     let bare_host = host.trim_start_matches('[').trim_end_matches(']');
 
-    // Final headers for this hop. The defaults depend on the HTTP version
-    // (ALPN), so they are built once it is known.
+    // Final headers for this hop. The set depends on the HTTP version
+    // (ALPN), so it is built once the version is known.
     let cookie = ctx.cookies.header_for(&req.url);
     let persona = Arc::clone(&ctx.persona);
+    let header_profile = ctx.header_profile.clone();
+    let meta = req.meta.clone().unwrap_or_default();
+    let proxy = ctx.proxy_for(&req.url);
+    // An HTTP proxy gets `http:` requests in absolute form.
+    let forward = proxy.as_ref().filter(|p| p.forwards(&req.url)).cloned();
     let wire = |version: HttpVersion| {
-        let mut base = headers::navigation_headers(&persona, &host);
-        if version == HttpVersion::Http1 {
-            base = headers::for_http1(&persona, base);
-        }
-        if let Some(cookie) = &cookie {
-            base = headers::with_cookie(base, cookie);
+        let input = BuildInput {
+            persona: &persona,
+            version,
+            meta: &meta,
+            url: &req.url,
+            method: &req.method,
+            body_len: req.body.len(),
+            cookie: cookie.as_deref(),
+            caller: &req.headers,
+            hop,
+            site,
+            hints,
+            restart,
+        };
+        let mut headers = match &header_profile {
+            Some(p) => p.build(&input),
+            None => headers::generic_request_headers(&input),
+        };
+        if let Some(p) = &forward {
+            headers = proxy::forward_headers(headers, p);
         }
         Request {
             method: req.method.clone(),
             url: req.url.clone(),
-            headers: merge_headers(base, &req.headers),
+            headers,
             body: req.body.clone(),
+            meta: None,
         }
     };
 
-    let connector = if https {
-        Some(ctx.tls_connector()?)
+    let (raw, sent, connection_id, connection_reused) = if let Some(pool) = ctx.pool.clone() {
+        let key = GroupKey::for_request(&req.url, &meta)
+            .ok_or_else(|| NetError::Http(format!("url has no host: {}", req.url)))?;
+        // The urgency the request's `priority` value carries orders the
+        // waiting requests (HTTP/1.1 drops the header, the value stays).
+        let urgency = crate::pool::urgency(
+            wire(HttpVersion::Http2)
+                .headers
+                .iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case("priority"))
+                .map(|(_, v)| v.as_str()),
+        );
+        let params = ConnectParams {
+            profile: Arc::clone(&ctx.profile),
+            insecure: ctx.danger_accept_invalid_certs,
+            proxy,
+            user_agent: Arc::from(ctx.persona.user_agent.as_str()),
+            tcp_profile: ctx.tcp_profile.clone(),
+        };
+        pooled_exchange(
+            &pool,
+            &key,
+            urgency,
+            &params,
+            &wire,
+            ctx.max_body,
+            forward.is_some(),
+        )
+        .await?
     } else {
-        None
-    };
-    let tcp = ctx.connect_tcp(bare_host, port).await?;
-
-    let raw = match connector {
-        None => h1::send_with_limit(tcp, &wire(HttpVersion::Http1), ctx.max_body).await?,
-        Some(connector) => {
-            let (stream, version) = connector.connect(bare_host, tcp).await?;
-            let wire = wire(version);
-            match version {
-                HttpVersion::Http2 => {
-                    h2::send_with_limit(stream, &wire, &ctx.profile, ctx.max_body).await?
-                }
-                HttpVersion::Http1 => h1::send_with_limit(stream, &wire, ctx.max_body).await?,
+        let connector = if https {
+            Some(ctx.tls_connector()?)
+        } else {
+            None
+        };
+        let mut tcp = match &forward {
+            Some(p) => p.dial(&ctx.dialer).await?,
+            None => ctx.connect_tcp(&req.url, bare_host, port).await?,
+        };
+        let (raw, sent) = match connector {
+            None => {
+                let wire = wire(HttpVersion::Http1);
+                let raw = h1::send_on_form(&mut tcp, &wire, ctx.max_body, forward.is_some())
+                    .await
+                    .map_err(|e| e.error)?
+                    .0;
+                (raw, wire.headers)
             }
-        }
+            Some(connector) => {
+                let (stream, version) = connector.connect(bare_host, tcp).await?;
+                let wire = wire(version);
+                let raw = match version {
+                    HttpVersion::Http2 => {
+                        h2::send_with_limit(stream, &wire, &ctx.profile, ctx.max_body).await?
+                    }
+                    HttpVersion::Http1 => h1::send_with_limit(stream, &wire, ctx.max_body).await?,
+                };
+                (raw, wire.headers)
+            }
+        };
+        (raw, sent, None, false)
     };
 
     let set_cookies = header_values(&raw.headers, "set-cookie");
@@ -362,7 +615,119 @@ async fn fetch_once(
             limit: ctx.max_body,
         });
     }
-    Ok((raw.status, raw.headers, body, raw.version))
+    Ok(Hop {
+        status: raw.status,
+        headers: raw.headers,
+        body,
+        version: raw.version,
+        sent,
+        connection_id,
+        connection_reused,
+    })
+}
+
+/// One request over the pool: take a connection or session of `key`, send,
+/// give the connection back. A request that fails on a reused connection
+/// before any response arrived is sent once more on a new connection, as
+/// Chrome does.
+async fn pooled_exchange(
+    pool: &ConnectionPool,
+    key: &GroupKey,
+    urgency: u8,
+    params: &ConnectParams,
+    wire: &(dyn Fn(HttpVersion) -> Request + Sync),
+    max_body: usize,
+    absolute: bool,
+) -> Result<(RawResponse, OrderedHeaders, Option<u64>, bool), NetError> {
+    let mut retried = false;
+    loop {
+        match pool.acquire(key, urgency, params).await? {
+            Lease::H1 { mut conn, reused } => {
+                let req = wire(HttpVersion::Http1);
+                let mut guard = SocketGuard::new(pool, key, params, false);
+                match h1::send_on_form(&mut conn.stream, &req, max_body, absolute).await {
+                    Ok((raw, reusable)) => {
+                        guard.defuse();
+                        let id = conn.id;
+                        pool.release(key, conn, reusable, params);
+                        return Ok((raw, req.headers, Some(id), reused));
+                    }
+                    Err(e) if reused && e.nothing_received && !retried => {
+                        tracing::debug!("resending on a new connection: {}", e.error);
+                        retried = true;
+                    }
+                    Err(e) => return Err(e.error),
+                }
+            }
+            Lease::NewH2(conn) => {
+                let req = wire(HttpVersion::Http2);
+                let mut guard = SocketGuard::new(pool, key, params, true);
+                let id = conn.id;
+                let started = h2::start(conn.stream, &req, &params.profile).await?;
+                let (send, driver, first) = started.split();
+                guard.defuse();
+                pool.publish(key, id, send, async move {
+                    if let Err(e) = driver.await {
+                        tracing::debug!("h2 connection ended: {e}");
+                    }
+                });
+                let raw = h2::finish_started(first, &req, max_body).await?;
+                return Ok((raw, req.headers, Some(id), false));
+            }
+            Lease::H2(session) => {
+                let req = wire(HttpVersion::Http2);
+                let id = session.id;
+                match h2::request_on(session.send.clone(), &req, max_body).await {
+                    Ok(raw) => return Ok((raw, req.headers, Some(id), true)),
+                    Err(e) if e.retryable && !retried => {
+                        tracing::debug!("session {id} refused the request: {}", e.error);
+                        pool.session_closed(key, id);
+                        retried = true;
+                    }
+                    Err(e) => return Err(e.error),
+                }
+            }
+        }
+    }
+}
+
+/// Gives a busy socket's slot back to the pool if the request ends without
+/// [`ConnectionPool::release`] (error, panic).
+struct SocketGuard<'a> {
+    pool: &'a ConnectionPool,
+    key: &'a GroupKey,
+    params: &'a ConnectParams,
+    session_start: bool,
+    armed: bool,
+}
+
+impl<'a> SocketGuard<'a> {
+    fn new(
+        pool: &'a ConnectionPool,
+        key: &'a GroupKey,
+        params: &'a ConnectParams,
+        session_start: bool,
+    ) -> Self {
+        SocketGuard {
+            pool,
+            key,
+            params,
+            session_start,
+            armed: true,
+        }
+    }
+
+    fn defuse(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SocketGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.pool.discard(self.key, self.session_start, self.params);
+        }
+    }
 }
 
 /// All values of header `name` (case-insensitive), in arrival order.
@@ -384,43 +749,6 @@ fn redirect_location(status: StatusCode, headers: &OrderedHeaders) -> Option<Str
         .find(|(n, _)| n.eq_ignore_ascii_case("location"))
         .map(|(_, v)| v.trim().to_owned())
         .filter(|v| !v.is_empty())
-}
-
-/// Overlay the caller's headers on the defaults. A caller header replaces the
-/// first default of the same name (case-insensitive) in place and removes any
-/// further defaults of that name. Repeats of a name within the caller's list,
-/// and names without a default, are appended in order.
-fn merge_headers(base: OrderedHeaders, caller: &OrderedHeaders) -> OrderedHeaders {
-    let mut out = base;
-    let default_len = out.len();
-    let mut replaced: Vec<String> = Vec::new();
-    for (name, value) in caller {
-        let lname = name.to_ascii_lowercase();
-        if replaced.contains(&lname) {
-            out.push((name.clone(), value.clone()));
-            continue;
-        }
-        let pos = out[..default_len.min(out.len())]
-            .iter()
-            .position(|(n, _)| n.eq_ignore_ascii_case(&lname));
-        match pos {
-            Some(i) => {
-                out[i].1 = value.clone();
-                // Drop later defaults of the same name (only below `default_len`).
-                let mut j = i + 1;
-                while j < default_len.min(out.len()) {
-                    if out[j].0.eq_ignore_ascii_case(&lname) {
-                        out.remove(j);
-                    } else {
-                        j += 1;
-                    }
-                }
-            }
-            None => out.push((name.clone(), value.clone())),
-        }
-        replaced.push(lname);
-    }
-    out
 }
 
 /// The request for the next hop after a redirect with `status` to `next`.
@@ -465,6 +793,7 @@ fn redirected_request(prev: &Request, status: StatusCode, next: Url) -> Request 
         } else {
             prev.body.clone()
         },
+        meta: prev.meta.clone(),
     }
 }
 
@@ -490,29 +819,6 @@ mod tests {
     }
 
     // ---- pure parts ----
-
-    #[test]
-    fn merge_replaces_in_place_and_appends() {
-        let base = h(&[("user-agent", "A"), ("accept", "x"), ("priority", "u=0")]);
-        let caller = h(&[("Accept", "y"), ("X-Test", "1"), ("x-test", "2")]);
-        let got = merge_headers(base, &caller);
-        assert_eq!(
-            got,
-            h(&[
-                ("user-agent", "A"),
-                ("accept", "y"),
-                ("priority", "u=0"),
-                ("X-Test", "1"),
-                ("x-test", "2"),
-            ])
-        );
-    }
-
-    #[test]
-    fn merge_with_empty_caller_is_identity() {
-        let base = h(&[("a", "1"), ("b", "2")]);
-        assert_eq!(merge_headers(base.clone(), &Vec::new()), base);
-    }
 
     #[test]
     fn redirect_location_only_for_redirect_statuses() {

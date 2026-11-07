@@ -1,0 +1,42 @@
+<!doctype html><!--LOG--><script>
+var S = crypto.subtle;
+async function order(name, f) {
+  var o = [];
+  f().then(() => o.push('op'), e => o.push('op rejected ' + e.name));
+  setTimeout(() => o.push('timeout'), 0);
+  Promise.resolve().then(() => o.push('micro'));
+  await new Promise(r => setTimeout(r, 30));
+  log(name + ' ' + o.join(','));
+}
+(async () => {
+  var key = await S.importKey('raw', new Uint8Array(16), 'AES-GCM', true, ['encrypt', 'decrypt']);
+  var hk = await S.importKey('raw', new Uint8Array(16), { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']);
+  var pw = await S.importKey('raw', new Uint8Array(16), 'PBKDF2', false, ['deriveBits']);
+  await order('digest', () => S.digest('SHA-256', new Uint8Array(10)));
+  await order('digest big', () => S.digest('SHA-256', new Uint8Array(1 << 20)));
+  await order('digest error', () => S.digest('FOO', new Uint8Array(10)));
+  await order('importKey', () => S.importKey('raw', new Uint8Array(16), 'AES-GCM', true, ['encrypt']));
+  await order('importKey error', () => S.importKey('raw', new Uint8Array(3), 'AES-GCM', true, ['encrypt']));
+  await order('encrypt', () => S.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, key, new Uint8Array(10)));
+  await order('sign', () => S.sign('HMAC', hk, new Uint8Array(10)));
+  await order('generateKey', () => S.generateKey({ name: 'AES-GCM', length: 128 }, true, ['encrypt']));
+  await order('generateKey ec', () => S.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']));
+  await order('deriveBits', () => S.deriveBits({ name: 'PBKDF2', salt: new Uint8Array(1), iterations: 10, hash: 'SHA-256' }, pw, 128));
+  var hkdf = await S.importKey('raw', new Uint8Array(16), 'HKDF', false, ['deriveBits', 'deriveKey']);
+  await order('deriveBits hkdf', () => S.deriveBits({ name: 'HKDF', salt: new Uint8Array(1), info: new Uint8Array(1), hash: 'SHA-256' }, hkdf, 128));
+  await order('deriveKey hkdf', () => S.deriveKey({ name: 'HKDF', salt: new Uint8Array(1), info: new Uint8Array(1), hash: 'SHA-256' }, hkdf, { name: 'AES-GCM', length: 128 }, true, ['encrypt']));
+  await order('deriveKey pbkdf2', async () => S.deriveKey({ name: 'PBKDF2', salt: new Uint8Array(1), iterations: 10, hash: 'SHA-256' }, await S.importKey('raw', new Uint8Array(16), 'PBKDF2', false, ['deriveKey']), { name: 'AES-GCM', length: 128 }, true, ['encrypt']));
+  await order('deriveBits pbkdf2 error', () => S.deriveBits({ name: 'PBKDF2', salt: new Uint8Array(1), iterations: 0, hash: 'SHA-256' }, pw, 128));
+  var ec = await S.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  await order('deriveBits ecdh', () => S.deriveBits({ name: 'ECDH', public: ec.publicKey }, ec.privateKey, 128));
+  await order('exportKey', () => S.exportKey('raw', key));
+  var o = [];
+  S.digest('SHA-256', new Uint8Array(1)).then(() => o.push('a'));
+  S.importKey('raw', new Uint8Array(16), 'AES-GCM', true, ['encrypt']).then(() => o.push('b'));
+  S.digest('SHA-1', new Uint8Array(1)).then(() => o.push('c'));
+  S.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, key, new Uint8Array(10)).then(() => o.push('d'));
+  await new Promise(r => setTimeout(r, 30));
+  log('mixed ' + o.join(','));
+  end();
+})();
+</script>

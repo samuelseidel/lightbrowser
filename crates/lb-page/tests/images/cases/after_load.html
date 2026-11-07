@@ -1,0 +1,14 @@
+<!doctype html><html><head><!--LOG--></head><body>
+<img id=a src="a.png">
+<script>
+addEventListener('load',function(){setTimeout(function(){
+  var n=W(new Image(),'late');n.src='a.png';
+  log('late set complete='+n.complete+' w='+n.naturalWidth+' h='+n.naturalHeight);
+  Promise.resolve().then(function(){log('micro after set complete='+n.complete)});
+  var box=document.createElement('div');box.innerHTML='<img id=c src="a.png">';W(box.firstChild,'c');document.body.appendChild(box);
+  log('inner complete='+box.firstChild.complete+' w='+box.firstChild.naturalWidth);
+  var x=W(new Image(),'other');x.src='b.png';log('other complete='+x.complete);
+  setTimeout(function(){var y=W(new Image(),'other2');y.src='b.png';log('other2 complete='+y.complete+' w='+y.naturalWidth)},400);
+},50)});
+</script>
+</body></html>

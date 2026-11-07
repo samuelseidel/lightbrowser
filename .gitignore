@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 .venv/
+
+# detect-bench session records (local runs)
+tests/detect-bench/results/

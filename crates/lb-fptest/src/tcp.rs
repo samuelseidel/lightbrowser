@@ -1,5 +1,5 @@
 //! TCP/IP SYN capture and signature, for checking `lb-net`'s `tcpfp` layer
-//! (ADR 0007). Linux only. Needs `CAP_NET_RAW`.
+//! (ADR 0031). Linux only. Needs `CAP_NET_RAW`.
 //!
 //! The parser here shares no code with the rewriter in `lb-net`, so a test
 //! cannot pass just because both sides make the same mistake. It also

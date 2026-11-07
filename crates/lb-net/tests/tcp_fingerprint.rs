@@ -1,4 +1,4 @@
-//! TCP/IP SYN fingerprint test (ADR 0007). Loopback only.
+//! TCP/IP SYN fingerprint test (ADR 0031). Loopback only.
 //!
 //! For each profile in `profiles/tcp/`, `lb_net::fetch` runs through a
 //! `NetContext` against a local HTTP server. `lb-fptest` captures the real

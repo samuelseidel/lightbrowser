@@ -1,0 +1,196 @@
+{
+  "format": 1,
+  "note": "Screens per OS. Windows and macOS sizes and bands are not captured: M7 surface reference (medium confidence); Linux Chrome UI height (outer - inner, 87) was captured, panel sizes are not.",
+  "chrome_ui_px": {
+    "windows": 103,
+    "macos": 107,
+    "linux": 87
+  },
+  "windows10": [
+    {
+      "form": "desktop",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "weight": 6
+    },
+    {
+      "form": "desktop",
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "weight": 2
+    },
+    {
+      "form": "desktop",
+      "width": 1366,
+      "height": 768,
+      "dpr": 1,
+      "weight": 1
+    },
+    {
+      "form": "laptop",
+      "width": 1536,
+      "height": 864,
+      "dpr": 1.25,
+      "weight": 4
+    },
+    {
+      "form": "laptop",
+      "width": 1280,
+      "height": 720,
+      "dpr": 1.5,
+      "weight": 1
+    },
+    {
+      "form": "laptop",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "weight": 1
+    }
+  ],
+  "windows": [
+    {
+      "form": "desktop",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "weight": 6
+    },
+    {
+      "form": "desktop",
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "weight": 3
+    },
+    {
+      "form": "laptop",
+      "width": 1536,
+      "height": 864,
+      "dpr": 1.25,
+      "weight": 4
+    },
+    {
+      "form": "laptop",
+      "width": 1280,
+      "height": 720,
+      "dpr": 1.5,
+      "weight": 1
+    },
+    {
+      "form": "laptop",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "weight": 1
+    }
+  ],
+  "macos": {
+    "mba13_m1": {
+      "width": 1440,
+      "height": 900,
+      "dpr": 2,
+      "menu_bar": 25,
+      "color_depth": 30,
+      "gamut": "p3",
+      "laptop": true
+    },
+    "mba13": {
+      "width": 1470,
+      "height": 956,
+      "dpr": 2,
+      "menu_bar": 37,
+      "color_depth": 30,
+      "gamut": "p3",
+      "laptop": true
+    },
+    "mbp14": {
+      "width": 1512,
+      "height": 982,
+      "dpr": 2,
+      "menu_bar": 38,
+      "color_depth": 30,
+      "gamut": "p3",
+      "laptop": true,
+      "hdr": true
+    },
+    "mbp16": {
+      "width": 1728,
+      "height": 1117,
+      "dpr": 2,
+      "menu_bar": 38,
+      "color_depth": 30,
+      "gamut": "p3",
+      "laptop": true,
+      "hdr": true
+    },
+    "mini": {
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "menu_bar": 25,
+      "color_depth": 24,
+      "gamut": "srgb",
+      "laptop": false
+    },
+    "mba13_intel": {
+      "width": 1440,
+      "height": 900,
+      "dpr": 2,
+      "menu_bar": 25,
+      "color_depth": 24,
+      "gamut": "srgb",
+      "laptop": true
+    },
+    "mbp13_intel": {
+      "width": 1440,
+      "height": 900,
+      "dpr": 2,
+      "menu_bar": 25,
+      "color_depth": 30,
+      "gamut": "p3",
+      "laptop": true
+    },
+    "mbp16_intel": {
+      "width": 1536,
+      "height": 960,
+      "dpr": 2,
+      "menu_bar": 25,
+      "color_depth": 30,
+      "gamut": "p3",
+      "laptop": true
+    }
+  },
+  "linux": [
+    {
+      "form": "desktop",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "weight": 6
+    },
+    {
+      "form": "desktop",
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "weight": 3
+    },
+    {
+      "form": "laptop",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "weight": 3
+    },
+    {
+      "form": "laptop",
+      "width": 1366,
+      "height": 768,
+      "dpr": 1,
+      "weight": 1
+    }
+  ]
+}

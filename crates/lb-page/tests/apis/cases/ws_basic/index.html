@@ -1,0 +1,32 @@
+<!doctype html><!--LOG--><script>
+document.cookie = 'pagecookie=abc; path=/';
+var base = 'ws://' + location.host + '/ws_basic/ws';
+function open(url, protos, f) {
+  return new Promise(res => {
+    var o = [];
+    var ws = protos === undefined ? new WebSocket(url) : new WebSocket(url, protos);
+    o.push('state ' + ws.readyState + ' ' + JSON.stringify(ws.protocol) + ' ' + JSON.stringify(ws.extensions) + ' ' + ws.binaryType + ' ' + ws.bufferedAmount);
+    ws.onopen = e => { o.push('open ' + e.constructor.name + ' ' + ws.readyState + ' ' + JSON.stringify(ws.protocol) + ' ' + JSON.stringify(ws.extensions)); f && f(ws, o); };
+    ws.onmessage = e => o.push('message ' + e.constructor.name + ' ' + (typeof e.data == 'string' ? JSON.stringify(e.data) : Object.prototype.toString.call(e.data) + ' ' + (e.data.byteLength ?? e.data.size)) + ' ' + JSON.stringify(e.origin) + ' ' + e.lastEventId + ' ' + e.ports.length);
+    ws.onerror = e => o.push('error ' + e.constructor.name + ' ' + ws.readyState);
+    ws.onclose = e => { o.push('close ' + e.constructor.name + ' ' + e.code + ' ' + JSON.stringify(e.reason) + ' ' + e.wasClean + ' ' + ws.readyState); res(o.join('\n  ')); };
+  });
+}
+(async () => {
+  log('basic ' + await open(base, undefined, (ws, o) => { ws.send('hello'); setTimeout(() => ws.close(), 100); }));
+  log('headers ' + await open(base + '?proto=chat', ['chat', 'superchat'], (ws, o) => { ws.onmessage = e => { var h = JSON.parse(e.data); o.push(h.map(l => l.replace(/^(Sec-WebSocket-Key: ).*/, '$1KEY').replace(/^(User-Agent: ).*/, '$1UA').replace(/127\.0\.0\.1:\d+/, 'HOST')).join(' | ')); ws.close(1000, 'done'); }; ws.send('headers'); }));
+  log('proto ' + await open(base + '?proto=superchat', ['chat', 'superchat'], (ws) => ws.close()));
+  log('bad proto ' + await open(base + '?proto=other', ['chat']));
+  log('proto not offered ' + await open(base + '?proto=chat'));
+  log('deflate ' + await open(base + '?deflate=1', undefined, (ws, o) => { ws.onmessage = e => { o.push('got ' + e.data); if (e.data.startsWith('compressed')) ws.close(); }; ws.send('raw'); }));
+  log('cookie ' + await open(base + '?cookie=1', undefined, (ws, o) => { o.push(document.cookie.split('; ').sort().join('; ')); ws.close(); }));
+  log('404 ' + await open('ws://' + location.host + '/ws_basic/ws?status=404'));
+  log('bad accept ' + await open(base + '?accept=xxx'));
+  log('refused ' + await open('ws://127.0.0.1:1/'));
+  log('server close ' + await open(base, undefined, ws => ws.send('close:4001:bye now')));
+  log('server close 1000 ' + await open(base, undefined, ws => ws.send('close:1000:')));
+  log('drop ' + await open(base, undefined, ws => ws.send('drop')));
+  log('ping ' + await open(base, undefined, (ws, o) => { ws.send('ping'); setTimeout(() => ws.close(3000, 'x'.repeat(10)), 100); }));
+  end();
+})();
+</script>

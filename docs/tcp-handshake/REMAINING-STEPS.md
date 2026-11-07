@@ -26,10 +26,10 @@ issues and commits. Context: [ANALYSIS.md](ANALYSIS.md).
 | ID | Step | Done when |
 |---|---|---|
 | T9 | Run the shim inside the browser process, so the rules and the shim share one lifecycle. Then default `--tcp-profile persona` once packaged. | `fetch` with a persona needs no separate command; a crash leaves no rule that blocks the next run |
-| T10 | Wire `tcp_profile_id` through the CDP browser context (M3) and Playwright launch helper (M5). | A context created over CDP sends its persona's SYN |
+| T10 | Wire `tcp_profile_id` through the CDP browser context (`serve`, `Target.createBrowserContext`) and the Python SDK launcher. `lb_page::BrowserContext::set_tcp_profile` exists; only `fetch` calls it today. | A context created over CDP sends its persona's SYN |
 | T11 | Document and test running in a container: `NET_ADMIN`, `NET_RAW`, and iptables or nft availability. | A documented `docker run` line passes the TCP test |
 | T12 | Measure the shim's cost: throughput, CPU and latency of a Windows persona against a Linux persona, in `bench/`. | Numbers in `bench/results/` and a stated limit |
-| T13 | Proxies (M2): decide what the TCP profile means behind an HTTP or SOCKS proxy. | Behaviour documented, and `with_tcp_profile` refuses or warns when a proxy is set |
+| T13 | Proxies (ADR 0027): decide what the TCP profile means behind an HTTP or SOCKS proxy. Today the hop to the proxy uses the host's stack and only direct connections are shaped. | Behaviour documented, and `with_tcp_profile` refuses or warns when a proxy is set |
 | T14 | Path variants: MSS other than 1460 (VPN, PPPoE) as profile options, since the data shows MSS spread. | A persona can pick an MSS, and the SYN window and JA4T follow |
 | T15 | Vendor the TCP consistency rule (UA OS matches the TCP profile) into the M4 consistency crate. | The rule is in `lb-persona` and covered by its tests |
 
@@ -42,8 +42,9 @@ issues and commits. Context: [ANALYSIS.md](ANALYSIS.md).
    exception to "capture on loopback only". Keep it, or restrict it.
 3. **`unsafe`.** The TCP code uses `unsafe` for syscalls and netlink, each with a
    comment. CLAUDE.md allows it only for engine bindings.
-4. **Merge target.** The repository's default branch is a session branch, with no
-   `main`. Pick the long-lived branch.
+4. **Merge target.** The repository's default branch is a session branch. The TCP
+   work and the M2-M7 branch were merged on 2026-11-07 (`integrate/all-branches`);
+   pick the long-lived branch and make it the default.
 
 ## When to build the userspace stack
 

@@ -5,4 +5,34 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# One JS engine per binary. The firefox build has the browser context,
+# networking and script-less document loading until SpiderMonkey lands.
+default = ["chrome"]
+chrome = ["lb-js/chrome", "lb-webapi/chrome", "dep:lb-paint", "dep:lb-css"]
+firefox = ["lb-js/firefox", "lb-webapi/firefox"]
+
 [dependencies]
+lb-js = { path = "../lb-js", default-features = false }
+lb-webapi = { path = "../lb-webapi", default-features = false }
+lb-dom = { path = "../lb-dom" }
+lb-net = { path = "../lb-net" }
+lb-persona = { path = "../lb-persona" }
+lb-cdp = { path = "../lb-cdp" }
+lb-layout = { path = "../lb-layout" }
+# Page screenshots (chrome build).
+lb-paint = { path = "../lb-paint", optional = true }
+lb-css = { path = "../lb-css", optional = true }
+lb-behavior = { path = "../lb-behavior" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+url = "2"
+http = "1"
+bytes = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+# Test support only: the page server that records connection use.
+lb-fptest = { path = "../lb-fptest" }

@@ -3,6 +3,11 @@ name = "lb-behavior"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 publish = false
+description = "Human-like input simulation (mouse, keyboard, scroll) vendored from stealth-browser"
 
 [dependencies]
+rand = { version = "0.9", default-features = false, features = ["small_rng"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }

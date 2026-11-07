@@ -1,0 +1,436 @@
+{
+  "format": 1,
+  "note": "WebGL per ANGLE backend and the GPUs per OS. D3D11 and Metal limits are the reference personas'; Linux GL (Mesa) limits and extension lists are not captured: M7 surface reference (medium confidence) (no GPU in the capture container).",
+  "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+  "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+  "shader_precision": {
+    "VERTEX_SHADER.LOW_FLOAT": {
+      "range_min": 127,
+      "range_max": 127,
+      "precision": 23
+    },
+    "VERTEX_SHADER.LOW_INT": {
+      "range_min": 31,
+      "range_max": 30,
+      "precision": 0
+    },
+    "VERTEX_SHADER.MEDIUM_FLOAT": {
+      "range_min": 127,
+      "range_max": 127,
+      "precision": 23
+    },
+    "VERTEX_SHADER.MEDIUM_INT": {
+      "range_min": 31,
+      "range_max": 30,
+      "precision": 0
+    },
+    "VERTEX_SHADER.HIGH_FLOAT": {
+      "range_min": 127,
+      "range_max": 127,
+      "precision": 23
+    },
+    "VERTEX_SHADER.HIGH_INT": {
+      "range_min": 31,
+      "range_max": 30,
+      "precision": 0
+    },
+    "FRAGMENT_SHADER.LOW_FLOAT": {
+      "range_min": 127,
+      "range_max": 127,
+      "precision": 23
+    },
+    "FRAGMENT_SHADER.LOW_INT": {
+      "range_min": 31,
+      "range_max": 30,
+      "precision": 0
+    },
+    "FRAGMENT_SHADER.MEDIUM_FLOAT": {
+      "range_min": 127,
+      "range_max": 127,
+      "precision": 23
+    },
+    "FRAGMENT_SHADER.MEDIUM_INT": {
+      "range_min": 31,
+      "range_max": 30,
+      "precision": 0
+    },
+    "FRAGMENT_SHADER.HIGH_FLOAT": {
+      "range_min": 127,
+      "range_max": 127,
+      "precision": 23
+    },
+    "FRAGMENT_SHADER.HIGH_INT": {
+      "range_min": 31,
+      "range_max": 30,
+      "precision": 0
+    }
+  },
+  "backends": {
+    "d3d11": {
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_disjoint_timer_query_webgl2",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_compression_bptc",
+        "EXT_texture_compression_rgtc",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_texture_norm16",
+        "KHR_parallel_shader_compile",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "OES_texture_float_linear",
+        "OVR_multiview2",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_provoking_vertex",
+        "WEBGL_stencil_texturing"
+      ],
+      "parameters": {
+        "MAX_TEXTURE_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          32767,
+          32767
+        ],
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_VERTEX_UNIFORM_VECTORS": 4095,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+        "MAX_FRAGMENT_UNIFORM_COMPONENTS": 4096,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_3D_TEXTURE_SIZE": 2048,
+        "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 120,
+        "MAX_UNIFORM_BUFFER_BINDINGS": 72,
+        "MAX_UNIFORM_BLOCK_SIZE": 65536,
+        "MAX_COMBINED_UNIFORM_BLOCKS": 60,
+        "MAX_SAMPLES": 4,
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          1
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          1024
+        ]
+      }
+    },
+    "metal": {
+      "extensions": [
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_disjoint_timer_query_webgl2",
+        "EXT_float_blend",
+        "EXT_texture_compression_bptc",
+        "EXT_texture_compression_rgtc",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_texture_norm16",
+        "KHR_parallel_shader_compile",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "OES_texture_float_linear",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw"
+      ],
+      "parameters": {
+        "MAX_TEXTURE_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 31,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+        "MAX_FRAGMENT_UNIFORM_COMPONENTS": 4096,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_3D_TEXTURE_SIZE": 2048,
+        "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 128,
+        "MAX_UNIFORM_BUFFER_BINDINGS": 72,
+        "MAX_UNIFORM_BLOCK_SIZE": 65536,
+        "MAX_COMBINED_UNIFORM_BLOCKS": 60,
+        "MAX_SAMPLES": 4,
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          1
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          511
+        ]
+      }
+    },
+    "gl_mesa": {
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_disjoint_timer_query_webgl2",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_compression_bptc",
+        "EXT_texture_compression_rgtc",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_texture_norm16",
+        "KHR_parallel_shader_compile",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "OES_texture_float_linear",
+        "OVR_multiview2",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_provoking_vertex",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "parameters": {
+        "MAX_TEXTURE_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_VERTEX_UNIFORM_VECTORS": 4096,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 4096,
+        "MAX_VARYING_VECTORS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+        "MAX_FRAGMENT_UNIFORM_COMPONENTS": 16384,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_3D_TEXTURE_SIZE": 2048,
+        "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 128,
+        "MAX_UNIFORM_BUFFER_BINDINGS": 84,
+        "MAX_UNIFORM_BLOCK_SIZE": 65536,
+        "MAX_COMBINED_UNIFORM_BLOCKS": 84,
+        "MAX_SAMPLES": 16,
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          7.375
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          255.875
+        ]
+      }
+    },
+    "gl_mesa_amd": {
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_disjoint_timer_query_webgl2",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_compression_bptc",
+        "EXT_texture_compression_rgtc",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_texture_norm16",
+        "KHR_parallel_shader_compile",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "OES_texture_float_linear",
+        "OVR_multiview2",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_provoking_vertex",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "parameters": {
+        "MAX_TEXTURE_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_VERTEX_UNIFORM_VECTORS": 4096,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 4096,
+        "MAX_VARYING_VECTORS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+        "MAX_FRAGMENT_UNIFORM_COMPONENTS": 16384,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_3D_TEXTURE_SIZE": 2048,
+        "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 128,
+        "MAX_UNIFORM_BUFFER_BINDINGS": 90,
+        "MAX_UNIFORM_BLOCK_SIZE": 65536,
+        "MAX_COMBINED_UNIFORM_BLOCKS": 90,
+        "MAX_SAMPLES": 8,
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          7.375
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          255.875
+        ]
+      }
+    }
+  },
+  "windows": [
+    {
+      "form": "desktop",
+      "weight": 3,
+      "vendor": "NVIDIA",
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002504) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "desktop",
+      "weight": 3,
+      "vendor": "NVIDIA",
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 (0x00002882) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "desktop",
+      "weight": 1,
+      "vendor": "NVIDIA",
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 (0x00002786) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "desktop",
+      "weight": 1,
+      "vendor": "NVIDIA",
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER (0x000021C4) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "desktop",
+      "weight": 1,
+      "vendor": "AMD",
+      "renderer": "ANGLE (AMD, AMD Radeon RX 6600 (0x000073FF) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "desktop",
+      "weight": 1,
+      "vendor": "Intel",
+      "renderer": "ANGLE (Intel, Intel(R) UHD Graphics 770 (0x00004680) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "laptop",
+      "weight": 3,
+      "vendor": "Intel",
+      "renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x000046A8) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "laptop",
+      "weight": 1,
+      "vendor": "Intel",
+      "renderer": "ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+      "form": "laptop",
+      "weight": 1,
+      "vendor": "AMD",
+      "renderer": "ANGLE (AMD, AMD Radeon(TM) 780M Graphics (0x000015BF) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    }
+  ],
+  "linux": [
+    {
+      "form": "desktop",
+      "weight": 2,
+      "vendor": "Intel",
+      "backend": "gl_mesa",
+      "renderer": "ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)"
+    },
+    {
+      "form": "desktop",
+      "weight": 2,
+      "vendor": "AMD",
+      "backend": "gl_mesa_amd",
+      "renderer": "ANGLE (AMD, AMD Radeon RX 6600 (radeonsi, navi23, LLVM {llvm}, DRM {drm}, {kernel}), OpenGL 4.6)"
+    },
+    {
+      "form": "desktop",
+      "weight": 1,
+      "vendor": "AMD",
+      "backend": "gl_mesa_amd",
+      "renderer": "ANGLE (AMD, AMD Radeon RX 7600 (radeonsi, navi33, LLVM {llvm}, DRM {drm}, {kernel}), OpenGL 4.6)"
+    },
+    {
+      "form": "laptop",
+      "weight": 3,
+      "vendor": "Intel",
+      "backend": "gl_mesa",
+      "renderer": "ANGLE (Intel, Mesa Intel(R) Xe Graphics (TGL GT2), OpenGL 4.6)"
+    },
+    {
+      "form": "laptop",
+      "weight": 1,
+      "vendor": "Intel",
+      "backend": "gl_mesa",
+      "renderer": "ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)"
+    }
+  ],
+  "macos_renderer": "ANGLE ({vendor}, ANGLE Metal Renderer: {gpu}, Unspecified Version)"
+}

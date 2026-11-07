@@ -1,0 +1,35 @@
+<!doctype html><!--LOG--><script>
+var o = [];
+class XP extends HTMLElement {
+  constructor() { super(); o.push('ctor ' + (this.id || '?') + ' attrs=' + this.attributes.length + ' kids=' + this.childNodes.length + ' parent=' + d(this.parentNode) + ' connected=' + this.isConnected); }
+  static get observedAttributes() { return ['a']; }
+  connectedCallback() { o.push('connected ' + this.id + ' kids=' + this.childNodes.length); }
+  attributeChangedCallback(n, ov, nv) { o.push('attr ' + this.id + ' ' + n + '=' + nv); }
+}
+customElements.define('x-p', XP);
+</script><body><x-p id=one a=1><span>kid</span></x-p><x-q id=q1></x-q><script>
+log('parsed defined: ' + o.join(' | ')); o = [];
+customElements.define('x-q', class extends HTMLElement { constructor() { super(); o.push('q ctor ' + this.id + ' connected=' + this.isConnected); } connectedCallback() { o.push('q connected ' + this.id); } });
+log('define after parse: ' + o.join(' | ')); o = [];
+document.write('<x-p id=written a=2></x-p>');
+log('document.write: ' + o.join(' | ')); o = [];
+</script><x-q id=q2><x-p id=two></x-p></x-q><table><x-p id=foster></x-p></table><script>
+log('more: ' + o.join(' | ')); o = [];
+var tp = document.createElement('template'); tp.innerHTML = '<x-p id=intemplate></x-p>';
+var c = tp.content.firstChild;
+log('template: ' + [c instanceof XP, o.join(' | ')].join(' ')); o = [];
+document.body.appendChild(document.importNode(tp.content, true));
+log('import template: ' + o.join(' | ')); o = [];
+var adopted = document.adoptNode(tp.content.firstChild);
+log('adopt template: ' + [adopted instanceof XP, o.join(' | ')].join(' ')); o = [];
+var doc = new DOMParser().parseFromString('<x-p id=dp></x-p>', 'text/html');
+log('DOMParser: ' + [doc.body.firstChild instanceof XP, o.join(' | ')].join(' ')); o = [];
+document.body.appendChild(doc.body.firstChild);
+log('DOMParser adopt: ' + o.join(' | ')); o = [];
+var later = document.createElement('div'); later.innerHTML = '<x-r id=r1></x-r>'; document.body.appendChild(later);
+customElements.define('x-r', class extends HTMLElement { constructor() { super(); o.push('r ctor ' + this.id); } });
+log('upgrade order: ' + o.join(' | ')); o = [];
+</script><x-p id=last></x-p><script>
+log('last: ' + o.join(' | ')); o = [];
+addEventListener('load', () => end());
+</script>

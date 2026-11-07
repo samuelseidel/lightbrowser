@@ -65,18 +65,8 @@ pub async fn send_with_limit<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let builder = builder_for(profile)?;
-    let request = build_request(req)?;
-
-    let (client, conn) = builder.handshake::<_, Bytes>(io).await?;
-
-    // Queue the request before the driver first runs. `ready` resolves
-    // without the driver (no peer SETTINGS limit yet), and the fork's first
-    // poll writes SETTINGS, WINDOW_UPDATE and HEADERS before reading, as
-    // browsers do, so the server's SETTINGS ACK never lands in between.
-    let mut client = client.ready().await?;
-    let end_of_stream = req.body.is_empty();
-    let (response, mut stream) = client.send_request(request, end_of_stream)?;
+    let started = start(io, req, profile).await?;
+    let (client, conn) = (started.send, started.conn);
 
     // The driver writes the preface and frames. It ends when `client` and all
     // streams are dropped (h2 then sends GOAWAY) or the peer closes.
@@ -86,14 +76,148 @@ where
         }
     });
 
+    let end_of_stream = req.body.is_empty();
+    let mut stream = started.stream;
     if !end_of_stream {
         send_body(&mut stream, req.body.clone()).await?;
     }
 
-    let response = response.await?;
-    let (parts, mut body) = response.into_parts();
+    let response = started.response.await?;
     drop(client);
+    read_body(response, max_body).await
+}
 
+/// A new connection with its first request queued (not yet written).
+pub(crate) struct Started<S> {
+    pub(crate) send: h2::client::SendRequest<Bytes>,
+    /// The connection driver: spawn it to write the preface and request.
+    pub(crate) conn: h2::client::Connection<S, Bytes>,
+    response: h2::client::ResponseFuture,
+    stream: h2::SendStream<Bytes>,
+}
+
+/// Open an HTTP/2 connection over `io` shaped by `profile` and queue `req`
+/// as its first stream.
+pub(crate) async fn start<S>(
+    io: S,
+    req: &Request,
+    profile: &ClientHelloProfile,
+) -> Result<Started<S>, NetError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let builder = builder_for(profile)?;
+    let request = build_request(req)?;
+    let (client, conn) = builder.handshake::<_, Bytes>(io).await?;
+    // Queue the request before the driver first runs. `ready` resolves
+    // without the driver (no peer SETTINGS limit yet), and the fork's first
+    // poll writes SETTINGS, WINDOW_UPDATE and HEADERS before reading, as
+    // browsers do, so the server's SETTINGS ACK never lands in between.
+    let mut client = client.ready().await?;
+    let (response, stream) = client.send_request(request, req.body.is_empty())?;
+    Ok(Started {
+        send: client,
+        conn,
+        response,
+        stream,
+    })
+}
+
+/// Why a request on a pooled session failed.
+#[derive(Debug)]
+pub(crate) struct SessionError {
+    pub(crate) error: NetError,
+    /// The session was closed or refused the stream before any response:
+    /// the request can be sent again on a new connection.
+    pub(crate) retryable: bool,
+}
+
+fn session_error(e: h2::Error) -> SessionError {
+    let retryable = e.is_go_away() || e.is_io() || e.reason() == Some(h2::Reason::REFUSED_STREAM);
+    SessionError {
+        error: e.into(),
+        retryable,
+    }
+}
+
+impl From<NetError> for SessionError {
+    fn from(error: NetError) -> Self {
+        SessionError {
+            error,
+            retryable: false,
+        }
+    }
+}
+
+/// Finish the first request of a session made by [`start`].
+pub(crate) async fn finish_started(
+    started_response: StartedResponse,
+    req: &Request,
+    max_body: usize,
+) -> Result<RawResponse, NetError> {
+    let StartedResponse {
+        response,
+        mut stream,
+    } = started_response;
+    if !req.body.is_empty() {
+        send_body(&mut stream, req.body.clone()).await?;
+    }
+    let response = response.await?;
+    read_body(response, max_body).await
+}
+
+/// The response half of [`Started`].
+pub(crate) struct StartedResponse {
+    response: h2::client::ResponseFuture,
+    stream: h2::SendStream<Bytes>,
+}
+
+impl<S> Started<S> {
+    /// Split into the session handle, the driver and the first response.
+    pub(crate) fn split(
+        self,
+    ) -> (
+        h2::client::SendRequest<Bytes>,
+        h2::client::Connection<S, Bytes>,
+        StartedResponse,
+    ) {
+        (
+            self.send,
+            self.conn,
+            StartedResponse {
+                response: self.response,
+                stream: self.stream,
+            },
+        )
+    }
+}
+
+/// Send `req` on an open session and read the response.
+pub(crate) async fn request_on(
+    send: h2::client::SendRequest<Bytes>,
+    req: &Request,
+    max_body: usize,
+) -> Result<RawResponse, SessionError> {
+    let request = build_request(req)?;
+    let mut send = send.ready().await.map_err(session_error)?;
+    let end_of_stream = req.body.is_empty();
+    let (response, mut stream) = send
+        .send_request(request, end_of_stream)
+        .map_err(session_error)?;
+    drop(send);
+    if !end_of_stream {
+        send_body(&mut stream, req.body.clone()).await?;
+    }
+    let response = response.await.map_err(session_error)?;
+    Ok(read_body(response, max_body).await?)
+}
+
+/// Read a response body, releasing flow-control capacity as it arrives.
+async fn read_body(
+    response: http::Response<h2::RecvStream>,
+    max_body: usize,
+) -> Result<RawResponse, NetError> {
+    let (parts, mut body) = response.into_parts();
     let mut buf = BytesMut::new();
     while let Some(chunk) = body.data().await {
         let chunk = chunk?;
@@ -195,6 +319,10 @@ pub fn builder_for(profile: &ClientHelloProfile) -> Result<Builder, NetError> {
 
     if let Some(p) = &profile.http2_priority.headers {
         b.headers_priority(p.depends_on, p.weight, p.exclusive);
+        // Chrome derives each stream's block from its priority and the
+        // streams still open (ADR 0018); the first request of a connection
+        // with urgency 0 gets exactly the captured block.
+        b.chrome_stream_dependencies(true);
     }
 
     if !profile.http2_priority.frames.is_empty() {
@@ -250,6 +378,14 @@ fn build_request(req: &Request) -> Result<http::Request<()>, NetError> {
         .version(Version::HTTP_2)
         .body(())?;
     *out.headers_mut() = header_map(&req.headers)?;
+    // The urgency the `priority` header carries decides the HEADERS block.
+    let priority = req
+        .headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case("priority"))
+        .map(|(_, v)| v.as_str());
+    out.extensions_mut()
+        .insert(h2::client::Urgency(crate::pool::urgency(priority)));
     Ok(out)
 }
 

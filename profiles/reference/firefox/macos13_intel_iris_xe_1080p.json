@@ -1,0 +1,191 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "d7a2f5c9-3e8b-4d1f-c6a4-b9e0f3d7a2c5",
+  "profile_name": "macOS 13.6 Ventura \u2014 Intel Iris Xe \u2014 1080p External Display",
+  "created_at": "2024-08-01T00:00:00Z",
+  "tags": [
+    "macos",
+    "macos13",
+    "ventura",
+    "intel",
+    "iris-xe",
+    "1080p",
+    "reference"
+  ],
+  "adversarial": false,
+  "os": {
+    "name": "macOS",
+    "version": "13.6",
+    "build": "13.6",
+    "platform": "MacIntel",
+    "architecture": "x86_64"
+  },
+  "browser": {
+    "name": "Firefox",
+    "version": "128.0",
+    "build_id": "20181001000000",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13.6; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "accept_language": "en-GB,en;q=0.5",
+    "do_not_track": null,
+    "cookie_enabled": true,
+    "java_enabled": false,
+    "pdf_viewer_enabled": true,
+    "product": "Gecko",
+    "product_sub": "20100101",
+    "vendor": "",
+    "vendor_sub": "",
+    "oscpu": "Intel Mac OS X 13.6",
+    "app_name": "Netscape",
+    "app_code_name": "Mozilla",
+    "app_version": "5.0 (Macintosh)"
+  },
+  "hardware": {
+    "hardware_concurrency": 4,
+    "device_memory": 8,
+    "max_touch_points": 0,
+    "gpu": {
+      "vendor": "Mozilla",
+      "renderer": "Mozilla",
+      "vendor_unmasked": "Intel Inc.",
+      "renderer_unmasked": "Intel Iris Xe Graphics"
+    }
+  },
+  "screen": {
+    "width": 1920,
+    "height": 1080,
+    "avail_width": 1920,
+    "avail_height": 1055,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.0,
+    "inner_width": 1920,
+    "inner_height": 984,
+    "outer_width": 1920,
+    "outer_height": 1055,
+    "avail_top": 25,
+    "avail_left": 0
+  },
+  "locale": {
+    "language": "en-GB",
+    "languages": [
+      "en-GB",
+      "en"
+    ],
+    "timezone": "Europe/London",
+    "timezone_offset": 0
+  },
+  "network": {
+    "connection_type": "4g",
+    "downlink": 10,
+    "rtt": 50,
+    "save_data": false
+  },
+  "fingerprint_seeds": {
+    "canvas_seed": "b6e4a8f2d0c9e5b3f7a1d4c8e2f6a0b9",
+    "webgl_noise_seed": "7f1c5a9e3b8d2f6a4c0e7b1d5f9a3c8e",
+    "audio_seed": "2c9f5b1e7a4d8f3c6e0b5a9f2d7c1e4b"
+  },
+  "webgl": {
+    "version": "WebGL 2.0",
+    "shading_language_version": "WebGL GLSL ES 3.00",
+    "extensions": [
+      "EXT_color_buffer_float",
+      "EXT_color_buffer_half_float",
+      "EXT_disjoint_timer_query",
+      "EXT_float_blend",
+      "EXT_frag_depth",
+      "EXT_shader_texture_lod",
+      "EXT_sRGB",
+      "EXT_texture_compression_rgtc",
+      "EXT_texture_filter_anisotropic",
+      "KHR_parallel_shader_compile",
+      "MOZ_debug",
+      "OES_draw_buffers_indexed",
+      "OES_element_index_uint",
+      "OES_fbo_render_mipmap",
+      "OES_standard_derivatives",
+      "OES_texture_float",
+      "OES_texture_float_linear",
+      "OES_texture_half_float",
+      "OES_texture_half_float_linear",
+      "OES_vertex_array_object",
+      "WEBGL_color_buffer_float",
+      "WEBGL_compressed_texture_s3tc",
+      "WEBGL_compressed_texture_s3tc_srgb",
+      "WEBGL_debug_renderer_info",
+      "WEBGL_debug_shaders",
+      "WEBGL_depth_texture",
+      "WEBGL_draw_buffers",
+      "WEBGL_explicit_present",
+      "WEBGL_lose_context",
+      "WEBGL_multi_draw"
+    ],
+    "parameters": {
+      "MAX_TEXTURE_SIZE": 16384,
+      "MAX_VIEWPORT_DIMS": [
+        16384,
+        16384
+      ],
+      "MAX_VERTEX_ATTRIBS": 16,
+      "MAX_VERTEX_UNIFORM_VECTORS": 4096,
+      "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+      "MAX_VARYING_VECTORS": 31,
+      "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 96,
+      "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+      "MAX_RENDERBUFFER_SIZE": 16384,
+      "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+      "MAX_FRAGMENT_UNIFORM_COMPONENTS": 4096,
+      "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+      "MAX_3D_TEXTURE_SIZE": 2048,
+      "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 128,
+      "MAX_UNIFORM_BUFFER_BINDINGS": 72,
+      "MAX_UNIFORM_BLOCK_SIZE": 65536,
+      "MAX_COMBINED_UNIFORM_BLOCKS": 72,
+      "MAX_SAMPLES": 8,
+      "ALIASED_LINE_WIDTH_RANGE": [
+        1,
+        1
+      ],
+      "ALIASED_POINT_SIZE_RANGE": [
+        1,
+        255
+      ]
+    }
+  },
+  "fonts": {
+    "available": [
+      "Arial",
+      "Arial Black",
+      "Arial Narrow",
+      "Baskerville",
+      "Courier",
+      "Courier New",
+      "Didot",
+      "Futura",
+      "Geneva",
+      "Georgia",
+      "Gill Sans",
+      "Helvetica",
+      "Helvetica Neue",
+      "Herculanum",
+      "Lucida Grande",
+      "Menlo",
+      "Monaco",
+      "Optima",
+      "Palatino",
+      "Papyrus",
+      "Tahoma",
+      "Times",
+      "Times New Roman",
+      "Trebuchet MS",
+      "Verdana"
+    ]
+  },
+  "tls": {
+    "profile_id": "firefox_128_macos",
+    "ja3": "2a1f4b8c3d9e7f5a1c6b4e9f2d7a3c8e",
+    "ja3s_note": "Firefox 128 on macOS 13 Ventura TLS 1.3 client hello. Same TLS profile as macOS 14; Firefox TLS fingerprint does not change between Ventura and Sonoma for the same Firefox version."
+  }
+}

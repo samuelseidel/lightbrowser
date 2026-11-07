@@ -1,0 +1,28 @@
+<!doctype html><!--LOG--><script>
+var S = crypto.subtle;
+(async () => {
+  for (const alg of ['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512', 'sha-256', { name: 'Sha-384' }])
+    for (const s of ['', 'abc', 'x'.repeat(1000)])
+      await a('digest ' + JSON.stringify(alg) + ' ' + s.length, async () => hex(await S.digest(alg, enc(s))));
+  await a('buffer', async () => hex(await S.digest('SHA-256', enc('abc').buffer)));
+  await a('dataview', async () => hex(await S.digest('SHA-256', new DataView(enc('xabc').buffer, 1))));
+  await a('u32', async () => hex(await S.digest('SHA-1', new Uint32Array([1, 2]))));
+  await a('result', async () => { var r = await S.digest('SHA-256', enc('')); return Object.prototype.toString.call(r) + ' ' + r.byteLength; });
+  await a('md5', () => S.digest('MD5', enc('')));
+  await a('sha-224', () => S.digest('SHA-224', enc('')));
+  await a('unknown', () => S.digest('foo', enc('')));
+  await a('obj no name', () => S.digest({}, enc('')));
+  await a('number alg', () => S.digest(1, enc('')));
+  await a('no data', () => S.digest('SHA-256'));
+  await a('string data', () => S.digest('SHA-256', 'abc'));
+  await a('no args', () => S.digest());
+  t('sync type', () => Object.prototype.toString.call(S.digest('SHA-256', enc(''))));
+  var order = [];
+  S.digest('SHA-256', enc('')).then(() => order.push('digest'));
+  setTimeout(() => order.push('timeout'), 0);
+  Promise.resolve().then(() => order.push('micro'));
+  await new Promise(r => setTimeout(r, 50));
+  log('order ' + order.join(','));
+  end();
+})();
+</script>

@@ -1,0 +1,654 @@
+[
+ {
+  "name": "ok",
+  "webgl2": false,
+  "vertex": true,
+  "src": "attribute vec2 p; void main(){gl_Position=vec4(p,0.,1.);}",
+  "ok": true,
+  "log": "",
+  "exts": []
+ },
+ {
+  "name": "nomain",
+  "webgl2": false,
+  "vertex": true,
+  "src": "attribute vec2 p;",
+  "ok": false,
+  "log": "ERROR: -1:-1: '' : Missing main()\n",
+  "exts": []
+ },
+ {
+  "name": "empty",
+  "webgl2": false,
+  "vertex": true,
+  "src": "",
+  "ok": false,
+  "log": "ERROR: 1:1: '' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "undeclared",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n gl_Position=vec4(q,0.,1.);\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: 'q' : undeclared identifier\nERROR: 0:2: 'constructor' : not enough data provided for construction\n",
+  "exts": []
+ },
+ {
+  "name": "syntax",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n gl_Position=vec4(1.0;\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: ';' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "typemismatch",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n float x = 1;\n gl_Position=vec4(x);\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: '=' : cannot convert from 'const int' to 'highp float'\n",
+  "exts": []
+ },
+ {
+  "name": "noprec",
+  "webgl2": false,
+  "vertex": false,
+  "src": "void main(){\n gl_FragColor=vec4(1.0);\n}",
+  "ok": true,
+  "log": "",
+  "exts": []
+ },
+ {
+  "name": "badver",
+  "webgl2": false,
+  "vertex": true,
+  "src": "#version 200\nvoid main(){}",
+  "ok": false,
+  "log": "ERROR: 0:1: '200' : client/version number not supported\n",
+  "exts": []
+ },
+ {
+  "name": "es3_in1",
+  "webgl2": false,
+  "vertex": true,
+  "src": "#version 300 es\nin vec2 p; void main(){gl_Position=vec4(p,0.,1.);}",
+  "ok": false,
+  "log": "ERROR: 0:1: '' : unsupported shader version 300\nERROR: 0:?: '' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "es3_ok",
+  "webgl2": true,
+  "vertex": true,
+  "src": "#version 300 es\nin vec2 p; void main(){gl_Position=vec4(p,0.,1.);}",
+  "ok": true,
+  "log": "",
+  "exts": []
+ },
+ {
+  "name": "es3_fragcolor",
+  "webgl2": true,
+  "vertex": false,
+  "src": "#version 300 es\nprecision mediump float;\nvoid main(){ gl_FragColor=vec4(1.0); }",
+  "ok": false,
+  "log": "ERROR: 0:3: 'gl_FragColor' : undeclared identifier\nERROR: 0:3: 'assign' : l-value required (can't modify a const)\nERROR: 0:3: '=' : dimension mismatch\nERROR: 0:3: 'assign' : cannot convert from 'const 4-component vector of float' to 'const highp float'\n",
+  "exts": []
+ },
+ {
+  "name": "es3_nooutput",
+  "webgl2": true,
+  "vertex": false,
+  "src": "#version 300 es\nprecision mediump float;\nvoid main(){ }",
+  "ok": true,
+  "log": "",
+  "exts": []
+ },
+ {
+  "name": "two_errors",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n a = 1.0;\n b = 2.0;\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: 'a' : undeclared identifier\nERROR: 0:2: 'assign' : l-value required (can't modify a const)\nERROR: 0:3: 'b' : undeclared identifier\nERROR: 0:3: 'assign' : l-value required (can't modify a const)\n",
+  "exts": []
+ },
+ {
+  "name": "bad_call",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n gl_Position = vec4(foo(1.0));\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: 'foo' : no matching overloaded function found\n",
+  "exts": []
+ },
+ {
+  "name": "wrong_args",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n gl_Position = vec4(sin(1.0, 2.0));\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: 'sin' : no matching overloaded function found\n",
+  "exts": []
+ },
+ {
+  "name": "redef",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n float a; float a;\n gl_Position=vec4(1.);\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: 'a' : redefinition\n",
+  "exts": []
+ },
+ {
+  "name": "int_float",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n gl_Position=vec4(1.0 + 1);\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: '+' : wrong operand types - no operation '+' exists that takes a left-hand operand of type 'const float' and a right operand of type 'const int' (or there is no acceptable conversion)\n",
+  "exts": []
+ },
+ {
+  "name": "swz",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n vec2 a; gl_Position=vec4(a.xyz,1.);\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: 'xyz' : vector field selection out of range\nERROR: 0:2: 'constructor' : not enough data provided for construction\n",
+  "exts": []
+ },
+ {
+  "name": "ret_type",
+  "webgl2": false,
+  "vertex": true,
+  "src": "float f(){ return; }\nvoid main(){ gl_Position=vec4(f()); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'return' : non-void function must return a value\nERROR: 0:1: 'f' : Function does not return a value\n",
+  "exts": []
+ },
+ {
+  "name": "assign_const",
+  "webgl2": false,
+  "vertex": true,
+  "src": "const float c = 1.0;\nvoid main(){ c = 2.0; gl_Position=vec4(c); }",
+  "ok": false,
+  "log": "ERROR: 0:2: 'assign' : l-value required (can't modify a const)\n",
+  "exts": []
+ },
+ {
+  "name": "unterminated",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ gl_Position=vec4(1.);",
+  "ok": false,
+  "log": "ERROR: 0:1: '' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "pp_error",
+  "webgl2": false,
+  "vertex": true,
+  "src": "#error boom\nvoid main(){}",
+  "ok": false,
+  "log": "ERROR: 0:1: '' :  boom\n",
+  "exts": []
+ },
+ {
+  "name": "pp_undef_macro_if",
+  "webgl2": false,
+  "vertex": true,
+  "src": "#if FOO\n#endif\nvoid main(){}",
+  "ok": false,
+  "log": "ERROR: 0:1: 'FOO' : unexpected token after conditional expression\n",
+  "exts": []
+ },
+ {
+  "name": "reserved",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ float gl_x; gl_Position=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'gl_x' : reserved built-in name\n",
+  "exts": []
+ },
+ {
+  "name": "loop_nonconst",
+  "webgl2": false,
+  "vertex": true,
+  "src": "uniform int n; void main(){ for(int i=0;i<n;i++){} gl_Position=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'i' : Loop index cannot be compared with non-constant expression\n",
+  "exts": []
+ },
+ {
+  "name": "bad_char",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ gl_Position=vec4(1.)$; }",
+  "ok": false,
+  "log": "ERROR: 0:1: '$' : invalid character\n",
+  "exts": []
+ },
+ {
+  "name": "discard_vs",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ discard; }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'discard' : discard supported in fragment shaders only\n",
+  "exts": []
+ },
+ {
+  "name": "missing_semicolon",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){\n float a = 1.0\n gl_Position=vec4(a);\n}",
+  "ok": false,
+  "log": "ERROR: 0:3: 'gl_Position' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "kw_es3",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ float in = 1.0; gl_Position=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'in' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "fs_noprec_var",
+  "webgl2": false,
+  "vertex": false,
+  "src": "void main(){\n float x = 1.0;\n gl_FragColor=vec4(x);\n}",
+  "ok": false,
+  "log": "ERROR: 0:2: '' : No precision specified for (float)\n",
+  "exts": []
+ },
+ {
+  "name": "fs_noprec_uniform",
+  "webgl2": false,
+  "vertex": false,
+  "src": "uniform vec4 c;\nvoid main(){ gl_FragColor=c; }",
+  "ok": false,
+  "log": "ERROR: 0:1: '' : No precision specified for (float)\n",
+  "exts": []
+ },
+ {
+  "name": "neg_bool",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ bool b = true; float x = -b; gl_Position=vec4(x); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '-' : wrong operand type - no operation '-' exists that takes an operand of type bool (or there is no acceptable conversion)\nERROR: 0:1: '=' : cannot convert from 'bool' to 'highp float'\n",
+  "exts": []
+ },
+ {
+  "name": "not_float",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ float x = !1.0; gl_Position=vec4(x); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '!' : wrong operand type - no operation '!' exists that takes an operand of type const float (or there is no acceptable conversion)\n",
+  "exts": []
+ },
+ {
+  "name": "if_float",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ if (1.0) {} gl_Position=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '' : boolean expression expected\nERROR: 0:1: '' : boolean expression expected\n",
+  "exts": []
+ },
+ {
+  "name": "assign_uniform",
+  "webgl2": false,
+  "vertex": true,
+  "src": "uniform float u; void main(){ u = 1.0; gl_Position=vec4(u); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'assign' : l-value required (can't modify a uniform \"u\")\n",
+  "exts": []
+ },
+ {
+  "name": "assign_attr",
+  "webgl2": false,
+  "vertex": true,
+  "src": "attribute float a; void main(){ a = 1.0; gl_Position=vec4(a); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'assign' : l-value required (can't modify an attribute \"a\")\n",
+  "exts": []
+ },
+ {
+  "name": "swz_mixed",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ vec4 a; gl_Position=vec4(a.xr, 1., 1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'xr' : illegal - vector component fields not from the same set\nERROR: 0:1: 'constructor' : not enough data provided for construction\n",
+  "exts": []
+ },
+ {
+  "name": "swz_bad",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ vec4 a; gl_Position=vec4(a.xq, 1., 1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'xq' : illegal - vector component fields not from the same set\nERROR: 0:1: 'constructor' : not enough data provided for construction\n",
+  "exts": []
+ },
+ {
+  "name": "index_oob",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ float a[2]; a[2] = 1.0; gl_Position=vec4(a[0]); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '[]' : array index out of range\n",
+  "exts": []
+ },
+ {
+  "name": "vec_index_oob",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ vec2 a; gl_Position=vec4(a[3]); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '[]' : vector field selection out of range\n",
+  "exts": []
+ },
+ {
+  "name": "ret_mismatch",
+  "webgl2": false,
+  "vertex": true,
+  "src": "float f(){ return vec2(1.); }\nvoid main(){ gl_Position=vec4(f()); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'return' : function return is not matching type:\n",
+  "exts": []
+ },
+ {
+  "name": "ctor_many",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ gl_Position=vec4(1.,2.,3.,4.,5.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'constructor' : too many arguments\n",
+  "exts": []
+ },
+ {
+  "name": "ctor_mat",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ mat2 m = mat2(1.,2.,3.); gl_Position=vec4(m[0],0.,1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'constructor' : not enough data provided for construction\n",
+  "exts": []
+ },
+ {
+  "name": "mul_mismatch",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ mat3 m; vec4 v; gl_Position=m*v; }",
+  "ok": false,
+  "log": "ERROR: 0:1: '*' : wrong operand types - no operation '*' exists that takes a left-hand operand of type 'highp 3X3 matrix of float' and a right operand of type 'highp 4-component vector of float' (or there is no acceptable conversion)\nERROR: 0:1: '=' : dimension mismatch\nERROR: 0:1: 'assign' : cannot convert from 'highp 3X3 matrix of float' to 'out highp 4-component vector of float'\n",
+  "exts": []
+ },
+ {
+  "name": "recursion",
+  "webgl2": false,
+  "vertex": true,
+  "src": "float f(float x); float g(float x){ return f(x); } float f(float x){ return g(x); }\nvoid main(){ gl_Position=vec4(f(1.)); }",
+  "ok": false,
+  "log": "ERROR: Recursive function call in the following call chain: g <- f <- g\n",
+  "exts": []
+ },
+ {
+  "name": "undefined_fn",
+  "webgl2": false,
+  "vertex": true,
+  "src": "float f(float x);\nvoid main(){ gl_Position=vec4(f(1.)); }",
+  "ok": false,
+  "log": "ERROR: Function f() called by main() is undefined\n",
+  "exts": []
+ },
+ {
+  "name": "ternary_mismatch",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ float x = true ? 1.0 : 1; gl_Position=vec4(x); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '?:' : mismatching ternary operator operand types 'const float and 'const int'\nERROR: 0:1: '=' : cannot convert from 'const int' to 'highp float'\n",
+  "exts": []
+ },
+ {
+  "name": "cond_nonbool",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ float x = 1.0 ? 1.0 : 2.0; gl_Position=vec4(x); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '' : boolean expression expected\nERROR: 0:1: '' : boolean expression expected\n",
+  "exts": []
+ },
+ {
+  "name": "break_outside",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ break; }",
+  "ok": false,
+  "log": "ERROR: 0:1: '' : break statement only allowed in loops and switch statements\n",
+  "exts": []
+ },
+ {
+  "name": "field_bad",
+  "webgl2": false,
+  "vertex": true,
+  "src": "struct S { float a; }; void main(){ S s; gl_Position=vec4(s.b); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'b' :  no such field in structure\nERROR: 0:1: 'constructor' : a struct cannot be used as a constructor argument for this type\n",
+  "exts": []
+ },
+ {
+  "name": "too_many_args",
+  "webgl2": false,
+  "vertex": true,
+  "src": "float f(float x){return x;} void main(){ gl_Position=vec4(f(1.,2.)); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'f' : no matching overloaded function found\n",
+  "exts": []
+ },
+ {
+  "name": "void_var",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ void x; }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'x' : illegal use of type 'void'\n",
+  "exts": []
+ },
+ {
+  "name": "es3_attribute",
+  "webgl2": true,
+  "vertex": true,
+  "src": "#version 300 es\nattribute vec2 p; void main(){ gl_Position=vec4(p,0.,1.); }",
+  "ok": false,
+  "log": "ERROR: 0:2: 'attribute' : Illegal use of reserved word\nERROR: 0:2: 'attribute' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "es3_texture2D",
+  "webgl2": true,
+  "vertex": false,
+  "src": "#version 300 es\nprecision mediump float; uniform sampler2D s; out vec4 o; void main(){ o = texture2D(s, vec2(0.)); }",
+  "ok": false,
+  "log": "ERROR: 0:2: 'texture2D' : no matching overloaded function found\nERROR: 0:2: '=' : dimension mismatch\nERROR: 0:2: 'assign' : cannot convert from 'const mediump float' to 'out mediump 4-component vector of float'\n",
+  "exts": []
+ },
+ {
+  "name": "es3_two_outputs_noloc",
+  "webgl2": true,
+  "vertex": false,
+  "src": "#version 300 es\nprecision mediump float; out vec4 a; out vec4 b; void main(){ a=vec4(1.); b=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:2: 'a' : when EXT_blend_func_extended extension is not enabled, must explicitly specify all locations when using multiple fragment outputs\nERROR: 0:2: 'b' : when EXT_blend_func_extended extension is not enabled, must explicitly specify all locations when using multiple fragment outputs\n",
+  "exts": []
+ },
+ {
+  "name": "es3_int_float",
+  "webgl2": true,
+  "vertex": true,
+  "src": "#version 300 es\nvoid main(){ int i = 1; float f = i; gl_Position=vec4(f); }",
+  "ok": false,
+  "log": "ERROR: 0:2: '=' : cannot convert from 'highp int' to 'highp float'\n",
+  "exts": []
+ },
+ {
+  "name": "es3_switch_ok",
+  "webgl2": true,
+  "vertex": true,
+  "src": "#version 300 es\nuniform int u; void main(){ float f=0.; switch(u){ case 1: f=1.; break; default: f=2.; } gl_Position=vec4(f); }",
+  "ok": true,
+  "log": "",
+  "exts": []
+ },
+ {
+  "name": "es3_uint_mismatch",
+  "webgl2": true,
+  "vertex": true,
+  "src": "#version 300 es\nvoid main(){ uint u = 1; gl_Position=vec4(float(u)); }",
+  "ok": false,
+  "log": "ERROR: 0:2: '=' : cannot convert from 'const int' to 'highp uint'\n",
+  "exts": []
+ },
+ {
+  "name": "deriv_noext",
+  "webgl2": false,
+  "vertex": false,
+  "src": "precision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'dFdx' : no matching overloaded function found\nERROR: 0:1: 'constructor' : not enough data provided for construction\n",
+  "exts": []
+ },
+ {
+  "name": "ext_unknown_enable",
+  "webgl2": false,
+  "vertex": true,
+  "src": "#extension GL_FOO_bar : enable\nvoid main(){ gl_Position=vec4(1.); }",
+  "ok": true,
+  "log": "WARNING: 0:1: 'GL_FOO_bar' : extension is not supported\n",
+  "exts": []
+ },
+ {
+  "name": "ext_unknown_require",
+  "webgl2": false,
+  "vertex": true,
+  "src": "#extension GL_FOO_bar : require\nvoid main(){ gl_Position=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'GL_FOO_bar' : extension is not supported\n",
+  "exts": []
+ },
+ {
+  "name": "ext_deriv_notenabled",
+  "webgl2": false,
+  "vertex": false,
+  "src": "#extension GL_OES_standard_derivatives : enable\nprecision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }",
+  "ok": false,
+  "log": "WARNING: 0:1: 'GL_OES_standard_derivatives' : extension is not supported\nERROR: 0:2: 'dFdx' : no matching overloaded function found\nERROR: 0:2: 'constructor' : not enough data provided for construction\n",
+  "exts": []
+ },
+ {
+  "name": "version_late",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){}\n#version 100\n",
+  "ok": false,
+  "log": "ERROR: 0:2: 'version' : #version directive must occur before anything else, except for comments and white space\n",
+  "exts": []
+ },
+ {
+  "name": "warning_unused",
+  "webgl2": false,
+  "vertex": true,
+  "src": "#pragma foo\nvoid main(){ gl_Position=vec4(1.); }",
+  "ok": true,
+  "log": "WARNING: 0:1: 'foo' : unrecognized pragma\n",
+  "exts": []
+ },
+ {
+  "name": "float_trail",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ gl_Position=vec4(1.0f); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '1.0f' : Floating-point suffix unsupported prior to GLSL ES 3.00\nERROR: 0:1: '1.0f' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "octal",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ int a = 09; gl_Position=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '09' : invalid number\nERROR: 0:1: ';' : syntax error\n",
+  "exts": []
+ },
+ {
+  "name": "big_int",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ int a = 4294967296; gl_Position=vec4(1.); }",
+  "ok": true,
+  "log": "WARNING: 0:1: '4294967296' : Integer overflow\n",
+  "exts": []
+ },
+ {
+  "name": "uniform_init",
+  "webgl2": false,
+  "vertex": true,
+  "src": "uniform float u = 1.0; void main(){ gl_Position=vec4(u); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'uniform' :  cannot initialize this type of qualifier \n",
+  "exts": []
+ },
+ {
+  "name": "const_noinit",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ const float c; gl_Position=vec4(c); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'c' : variables with qualifier 'const' must be initialized\n",
+  "exts": []
+ },
+ {
+  "name": "array_nonconst",
+  "webgl2": false,
+  "vertex": true,
+  "src": "void main(){ int n = 2; float a[n]; gl_Position=vec4(1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: '' : constant expression required\nERROR: 0:1: '' : array size must be a constant integer expression\n",
+  "exts": []
+ },
+ {
+  "name": "deriv_ext_enabled_nodirective",
+  "webgl2": false,
+  "vertex": false,
+  "src": "precision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }",
+  "ok": false,
+  "log": "ERROR: 0:1: 'GL_OES_standard_derivatives' : extension is disabled\n",
+  "exts": [
+   "GL_OES_standard_derivatives"
+  ]
+ },
+ {
+  "name": "deriv_ext_enabled",
+  "webgl2": false,
+  "vertex": false,
+  "src": "#extension GL_OES_standard_derivatives : enable\nprecision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }",
+  "ok": true,
+  "log": "",
+  "exts": [
+   "GL_OES_standard_derivatives"
+  ]
+ }
+]

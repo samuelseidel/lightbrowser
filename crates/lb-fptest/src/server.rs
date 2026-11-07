@@ -204,10 +204,20 @@ impl CaptureServer {
 }
 
 /// Replays bytes already read before handing reads to the inner stream.
-struct Rewind<S> {
+pub(crate) struct Rewind<S> {
     prefix: Vec<u8>,
     pos: usize,
     inner: S,
+}
+
+impl<S> Rewind<S> {
+    pub(crate) fn new(prefix: Vec<u8>, inner: S) -> Self {
+        Self {
+            prefix,
+            pos: 0,
+            inner,
+        }
+    }
 }
 
 impl<S: AsyncRead + Unpin> AsyncRead for Rewind<S> {
@@ -243,7 +253,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Rewind<S> {
     }
 }
 
-async fn read_some<R: AsyncRead + Unpin>(
+pub(crate) async fn read_some<R: AsyncRead + Unpin>(
     r: &mut R,
     buf: &mut Vec<u8>,
     t: Duration,

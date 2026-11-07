@@ -1,0 +1,87 @@
+<!doctype html>
+<!-- Shader info logs recorded in Chrome for Testing (loopback); see record.mjs. -->
+<script>
+const out = [];
+const g1 = document.createElement('canvas').getContext('webgl');
+const g2 = document.createElement('canvas').getContext('webgl2');
+const V = g1.VERTEX_SHADER, F = g1.FRAGMENT_SHADER;
+function comp(g, t, src) { const s = g.createShader(t); g.shaderSource(s, src); g.compileShader(s); return [g.getShaderParameter(s, g.COMPILE_STATUS), g.getShaderInfoLog(s), s]; }
+const cases = {
+ ok: [1,V,'attribute vec2 p; void main(){gl_Position=vec4(p,0.,1.);}'],
+ nomain: [1,V,'attribute vec2 p;'],
+ empty: [1,V,''],
+ undeclared: [1,V,'void main(){\n gl_Position=vec4(q,0.,1.);\n}'],
+ syntax: [1,V,'void main(){\n gl_Position=vec4(1.0;\n}'],
+ typemismatch: [1,V,'void main(){\n float x = 1;\n gl_Position=vec4(x);\n}'],
+ noprec: [1,F,'void main(){\n gl_FragColor=vec4(1.0);\n}'],
+ badver: [1,V,'#version 200\nvoid main(){}'],
+ es3_in1: [1,V,'#version 300 es\nin vec2 p; void main(){gl_Position=vec4(p,0.,1.);}'],
+ es3_ok: [2,V,'#version 300 es\nin vec2 p; void main(){gl_Position=vec4(p,0.,1.);}'],
+ es3_fragcolor: [2,F,'#version 300 es\nprecision mediump float;\nvoid main(){ gl_FragColor=vec4(1.0); }'],
+ es3_nooutput: [2,F,'#version 300 es\nprecision mediump float;\nvoid main(){ }'],
+ two_errors: [1,V,'void main(){\n a = 1.0;\n b = 2.0;\n}'],
+ bad_call: [1,V,'void main(){\n gl_Position = vec4(foo(1.0));\n}'],
+ wrong_args: [1,V,'void main(){\n gl_Position = vec4(sin(1.0, 2.0));\n}'],
+ redef: [1,V,'void main(){\n float a; float a;\n gl_Position=vec4(1.);\n}'],
+ int_float: [1,V,'void main(){\n gl_Position=vec4(1.0 + 1);\n}'],
+ swz: [1,V,'void main(){\n vec2 a; gl_Position=vec4(a.xyz,1.);\n}'],
+ ret_type: [1,V,'float f(){ return; }\nvoid main(){ gl_Position=vec4(f()); }'],
+ assign_const: [1,V,'const float c = 1.0;\nvoid main(){ c = 2.0; gl_Position=vec4(c); }'],
+ unterminated: [1,V,'void main(){ gl_Position=vec4(1.);'],
+ pp_error: [1,V,'#error boom\nvoid main(){}'],
+ pp_undef_macro_if: [1,V,'#if FOO\n#endif\nvoid main(){}'],
+ reserved: [1,V,'void main(){ float gl_x; gl_Position=vec4(1.); }'],
+ loop_nonconst: [1,V,'uniform int n; void main(){ for(int i=0;i<n;i++){} gl_Position=vec4(1.); }'],
+ bad_char: [1,V,'void main(){ gl_Position=vec4(1.)$; }'],
+ discard_vs: [1,V,'void main(){ discard; }'],
+ missing_semicolon: [1,V,'void main(){\n float a = 1.0\n gl_Position=vec4(a);\n}'],
+ kw_es3: [1,V,'void main(){ float in = 1.0; gl_Position=vec4(1.); }'],
+ fs_noprec_var: [1,F,'void main(){\n float x = 1.0;\n gl_FragColor=vec4(x);\n}'],
+ fs_noprec_uniform: [1,F,'uniform vec4 c;\nvoid main(){ gl_FragColor=c; }'],
+ neg_bool: [1,V,'void main(){ bool b = true; float x = -b; gl_Position=vec4(x); }'],
+ not_float: [1,V,'void main(){ float x = !1.0; gl_Position=vec4(x); }'],
+ if_float: [1,V,'void main(){ if (1.0) {} gl_Position=vec4(1.); }'],
+ assign_uniform: [1,V,'uniform float u; void main(){ u = 1.0; gl_Position=vec4(u); }'],
+ assign_attr: [1,V,'attribute float a; void main(){ a = 1.0; gl_Position=vec4(a); }'],
+ swz_mixed: [1,V,'void main(){ vec4 a; gl_Position=vec4(a.xr, 1., 1.); }'],
+ swz_bad: [1,V,'void main(){ vec4 a; gl_Position=vec4(a.xq, 1., 1.); }'],
+ index_oob: [1,V,'void main(){ float a[2]; a[2] = 1.0; gl_Position=vec4(a[0]); }'],
+ vec_index_oob: [1,V,'void main(){ vec2 a; gl_Position=vec4(a[3]); }'],
+ ret_mismatch: [1,V,'float f(){ return vec2(1.); }\nvoid main(){ gl_Position=vec4(f()); }'],
+ ctor_many: [1,V,'void main(){ gl_Position=vec4(1.,2.,3.,4.,5.); }'],
+ ctor_mat: [1,V,'void main(){ mat2 m = mat2(1.,2.,3.); gl_Position=vec4(m[0],0.,1.); }'],
+ mul_mismatch: [1,V,'void main(){ mat3 m; vec4 v; gl_Position=m*v; }'],
+ recursion: [1,V,'float f(float x); float g(float x){ return f(x); } float f(float x){ return g(x); }\nvoid main(){ gl_Position=vec4(f(1.)); }'],
+ undefined_fn: [1,V,'float f(float x);\nvoid main(){ gl_Position=vec4(f(1.)); }'],
+ ternary_mismatch: [1,V,'void main(){ float x = true ? 1.0 : 1; gl_Position=vec4(x); }'],
+ cond_nonbool: [1,V,'void main(){ float x = 1.0 ? 1.0 : 2.0; gl_Position=vec4(x); }'],
+ break_outside: [1,V,'void main(){ break; }'],
+ field_bad: [1,V,'struct S { float a; }; void main(){ S s; gl_Position=vec4(s.b); }'],
+ too_many_args: [1,V,'float f(float x){return x;} void main(){ gl_Position=vec4(f(1.,2.)); }'],
+ void_var: [1,V,'void main(){ void x; }'],
+ es3_attribute: [2,V,'#version 300 es\nattribute vec2 p; void main(){ gl_Position=vec4(p,0.,1.); }'],
+ es3_texture2D: [2,F,'#version 300 es\nprecision mediump float; uniform sampler2D s; out vec4 o; void main(){ o = texture2D(s, vec2(0.)); }'],
+ es3_two_outputs_noloc: [2,F,'#version 300 es\nprecision mediump float; out vec4 a; out vec4 b; void main(){ a=vec4(1.); b=vec4(1.); }'],
+ es3_int_float: [2,V,'#version 300 es\nvoid main(){ int i = 1; float f = i; gl_Position=vec4(f); }'],
+ es3_switch_ok: [2,V,'#version 300 es\nuniform int u; void main(){ float f=0.; switch(u){ case 1: f=1.; break; default: f=2.; } gl_Position=vec4(f); }'],
+ es3_uint_mismatch: [2,V,'#version 300 es\nvoid main(){ uint u = 1; gl_Position=vec4(float(u)); }'],
+ deriv_noext: [1,F,'precision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }'],
+ ext_unknown_enable: [1,V,'#extension GL_FOO_bar : enable\nvoid main(){ gl_Position=vec4(1.); }'],
+ ext_unknown_require: [1,V,'#extension GL_FOO_bar : require\nvoid main(){ gl_Position=vec4(1.); }'],
+ ext_deriv_notenabled: [1,F,'#extension GL_OES_standard_derivatives : enable\nprecision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }'],
+ version_late: [1,V,'void main(){}\n#version 100\n'],
+ warning_unused: [1,V,'#pragma foo\nvoid main(){ gl_Position=vec4(1.); }'],
+ float_trail: [1,V,'void main(){ gl_Position=vec4(1.0f); }'],
+ octal: [1,V,'void main(){ int a = 09; gl_Position=vec4(1.); }'],
+ big_int: [1,V,'void main(){ int a = 4294967296; gl_Position=vec4(1.); }'],
+ uniform_init: [1,V,'uniform float u = 1.0; void main(){ gl_Position=vec4(u); }'],
+ const_noinit: [1,V,'void main(){ const float c; gl_Position=vec4(c); }'],
+ array_nonconst: [1,V,'void main(){ int n = 2; float a[n]; gl_Position=vec4(1.); }'],
+};
+for (const [k, [v, t, src]] of Object.entries(cases)) { const r = comp(v == 1 ? g1 : g2, t, src); out.push({ name: k, webgl2: v == 2, vertex: t == V, src, ok: r[0], log: r[1], exts: [] }); }
+g1.getExtension('OES_standard_derivatives');
+for (const [k, src] of [['deriv_ext_enabled_nodirective', 'precision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }'], ['deriv_ext_enabled', '#extension GL_OES_standard_derivatives : enable\nprecision mediump float; varying vec2 v; void main(){ gl_FragColor=vec4(dFdx(v),0.,1.); }']]) {
+  const r = comp(g1, F, src); out.push({ name: k, webgl2: false, vertex: false, src, ok: r[0], log: r[1], exts: ['GL_OES_standard_derivatives'] });
+}
+window.OUT = out;
+</script>

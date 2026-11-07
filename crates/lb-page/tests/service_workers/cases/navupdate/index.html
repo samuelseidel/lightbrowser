@@ -1,0 +1,11 @@
+<!doctype html><title>navupdate</title><!--LOG-->
+<script>
+// Chrome checks the registration for an update about 1.5-2 s after a
+// controlled navigation (here: after 1 s not yet, after 3 s done).
+var n = load(), sw = navigator.serviceWorker;
+function hits() { return fetch('hits').then(function (r) { return r.json() }).then(function (h) { log('hits sw.js=' + h['sw.js'] + ' index=' + h['']) }) }
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms) }) }
+log('load ' + n + ' controlled=' + !!sw.controller);
+if (n === 0) sw.register('sw.js').then(function () { return sw.ready }).then(hits).then(again);
+else sleep(1000).then(hits).then(function () { return sleep(2000) }).then(hits).then(n < 2 ? again : end);
+</script>

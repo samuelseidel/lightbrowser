@@ -1,7 +1,8 @@
 # ADR 0003: BoringSSL and a forked h2 for network fingerprints
 
 Status: Accepted (2026-11-02). Implemented in M1 (2026-11-02); see
-"M1 outcome" below.
+"M1 outcome" below. Connection reuse, TLS resumption and per-stream HTTP/2
+priority blocks: ADR 0018.
 
 ## Context
 
@@ -84,7 +85,7 @@ Gaps, all closed in M4b with small BoringSSL patches or a re-capture:
 | `ffdhe2048`, `ffdhe3072` (256, 257) not sent | BoringSSL has no finite-field groups |
 | Extension order is BoringSSL's, not Firefox's | BoringSSL fixes the order (or permutes it) |
 | key_share is `[x25519]`, Firefox sends `[x25519, P-256]` | BoringSSL picks the key shares |
-| No `pre_shared_key` (41) | no session cache / resumption yet |
+| No `pre_shared_key` (41) on the first connection | resumption exists since ADR 0018 (connection pool); Firefox's resumed ClientHello is not checked |
 | Profile disagrees with itself: `ja3_string` has 65037 (ECH GREASE) and no 18/27; `extensions_order` has 18, 21, 41 and no 65037; `ja4` is a hand-made raw string | the stealth-browser file was not produced by one capture. Re-capture Firefox 128 with `lb-fptest` |
 
 So Firefox's JA3 and JA4 differ today. The test pins each of these gaps, so
@@ -93,8 +94,8 @@ both a regression and a fix make it fail.
 HTTP/1.1 (no fingerprint hash, checked by hand against Chromium 153): Chrome
 gets `Connection: keep-alive` after `Host` and no `Priority` header. hyper
 title-cases names, so `sec-ch-ua*` goes out as `Sec-Ch-Ua*`, where Chrome
-sends lowercase. Fixing that needs hyper's private header-case map; it is
-open.
+sends lowercase. Fixing that needs hyper's private header-case map. Fixed
+later by our own HTTP/1.1 writer (ADR 0011).
 
 ## Alternatives considered
 
