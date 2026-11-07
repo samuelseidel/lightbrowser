@@ -139,6 +139,65 @@ async fn eval(h: &CdpHost, expr: &str) -> serde_json::Value {
     r.result.value.unwrap_or(serde_json::Value::Null)
 }
 
+/// Playwright's mouse API as the CDP commands it sends (Playwright 1.65,
+/// `crInput.js`): `move` with `steps` goes from the last position in equal
+/// strides, one command each; `down`, `up` and `click` use the left button.
+fn expand_playwright(steps: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let (mut x, mut y, mut down) = (0.0f64, 0.0f64, false);
+    let mut out = Vec::new();
+    let mouse = |kind: &str, x: f64, y: f64, down: bool| {
+        let mut p = json!({"type": kind, "button": if down { "left" } else { "none" },
+            "buttons": i32::from(down), "x": x, "y": y, "modifiers": 0});
+        if kind == "mouseMoved" {
+            p["force"] = json!(if down { 0.5 } else { 0.0 });
+        } else {
+            p["button"] = json!("left");
+            p["clickCount"] = json!(1);
+            if kind == "mousePressed" {
+                p["buttons"] = json!(1);
+                p["force"] = json!(0.5);
+            } else {
+                p["buttons"] = json!(0);
+            }
+        }
+        json!({"method": "Input.dispatchMouseEvent", "params": p})
+    };
+    for s in steps {
+        let Some(call) = s["pw"].as_str() else {
+            out.push(s);
+            continue;
+        };
+        let args = s["args"].as_array().cloned().unwrap_or_default();
+        match call {
+            "move" | "click" => {
+                let (tx, ty) = (args[0].as_f64().unwrap(), args[1].as_f64().unwrap());
+                let n = args.get(2).and_then(|o| o["steps"].as_u64()).unwrap_or(1);
+                let (fx, fy) = (x, y);
+                for i in 1..=n {
+                    let f = i as f64 / n as f64;
+                    out.push(mouse("mouseMoved", fx + (tx - fx) * f, fy + (ty - fy) * f, down));
+                }
+                (x, y) = (tx, ty);
+                if call == "click" {
+                    out.push(mouse("mousePressed", x, y, true));
+                    out.push(mouse("mouseReleased", x, y, false));
+                }
+            }
+            "down" => {
+                down = true;
+                out.push(mouse("mousePressed", x, y, true));
+            }
+            "up" => {
+                down = false;
+                out.push(mouse("mouseReleased", x, y, false));
+            }
+            other => panic!("pw {other}"),
+        }
+    }
+    out
+}
+
 /// Load the case, send its `steps.json` the way chrome.mjs does, and read
 /// the log.
 async fn run_steps(case: &str, steps: &str) -> (String, String) {
@@ -156,7 +215,7 @@ async fn run_steps(case: &str, steps: &str) -> (String, String) {
     .await
     .unwrap();
     let steps: Vec<serde_json::Value> = serde_json::from_str(steps).unwrap();
-    for s in steps {
+    for s in expand_playwright(steps) {
         if let Some(ms) = s["wait"].as_u64() {
             tokio::time::sleep(Duration::from_millis(ms)).await;
         } else if let Some(expr) = s["eval"].as_str() {
@@ -224,6 +283,17 @@ cases!(
     history_loc,
     history_nav,
     history_shared,
+);
+
+// Trusted input through CDP (steps.json): `CdpHost` here, the commands
+// over a CDP session in Chrome.
+cases!(
+    false;
+    pointer_kinds,
+    pointer_late,
+    pointer_plain,
+    pointer_pw,
+    pointer_raw,
 );
 
 // The 10 s window runs on the virtual clock: the page's `setTimeout`s

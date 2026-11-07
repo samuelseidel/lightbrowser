@@ -65,6 +65,9 @@ pub enum EventExtra {
     /// `FocusEvent`.
     Focus {
         related: Option<HostRef>,
+        /// Focus moved by the user (a click, Tab), not by script: the event
+        /// has `sourceCapabilities`.
+        user: bool,
     },
     /// `UIEvent` with a `detail`.
     Ui {
@@ -107,6 +110,17 @@ pub struct EventData {
     /// `None` reads the one the event was made with.
     pub related_view: Option<Option<HostRef>>,
     pub extra: EventExtra,
+    /// `UIEvent.sourceCapabilities` an event made by script was given
+    /// (an `InputDeviceCapabilities` object id). Trusted events get theirs
+    /// from [`super::input::source_capabilities`].
+    pub source: Option<u32>,
+    /// `PointerEvent.getCoalescedEvents()`: a list the constructor was
+    /// given, or the one made on first use for a trusted `pointermove` or
+    /// `pointerrawupdate` (the event's own sample).
+    pub coalesced: Option<Vec<u32>>,
+    /// `PointerEvent.getPredictedEvents()` (from the constructor only: the
+    /// input pipeline predicts nothing).
+    pub predicted: Vec<u32>,
 }
 
 /// One entry of an event's path (DOM "event path" struct).
@@ -129,7 +143,7 @@ pub(crate) fn related_of(e: &EventData) -> Option<HostRef> {
     }
     match &e.extra {
         EventExtra::Mouse(m) => m.related,
-        EventExtra::Focus { related } => *related,
+        EventExtra::Focus { related, .. } => *related,
         _ => None,
     }
 }
@@ -156,6 +170,9 @@ impl EventData {
             path: Vec::new(),
             related_view: None,
             extra: EventExtra::None,
+            source: None,
+            coalesced: None,
+            predicted: Vec::new(),
         }
     }
 }

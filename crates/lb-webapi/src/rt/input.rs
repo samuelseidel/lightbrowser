@@ -16,7 +16,7 @@
 use std::rc::Rc;
 
 use lb_dom::{Document, NodeFlags, NodeId, NodeType, local_name};
-use lb_js::{Arg, CallCtx, HostError, HostRef, ValueKind};
+use lb_js::{Arg, CallCtx, HostError, HostRef, JsValue, ValueKind};
 
 use super::events::{EventData, EventExtra, dispatch, new_event};
 use super::{
@@ -194,6 +194,8 @@ pub struct KeyData {
 pub(crate) struct InputState {
     /// Element under the pointer.
     hover: Option<NodeId>,
+    /// Focus is being moved by the user (see `window::focus_user`).
+    pub(crate) user_focus: bool,
     /// Target of the last mousedown, for click.
     down: Option<NodeId>,
     buttons: u16,
@@ -661,9 +663,15 @@ fn mouse_move(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     let Some(target) = hit(w, ev.x, ev.y) else {
         return;
     };
-    update_hover(js, w, ev, target);
     let buttons = held(w, ev);
     let t = w.node_ref(0, target);
+    // Chrome makes pointerrawupdate, first of the pointer's events, only
+    // while somebody listens for it.
+    if has_listener(w, "pointerrawupdate") {
+        let e = mouse_extra(w, ev.x, ev.y, -1, buttons, ev.modifiers, 0, None, true);
+        fire(js, w, t, "PointerEvent", "pointerrawupdate", true, false, e);
+    }
+    update_hover(js, w, ev, target);
     let e = mouse_extra(w, ev.x, ev.y, -1, buttons, ev.modifiers, 0, None, true);
     let ok = fire(js, w, t, "PointerEvent", "pointermove", true, true, e);
     let e = mouse_extra(w, ev.x, ev.y, 0, buttons, ev.modifiers, 0, None, false);
@@ -726,7 +734,7 @@ fn mouse_press(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
                 .find(|&a| focusable(d, a))
         });
         if to != w.focused.get() {
-            super::window::focus(js, w, to);
+            super::window::focus_user(js, w, to);
         }
         if let Some(f) = to {
             w.input.borrow_mut().select_all = None;
@@ -1432,7 +1440,7 @@ fn default_action(
         && c != n
     {
         if w.with_doc(|d| focusable(d, c)) && w.focused.get() != Some(c) {
-            super::window::focus(js, w, Some(c));
+            super::window::focus_user(js, w, Some(c));
         }
         let ev = new_event(w, "PointerEvent", "click", true, true, EventExtra::None);
         w.with_obj(ev, |o| {
@@ -1788,7 +1796,7 @@ fn key_default(js: &mut dyn Js, w: &Rc<Window>, ev: &KeyInput) {
                 })
             });
             if let Some(n) = next {
-                super::window::focus(js, w, Some(n));
+                super::window::focus_user(js, w, Some(n));
                 if w.with_doc(|d| has_selection(d, n)) {
                     let len = utf16(&control_value(w, 0, n)).len();
                     set_selection(w, 0, n, 0, len, 0);
@@ -2141,7 +2149,153 @@ fn dict_host(
     }))
 }
 
+/// The `PointerEvent` objects in a sequence member of an init dictionary.
+fn dict_events(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    d: &Dict,
+    k: &str,
+) -> Result<Vec<u32>, HostError> {
+    let Some(list) = d.get(cx, k)? else {
+        return Ok(Vec::new());
+    };
+    let len = cx.get_property(list, "length")?;
+    let n = match cx.handle_value(len) {
+        JsValue::Number(n) => n as u32,
+        _ => 0,
+    };
+    cx.release(len);
+    let mut ids = Vec::new();
+    for i in 0..n {
+        let item = cx.get_property(list, &i.to_string())?;
+        let id = cx.handle_host(item).filter(|h| h.kind == K_OBJ).map(|h| h.id);
+        cx.release(item);
+        match id.filter(|&id| {
+            w.with_obj(id, |o| matches!(o, Obj::Event(e) if e.iface == "PointerEvent")) == Some(true)
+        }) {
+            Some(id) => ids.push(id),
+            None => {
+                cx.release(list);
+                return Err(HostError::type_error(format!(
+                    "Failed to construct 'PointerEvent': Failed to read the '{k}' property from 'PointerEventInit': Failed to read the sequence element {i}: Failed to convert value to 'PointerEvent'."
+                )));
+            }
+        }
+    }
+    cx.release(list);
+    Ok(ids)
+}
+
+/// `UIEvent.sourceCapabilities` of an event (an `InputDeviceCapabilities`
+/// object id), as Chrome 153 gives it: what a script passed to the
+/// constructor; for trusted events the window's shared object for a device
+/// that fires no touch events (the input pipeline has only mouse and
+/// keyboard) on mouse and keyboard events, on the `click`, `auxclick` and
+/// `contextmenu` pointer events, and on focus events a click or Tab caused;
+/// none on the other pointer events, wheel and input events and anything
+/// made by script.
+fn source_capabilities(w: &Window, e: &EventData) -> Option<u32> {
+    if let Some(id) = e.source {
+        return Some(id);
+    }
+    if !e.trusted {
+        return None;
+    }
+    let has = match e.iface {
+        "MouseEvent" | "KeyboardEvent" => true,
+        "PointerEvent" => matches!(e.type_.as_str(), "click" | "auxclick" | "contextmenu"),
+        "FocusEvent" => matches!(e.extra, EventExtra::Focus { user: true, .. }),
+        _ => false,
+    };
+    has.then(|| {
+        w.cached_obj((0, 0, "input_device_capabilities", String::new()), || {
+            Obj::InputDevice(false)
+        })
+    })
+}
+
+/// The events `getCoalescedEvents()` of event `id` returns: the list the
+/// event was made with, or for a trusted `pointermove` / `pointerrawupdate`
+/// its own sample as a separate event (Chrome 153, for input that arrives
+/// one event at a time, as through `Input.dispatchMouseEvent`; made on first
+/// use and kept). Pointer down and up have none.
+fn coalesced_events(w: &Window, id: u32) -> Vec<u32> {
+    let own = w
+        .with_obj(id, |o| match o {
+            Obj::Event(e) => match &e.coalesced {
+                Some(c) => Ok(c.clone()),
+                None if e.trusted
+                    && e.iface == "PointerEvent"
+                    && matches!(e.type_.as_str(), "pointermove" | "pointerrawupdate") =>
+                {
+                    Err(Box::new((**e).clone()))
+                }
+                None => Ok(Vec::new()),
+            },
+            _ => Ok(Vec::new()),
+        })
+        .unwrap_or(Ok(Vec::new()));
+    match own {
+        Ok(list) => list,
+        Err(mut sample) => {
+            sample.bubbles = false;
+            sample.cancelable = false;
+            sample.current_target = None;
+            sample.phase = 0;
+            sample.stop = false;
+            sample.stop_immediate = false;
+            sample.canceled = false;
+            sample.in_passive = false;
+            sample.dispatching = false;
+            sample.path = Vec::new();
+            sample.coalesced = Some(Vec::new());
+            sample.predicted = Vec::new();
+            let child = w.new_obj(Obj::Event(sample));
+            w.with_obj(id, |o| {
+                if let Obj::Event(e) = o {
+                    e.coalesced = Some(vec![child]);
+                }
+            });
+            vec![child]
+        }
+    }
+}
+
+/// A listener for `type_` exists anywhere in the document (or window).
+fn has_listener(w: &Window, type_: &str) -> bool {
+    w.listeners
+        .borrow()
+        .values()
+        .any(|ls| ls.iter().any(|l| !l.removed.get() && l.type_ == type_))
+        || w.handlers.borrow().keys().any(|(_, t)| t == type_)
+}
+
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
+    // InputDeviceCapabilities.
+    ctor(reg, rt, "InputDeviceCapabilities", |cx, w| {
+        let d = Dict::arg(cx, 0);
+        let fires = d.bool(cx, "firesTouchEvents")?;
+        d.release(cx);
+        let id = w.new_obj(Obj::InputDevice(fires));
+        cx.init_this(HostRef::new(K_OBJ, id))
+    });
+    getter(reg, rt, "InputDeviceCapabilities", "firesTouchEvents", |cx, w| {
+        let id = match cx.this_host() {
+            Some(h) if h.kind == K_OBJ => h.id,
+            _ => return Err(super::illegal()),
+        };
+        match w
+            .with_obj(id, |o| match o {
+                Obj::InputDevice(b) => Some(*b),
+                _ => None,
+            })
+            .flatten()
+        {
+            Some(b) => cx.ret(b),
+            None => Err(super::illegal()),
+        }
+    });
+
     // Constructors with their init dictionaries.
     for iface in [
         "UIEvent",
@@ -2168,6 +2322,14 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 d.bool(cx, "cancelable")?,
             );
             e.composed = d.bool(cx, "composed")?;
+            e.source = dict_host(cx, &d, "sourceCapabilities")?
+                .filter(|h| h.kind == K_OBJ)
+                .map(|h| h.id)
+                .filter(|&id| w.with_obj(id, |o| matches!(o, Obj::InputDevice(_))) == Some(true));
+            if iface == "PointerEvent" {
+                e.coalesced = Some(dict_events(cx, w, &d, "coalescedEvents")?);
+                e.predicted = dict_events(cx, w, &d, "predictedEvents")?;
+            }
             let detail = d.number(cx, "detail")?.unwrap_or(0.0) as i32;
             e.extra = match iface {
                 "MouseEvent" | "PointerEvent" | "WheelEvent" | "DragEvent" => {
@@ -2241,6 +2403,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 },
                 "FocusEvent" => EventExtra::Focus {
                     related: dict_host(cx, &d, "relatedTarget")?,
+                    user: false,
                 },
                 _ => EventExtra::Ui { detail },
             };
@@ -2276,8 +2439,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             _ => 0,
         })
     });
-    getter(reg, rt, "UIEvent", "sourceCapabilities", |cx, _w| {
-        cx.ret(Arg::Null)
+    getter(reg, rt, "UIEvent", "sourceCapabilities", |cx, w| {
+        let e = this_event_data(cx, w)?;
+        cx.ret(source_capabilities(w, &e).map_or(Arg::Null, |id| w.obj_arg(id)))
     });
 
     // MouseEvent
@@ -2405,11 +2569,24 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     } else {
         0
     });
-    method(reg, rt, "PointerEvent", "getCoalescedEvents", |cx, _w| {
-        cx.ret(Arg::Array(Vec::new()))
+    method(reg, rt, "PointerEvent", "getCoalescedEvents", |cx, w| {
+        let id = match cx.this_host() {
+            Some(h) if h.kind == K_OBJ => h.id,
+            _ => return Err(super::illegal()),
+        };
+        this_event_data(cx, w)?;
+        cx.ret(Arg::Array(
+            coalesced_events(w, id)
+                .into_iter()
+                .map(|i| w.obj_arg(i))
+                .collect(),
+        ))
     });
-    method(reg, rt, "PointerEvent", "getPredictedEvents", |cx, _w| {
-        cx.ret(Arg::Array(Vec::new()))
+    method(reg, rt, "PointerEvent", "getPredictedEvents", |cx, w| {
+        let e = this_event_data(cx, w)?;
+        cx.ret(Arg::Array(
+            e.predicted.into_iter().map(|i| w.obj_arg(i)).collect(),
+        ))
     });
 
     // WheelEvent

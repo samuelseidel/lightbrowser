@@ -370,6 +370,14 @@ fn focus_chain(d: &mut lb_dom::Document, n: NodeId, on: bool) {
     }
 }
 
+/// Move focus for the user (a click, Tab): the focus events get
+/// `sourceCapabilities`.
+pub(crate) fn focus_user(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
+    w.input.borrow_mut().user_focus = true;
+    focus(js, w, to);
+    w.input.borrow_mut().user_focus = false;
+}
+
 /// Move focus (`focus()` / `blur()`), firing blur/focusout and
 /// focus/focusin.
 pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
@@ -377,8 +385,10 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
     if old == to {
         return;
     }
+    let user = w.input.borrow().user_focus;
     let focus_extra = |related: Option<NodeId>| EventExtra::Focus {
         related: related.map(|r| w.node_ref(0, r)),
+        user,
     };
     if let Some(o) = old {
         super::input::before_blur(js, w, o);

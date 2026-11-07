@@ -1,0 +1,12 @@
+[
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "none", "buttons": 0, "x": 10, "y": 10, "modifiers": 0, "force": 0}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "none", "buttons": 0, "x": 20, "y": 25, "modifiers": 0, "force": 0}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "none", "buttons": 0, "x": 30, "y": 40, "modifiers": 0, "force": 0}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "button": "left", "buttons": 1, "x": 30, "y": 40, "modifiers": 0, "clickCount": 1, "force": 0.5}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "left", "buttons": 1, "x": 45, "y": 50, "modifiers": 0, "force": 0.5}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "left", "buttons": 1, "x": 60, "y": 70, "modifiers": 0, "force": 0.5}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "button": "left", "buttons": 0, "x": 60, "y": 70, "modifiers": 0, "clickCount": 1}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "none", "buttons": 0, "x": 80, "y": 90, "modifiers": 0, "force": 0}},
+ {"wait": 200},
+ {"eval": "after()"}
+]

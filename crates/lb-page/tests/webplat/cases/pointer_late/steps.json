@@ -1,0 +1,7 @@
+[
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "none", "buttons": 0, "x": 10, "y": 10, "modifiers": 0, "force": 0}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "none", "buttons": 0, "x": 20, "y": 10, "modifiers": 0, "force": 0}},
+ {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "button": "none", "buttons": 0, "x": 30, "y": 10, "modifiers": 0, "force": 0}},
+ {"wait": 100},
+ {"eval": "after()"}
+]

@@ -1,0 +1,35 @@
+<!doctype html><!--LOG--><body style="margin:0"><div id=box style="width:400px;height:300px;background:#ccc"></div><script>
+// Trusted mouse input through CDP Input.dispatchMouseEvent (steps.json):
+// what the pointer, mouse and click events say about their coalesced and
+// predicted lists, pointerrawupdate and sourceCapabilities.
+var box = document.getElementById('box'), saved = [], lastSC = null, sameSC = [];
+function sc(e) {
+  var s = e.sourceCapabilities;
+  if (s === null) return 'null';
+  if (lastSC !== null) sameSC.push(s === lastSC);
+  lastSC = s;
+  return 'fires=' + s.firesTouchEvents;
+}
+function brief(e) {
+  return e.type + ' ' + e.clientX + ',' + e.clientY + ' btn=' + e.button + '/' + e.buttons + ' trusted=' + e.isTrusted
+    + ' tgt=' + (e.target === null ? 'null' : (e.target.id || e.target.tagName)) + ' bubbles=' + e.bubbles + ' cancelable=' + e.cancelable
+    + ' press=' + e.pressure + ' mv=' + e.movementX + ',' + e.movementY;
+}
+['pointerrawupdate', 'pointermove', 'pointerdown', 'pointerup', 'mousemove', 'mousedown', 'mouseup', 'click'].forEach(function (type) {
+  document.addEventListener(type, function (e) {
+    var line = brief(e) + ' id=' + e.pointerId + ' ' + e.pointerType + ' primary=' + e.isPrimary + ' sc=' + sc(e);
+    if (e.getCoalescedEvents) {
+      var c = e.getCoalescedEvents(), p = e.getPredictedEvents();
+      line += ' coalesced=[' + c.map(function (x) { return brief(x) + ' sc=' + sc(x); }).join(' ; ') + '] predicted=' + p.length;
+      line += ' again=' + (e.getCoalescedEvents() === c) + '/' + (e.getCoalescedEvents()[0] === c[0]);
+      saved.push(e);
+    }
+    log(line);
+  }, true);
+});
+function after() {
+  log('saved events later: ' + saved.map(function (e) { return e.type + ':' + e.getCoalescedEvents().length + '/' + e.getPredictedEvents().length; }).join(' '));
+  log('same sourceCapabilities object: ' + sameSC.every(Boolean) + ' (' + sameSC.length + ' compared)');
+  end();
+}
+</script>

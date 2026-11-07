@@ -1,0 +1,12 @@
+<!doctype html><!--LOG--><body style="margin:0"><div id=box style="width:400px;height:300px;background:#ccc"></div><script>
+// pointerrawupdate is made only while somebody listens: the listener is
+// added by the first pointermove, the second move gets one.
+var n = 0;
+document.addEventListener('pointermove', function (e) {
+  log('pointermove ' + e.clientX);
+  if (++n == 1) window.addEventListener('pointerrawupdate', function (r) {
+    log('pointerrawupdate ' + r.clientX + ' coalesced=' + r.getCoalescedEvents().length);
+  });
+});
+function after() { end(); }
+</script>

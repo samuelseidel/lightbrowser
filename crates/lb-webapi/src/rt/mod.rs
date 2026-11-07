@@ -2158,6 +2158,8 @@ pub(crate) enum Obj {
         sheet: u32,
         uid: u32,
     },
+    /// `InputDeviceCapabilities` (`firesTouchEvents`).
+    InputDevice(bool),
 }
 
 impl Obj {
@@ -2220,6 +2222,7 @@ impl Obj {
             Obj::WebSocket(_) => "WebSocket",
             Obj::Idb(x) => x.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
+            Obj::InputDevice(_) => "InputDeviceCapabilities",
         }
     }
 }

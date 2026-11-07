@@ -31,6 +31,7 @@ for (const c of cases) {
   if (fs.existsSync(steps)) {
     for (const s of JSON.parse(fs.readFileSync(steps, 'utf8'))) {
       if (s.wait) await new Promise((r) => setTimeout(r, s.wait));
+      else if (s.burst) await Promise.all(s.burst.map((b) => cdp.send(b.method, b.params)));
       else if (s.eval) await p.evaluate(s.eval);
       else if (s.pw) await p.mouse[s.pw](...(s.args || []));
       else if (s.key) await p.keyboard[s.key](...(s.args || []));
