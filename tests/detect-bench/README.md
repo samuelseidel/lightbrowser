@@ -615,6 +615,11 @@ comparison and its tests are in place.
 - `webrtc_candidates` compared `[::1]` with `::1` and fired on stock Chrome on the IPv6
   loopback; brackets are ignored (recorded fixture).
 - The stroke pairing and the click grouping are bounded (see "Limits" above).
+- Checks (rtx-dev, Python 3.12; the Mac, Python 3.9): 166 tests (136 + 28 in
+  `test_hardening_r2.py` + 2 in `test_rules_wave2.py`; 23 of the 28 fail on the round-1 sources,
+  the other 5 pin behaviour that must not change); T-001 100 and T-003
+  100 (fp 100) as before; T-010 over CDP for the eight reference personas: fp 0 and, with
+  `--input human`, beh 0, fired rules and scores identical to the base and to round 1.
 - Not changed: a replay with sub-pixel noise is not caught by `beh_path_repeat` (limit above);
   the verdict `declared_agent` on unverified headers is the brief (see "Signed agents").
 
