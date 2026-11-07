@@ -1,0 +1,61 @@
+<!doctype html><!--LOG--><script>
+// What estimate() counts: localStorage, sessionStorage, IndexedDB, the
+// Cache API (and cookies). Usage after a write is polled for up to 6 s
+// (Chrome updates its numbers some time after a write; the three that
+// do not count are given 2 s); the exact byte
+// counts are Chrome's own (leveldb overhead, padding) and are not
+// compared, only whether, and under which usageDetails key, usage moved.
+async function est() { var e = await navigator.storage.estimate(); return e; }
+async function moved(name, before, write, patience) {
+  await write();
+  var e, t0 = Date.now();
+  for (;;) {
+    e = await est();
+    if (e.usage > before.usage || Date.now() - t0 > (patience || 6000)) break;
+    await sleep(200);
+  }
+  log(name + ': usage grew=' + (e.usage > before.usage) + ' by at least 40000: ' + (e.usage - before.usage >= 40000)
+    + ' details=[' + Object.keys(e.usageDetails).map(function (k) { return k + ':' + (e.usageDetails[k] > 0); }).join() + ']'
+    + ' quota-usage=' + (e.quota - e.usage));
+  return e;
+}
+(async function () {
+  var e = await est();
+  log('start: usage=' + e.usage + ' details=[' + Object.keys(e.usageDetails) + ']');
+  var big = 'x'.repeat(50000);
+  e = await moved('localStorage', e, function () { localStorage.setItem('k', big); }, 2000);
+  e = await moved('sessionStorage', e, function () { sessionStorage.setItem('k', big); }, 2000);
+  e = await moved('cookie', e, function () { document.cookie = 'c=' + big.slice(0, 3000); }, 2000);
+  e = await moved('indexedDB', e, function () {
+    return new Promise(function (res, rej) {
+      var r = indexedDB.open('db', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('s'); };
+      r.onsuccess = function () {
+        var tx = r.result.transaction('s', 'readwrite');
+        tx.objectStore('s').put(big, 'k');
+        tx.oncomplete = function () { r.result.close(); res(); };
+        tx.onerror = rej;
+      };
+      r.onerror = rej;
+    });
+  });
+  e = await moved('caches', e, async function () {
+    var c = await caches.open('c');
+    await c.put('/x', new Response(big));
+  });
+  var before = e;
+  localStorage.removeItem('k');
+  await caches.delete('c');
+  indexedDB.deleteDatabase('db');
+  var t0 = Date.now(), e3;
+  for (;;) {
+    e3 = await est();
+    if (e3.usage < before.usage || Date.now() - t0 > 6000) break;
+    await sleep(200);
+  }
+  // (What is left in usageDetails after a delete depends on the
+  // database files Chrome keeps: not compared.)
+  log('after deletes: usage fell=' + (e3.usage < before.usage));
+  end();
+})();
+</script>

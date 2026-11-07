@@ -1,0 +1,74 @@
+<!doctype html><!--LOG--><body style="margin:0"><button id=b style="display:block;width:100px;height:40px" onclick="phase2()">go</button><script>
+// speechSynthesis.speak() with the persona's voices. No browser here has a
+// voice to record, so the expected log (expected.txt) follows the model in
+// speech.rs: Blink's event order, word boundaries for local voices only,
+// 400 ms per word at rate 1. Runs on the virtual clock; the click gives
+// the page its user activation.
+var ss = speechSynthesis;
+function r3(x) { return (Math.round(x * 1000) / 1000).toFixed(3); }
+function flags() { return 'sp=' + ss.speaking + ' pend=' + ss.pending + ' paused=' + ss.paused; }
+function mk(label, text, init) {
+  var u = new SpeechSynthesisUtterance(text);
+  Object.keys(init || {}).forEach(function (k) { u[k] = init[k]; });
+  ['start', 'end', 'error', 'pause', 'resume', 'boundary'].forEach(function (type) {
+    u.addEventListener(type, function (e) {
+      log(label + ' ' + e.type + ' ' + e.charIndex + '/' + e.charLength + ' name=[' + e.name + '] t=' + r3(e.elapsedTime)
+        + (type == 'error' ? ' error=' + e.error : '') + ' ' + flags());
+    });
+  });
+  return u;
+}
+function voice(name) { return ss.getVoices().filter(function (v) { return v.name == name; })[0]; }
+async function phase2() {
+  var vs = ss.getVoices();
+  log('voices ' + vs.length + ' first=' + vs[0].name + ' default=' + vs.filter(function (v) { return v.default; }).map(function (v) { return v.name; }));
+  log('--- default voice (local), rate 2');
+  ss.speak(mk('a', 'one two  three', { rate: 2 }));
+  log('after speak ' + flags());
+  await sleep(1000);
+  log('later ' + flags());
+  log('--- network voice');
+  ss.speak(mk('b', 'one two', { voice: voice('Google US English'), rate: 5 }));
+  await sleep(1000);
+  log('--- lang picks the voice (de-DE: network), voice property reads back');
+  var d = mk('c', 'eins', { lang: 'de-DE', rate: 5 });
+  ss.speak(d);
+  log('voice of c: ' + d.voice + ' ' + (voice('Google Deutsch') === ss.getVoices()[3]));
+  await sleep(1000);
+  log('--- own voice property');
+  var e = mk('d', 'x', { rate: 10 });
+  e.voice = voice('Microsoft Zira - English (United States)');
+  log('voice of d: ' + e.voice.name + ' same object: ' + (e.voice === voice('Microsoft Zira - English (United States)')));
+  ss.speak(e);
+  await sleep(500);
+  log('--- two queued');
+  ss.speak(mk('e', 'ab cd', { rate: 4 }));
+  ss.speak(mk('f', 'ef', { rate: 4 }));
+  log('queued ' + flags());
+  await sleep(2000);
+  log('--- pause at 0.3 s, resume at 0.8 s (4 words, rate 2)');
+  ss.speak(mk('g', 'a b c d', { rate: 2 }));
+  await sleep(300);
+  ss.pause();
+  log('right after pause ' + flags());
+  await sleep(500);
+  ss.resume();
+  log('right after resume ' + flags());
+  await sleep(2000);
+  log('--- cancel at 0.3 s with another queued');
+  ss.speak(mk('h', 'a b c d', { rate: 2 }));
+  ss.speak(mk('i', 'never', { rate: 2 }));
+  await sleep(300);
+  ss.cancel();
+  log('right after cancel ' + flags());
+  await sleep(2000);
+  log('later ' + flags());
+  log('--- empty text, unusual rate');
+  ss.speak(mk('j', '', {}));
+  await sleep(100);
+  ss.speak(mk('k', 'aa bb', { rate: 0.5 }));
+  await sleep(3000);
+  log('end ' + flags());
+  end();
+}
+</script>

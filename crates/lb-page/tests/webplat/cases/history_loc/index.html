@@ -1,0 +1,15 @@
+<!doctype html><!--LOG--><script>
+// Navigations the used-up budget stops (or not), each in a new iframe:
+// the frame uses its budget up, makes the call, and reports whether it
+// went anywhere.
+var kinds = ['none', 'href', 'assign', 'replace', 'reload', 'go(0)', 'fragment', 'link click', 'form submit'];
+var kind = 0;
+function next() {
+  if (kind == kinds.length) { end(); return; }
+  var f = document.createElement('iframe');
+  f.src = 'frame.html?' + kinds[kind];
+  document.body.appendChild(f);
+}
+addEventListener('message', function (e) { log(e.data); kind++; next(); });
+document.addEventListener('DOMContentLoaded', next);
+</script>

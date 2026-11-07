@@ -370,6 +370,14 @@ fn focus_chain(d: &mut lb_dom::Document, n: NodeId, on: bool) {
     }
 }
 
+/// Move focus for the user (a click, Tab): the focus events get
+/// `sourceCapabilities`.
+pub(crate) fn focus_user(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
+    w.input.borrow_mut().user_focus = true;
+    focus(js, w, to);
+    w.input.borrow_mut().user_focus = false;
+}
+
 /// Move focus (`focus()` / `blur()`), firing blur/focusout and
 /// focus/focusin.
 pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
@@ -377,8 +385,10 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
     if old == to {
         return;
     }
+    let user = w.input.borrow().user_focus;
     let focus_extra = |related: Option<NodeId>| EventExtra::Focus {
         related: related.map(|r| w.node_ref(0, r)),
+        user,
     };
     if let Some(o) = old {
         super::input::before_blur(js, w, o);
@@ -580,6 +590,9 @@ pub(crate) fn apply_traversal(js: &mut dyn Js, w: &Rc<Window>, url: Url, state: 
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
 pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
+    if !w.navigation_allowed() {
+        return;
+    }
     navigate_to_as(js, w, url, replace, None);
 }
 
@@ -639,7 +652,7 @@ pub(crate) fn navigate_to_as(
         let _ = js;
         return;
     }
-    w.request_navigation(NavRequest::get(url, replace));
+    w.post_navigation(NavRequest::get(url, replace));
 }
 
 /// `(screenX, screenY)`: the persona's `window_position()` (Wayland 0,0;
@@ -1139,7 +1152,8 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Location", "reload", |_cx, w| {
-        w.request_navigation(NavRequest {
+        // Not counted by the limiter (Chrome 153).
+        w.post_navigation(NavRequest {
             reload: true,
             ..NavRequest::get(w.url(), true)
         });
@@ -1160,7 +1174,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             return cx.ret(host.length());
         }
         let h = w.history.borrow();
-        cx.ret(h.before + h.entries.len() as u32)
+        cx.ret((h.before + h.entries.len() as u32).min(super::HISTORY_MAX))
     });
     getter(reg, rt, "History", "state", |cx, w| {
         not_fully_active(w, "state")?;
@@ -1208,6 +1222,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 }
                 _ => w.url(),
             };
+            if !w.navigation_allowed() {
+                return Ok(());
+            }
             record_entry(w, &url, state, replace, None);
             w.set_url(url);
             Ok(())
@@ -1220,6 +1237,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             } else {
                 delta
             };
+            if !w.navigation_allowed() {
+                return Ok(());
+            }
             if w.session.borrow().is_some() {
                 // The page's session history decides (and may load).
                 w.request_traversal(delta);
@@ -1227,7 +1247,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             }
             if delta == 0 {
                 if name == "go" {
-                    w.request_navigation(NavRequest::get(w.url(), true));
+                    w.post_navigation(NavRequest::get(w.url(), true));
                 }
                 return Ok(());
             }

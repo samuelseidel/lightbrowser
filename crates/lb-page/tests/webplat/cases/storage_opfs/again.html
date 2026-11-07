@@ -1,0 +1,14 @@
+<!doctype html><!--LOG--><script>
+// A second document of the same origin sees the files (the file system
+// belongs to the origin).
+(async function () {
+  sessionStorage.getItem('prev').split('\n').forEach(log);
+  var root = await navigator.storage.getDirectory();
+  var out = [];
+  for await (var e of root.entries()) out.push(e[0] + ':' + e[1].kind);
+  log('second document: [' + out.sort().join() + '] text=[' + await (await (await root.getFileHandle('keep.txt')).getFile()).text() + ']');
+  var e = await navigator.storage.estimate();
+  log('usageDetails: [' + Object.keys(e.usageDetails).join() + '] usage>0: ' + (e.usage > 0));
+  end();
+})();
+</script>

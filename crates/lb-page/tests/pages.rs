@@ -12,6 +12,7 @@ mod report;
 mod service_workers;
 mod shadow;
 mod stylesheets;
+mod webplat;
 mod workers;
 
 use std::time::Duration;
