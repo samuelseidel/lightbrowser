@@ -380,8 +380,7 @@ pub struct MediaFeature {
 /// empty value keeps the persona's; each call replaces the last one.
 /// Unknown features and values are errors.
 pub fn parse_emulated_media(m: &EmulatedMedia) -> Result<lb_css::MediaOverrides, CdpError> {
-    let mut o = lb_css::MediaOverrides::default();
-    o.print = match m.media.as_deref().unwrap_or("") {
+    let print = match m.media.as_deref().unwrap_or("") {
         "" => None,
         "screen" => Some(false),
         "print" => Some(true),
@@ -390,6 +389,10 @@ pub fn parse_emulated_media(m: &EmulatedMedia) -> Result<lb_css::MediaOverrides,
                 "media type {other:?} is not supported (screen or print)"
             )));
         }
+    };
+    let mut o = lb_css::MediaOverrides {
+        print,
+        ..Default::default()
     };
     for f in m.features.iter().flatten() {
         if f.value.is_empty() {

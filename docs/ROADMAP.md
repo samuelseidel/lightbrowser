@@ -3363,6 +3363,38 @@ keeps bindings out of the main world, confirmed by the user). Missing:
 `beforeunload` in child frames, vector text in PDFs. Console calls made
 in an isolated world are reported with the main world's context id.
 
+### Linux checks on rtx-dev, idle workers, V8's thread pool (2026-11-07)
+
+Builds and checks now run on `rtx-dev` (Ubuntu 24.04, x86_64, 24 cores,
+62 GB). For commit `2a7e09b`: build, fmt, WPT **11739/12471** (as on
+macOS), Playwright **41/41**, firefox tests; clippy (chrome and firefox)
+and nine `lb-cdp` tests failed on one lint and on the mock host refusing
+media emulation, both fixed after it. `apis::import_page` failed once
+under heavy load (its last line orders a fresh `import()` against a
+`setTimeout(0)`, a race with the loopback fetch) and passed 6 of 6 runs
+alone. Bench (5 x 50 pages; Chromium 1243 on the same machine):
+
+| | `fetch` | CDP | Chromium (CDP) |
+|---|---|---|---|
+| crawl | 0.80 s | 0.47 s | 3.10 s |
+| CPU | 0.70 s | 0.46 s | 12.8 s |
+| peak RSS | 17.8 MB | 22.4 MB | 2,811 MB (summed) |
+| peak PSS | | 19.5 MB | 1,241 MB |
+| idle RSS | | 5.50 MB | 918 MB |
+
+**Idle workers release their engine** (ADR 0035 revision 1). A worker
+with no pages for 30 s drops its engine, bindings and spare realm and
+calls `malloc_trim`; realm ids are now unique in the process. Linux,
+release, after a 50-page crawl over CDP: private memory (`RssAnon`)
+14.4 MB, 35 s later 8.1 MB (idle before any page: 1.4 MB); RSS 31.9 ->
+25.7 MB; the next page took 6-12 ms with its new engine. Closing the
+context frees little more (7.5 MB).
+
+**V8's background pool is 2 threads** instead of V8's default (cores - 1,
+up to 16): after a crawl on 24 cores the process has 6 threads instead
+of 20, private memory about 0.4 MB less, crawl times and CPU the same
+within the noise of 3-run benches; `LB_V8_THREADS` overrides.
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from

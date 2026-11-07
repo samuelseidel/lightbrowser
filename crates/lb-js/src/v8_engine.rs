@@ -69,7 +69,15 @@ pub fn init_v8(flags: &str) -> bool {
         }
         // ICU's data is not linked in; register our copy first (ADR 0013).
         icu_data::install();
-        let platform = v8::new_default_platform(0, false).make_shared();
+        // V8's background pool (concurrent GC and compilation): 2 threads.
+        // V8's own default is the core count minus one, up to 16, each
+        // with its own stack and allocator state, for a browser that runs
+        // pages one per worker. `LB_V8_THREADS` overrides (0: V8's sizing).
+        let threads = std::env::var("LB_V8_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2);
+        let platform = v8::new_default_platform(threads, false).make_shared();
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();
         did = true;
@@ -1007,7 +1015,6 @@ struct State {
     /// context) double-frees at isolate teardown for contexts deserialized
     /// from a snapshot.
     realm_by_global: HashMap<i32, Vec<RealmId>>,
-    next_realm: u32,
     handles: Slab<(RealmId, v8::Global<v8::Value>)>,
     resolvers: Slab<(RealmId, v8::Global<v8::PromiseResolver>)>,
     /// Wrapper cache: `(wrapper_key world or realm, host)` to (the realm
@@ -1087,6 +1094,11 @@ impl State {
 /// Wrapper cache key of the main world's shared wrappers (no realm has
 /// id 0).
 const MAIN_WORLD: RealmId = RealmId(0);
+
+/// Realm ids are unique in the process, across engines: an id kept from an
+/// engine that was dropped (a worker releases its engine when idle) can
+/// never name a realm of a later one.
+static NEXT_REALM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
 /// Internal fields of every wrapper: kind, id.
 const HOST_FIELDS: usize = 2;
@@ -1266,7 +1278,6 @@ impl Engine {
             interfaces: Vec::new(),
             realms: HashMap::new(),
             realm_by_global: HashMap::new(),
-            next_realm: 1,
             handles: Slab::new(),
             resolvers: Slab::new(),
             wrappers: HashMap::new(),
@@ -2233,12 +2244,7 @@ fn new_realm_in(
         made: RefCell::new(made),
         fixups: options.fixups.clone(),
     });
-    let id = {
-        let mut st = state.borrow_mut();
-        let id = RealmId(st.next_realm);
-        st.next_realm += 1;
-        id
-    };
+    let id = RealmId(NEXT_REALM.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let scope = &mut v8::ContextScope::new(scope, context);
     let global = context.global(scope);
     let console = console::capture_builtins(scope, global);

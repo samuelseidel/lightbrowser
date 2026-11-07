@@ -179,6 +179,9 @@ Playwright"): Playwright 38/38 (Node 26, Playwright 1.65), lazy ICU paging
 geolocation, drag and drop and `Page.printToPDF` (ADR 0037); Playwright's
 implicit 1280x720 viewport keeps the persona's screen (ADR 0009 revision 2)
 and media emulation applies as the client asks (revision 3); `beforeunload`.
+Idle workers drop their engine after 30 s (ADR 0035 revision 1); V8's
+background pool is 2 threads (`LB_V8_THREADS`). Builds and checks also run
+on the `rtx-dev` Linux box (ROADMAP "Linux checks on rtx-dev").
 See "Where we stand" and the status
 sections in `docs/ROADMAP.md`.
 

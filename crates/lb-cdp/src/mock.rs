@@ -1491,6 +1491,16 @@ impl PageHost for MockHost {
         Ok(())
     }
 
+    /// The mock lays nothing out: media the client asks for has no effect
+    /// here (the real host applies it, ADR 0009 revision 3).
+    fn set_emulated_media(
+        &self,
+        _target_id: &str,
+        _media: lb_css::MediaOverrides,
+    ) -> HostResult<()> {
+        Ok(())
+    }
+
     fn set_viewport(&self, target_id: &str, viewport: Option<ViewportOverride>) -> HostResult<()> {
         let persona = self.page_persona(target_id);
         self.with_page(target_id, |p| {

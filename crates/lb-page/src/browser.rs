@@ -35,6 +35,10 @@ pub struct BrowserOptions {
     /// its creation and the template set it holds cost ~3 MB of resident
     /// memory in `serve`.
     pub startup_snapshot: bool,
+    /// A worker with no pages for this long drops its JS engine and
+    /// bindings and hands the freed memory back to the OS; its next page
+    /// makes a new engine. `None` keeps engines for the browser's life.
+    pub idle_release: Option<std::time::Duration>,
 }
 
 impl Default for BrowserOptions {
@@ -43,6 +47,7 @@ impl Default for BrowserOptions {
             workers: std::thread::available_parallelism().map_or(1, |n| n.get()),
             max_heap_bytes: Some(512 << 20),
             startup_snapshot: false,
+            idle_release: Some(std::time::Duration::from_secs(30)),
         }
     }
 }
@@ -122,6 +127,21 @@ impl WorkerState {
         self.runtime.borrow().clone()
     }
 
+    /// Drop the engine and its bindings (no pages are left) and return the
+    /// freed memory to the OS. The next page makes a new engine; realm ids
+    /// are unique in the process, so nothing kept from this one can name a
+    /// realm of the next.
+    pub(crate) fn release_engine(&self) {
+        if !self.pages.borrow().is_empty() {
+            return;
+        }
+        self.runtime.borrow_mut().take();
+        if self.engine.borrow_mut().take().is_some() {
+            tracing::debug!("idle worker released its engine");
+        }
+        release_free_memory();
+    }
+
     /// Ask for one full GC (V8 low-memory notification) when this worker
     /// next has nothing queued, e.g. after a page closed: dropped realms
     /// are otherwise kept until the next allocation pressure.
@@ -182,9 +202,10 @@ impl Browser {
         let count = handle.pages.clone();
         let max_heap = self.opts.max_heap_bytes;
         let snapshot = self.opts.startup_snapshot;
+        let idle = self.opts.idle_release;
         let t = std::thread::Builder::new()
             .name(format!("lb-worker-{i}"))
-            .spawn(move || worker_main(rx, count, max_heap, snapshot))
+            .spawn(move || worker_main(rx, count, max_heap, snapshot, idle))
             .map_err(|e| PageError::Setup(e.to_string()))?;
         Ok((handle, t))
     }
@@ -271,6 +292,7 @@ fn worker_main(
     page_count: Arc<AtomicUsize>,
     max_heap: Option<usize>,
     startup_snapshot: bool,
+    idle_release: Option<std::time::Duration>,
 ) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -294,7 +316,22 @@ fn worker_main(
             stop: std::cell::Cell::new(false),
             gc_pending: std::cell::Cell::new(false),
         });
-        while let Some(job) = rx.recv().await {
+        loop {
+            // No pages and an engine: wait for work at most `idle_release`,
+            // then give the engine's memory back.
+            let idle = idle_release
+                .filter(|_| state.pages.borrow().is_empty() && state.engine.borrow().is_some());
+            let job = match idle {
+                Some(d) => tokio::select! {
+                    j = rx.recv() => j,
+                    _ = tokio::time::sleep(d) => {
+                        state.release_engine();
+                        continue;
+                    }
+                },
+                None => rx.recv().await,
+            };
+            let Some(job) = job else { break };
             job(&state);
             if state.stop.get() {
                 break;
@@ -314,4 +351,21 @@ fn worker_main(
         state.runtime.borrow_mut().take();
         state.engine.borrow_mut().take();
     });
+}
+
+/// Hand memory the allocator keeps but no longer uses back to the OS.
+fn release_free_memory() {
+    // SAFETY: plain allocator calls with no pointers of ours; both only
+    // release free memory.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::malloc_trim(0);
+    }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        unsafe extern "C" {
+            fn malloc_zone_pressure_relief(zone: *mut libc::c_void, goal: usize) -> usize;
+        }
+        malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+    }
 }

@@ -393,3 +393,4 @@ process and is controlled over CDP.
 - Fonts: metric tables only (advance widths, ascent/descent) for persona fonts. Glyph outline packs (205 KB, compiled in) are parsed only when a canvas draws or measures text.
 - Images: `<img>` loads keep the encoded bytes and their size; pixels are decoded on first `drawImage`. Elements of a document share one request per URL and the loaded image (ADR 0024).
 - A worker that loaded a CDP page keeps one spare window realm (~0.4 MB of V8 heap) for the next page's `about:blank` (ADR 0023).
+- A worker with no pages for 30 s (`BrowserOptions::idle_release`) drops its engine, bindings and spare realm and returns the allocator's free memory to the OS; its next page makes a new engine (ADR 0035, revision 1). Realm ids are unique in the process.

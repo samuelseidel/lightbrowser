@@ -1,6 +1,6 @@
 # ADR 0035: Worker threads start on demand
 
-Status: Accepted (2026-11-07).
+Status: Accepted (2026-11-07); revision 1 (2026-11-07): idle workers release their engine.
 
 ## Context
 
@@ -41,3 +41,17 @@ threads.
   microseconds), the same cost a later concurrent page pays.
 - A thread spawn failure now surfaces on the page that needed the thread
   (`PageError::Setup`), not from `Browser::new`.
+
+## Revision 1: idle workers release their engine (2026-11-07)
+
+After a crawl with every page closed, `serve` kept the worker's V8
+isolate, its heap pages, the bindings' interface table and the spare
+realm: about 16 MB of footprint on macOS against 2.7 MB at idle. A
+worker with no pages for `BrowserOptions::idle_release` (default 30 s)
+now drops its engine and runtime and hands the allocator's free memory
+back to the OS (`malloc_trim` on glibc, `malloc_zone_pressure_relief` on
+macOS); the thread stays. Its next page makes a new engine (a one-time
+setup cost of a few milliseconds in a release build). Realm ids are now
+unique in the process (`lb-js`), so an id a task kept from the dropped
+engine can never name a realm of the next one. Measurements: ROADMAP,
+"Idle workers release their engine".

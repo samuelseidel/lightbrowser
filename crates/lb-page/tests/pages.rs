@@ -19,6 +19,38 @@ use common::{Resource, body, browser, context, open, serve};
 use lb_js::JsValue;
 use lb_page::WaitUntil;
 
+// A worker with no pages drops its engine after `idle_release` (ADR 0035)
+// and makes a new one for its next page; realms of the old engine are
+// never confused with the new engine's.
+#[tokio::test]
+async fn idle_worker_releases_its_engine_and_makes_a_new_one() {
+    let s = serve(vec![(
+        "/",
+        Resource::html(
+            "<!DOCTYPE html><html><body><script>document.body.dataset.n = String(40 + 2);</script></body></html>",
+        ),
+    )])
+    .await;
+    let b = lb_page::Browser::new(lb_page::BrowserOptions {
+        workers: 1,
+        idle_release: Some(Duration::from_millis(100)),
+        ..Default::default()
+    })
+    .unwrap();
+    let ctx = context(false);
+    for _ in 0..3 {
+        let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+        assert_eq!(
+            page.evaluate("document.body.dataset.n").await.unwrap(),
+            JsValue::String("42".into())
+        );
+        page.close().await.unwrap();
+        // Past the idle time: the engine goes, the next page makes one.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert_eq!(b.started_workers(), 1);
+}
+
 #[tokio::test]
 async fn inline_script_appends_nodes() {
     let s = serve(vec![(
