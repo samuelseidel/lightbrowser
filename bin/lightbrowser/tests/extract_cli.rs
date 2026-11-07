@@ -81,13 +81,14 @@ fn golden(name: &str, ext: &str, host: &str) -> String {
 }
 
 /// Cases with ASCII-only sources (the server sends no charset).
-const CASES: [(&str, &str); 6] = [
+const CASES: [(&str, &str); 7] = [
     ("headings", "html"),
     ("links_base", "html"),
     ("table", "html"),
     ("shadow", "html"),
     ("scripted", "html"),
     ("plain", "txt"),
+    ("regress", "html"),
 ];
 
 #[test]

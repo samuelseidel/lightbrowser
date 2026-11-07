@@ -52,9 +52,14 @@ of html, text, markdown, links, json, got "x"`.
 - Lists: `-` bullets, `1.` numbers starting at `start`, `li value` resets
   the count, hidden items are not counted; continuation lines are indented
   by the marker's width (`10. ` is 4); nested lists follow their item's
-  text tightly, a list is loose (blank lines between items) when an item
-  has two blocks apart from nested lists. A list right after another list
-  uses `*` / `)` so the two do not merge.
+  text tightly (a numbered list that does not start at 1 cannot interrupt
+  a paragraph in CommonMark, so a blank line separates it, which does not
+  make the outer list loose), a list is loose (blank lines between items)
+  when an item has two blocks apart from nested lists. A list right after
+  another list uses the other marker than that list did (`-` and `*`,
+  `.` and `)` alternate), so neighbours never merge, however many there
+  are. An item with nothing to show (hidden, icon only, an empty nested
+  list) is not an item and not counted; a list with no items is dropped.
 - Inline: links `[text](absolute URL)` (an `href` that does not resolve or
   is `javascript:` leaves the text without a link; a link with empty
   text is dropped; `(`, `)` and `\` in the URL are escaped), images
@@ -62,8 +67,13 @@ of html, text, markdown, links, json, got "x"`.
   `src` adds nothing), `em`/`i` as `*`, `strong`/`b` as `**`,
   `del`/`s`/`strike` as `~~`, `code`/`kbd`/`samp`/`tt` as backtick spans
   with a fence longer than any backtick run inside. Edge whitespace of an
-  emphasis, link or code span goes outside its markers. A link that holds
-  blocks stays one link: its blocks are joined with spaces.
+  emphasis, link or code span goes outside its markers. A closing `*`,
+  `**` or `~~` that follows punctuation and precedes a letter or digit
+  would not close in CommonMark, so a space is written after it. A link
+  that holds blocks stays one link: its blocks are joined with spaces;
+  headings inside it are still listed as headings (and count for the
+  `h1` rule). The control characters U+0001 to U+0003, which the
+  converter uses as buffer markers, are removed from page text first.
 - `<br>` is a backslash hard break (never two trailing spaces); two in a
   row, with only whitespace between, end the paragraph.
 - Code blocks are fenced with at least three backticks, more when the
@@ -73,7 +83,10 @@ of html, text, markdown, links, json, got "x"`.
 - Tables are GFM. The header is the `thead` row, or a first row made only
   of `th`; otherwise an empty header row is written (GFM needs one).
   Rows are `thead`, `tbody`/direct rows, `tfoot`, padded to the widest
-  row. `colspan` adds empty cells (`rowspan` is not modelled). Alignment
+  row. `colspan` adds empty cells, at most 100 per cell (`rowspan` is not
+  modelled). When padding to a rectangle would cost more than eight times
+  the cells there are (plus 4096), the table is written as one `| a | b |`
+  line per row without padding, so the output stays linear in the input. Alignment
   is the first `align` attribute or inline `text-align` found in a column,
   header first. `|` becomes `\|`; block content and `<br>` in a cell
   become spaces. A `caption` is a paragraph before the table.
@@ -88,7 +101,9 @@ of html, text, markdown, links, json, got "x"`.
 - Blocks are joined by one blank line and the text ends with one newline;
   an empty page gives an empty string. The text starts with `# <title>`
   only when no non-empty, visible `h1` was written.
-- Element nesting deeper than 400 levels is cut off (stack safety).
+- Element nesting deeper than 400 levels is not followed further: the
+  rest of that subtree is kept as one paragraph of plain text (stack
+  safety; the text is not lost).
 
 ### Links
 
@@ -98,9 +113,10 @@ text of the anchor (images give their `alt`, blocks and `br` give spaces).
 `href` values that start with `#` (after trimming), `javascript:` values
 and values that do not resolve are dropped; entries with the same URL and
 text are dropped after the first. `a` elements inside `script`, `style`,
-`template`, `noscript` and non-HTML (SVG) content are not listed. Unlike
-the Markdown, the list **includes hidden anchors**: it states what links
-the document has, not what is shown (see Consequences).
+`template`, `noscript` and non-HTML (SVG) content are not listed. Anchors the
+Markdown leaves out (hidden by attribute or `display: none`, inside a
+hidden subtree or a closed `dialog`, or `visibility: hidden` themselves)
+are not listed, so the three outputs agree about what is shown.
 
 ### JSON
 
@@ -108,9 +124,10 @@ One object, keys in this order, two-space indent, trailing newline, written
 by hand so the order does not depend on a `serde_json` feature:
 `url` (as requested, normalised), `final_url`, `status`, `title`
 (`document.title`), `lang` (root `lang`, `null` when absent or empty),
-`description` (first `meta name=description` `content`, normalised, or
-`null`), `canonical` (`link rel~=canonical` `href`, absolute, or `null`),
-`headings` (`[{level, text}]`, the headings written to the Markdown),
+`description` (first `meta name=description` with a non-empty
+`content`, normalised, or `null`), `canonical` (`link rel~=canonical` `href`, absolute, or `null`),
+`headings` (`[{level, text}]`, in document order, including headings
+inside links),
 `links` (`[{url, text, rel}]`, the same list as the links dump with the
 normalised `rel`), `text` (the `--dump text` string) and `markdown`.
 
@@ -119,7 +136,7 @@ normalised `rel`), `text` (the `--dump text` string) and `markdown`.
 The expectations are hand-written from these rules, not browser
 recordings.
 
-- `crates/lb-page/tests/extract/`: 18 cases (`NAME.html` or `NAME.txt`
+- `crates/lb-page/tests/extract/`: 19 cases (`NAME.html` or `NAME.txt`
   with `NAME.md`, `NAME.links`, `NAME.json`; `gen_json.py` writes the JSON
   files from hand-written metadata). `tests/extract.rs` loads each page
   from a loopback server and compares all three outputs. Cases: headings,
@@ -128,13 +145,19 @@ recordings.
   hidden content (attribute, inline style, style sheet class, visibility),
   whitespace and entities, escapes, skipped elements and an iframe, shadow
   DOM (declarative and script-attached, with slots), blocks inside links,
-  a page without `h1`, a page built by script, a `text/plain` response.
-- 15 unit tests in the module (escaping, base selection, link filtering,
+  a page without `h1`, a page built by script, a `text/plain` response,
+  and `regress` (round 2: adjacent lists, empty items, nested `ol start`,
+  marker characters, a heading inside a link, emphasis next to
+  punctuation, an empty first description).
+- 24 unit tests in the module (escaping, base selection, link filtering,
   numbering, emphasis edges, breaks, tables, fences, probes, depth limit,
-  JSON layout).
+  JSON layout, and one per round 2 problem: adjacent lists, empty items,
+  nested `ol start`, a table of `colspan` cells, marker characters,
+  headings in links, emphasis next to punctuation, hidden links, an empty
+  description).
 - `bin/lightbrowser/tests/extract_cli.rs`: the built binary against a
   loopback `python3 -m http.server` that serves the same files; all
-  three modes for six cases equal the golden files, `json.text` equals
+  three modes for seven cases equal the golden files, `json.text` equals
   `--dump text`, `--dump html` is unchanged, an error status shows in the
   JSON (exit code 1), and a bad `--dump` value exits with 2 and lists the
   five values.
@@ -146,10 +169,9 @@ recordings.
   mutates the document. It does create the page's layout engine (as
   `getComputedStyle` would), so one more engine's memory is allocated for
   these three modes only.
-- The links dump and the Markdown disagree about hidden anchors on
-  purpose. If a crawler wants only visible links it can filter on the
-  Markdown; changing the dump later is a one-line condition in
-  `Ex::links`.
+- The links dump leaves out hidden anchors (round 2; the first version
+  listed them). A tool that wants every anchor of the DOM should read
+  `--dump html`.
 - Not done: `rowspan`, `srcset`/`picture`, reversed lists, task-list
   checkboxes, definition lists as such, `<q>` quotes, math, text of
   `iframe`s and of `svg`. Text inside `pre` loses trailing spaces per
