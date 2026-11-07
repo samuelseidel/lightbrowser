@@ -33,6 +33,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lb_net::egress;
 use lb_net::fetch::NetContext;
 use lb_net::websocket::{WsConnect, WsEvent};
 use lb_net::{
@@ -160,8 +161,20 @@ fn get(url: &str) -> Request {
     Request::get(url.parse().unwrap())
 }
 
+/// A fetch that must end within this long. A regression that lets a request
+/// through to a listener that never answers (`Silent`) would otherwise hang
+/// the test binary; this makes it fail.
+const FETCH_LIMIT: Duration = Duration::from_secs(10);
+
+async fn fetch_limited(c: &mut NetContext, url: &str) -> Result<Response, NetError> {
+    match tokio::time::timeout(FETCH_LIMIT, lb_net::fetch(c, get(url))).await {
+        Ok(r) => r,
+        Err(_) => panic!("{url}: no answer in {FETCH_LIMIT:?}: the request was not refused"),
+    }
+}
+
 async fn blocked(c: &mut NetContext, url: &str) -> lb_net::Blocked {
-    match lb_net::fetch(c, get(url)).await {
+    match fetch_limited(c, url).await {
         Err(NetError::Blocked(b)) => b,
         Err(e) => panic!("{url}: expected a refusal, got error {e}"),
         Ok(r) => panic!("{url}: expected a refusal, got {}", r.status),
@@ -169,7 +182,7 @@ async fn blocked(c: &mut NetContext, url: &str) -> lb_net::Blocked {
 }
 
 async fn reaches(c: &mut NetContext, url: &str) -> Response {
-    lb_net::fetch(c, get(url))
+    fetch_limited(c, url)
         .await
         .unwrap_or_else(|e| panic!("{url}: {e}"))
 }
@@ -306,21 +319,29 @@ async fn allow_host_ip_cidr_and_name_forms_allow_an_outside_server() {
         IpAddr::V4(_) => format!("{ip}/32"),
         IpAddr::V6(_) => format!("{ip}/128"),
     };
+    let exact_pin = exact.clone();
     for entry in [exact, ip.to_string(), cidr] {
         for pooled in [false, true] {
             let mut c = ctx(Some(loopback_with(&[&entry])), pooled);
             assert_eq!(reaches(&mut c, &url).await.status, 200, "{entry}");
         }
     }
-    // The name form: `*.lab.test` is allowed, resolves (through the
-    // override) to the outside address; the address check passes because an
-    // entry vouched for the name.
-    for pooled in [false, true] {
-        let mut c = ctx(Some(loopback_with(&["*.lab.test"])), pooled);
-        let calls = hosts(&c, &[("app.lab.test", ip)]);
-        let r = reaches(&mut c, &format!("http://app.lab.test:{}/", s.port)).await;
-        assert_eq!(r.status.as_u16(), 200);
-        assert_eq!(*calls.lock().unwrap(), vec!["app.lab.test".to_owned()]);
+    // The name forms: the hosts override maps `app.lab.test` to the
+    // outside address. A name pinned to the address reaches it wherever the
+    // address is; an unpinned name entry reaches it when the address is an
+    // internal one (RFC 1918, unique-local), which is the usual lab.
+    let mut forms = vec![format!("app.lab.test@{exact_pin}")];
+    if matches!(ip, IpAddr::V4(a) if a.is_private()) {
+        forms.push("*.lab.test".into());
+    }
+    for entry in forms {
+        for pooled in [false, true] {
+            let mut c = ctx(Some(loopback_with(&[&entry])), pooled);
+            let calls = hosts(&c, &[("app.lab.test", ip)]);
+            let r = reaches(&mut c, &format!("http://app.lab.test:{}/", s.port)).await;
+            assert_eq!(r.status.as_u16(), 200, "{entry}");
+            assert_eq!(*calls.lock().unwrap(), vec!["app.lab.test".to_owned()]);
+        }
     }
     // An allow entry for another address does not help.
     let mut c = ctx(Some(loopback_with(&["10.255.255.254"])), true);
@@ -362,6 +383,70 @@ async fn a_name_that_is_not_allowed_is_never_resolved() {
     blocked(&mut c, "http://localhost:1/").await;
     blocked(&mut c, "http://127.0.0.1:1/").await;
     assert!(calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_allowed_name_cannot_be_rebound_to_a_public_or_link_local_address() {
+    // The hosts override stands in for a DNS answer that changed (rebinding)
+    // or a hostile resolver: the names are allowed, so they are looked up,
+    // and the address they got is what is refused. Nothing is sent: the
+    // refusal is before the SYN (a regression would connect to these
+    // addresses and the fetch limit would fail the test).
+    let v = |s: &str| s.parse::<IpAddr>().unwrap();
+    let rebound = [
+        ("pub.lab.test", v("203.0.113.9")),
+        ("meta.lab.test", v("169.254.169.254")),
+        ("v6.lab.test", v("2001:db8::1")),
+        ("mapped.lab.test", v("::ffff:203.0.113.9")),
+        ("ll6.lab.test", v("fe80::1")),
+    ];
+    for pooled in [false, true] {
+        let mut c = ctx(Some(loopback_with(&["*.lab.test"])), pooled);
+        let calls = hosts(&c, &rebound);
+        for (name, addr) in rebound {
+            let b = blocked(&mut c, &format!("http://{name}/")).await;
+            assert_eq!(b.kind, lb_net::egress::BlockedKind::Address, "{name}");
+            assert_eq!(b.target, egress::unmap(addr).to_string(), "{name}");
+            let b = blocked(&mut c, &format!("https://{name}:8443/")).await;
+            assert_eq!(b.kind, lb_net::egress::BlockedKind::Address, "{name}");
+        }
+        assert_eq!(calls.lock().unwrap().len(), rebound.len() * 2);
+        if let Some(p) = &c.pool {
+            assert_eq!(p.opened(), 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_pinned_name_reaches_only_its_pins() {
+    let inside = site("127.0.0.1".parse().unwrap(), ok_site()).await;
+    let outside_ip = outside_ip();
+    let outside = outside_ip.map(Silent::bind);
+    for pooled in [false, true] {
+        // Pinned to loopback: the name reaches the loopback server, and is
+        // refused when its answer moves to another internal address.
+        let mut c = ctx(Some(loopback_with(&["pin.test@127.0.0.1"])), pooled);
+        let calls = hosts(&c, &[("pin.test", "127.0.0.1".parse().unwrap())]);
+        let r = reaches(&mut c, &format!("http://pin.test:{}/", inside.port)).await;
+        assert_eq!(r.status.as_u16(), 200);
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        if let (Some(ip), Some(l)) = (outside_ip, &outside) {
+            let _ = hosts(&c, &[("pin.test", ip)]);
+            let b = blocked(&mut c, &format!("http://pin.test:{}/", l.port())).await;
+            assert_eq!(b.kind, lb_net::egress::BlockedKind::Address);
+        }
+        // Pinned to somewhere else: a loopback answer is refused too (a
+        // pin is the whole set, not an addition to loopback).
+        let mut c = ctx(Some(loopback_with(&["pin.test@10.255.255.254"])), pooled);
+        let _ = hosts(&c, &[("pin.test", "127.0.0.1".parse().unwrap())]);
+        let before = inside.hits.load(Ordering::SeqCst);
+        let b = blocked(&mut c, &format!("http://pin.test:{}/", inside.port)).await;
+        assert_eq!(b.kind, lb_net::egress::BlockedKind::Address);
+        assert_eq!(inside.hits.load(Ordering::SeqCst), before);
+    }
+    if let Some(l) = &outside {
+        assert!(l.untouched(), "a connection reached the refused listener");
+    }
 }
 
 #[tokio::test]
@@ -584,6 +669,72 @@ async fn an_allowed_target_goes_through_the_proxy() {
         "{seen:?}"
     );
     assert_eq!(s.hits.load(Ordering::SeqCst), 4);
+}
+
+/// Every request goes to the proxy, loopback targets included (`<-loopback>`).
+fn via_all(c: &mut NetContext, proxy: &str) {
+    c.proxy = Some(Arc::new(
+        Proxy::parse(proxy, Some("<-loopback>")).unwrap().unwrap(),
+    ));
+}
+
+#[tokio::test]
+async fn a_name_through_a_proxy_needs_an_unpinned_entry() {
+    // The proxy resolves names itself, so this stack cannot check the
+    // address they get: `localhost` names (whose rule is "resolves to
+    // loopback") and pinned names are refused before the proxy is
+    // contacted; unpinned entries and IP literals go.
+    let p = ProxyProc::start();
+    let s = site("127.0.0.1".parse().unwrap(), ok_site()).await;
+    let port = s.port;
+    for pooled in [false, true] {
+        for proxy in [
+            format!("127.0.0.1:{}", p.http),
+            format!("socks5://127.0.0.1:{}", p.socks),
+        ] {
+            let mut c = ctx(Some(loopback_with(&["*.lab.test", "pin.test@127.0.0.1"])), pooled);
+            via_all(&mut c, &proxy);
+            let before = s.hits.load(Ordering::SeqCst);
+            for url in [
+                format!("http://localhost:{port}/"),
+                format!("http://a.localhost:{port}/"),
+                format!("https://a.localhost:{port}/"),
+                format!("http://pin.test:{port}/"),
+                format!("https://pin.test:{port}/"),
+                format!("http://example.test:{port}/"),
+            ] {
+                let b = blocked(&mut c, &url).await;
+                let want = if url.contains("example") {
+                    lb_net::egress::BlockedKind::Name
+                } else {
+                    lb_net::egress::BlockedKind::ProxiedName
+                };
+                assert_eq!(b.kind, want, "{url} via {proxy}");
+            }
+            assert_eq!(s.hits.load(Ordering::SeqCst), before);
+            // An unpinned entry vouches; an IP literal is checked here.
+            for url in [
+                format!("http://a.lab.test:{port}/"),
+                format!("http://127.0.0.1:{port}/"),
+            ] {
+                assert_eq!(reaches(&mut c, &url).await.status.as_u16(), 200, "{url}");
+            }
+            blocked(&mut c, &format!("http://10.1.2.3:{port}/")).await;
+            if let Some(pool) = &c.pool {
+                // Refused names never got a pool group (two did).
+                assert_eq!(pool.groups(), 2, "{proxy}");
+            }
+        }
+    }
+    let seen = p.entries();
+    assert!(!seen.is_empty());
+    for e in &seen {
+        let t = e.to_string();
+        assert!(
+            !t.contains("localhost") && !t.contains("pin.test") && !t.contains("example.test"),
+            "the proxy saw a refused target: {t}"
+        );
+    }
 }
 
 #[tokio::test]

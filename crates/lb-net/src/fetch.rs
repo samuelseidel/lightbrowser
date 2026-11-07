@@ -524,7 +524,13 @@ async fn fetch_once_inner(
     // Egress policy (ADR 0044): first thing per hop, so a refused host
     // costs no header work, no pool entry and no DNS query. Redirects come
     // through here too. The dialer checks every resolved address again.
-    ctx.egress.check_name(bare_host)?;
+    // Through a proxy the proxy resolves the name, so only a name an allow
+    // entry vouches for goes (`check_remote_name`).
+    if ctx.proxy_for(&req.url).is_some() {
+        ctx.egress.check_remote_name(bare_host)?;
+    } else {
+        ctx.egress.check_name(bare_host)?;
+    }
 
     // Final headers for this hop. The set depends on the HTTP version
     // (ALPN), so it is built once the version is known.

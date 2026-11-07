@@ -15,18 +15,30 @@
 //!
 //! Allow entries are a name glob (`*.lab.test`, `build-*.internal`; `*`
 //! matches any run of characters), an IP address (`10.0.0.5`, `::1`,
-//! `[fd00::1]`) or a CIDR block (`10.0.0.0/8`, `fd00::/8`).
+//! `[fd00::1]`), a CIDR block (`10.0.0.0/8`, `fd00::/8`) or a name glob
+//! pinned to addresses (`*.lab.test@10.0.0.0/8,192.168.1.5`). A block that
+//! holds every address (`0.0.0.0/0`, `::/0`) is refused like a bare `*`.
 //!
 //! Two checks, because a name is not an address:
 //! - [`EgressPolicy::check_name`] runs before any DNS lookup. A name that
 //!   is not allowed is never resolved, so no resolver traffic leaves for
 //!   it. For an IP literal it is the address check.
 //! - [`EgressPolicy::check_resolved`] (or [`EgressPolicy::check_addr`])
-//!   runs on every address a name resolved to, before the connection. A
-//!   name that an allow *entry* names may resolve to any address (the
-//!   operator vouched for it); the implicit loopback names (`localhost`,
-//!   `*.localhost`) must resolve to loopback, so a hosts file or a DNS
-//!   answer cannot turn them into an outside destination.
+//!   runs on every address a name resolved to, before the connection.
+//!   What a name may resolve to depends on how it was allowed:
+//!   - an implicit loopback name (`localhost`, `*.localhost`) and any
+//!     name no entry lists: an address `check_addr` allows (so a hosts file
+//!     or a DNS answer cannot turn `a.localhost` into an outside host);
+//!   - a name an unpinned entry lists: an *internal* address (loopback,
+//!     RFC 1918, IPv6 unique-local) or one `check_addr` allows, never a
+//!     public or link-local one (cloud metadata is `169.254.169.254`), so
+//!     rebinding an allowed name to a public host fails;
+//!   - a name a pinned entry (`name@cidr,...`) lists: only the pinned
+//!     addresses.
+//! - [`EgressPolicy::check_remote_name`] is the name check for a request
+//!   that goes through a proxy: the proxy resolves the name, so its address
+//!   cannot be checked here, and only a name an unpinned entry lists (the
+//!   operator vouched for it) is allowed.
 //!
 //! Host strings are normalised the way URLs are before matching: ASCII case,
 //! one trailing dot, IDN to punycode, numeric IPv4 forms (`0x7f.1`), IPv6
@@ -94,6 +106,9 @@ pub enum BlockedKind {
     Address,
     /// Not a valid host at all.
     Invalid,
+    /// A host name for a request through a proxy, which resolves the name
+    /// itself: only a name an unpinned allow entry lists may go.
+    ProxiedName,
 }
 
 /// A destination the policy refuses.
@@ -110,6 +125,7 @@ impl fmt::Display for Blocked {
             BlockedKind::Name => "host name",
             BlockedKind::Address => "address",
             BlockedKind::Invalid => "host",
+            BlockedKind::ProxiedName => "host name through a proxy (the proxy resolves it; only a name an unpinned allow entry lists may go)",
         };
         write!(
             f,
@@ -276,12 +292,71 @@ fn is_localhost(name: &str) -> bool {
     name == "localhost" || name.ends_with(".localhost")
 }
 
+#[derive(Debug, Clone)]
+struct NameRule {
+    pattern: String,
+    pins: Option<Vec<IpNet>>,
+}
+
+/// An address inside the operator's own network: loopback, RFC 1918, IPv6
+/// unique-local. The addresses an unpinned allowed name may resolve to
+/// (link-local, including cloud metadata, is not among them).
+fn is_internal(ip: IpAddr) -> bool {
+    match unmap(ip) {
+        IpAddr::V4(a) => a.is_loopback() || a.is_private(),
+        IpAddr::V6(a) => a.is_loopback() || a.segments()[0] & 0xfe00 == 0xfc00,
+    }
+}
+
+/// An IP address or CIDR block as written in an allow entry. `Ok(None)`:
+/// the text is not an address form (it may be a name).
+fn parse_net(spec: &str) -> Result<Option<IpNet>, String> {
+    let (host, bits) = match spec.rsplit_once('/') {
+        Some((h, b)) => (
+            h,
+            Some(
+                b.parse::<u8>()
+                    .map_err(|_| "prefix length is not a number".to_string())?,
+            ),
+        ),
+        None => (spec, None),
+    };
+    // Brackets hold an IPv6 address only.
+    let parsed = match host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+        Some(inner) => inner.parse::<Ipv6Addr>().ok().map(IpAddr::V6),
+        None => host.parse::<IpAddr>().ok(),
+    };
+    let Some(ip) = parsed else {
+        return if bits.is_some() {
+            Err("a prefix length needs an IP address".into())
+        } else {
+            Ok(None)
+        };
+    };
+    let (ip, bits) = match bits {
+        // `IpNet::new` turns a mapped IPv6 block into an IPv4 one.
+        Some(b) => (ip, b),
+        None => {
+            let ip = unmap(ip);
+            (ip, if ip.is_ipv4() { 32 } else { 128 })
+        }
+    };
+    let net = IpNet::new(ip, bits).map_err(|e| e.0)?;
+    if net.bits == 0 {
+        return Err(format!(
+            "{spec} holds every address, which is egress mode open; use --egress open"
+        ));
+    }
+    Ok(Some(net))
+}
+
 /// The egress policy of a network context. Cheap to share (`Arc`).
 #[derive(Debug, Clone, Default)]
 pub struct EgressPolicy {
     mode: EgressMode,
-    /// Allowed name globs, normalised.
-    names: Vec<String>,
+    /// Allowed name globs, normalised, each with the addresses it is pinned
+    /// to (`None`: not pinned).
+    names: Vec<NameRule>,
     /// Allowed addresses (single addresses are /32 and /128 blocks).
     nets: Vec<IpNet>,
     /// The entries as given, for [`describe`](Self::describe).
@@ -328,55 +403,63 @@ impl EgressPolicy {
         EgressPolicy::new(mode.parse()?, allow)
     }
 
-    /// Add one allow entry.
+    /// Add one allow entry: a name glob, an IP, a CIDR block, or
+    /// `name-glob@net[,net...]` (the name may resolve only to those
+    /// addresses).
     pub fn add(&mut self, entry: &str) -> Result<(), EgressError> {
         let entry = entry.trim();
         let bad = |why: &str| EgressError(format!("invalid allow entry {entry:?}: {why}"));
         if entry.is_empty() {
             return Err(bad("empty"));
         }
-        let (host, bits) = match entry.rsplit_once('/') {
-            Some((h, b)) => (
-                h,
-                Some(
-                    b.parse::<u8>()
-                        .map_err(|_| bad("prefix length is not a number"))?,
-                ),
-            ),
+        let (host, pins) = match entry.split_once('@') {
+            Some((h, p)) => (h, Some(p)),
             None => (entry, None),
         };
-        // Brackets hold an IPv6 address only.
-        let parsed = match host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
-            Some(inner) => inner.parse::<Ipv6Addr>().ok().map(IpAddr::V6),
-            None => host.parse::<IpAddr>().ok(),
-        };
-        if let Some(ip) = parsed {
-            let (ip, bits) = match bits {
-                // `IpNet::new` turns a mapped IPv6 block into an IPv4 one.
-                Some(b) => (ip, b),
-                None => {
-                    let ip = unmap(ip);
-                    (ip, if ip.is_ipv4() { 32 } else { 128 })
-                }
-            };
-            self.nets.push(IpNet::new(ip, bits)?);
-        } else if bits.is_some() {
-            return Err(bad("a prefix length needs an IP address"));
-        } else if host.contains(':') || host.contains('[') {
+        if let Some(net) = parse_net(host).map_err(|w| bad(&w))? {
+            if pins.is_some() {
+                return Err(bad("only a name can be pinned to addresses"));
+            }
+            self.nets.push(net);
+            self.given.push(entry.to_owned());
+            return Ok(());
+        }
+        if host.contains(':') || host.contains('[') {
             return Err(bad(
                 "ports are not part of an entry, and IPv6 needs a valid address",
             ));
-        } else if host.contains('*') {
-            self.names.push(pattern(host).map_err(|w| bad(&w))?);
+        }
+        let pins = match pins {
+            None => None,
+            Some(list) => {
+                let mut nets = Vec::new();
+                for spec in list.split(',') {
+                    match parse_net(spec.trim()).map_err(|w| bad(&w))? {
+                        Some(n) => nets.push(n),
+                        None => return Err(bad("a pin is an IP address or a CIDR block")),
+                    }
+                }
+                Some(nets)
+            }
+        };
+        let pattern = if host.contains('*') {
+            pattern(host).map_err(|w| bad(&w))?
         } else {
             // A plain name: numeric IPv4 forms (`0x7f.1`) are addresses.
             match normalize(host).ok_or_else(|| bad("not a valid host name"))? {
-                Host::Ip(ip) => self
-                    .nets
-                    .push(IpNet::new(ip, if ip.is_ipv4() { 32 } else { 128 })?),
-                Host::Name(n) => self.names.push(pattern(&n).map_err(|w| bad(&w))?),
+                Host::Ip(ip) => {
+                    if pins.is_some() {
+                        return Err(bad("only a name can be pinned to addresses"));
+                    }
+                    self.nets
+                        .push(IpNet::new(ip, if ip.is_ipv4() { 32 } else { 128 })?);
+                    self.given.push(entry.to_owned());
+                    return Ok(());
+                }
+                Host::Name(n) => pattern(&n).map_err(|w| bad(&w))?,
             }
-        }
+        };
+        self.names.push(NameRule { pattern, pins });
         self.given.push(entry.to_owned());
         Ok(())
     }
@@ -444,24 +527,70 @@ impl EgressPolicy {
         }
     }
 
-    /// May the stack connect to `ip`, an address `host` resolved to? A
-    /// name an allow entry lists may resolve to any address; any other name
-    /// (the implicit `localhost` names included) must resolve to an address
-    /// [`check_addr`](Self::check_addr) allows.
+    /// May the stack connect to `ip`, an address `host` resolved to? A name
+    /// no entry lists (the implicit `localhost` names included) must
+    /// resolve to an address [`check_addr`](Self::check_addr) allows. A
+    /// name an unpinned entry lists may also resolve to an internal
+    /// address (loopback, RFC 1918, unique-local), and a name a pinned
+    /// entry lists to its pinned addresses. Public and link-local addresses
+    /// are never reached through a name alone: add the address (or a pin).
     pub fn check_resolved(&self, host: &str, ip: IpAddr) -> Result<(), Blocked> {
         if self.is_open() {
             return Ok(());
         }
-        if let Some(Host::Name(n)) = normalize(host)
-            && self.name_listed(&n)
-        {
+        let ip = unmap(ip);
+        let Some(Host::Name(n)) = normalize(host) else {
+            return self.check_addr(ip);
+        };
+        let mut listed = false;
+        for rule in self.names.iter().filter(|r| glob(&r.pattern, &n)) {
+            listed = true;
+            let ok = match &rule.pins {
+                None => is_internal(ip) || self.check_addr(ip).is_ok(),
+                Some(pins) => pins.iter().any(|p| p.contains(ip)),
+            };
+            if ok {
+                return Ok(());
+            }
+        }
+        if listed {
+            Err(self.refuse(&ip.to_string(), BlockedKind::Address))
+        } else {
+            self.check_addr(ip)
+        }
+    }
+
+    /// The name check for a request that goes through a proxy. The proxy
+    /// resolves a name itself, so this stack cannot check the address it
+    /// gets: only a name an *unpinned* entry lists is allowed (the operator
+    /// vouched for it), not `localhost` and `*.localhost` (their rule is
+    /// that they resolve to loopback), and not a pinned name. An IP
+    /// literal is the address check.
+    pub fn check_remote_name(&self, host: &str) -> Result<(), Blocked> {
+        if self.is_open() {
             return Ok(());
         }
-        self.check_addr(ip)
+        match normalize(host) {
+            None => Err(self.refuse(host, BlockedKind::Invalid)),
+            Some(Host::Ip(ip)) => self.check_addr(ip),
+            Some(Host::Name(n)) => {
+                if self
+                    .names
+                    .iter()
+                    .any(|r| r.pins.is_none() && glob(&r.pattern, &n))
+                {
+                    Ok(())
+                } else if self.name_listed(&n) || (self.mode == EgressMode::Loopback && is_localhost(&n)) {
+                    Err(self.refuse(&n, BlockedKind::ProxiedName))
+                } else {
+                    Err(self.refuse(&n, BlockedKind::Name))
+                }
+            }
+        }
     }
 
     fn name_listed(&self, name: &str) -> bool {
-        self.names.iter().any(|p| glob(p, name))
+        self.names.iter().any(|r| glob(&r.pattern, name))
     }
 }
 
@@ -687,8 +816,7 @@ mod tests {
         let mut p = lb(&[]);
         p.add("10.1.2.3/8").unwrap(); // host bits are cleared
         assert!(p.check_addr(ip("10.200.0.1")).is_ok());
-        p.add("0.0.0.0/0").unwrap();
-        assert!(p.check_addr(ip("8.8.8.8")).is_ok());
+        assert!(p.check_addr(ip("8.8.8.8")).is_err());
         // An IPv6 block that holds IPv4-mapped addresses is an IPv4 block.
         let mut q = lb(&[]);
         q.add("::ffff:10.0.0.0/104").unwrap();
@@ -715,6 +843,22 @@ mod tests {
             "http://x.test",
             "[10.0.0.1]",
             "ex%ample.test",
+            // A block that holds every address is open mode in disguise.
+            "0.0.0.0/0",
+            "::/0",
+            "::ffff:0:0/96",
+            "[::]/0",
+            // Pins: only a name has them, and they are addresses.
+            "a.test@",
+            "a.test@x.test",
+            "a.test@10.0.0.0/8,",
+            "a.test@0.0.0.0/0",
+            "a.test@10.0.0.1:80",
+            "10.0.0.1@10.0.0.0/8",
+            "10.0.0.0/8@10.0.0.0/8",
+            "0x0a.1@10.0.0.0/8",
+            "*@10.0.0.0/8",
+            "@10.0.0.0/8",
         ] {
             assert!(
                 EgressPolicy::new(EgressMode::Loopback, &[e]).is_err(),
@@ -759,11 +903,120 @@ mod tests {
         assert!(p.check_resolved("localhost", ip("192.168.1.1")).is_err());
         // ... unless the operator allowed that address.
         assert!(p.check_resolved("localhost", ip("10.1.1.1")).is_ok());
-        // A name an entry lists may resolve anywhere.
-        assert!(p.check_resolved("a.lab.test", ip("203.0.113.9")).is_ok());
+        // A name an entry lists may resolve to an internal address ...
+        for ok in [
+            "10.9.9.9",
+            "192.168.1.1",
+            "172.16.0.1",
+            "127.0.0.1",
+            "fd00::5",
+            "::1",
+        ] {
+            assert!(p.check_resolved("a.lab.test", ip(ok)).is_ok(), "{ok}");
+        }
+        // ... never to a public one (rebinding), nor to link-local ones
+        // (cloud metadata), CGNAT, or an IPv4-mapped form of those.
+        for no in [
+            "203.0.113.9",
+            "93.184.216.34",
+            "169.254.169.254",
+            "fe80::1",
+            "100.64.0.1",
+            "2001:db8::1",
+            "::ffff:203.0.113.9",
+            "::ffff:169.254.169.254",
+            "0.0.0.0",
+        ] {
+            let e = p.check_resolved("a.lab.test", ip(no)).unwrap_err();
+            assert_eq!(e.kind, BlockedKind::Address, "{no}");
+        }
         // An IP literal is its own address.
         assert!(p.check_resolved("203.0.113.9", ip("203.0.113.9")).is_err());
         assert!(p.check_resolved("127.0.0.1", ip("127.0.0.1")).is_ok());
+        // An address the operator allowed is reachable by a listed name.
+        let q = lb(&["*.lab.test", "203.0.113.0/24"]);
+        assert!(q.check_resolved("a.lab.test", ip("203.0.113.9")).is_ok());
+        assert!(q.check_resolved("a.lab.test", ip("203.0.114.9")).is_err());
+    }
+
+    #[test]
+    fn pinned_names_resolve_only_to_their_pins() {
+        let p = lb(&["*.lab.test@203.0.113.0/24,10.0.0.7", "plain.test"]);
+        // Allowed before any lookup, like any entry.
+        assert!(p.check_name("a.lab.test").is_ok());
+        for ok in ["203.0.113.9", "10.0.0.7", "::ffff:10.0.0.7"] {
+            assert!(p.check_resolved("a.lab.test", ip(ok)).is_ok(), "{ok}");
+        }
+        // Not to loopback, not to another private or public address.
+        for no in ["127.0.0.1", "10.0.0.8", "192.168.1.1", "8.8.8.8", "::1"] {
+            assert!(p.check_resolved("a.lab.test", ip(no)).is_err(), "{no}");
+        }
+        // The pin of one entry does not widen another name's.
+        assert!(p.check_resolved("plain.test", ip("203.0.113.9")).is_err());
+        assert!(p.check_resolved("plain.test", ip("10.1.1.1")).is_ok());
+        // A name two entries list gets both (the unpinned entry is wider).
+        let q = lb(&["a.lab.test@203.0.113.9", "*.lab.test"]);
+        assert!(q.check_resolved("a.lab.test", ip("10.1.1.1")).is_ok());
+        assert!(q.check_resolved("a.lab.test", ip("203.0.113.9")).is_ok());
+        assert!(q.check_resolved("b.lab.test", ip("203.0.113.9")).is_err());
+        // IPv6 pins, bracketed and CIDR; a pin of a public host is the way
+        // to reach one by name.
+        let r = lb(&["v6.test@[fd00::1],2001:db8::/32", "pub.test@8.8.8.8"]);
+        assert!(r.check_resolved("v6.test", ip("fd00::1")).is_ok());
+        assert!(r.check_resolved("v6.test", ip("2001:db8:1::5")).is_ok());
+        assert!(r.check_resolved("v6.test", ip("fd00::2")).is_err());
+        assert!(r.check_resolved("pub.test", ip("8.8.8.8")).is_ok());
+        assert!(r.check_resolved("pub.test", ip("8.8.4.4")).is_err());
+        assert_eq!(
+            p.describe(),
+            "loopback (allow: *.lab.test@203.0.113.0/24,10.0.0.7, plain.test)"
+        );
+    }
+
+    #[test]
+    fn allowlist_mode_names_follow_the_same_rules() {
+        let p = EgressPolicy::new(
+            EgressMode::AllowList,
+            &["lab.test", "pin.test@127.0.0.1", "10.0.0.1"],
+        )
+        .unwrap();
+        assert!(p.check_resolved("lab.test", ip("192.168.1.1")).is_ok());
+        assert!(p.check_resolved("lab.test", ip("8.8.8.8")).is_err());
+        assert!(p.check_resolved("pin.test", ip("127.0.0.1")).is_ok());
+        assert!(p.check_resolved("pin.test", ip("192.168.1.1")).is_err());
+        // No implicit loopback for names nobody listed.
+        assert!(p.check_resolved("other.test", ip("127.0.0.1")).is_err());
+    }
+
+    #[test]
+    fn remote_names_need_an_unpinned_entry() {
+        let p = lb(&["*.lab.test", "pin.test@10.0.0.1", "10.0.0.0/8"]);
+        // The proxy resolves the name: only an unpinned entry vouches.
+        assert!(p.check_remote_name("a.lab.test").is_ok());
+        assert!(p.check_remote_name("a.lab.test:8080").is_ok());
+        let e = p.check_remote_name("pin.test").unwrap_err();
+        assert_eq!(e.kind, BlockedKind::ProxiedName);
+        assert!(e.to_string().contains("proxy"), "{e}");
+        for implicit in ["localhost", "a.localhost", "LOCALHOST."] {
+            assert_eq!(
+                p.check_remote_name(implicit).unwrap_err().kind,
+                BlockedKind::ProxiedName,
+                "{implicit}"
+            );
+        }
+        assert_eq!(
+            p.check_remote_name("example.com").unwrap_err().kind,
+            BlockedKind::Name
+        );
+        // IP literals are the address check, as ever.
+        assert!(p.check_remote_name("10.1.2.3").is_ok());
+        assert!(p.check_remote_name("127.0.0.1").is_ok());
+        assert!(p.check_remote_name("[::1]:80").is_ok());
+        assert!(p.check_remote_name("8.8.8.8").is_err());
+        assert!(p.check_remote_name("a b").is_err());
+        assert!(EgressPolicy::open().check_remote_name("anything").is_ok());
+        // An entry for localhost itself does vouch.
+        assert!(lb(&["localhost"]).check_remote_name("localhost").is_ok());
     }
 
     #[test]

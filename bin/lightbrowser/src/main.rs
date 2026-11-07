@@ -28,6 +28,7 @@ USAGE:
                                             violation or load error)
   lightbrowser fingerprint-report [--persona P] [--url URL] [--profiles-dir DIR]
                     [--insecure] [--timeout SECS]
+                    [--egress open|loopback|allowlist] [--allow-host H]...
                                             load URL (default about:blank),
                                             compare the live fingerprint
                                             surface with the persona, print
@@ -88,6 +89,20 @@ struct EgressArgs {
 }
 
 impl EgressArgs {
+    /// `--egress MODE`. Two different modes are a usage error (the last
+    /// one must not silently win and lift a restriction).
+    fn set_mode(&mut self, mode: String) -> Result<(), String> {
+        match &self.mode {
+            Some(prev) if !prev.trim().eq_ignore_ascii_case(mode.trim()) => Err(format!(
+                "--egress given twice with different values ({prev}, {mode})"
+            )),
+            _ => {
+                self.mode = Some(mode);
+                Ok(())
+            }
+        }
+    }
+
     /// The policy these flags ask for; `None` for the default (open).
     fn policy(&self) -> Result<Option<Arc<lb_net::EgressPolicy>>, String> {
         let mode = self.mode.as_deref().unwrap_or("open");
@@ -186,7 +201,7 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
             "--insecure" => out.insecure = true,
             "--proxy" => out.proxy = Some(value("--proxy")?),
             "--proxy-bypass-list" => out.proxy_bypass = Some(value("--proxy-bypass-list")?),
-            "--egress" => out.egress.mode = Some(value("--egress")?),
+            "--egress" => out.egress.set_mode(value("--egress")?)?,
             "--allow-host" => out.egress.allow.push(value("--allow-host")?),
             "-v" | "--verbose" => out.verbose = true,
             f if f.starts_with('-') => return Err(format!("unknown option: {f}")),
@@ -510,6 +525,7 @@ struct ReportArgs {
     profiles_dir: Option<PathBuf>,
     insecure: bool,
     timeout: u64,
+    egress: EgressArgs,
 }
 
 fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
@@ -539,9 +555,12 @@ fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
                     .map_err(|_| "--timeout takes whole seconds".to_string())?
             }
             "--insecure" => out.insecure = true,
+            "--egress" => out.egress.set_mode(value("--egress")?)?,
+            "--allow-host" => out.egress.allow.push(value("--allow-host")?),
             other => return Err(format!("unknown option {other}")),
         }
     }
+    out.egress.policy()?;
     Ok(out)
 }
 
@@ -569,6 +588,9 @@ fn run_report(args: &ReportArgs) -> Result<bool, String> {
         virtual_time: false,
     })
     .map_err(|e| e.to_string())?;
+    if let Some(policy) = args.egress.policy()? {
+        ctx.set_egress(policy);
+    }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -667,7 +689,7 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
             "--insecure" => out.insecure = true,
             "--proxy" => out.proxy = Some(value("--proxy")?),
             "--proxy-bypass-list" => out.proxy_bypass = Some(value("--proxy-bypass-list")?),
-            "--egress" => out.egress.mode = Some(value("--egress")?),
+            "--egress" => out.egress.set_mode(value("--egress")?)?,
             "--allow-host" => out.egress.allow.push(value("--allow-host")?),
             "--workers" => {
                 out.workers = Some(
@@ -786,9 +808,22 @@ fn serve_with(
 fn serve_with(
     persona: PersonaProfile,
     _tls_dir: PathBuf,
-    _args: &ServeArgs,
+    args: &ServeArgs,
     config: lb_cdp::ServerConfig,
 ) -> Result<(), String> {
+    // The mock page host loads loopback URLs only, which is at least as
+    // strict as `open` and `loopback`; an allowlist could not be honoured
+    // (it would not even allow all of loopback), so it is refused rather
+    // than accepted and ignored (ADR 0044).
+    if let Some(p) = args.egress.policy()?
+        && p.mode() == lb_net::EgressMode::AllowList
+    {
+        return Err(
+            "--egress allowlist is not supported by the firefox build's serve (its mock page \
+             host loads loopback URLs only)"
+                .into(),
+        );
+    }
     let label = persona.profile_id.clone();
     let host = std::rc::Rc::new(lb_cdp::mock::MockHost::new(persona));
     eprintln!("page host: MOCK (no JS engine in the firefox build yet); persona {label}");
@@ -1060,6 +1095,31 @@ mod tests {
             parse_serve_args(&strs(&["--egress", "loopback", "--allow-host", "a:80"])).is_err()
         );
         assert!(parse_serve_args(&strs(&["--egress"])).is_err());
+        // Two different modes must not let the last one lift the first.
+        assert!(parse_fetch_args(&strs(&["u", "--egress", "loopback", "--egress", "open"])).is_err());
+        assert!(parse_serve_args(&strs(&["--egress=open", "--egress", "loopback"])).is_err());
+        assert!(parse_serve_args(&strs(&["--egress=loopback", "--egress", "Loopback"])).is_ok());
+        // An entry that holds every address is refused like `*`.
+        for e in ["0.0.0.0/0", "::/0", "*"] {
+            assert!(
+                parse_serve_args(&strs(&["--egress", "loopback", "--allow-host", e])).is_err(),
+                "{e}"
+            );
+        }
+        // A name pinned to addresses.
+        let s = parse_serve_args(&strs(&[
+            "--egress",
+            "loopback",
+            "--allow-host",
+            "a.lab.test@10.0.0.0/8",
+        ]))
+        .unwrap();
+        assert!(s.egress.policy().unwrap().unwrap().check_name("a.lab.test").is_ok());
+        // `fingerprint-report` takes the same flags.
+        let r = parse_report_args(&strs(&["--url", "http://x/", "--egress", "loopback"])).unwrap();
+        assert!(r.egress.policy().unwrap().is_some());
+        assert!(parse_report_args(&strs(&["--allow-host", "a.test"])).is_err());
+        assert!(parse_report_args(&strs(&["--egress", "nope"])).is_err());
     }
 
     #[test]

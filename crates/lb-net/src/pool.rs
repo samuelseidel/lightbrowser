@@ -591,7 +591,11 @@ impl ConnectionPool {
     ) -> Result<Lease, NetError> {
         // A refused origin never gets a group (ADR 0044): no entry, no
         // waiter, no connect, and so no TLS session either.
-        params.egress.check_name(&key.host)?;
+        if params.proxy.is_some() {
+            params.egress.check_remote_name(&key.host)?;
+        } else {
+            params.egress.check_name(&key.host)?;
+        }
         let rx = {
             let mut st = self.lock();
             let now = Instant::now();
@@ -977,6 +981,7 @@ fn close_oldest_idle(st: &mut State) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
@@ -1021,5 +1026,74 @@ mod tests {
                 partition: "http://127.0.0.1 same_site".into(),
             }
         );
+    }
+
+    fn params(egress: EgressPolicy, proxy: Option<Arc<Proxy>>) -> ConnectParams {
+        let path = format!(
+            "{}/../../profiles/tls/chrome_153_linux.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let profile =
+            ClientHelloProfile::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
+        ConnectParams {
+            profile: Arc::new(profile),
+            insecure: true,
+            proxy,
+            user_agent: Arc::from("test"),
+            tcp_profile: None,
+            egress: Arc::new(egress),
+        }
+    }
+
+    fn key(host: &str, https: bool) -> GroupKey {
+        GroupKey {
+            https,
+            host: host.into(),
+            port: if https { 443 } else { 80 },
+            partition: String::new(),
+        }
+    }
+
+    /// The pool's own egress check (ADR 0044), called directly so the check
+    /// in `fetch_once_inner` is not what refuses: a refused origin gets no
+    /// group, no waiter, no connect attempt and no name lookup.
+    #[tokio::test]
+    async fn acquire_refuses_before_making_a_group() {
+        let pool = ConnectionPool::new();
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let l2 = Arc::clone(&lookups);
+        pool.set_resolve_hook(Some(Arc::new(move |_| {
+            l2.fetch_add(1, Ordering::SeqCst);
+            None
+        })));
+        for k in [
+            key("example.test", false),
+            key("example.test", true),
+            key("10.1.2.3", false),
+            key("[2001:db8::1]", true),
+        ] {
+            let r = pool
+                .acquire(&k, 0, &params(EgressPolicy::loopback(), None))
+                .await;
+            assert!(matches!(r, Err(NetError::Blocked(_))), "{}", k.host);
+            assert_eq!(pool.groups(), 0, "{} got a pool group", k.host);
+        }
+        // Through a proxy the name check is the stricter one: `localhost`
+        // is not vouched for there (the proxy resolves it).
+        let proxy = Arc::new(
+            crate::proxy::Proxy::parse("127.0.0.1:9", Some("<-loopback>"))
+                .unwrap()
+                .unwrap(),
+        );
+        let r = pool
+            .acquire(
+                &key("a.localhost", false),
+                0,
+                &params(EgressPolicy::loopback(), Some(proxy)),
+            )
+            .await;
+        assert!(matches!(r, Err(NetError::Blocked(_))));
+        assert_eq!(pool.groups(), 0);
+        assert_eq!((pool.opened(), lookups.load(Ordering::SeqCst)), (0, 0));
     }
 }

@@ -261,7 +261,7 @@ impl Proxy {
         port: u16,
         user_agent: &str,
     ) -> Result<TcpStream, NetError> {
-        egress.check_name(host)?;
+        egress.check_remote_name(host)?;
         match self.kind {
             ProxyKind::Http => {
                 self.connect_tunnel(dialer, egress, host, port, user_agent)
