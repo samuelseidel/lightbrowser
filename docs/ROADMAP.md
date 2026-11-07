@@ -3208,6 +3208,19 @@ The three failures above are fixed:
   Linux is unchanged. The macOS arm64 archive's ICU data equals the
   checked-in file. `stubs_name_archive_symbols` skips `WasmRevecPhase` off
   x86_64, since V8 builds the revectorizer only for x64.
+- A review found three small gaps in the Mach-O and `ar` reader:
+  - only `S_ZEROFILL` was treated as having no file data (now all three
+    zerofill types are);
+  - offset sums taken from the file could overflow (now checked);
+  - several branches had no test (`/SYM64/`, `__.SYMDEF_64`, odd sizes, a
+    synthetic Mach-O object, now tested on every OS).
+- `lb-persona` `all_reference_personas_validate` loaded
+  `profiles/reference/tcp_public.json` (ADR 0033) as a persona; it now
+  reads only `reference/chrome` and `reference/firefox`. The two came
+  from different branches and met at the merge without a conflict.
+- Full checks on macOS arm64: fmt and both clippy runs clean;
+  `cargo test --workspace` 687 passed after the persona fix; firefox
+  package tests 15 passed. Playwright, the bench and T-010 were not run.
 
 ## Risks
 

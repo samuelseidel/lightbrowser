@@ -45,7 +45,10 @@ fn chrome_mac() -> PersonaProfile {
 
 #[test]
 fn all_reference_personas_validate() {
-    let files = json_files("reference");
+    // Personas only: `reference/` also holds the public TCP data
+    // (`tcp_public.json`, ADR 0033).
+    let mut files = json_files("reference/chrome");
+    files.extend(json_files("reference/firefox"));
     assert!(
         files.len() >= 5,
         "expected firefox and chrome references, found {files:?}"
