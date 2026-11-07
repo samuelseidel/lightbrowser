@@ -106,6 +106,14 @@ fn prop<'a>(node: &'a Value, name: &str) -> Option<&'a Value> {
         .get("value")
 }
 
+/// Two spaces per level, at most [`MAX_INDENT`] levels: a page nested
+/// thousands deep would otherwise make every line thousands of bytes long.
+fn indent(depth: usize) -> String {
+    "  ".repeat(depth.min(MAX_INDENT))
+}
+
+const MAX_INDENT: usize = 48;
+
 fn quote(s: &str) -> String {
     // A JSON string is a fine quoted form and keeps newlines out of the line.
     Value::String(s.to_string()).to_string()
@@ -175,74 +183,116 @@ struct Walk<'a> {
     fields: Vec<Field>,
 }
 
-impl Walk<'_> {
-    /// `named`: the name of the nearest shown ancestor, to drop text that
-    /// only repeats it.
-    fn visit(&mut self, node: &Value, depth: usize, named: &str) {
-        let ignored = node.get("ignored").and_then(Value::as_bool) == Some(true);
-        let kids = |w: &mut Self, depth: usize, named: &str| {
-            let ids: Vec<String> = node
+/// Roles whose accessible name is made of their content: a static text
+/// child that only repeats the name is left out of the snapshot. Any other
+/// node's name (the page title of the root, an `aria-label` on a landmark)
+/// says nothing about its text children, which stay.
+const NAMED_BY_CONTENT: &[&str] = &[
+    "button",
+    "link",
+    "heading",
+    "tab",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "checkbox",
+    "radio",
+    "switch",
+    "treeitem",
+    "DisclosureTriangle",
+    "cell",
+    "gridcell",
+    "columnheader",
+    "rowheader",
+    "tooltip",
+    "legend",
+    "caption",
+    "LabelText",
+    "term",
+    "code",
+    "emphasis",
+    "strong",
+    "deletion",
+    "insertion",
+    "mark",
+];
+
+impl<'a> Walk<'a> {
+    /// Pre-order, with an explicit stack: the page chooses the nesting
+    /// depth, and a recursive walk would overflow the stack on a deep one.
+    /// `named` of a stack item: the name of the nearest shown ancestor that
+    /// is named by its content, to drop text that only repeats it.
+    fn walk(&mut self, root: &'a Value) {
+        let mut stack: Vec<(&'a Value, usize, String)> = vec![(root, 0, String::new())];
+        while let Some((node, depth, named)) = stack.pop() {
+            let ignored = node.get("ignored").and_then(Value::as_bool) == Some(true);
+            let ids = node
                 .get("childIds")
                 .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(str::to_owned))
-                        .collect()
-                })
+                .map(Vec::as_slice)
                 .unwrap_or_default();
-            for id in ids {
-                if let Some(child) = w.by_id.get(id.as_str()).copied() {
-                    w.visit(child, depth, named);
+            // Children go on the stack reversed, so the first is popped first.
+            let mut push_kids = |stack: &mut Vec<(&'a Value, usize, String)>, depth: usize, named: &str| {
+                for id in ids.iter().rev() {
+                    let child = id.as_str().and_then(|i| self.by_id.get(i).copied());
+                    if let Some(child) = child {
+                        stack.push((child, depth, named.to_owned()));
+                    }
                 }
+            };
+            if ignored {
+                push_kids(&mut stack, depth, &named);
+                continue;
             }
-        };
-        if ignored {
-            kids(self, depth, named);
-            return;
-        }
-        let role = text_of(node, "role");
-        let name = text_of(node, "name");
-        if role == "StaticText" {
-            if !name.is_empty() && !(named.contains(name.as_str())) {
-                self.lines
-                    .push(format!("{}- text {}", "  ".repeat(depth), quote(&name)));
+            let role = text_of(node, "role");
+            let name = text_of(node, "name");
+            if role == "StaticText" {
+                let t = name.trim();
+                if !t.is_empty() && !named.contains(t) {
+                    self.lines
+                        .push(format!("{}- text {}", indent(depth), quote(&name)));
+                }
+                continue;
             }
-            return;
+            let mut line = format!("{}- {role}", indent(depth));
+            if !name.is_empty() {
+                line.push(' ');
+                line.push_str(&quote(&name));
+            }
+            for f in flags(node) {
+                line.push_str(&format!(" [{f}]"));
+            }
+            let focusable = prop(node, "focusable").and_then(Value::as_bool) == Some(true);
+            let backend = node.get("backendDOMNodeId").and_then(Value::as_i64);
+            let wants_ref = depth > 0
+                && (INTERACTIVE.contains(&role.as_str())
+                    // `form` and `region` are landmarks only when named.
+                    || LANDMARKS.contains(&role.as_str())
+                        && (!matches!(role.as_str(), "form" | "region") || !name.is_empty())
+                    || focusable && role != "RootWebArea");
+            if let (true, Some(b)) = (wants_ref, backend) {
+                let r = self.refs.assign(b);
+                line.push_str(&format!(" [ref={r}]"));
+            }
+            let value = text_of(node, "value");
+            match backend {
+                Some(b) if FIELDS.contains(&role.as_str()) => self.fields.push(Field {
+                    line: self.lines.len(),
+                    node: b,
+                    fallback: value,
+                }),
+                _ if !value.is_empty() => line.push_str(&value_suffix(&value)),
+                _ => {}
+            }
+            self.lines.push(line);
+            let next_named = if NAMED_BY_CONTENT.contains(&role.as_str()) {
+                name.as_str()
+            } else {
+                ""
+            };
+            push_kids(&mut stack, depth + 1, next_named);
         }
-        let mut line = format!("{}- {role}", "  ".repeat(depth));
-        if !name.is_empty() {
-            line.push(' ');
-            line.push_str(&quote(&name));
-        }
-        for f in flags(node) {
-            line.push_str(&format!(" [{f}]"));
-        }
-        let focusable = prop(node, "focusable").and_then(Value::as_bool) == Some(true);
-        let backend = node.get("backendDOMNodeId").and_then(Value::as_i64);
-        let wants_ref = depth > 0
-            && (INTERACTIVE.contains(&role.as_str())
-                // `form` and `region` are landmarks only when named.
-                || LANDMARKS.contains(&role.as_str())
-                    && (!matches!(role.as_str(), "form" | "region") || !name.is_empty())
-                || focusable && role != "RootWebArea");
-        if let (true, Some(b)) = (wants_ref, backend) {
-            let r = self.refs.assign(b);
-            line.push_str(&format!(" [ref={r}]"));
-        }
-        let value = text_of(node, "value");
-        match backend {
-            Some(b) if FIELDS.contains(&role.as_str()) => self.fields.push(Field {
-                line: self.lines.len(),
-                node: b,
-                fallback: value,
-            }),
-            _ if !value.is_empty() => line.push_str(&value_suffix(&value)),
-            _ => {}
-        }
-        self.lines.push(line);
-        let next_named = if name.is_empty() { named } else { &name };
-        let next_named = next_named.to_owned();
-        kids(self, depth + 1, &next_named);
     }
 }
 
@@ -263,7 +313,7 @@ pub fn render(nodes: &[Value], refs: &mut Refs) -> (Vec<String>, Vec<Field>) {
         lines: Vec::new(),
         fields: Vec::new(),
     };
-    w.visit(root, 0, "");
+    w.walk(root);
     (w.lines, w.fields)
 }
 
