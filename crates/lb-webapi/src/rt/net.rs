@@ -1244,7 +1244,8 @@ fn send_beacon(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostE
         timing_cors: false,
     };
     // Not tied to the window: the request survives the document's unload.
-    let fut = w.net.fetch(req);
+    let pending = super::perf::Pending::of(&req, false);
+    let fut = super::perf::track(w, pending, w.net.fetch(req));
     w.net.spawn(Box::pin(async move {
         let _ = fut.await;
     }));

@@ -94,7 +94,19 @@ async fn run(case: &str) {
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
     let got = normalize(&got, srv.ports);
-    assert_eq!(got, chrome(case), "{case}:\n{got}");
+    let want = chrome(case);
+    if got != want {
+        // The lines that differ, Chrome's first.
+        let (g, w): (Vec<_>, Vec<_>) = (got.lines().collect(), want.lines().collect());
+        let mut diff = String::new();
+        for i in 0..g.len().max(w.len()) {
+            let (a, b) = (g.get(i).copied().unwrap_or("<none>"), w.get(i).copied().unwrap_or("<none>"));
+            if a != b {
+                diff.push_str(&format!("line {i}\n  chrome: {b}\n  lb:     {a}\n"));
+            }
+        }
+        panic!("{case} differs from Chrome:\n{diff}");
+    }
 }
 
 macro_rules! cases {

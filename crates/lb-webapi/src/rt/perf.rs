@@ -850,7 +850,7 @@ fn add_resource(w: &Rc<Window>, e: Rc<Entry>) {
     notify(w, &e);
     let mut st = w.perf.borrow_mut();
     if st.resources.len() < st.limit && !st.full_pending {
-        st.resources.push(e);
+        insert_sorted(&mut st.resources, e);
         return;
     }
     let queue = !st.full_pending;
@@ -863,6 +863,12 @@ fn add_resource(w: &Rc<Window>, e: Rc<Entry>) {
             Box::new(|js, w| fire_buffer_full(js, w)),
         );
     }
+}
+
+/// The resource buffer is ordered by start time (after equal ones).
+fn insert_sorted(v: &mut Vec<Rc<Entry>>, e: Rc<Entry>) {
+    let at = v.partition_point(|x| x.start <= e.start);
+    v.insert(at, e);
 }
 
 /// Spec "fire a buffer full event".
@@ -883,7 +889,7 @@ fn fire_buffer_full(js: &mut dyn super::Js, w: &Rc<Window>) {
             let mut st = w.perf.borrow_mut();
             while !st.secondary.is_empty() && st.resources.len() < st.limit {
                 let e = st.secondary.remove(0);
-                st.resources.push(e);
+                insert_sorted(&mut st.resources, e);
             }
         }
         let after = w.perf.borrow().secondary.len();
@@ -943,11 +949,13 @@ fn nav_data(w: &Window) -> ResData {
                         Some((s, e)) if ok => (ms(s), ms(e)),
                         _ => (0.0, 0.0),
                     };
+                    // Chrome's fetch starts a little after the navigation.
                     let fetch_start = if t.redirect.is_some() {
                         ms(t.fetch_start).max(re)
                     } else {
                         ms(t.fetch_start)
-                    };
+                    }
+                    .max(0.1);
                     let (dns_start, dns_end, connect_start, secure, connect_end) = match &t.conn {
                         Some(c) => {
                             let dns_end = ms(c.dns_end).max(fetch_start);
@@ -1062,49 +1070,45 @@ fn ensure_vis(w: &Window) -> Option<Rc<Entry>> {
 }
 
 /// A navigation timing value (the attributes `PerformanceNavigationTiming`
-/// adds, and the `PerformanceTiming` ones) in window milliseconds; 0 when
-/// the point was not reached.
-fn nav_point(w: &Window, name: &str) -> f64 {
+/// adds, and the `PerformanceTiming` ones) in window milliseconds; `None`
+/// when the point was not reached (or would reveal cross-origin timing).
+fn nav_point(w: &Window, name: &str) -> Option<f64> {
     let d = nav_data(w);
     let m = w.perf.borrow().marks_nav;
-    let v = |o: Option<f64>| o.unwrap_or(0.0);
+    // The network steps exist when the document came over the network.
+    let net = !d.protocol.is_empty();
+    let some_if = |c: bool, v: f64| c.then_some(v);
     match name {
-        "navigationStart" => 0.0,
-        "unloadEventStart" | "unloadEventEnd" => 0.0,
-        "redirectStart" => d.redirect_start,
-        "redirectEnd" => d.redirect_end,
-        "fetchStart" => d.fetch_start,
-        "domainLookupStart" => d.dns_start,
-        "domainLookupEnd" => d.dns_end,
-        "connectStart" => d.connect_start,
-        "connectEnd" => d.connect_end,
-        "secureConnectionStart" => d.secure_start,
-        "requestStart" => d.request_start,
-        "responseStart" => d.response_start,
-        "responseEnd" => d.response_end,
-        "domLoading" => v(m.dom_loading).max(d.response_end),
-        "domInteractive" => v(m.dom_interactive),
-        "domContentLoadedEventStart" => v(m.dcl_start),
-        "domContentLoadedEventEnd" => v(m.dcl_end),
-        "domComplete" => v(m.dom_complete),
-        "loadEventStart" => v(m.load_start),
-        "loadEventEnd" => v(m.load_end),
-        _ => 0.0,
+        "navigationStart" => Some(0.0),
+        "redirectStart" => some_if(d.redirect_count > 0, d.redirect_start),
+        "redirectEnd" => some_if(d.redirect_count > 0, d.redirect_end),
+        "fetchStart" => Some(d.fetch_start),
+        "domainLookupStart" => some_if(net, d.dns_start),
+        "domainLookupEnd" => some_if(net, d.dns_end),
+        "connectStart" => some_if(net, d.connect_start),
+        "connectEnd" => some_if(net, d.connect_end),
+        "secureConnectionStart" => some_if(d.secure_start > 0.0, d.secure_start),
+        "requestStart" => some_if(net, d.request_start),
+        "responseStart" => some_if(net, d.response_start),
+        "responseEnd" => Some(d.response_end),
+        "domLoading" => m.dom_loading.map(|l| l.max(d.response_end)),
+        "domInteractive" => m.dom_interactive,
+        "domContentLoadedEventStart" => m.dcl_start,
+        "domContentLoadedEventEnd" => m.dcl_end,
+        "domComplete" => m.dom_complete,
+        "loadEventStart" => m.load_start,
+        "loadEventEnd" => m.load_end,
+        _ => None,
     }
 }
 
 /// Legacy `performance.timing` value (milliseconds since the epoch, 0 when
 /// the point was not reached).
 pub(crate) fn legacy_timing(w: &Window, field: &str) -> f64 {
-    let nav = w.clock.time_origin.floor();
     if field == "navigationStart" {
-        return nav;
+        return w.clock.time_origin.floor();
     }
-    let ms = nav_point(w, field);
-    if ms == 0.0 && !matches!(field, "domLoading") {
-        return 0.0;
-    }
-    (w.clock.time_origin + ms).floor()
+    nav_point(w, field).map_or(0.0, |ms| (w.clock.time_origin + ms).floor())
 }
 
 /// Legacy `performance.navigation` type and redirect count.
@@ -1286,9 +1290,9 @@ fn to_number(cx: &mut CallCtx<'_, '_, '_>, h: Handle) -> f64 {
     }
 }
 
-fn non_finite(prop: &str, dict: &str) -> HostError {
+fn non_finite(prefix: &str, prop: &str, dict: &str) -> HostError {
     HostError::type_error(format!(
-        "Failed to read the '{prop}' property from '{dict}': The provided double value is non-finite."
+        "{prefix}Failed to read the '{prop}' property from '{dict}': The provided double value is non-finite."
     ))
 }
 
@@ -1347,7 +1351,7 @@ fn make_mark(
             cx.release(h);
             if !n.is_finite() {
                 d.release(cx);
-                return Err(non_finite("startTime", "PerformanceMarkOptions"));
+                return Err(non_finite(prefix, "startTime", "PerformanceMarkOptions"));
             }
             Some(n)
         }
@@ -1390,10 +1394,11 @@ fn mark_time(
     w: &Window,
     h: Option<Handle>,
     cx: &mut CallCtx<'_, '_, '_>,
+    numbers: bool,
 ) -> Result<Option<f64>, HostError> {
     let Some(h) = h else { return Ok(None) };
     let kind = cx.handle_kind(h);
-    if kind == ValueKind::Number {
+    if numbers && kind == ValueKind::Number {
         let n = to_number(cx, h);
         cx.release(h);
         return Ok(Some(n));
@@ -1410,8 +1415,11 @@ fn resolve_mark(w: &Window, name: &str) -> Result<f64, HostError> {
         return Ok(m.start);
     }
     if !w.is_worker() && TIMING_ATTRS.contains(&name) {
-        let v = nav_point(w, name);
-        if v == 0.0 && name != "navigationStart" {
+        // Blink: the legacy attribute (whole milliseconds) minus
+        // `navigationStart`, 0 meaning empty.
+        let legacy = legacy_timing(w, name);
+        let v = (legacy != 0.0).then(|| legacy - legacy_timing(w, "navigationStart"));
+        let Some(v) = v else {
             return Err(w.rt.err(
                 "InvalidAccessError",
                 fail(
@@ -1421,7 +1429,7 @@ fn resolve_mark(w: &Window, name: &str) -> Result<f64, HostError> {
                     ),
                 ),
             ));
-        }
+        };
         return Ok(v);
     }
     Err(w.rt.err(
@@ -1478,7 +1486,7 @@ fn do_measure(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<Rc<Entry>,
                         let n = to_number(cx, h);
                         if !n.is_finite() {
                             cx.release(h);
-                            return Err(non_finite(prop, "PerformanceMeasureOptions"));
+                            return Err(non_finite("Failed to execute 'measure' on 'Performance': ", prop, "PerformanceMeasureOptions"));
                         }
                         Ok((Some(h), Some(n)))
                     }
@@ -1492,7 +1500,7 @@ fn do_measure(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<Rc<Entry>,
                     let n = to_number(cx, h);
                     cx.release(h);
                     if !n.is_finite() {
-                        return Err(non_finite("duration", "PerformanceMeasureOptions"));
+                        return Err(non_finite("Failed to execute 'measure' on 'Performance': ", "duration", "PerformanceMeasureOptions"));
                     }
                     Some(n)
                 }
@@ -1505,7 +1513,7 @@ fn do_measure(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<Rc<Entry>,
                     }
                     Some(n)
                 }
-                None => mark_time(w, s, cx)?,
+                None => mark_time(w, s, cx, true)?,
             };
             let en2 = match en {
                 Some(n) => {
@@ -1514,7 +1522,7 @@ fn do_measure(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<Rc<Entry>,
                     }
                     Some(n)
                 }
-                None => mark_time(w, e, cx)?,
+                None => mark_time(w, e, cx, true)?,
             };
             for t in [st, en2].into_iter().flatten() {
                 if t < 0.0 {
@@ -1527,17 +1535,22 @@ fn do_measure(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<Rc<Entry>,
             detail = clone_detail(cx, w, de, &fail("measure", ""))?;
         } else {
             start = None;
-            end = None;
+            end = if cx.len() > 2 && cx.arg_kind(2) != ValueKind::Undefined {
+                let h = cx.arg_handle(2);
+                mark_time(w, Some(h), cx, false)?
+            } else {
+                None
+            };
             duration = None;
             detail = None;
         }
     } else {
         // `measure(name, startMark, endMark)`
         let sh = cx.arg_handle(1);
-        let st = mark_time(w, Some(sh), cx)?;
+        let st = mark_time(w, Some(sh), cx, false)?;
         let en = if cx.len() > 2 && cx.arg_kind(2) != ValueKind::Undefined {
             let h = cx.arg_handle(2);
-            mark_time(w, Some(h), cx)?
+            mark_time(w, Some(h), cx, false)?
         } else {
             None
         };
@@ -1653,12 +1666,12 @@ fn entry_json(w: &Window, e: &Entry) -> String {
             if nav {
                 s.push_str(&format!(
                     ",\"unloadEventStart\":0,\"unloadEventEnd\":0,\"domInteractive\":{},\"domContentLoadedEventStart\":{},\"domContentLoadedEventEnd\":{},\"domComplete\":{},\"loadEventStart\":{},\"loadEventEnd\":{},\"type\":{},\"redirectCount\":{},\"activationStart\":0,\"criticalCHRestart\":0,\"notRestoredReasons\":null,\"confidence\":{{\"randomizedTriggerRate\":0.4994798,\"value\":\"low\"}}",
-                    num(nav_point(w, "domInteractive")),
-                    num(nav_point(w, "domContentLoadedEventStart")),
-                    num(nav_point(w, "domContentLoadedEventEnd")),
-                    num(nav_point(w, "domComplete")),
-                    num(nav_point(w, "loadEventStart")),
-                    num(nav_point(w, "loadEventEnd")),
+                    num(nav_point(w, "domInteractive").unwrap_or(0.0)),
+                    num(nav_point(w, "domContentLoadedEventStart").unwrap_or(0.0)),
+                    num(nav_point(w, "domContentLoadedEventEnd").unwrap_or(0.0)),
+                    num(nav_point(w, "domComplete").unwrap_or(0.0)),
+                    num(nav_point(w, "loadEventStart").unwrap_or(0.0)),
+                    num(nav_point(w, "loadEventEnd").unwrap_or(0.0)),
                     jstr(d.nav_type),
                     d.redirect_count,
                 ));
@@ -1835,16 +1848,17 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         if w.is_worker() {
             return cx.ret(Arg::Json(format!("{{\"timeOrigin\":{}}}", num(origin))));
         }
-        let timing: Vec<String> = TIMING_ATTRS
-            .iter()
-            .map(|f| format!("\"{f}\":{}", num(legacy_timing(w, f))))
-            .collect();
-        let (t, rc) = legacy_navigation(w);
-        cx.ret(Arg::Json(format!(
-            "{{\"timeOrigin\":{},\"timing\":{{{}}},\"navigation\":{{\"type\":{t},\"redirectCount\":{rc}}}}}",
-            num(origin),
-            timing.join(",")
-        )))
+        // `{timeOrigin, timing, navigation}` with the live `PerformanceTiming`
+        // and `PerformanceNavigation` objects (they serialize themselves).
+        let obj = cx.make_handle(Arg::Json(format!("{{\"timeOrigin\":{}}}", num(origin))))?;
+        let timing = super::navigator::single_nav(w, "nav:timing", super::navigator::NavObj::Timing);
+        let nav =
+            super::navigator::single_nav(w, "nav:navigation", super::navigator::NavObj::Navigation);
+        cx.set_property(obj, "timing", timing)?;
+        cx.set_property(obj, "navigation", nav)?;
+        let r = cx.ret(Arg::Handle(obj));
+        cx.release(obj);
+        r
     });
 
     // ----- entries -----
@@ -2005,7 +2019,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             if e.kind != Kind::Navigation {
                 return Err(illegal());
             }
-            cx.ret(nav_point(w, name))
+            cx.ret(nav_point(w, name).unwrap_or(0.0))
         });
     }
     getter(reg, rt, "PerformanceNavigationTiming", "type", |cx, w| {
@@ -2299,7 +2313,7 @@ fn observe(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostError
             return Err(w.rt.err(
                 "InvalidModificationError",
                 format!(
-                    "{pre}This PerformanceObserver has performed observe({{type:...}}, therefore it cannot perform observe({{entryTypes:...}}"
+                    "{pre}This PerformanceObserver has performed observe({{type:...}}, therefore it cannot perform observe({{entryTypes:...}})"
                 ),
             ));
         }
@@ -2336,7 +2350,7 @@ fn observe(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostError
             return Err(w.rt.err(
                 "InvalidModificationError",
                 format!(
-                    "{pre}This observer has performed observe({{entryTypes:...}}, therefore it cannot perform observe({{type:...}}"
+                    "{pre}This observer has performed observe({{entryTypes:...}}, therefore it cannot perform observe({{type:...}})"
                 ),
             ));
         }

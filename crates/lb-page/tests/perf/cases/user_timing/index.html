@@ -47,6 +47,8 @@ addEventListener('load',async function(){
   log('m opts none '+(function(){var x=performance.measure('m11',{});return [x.startTime,x.duration>0].join()})());
   log('m nav attr '+(function(){var x=performance.measure('m12','fetchStart');return [x.startTime>=0,x.duration>0].join()})());
   log('m nav attr2 '+(function(){var x=performance.measure('m13','navigationStart','domInteractive');return [x.startTime,x.duration>0].join()})());
+  // Their start is a whole-millisecond difference that depends on the time origin's fraction: out of the ordered lists below.
+  performance.clearMeasures('m12');performance.clearMeasures('m13');
   t('m nav 0',function(){var x=performance.measure('m14','redirectStart','unloadEventEnd');return [x.startTime,x.duration].join()});
   t('m nav 0 b',function(){var x=performance.measure('m15','domInteractive','unloadEventStart');return [x.startTime>0,x.duration].join()});
   t('measure none',function(){return performance.measure()});
