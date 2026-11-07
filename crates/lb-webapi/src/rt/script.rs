@@ -100,6 +100,9 @@ pub fn execute_classic(
     url: &str,
     line: u32,
 ) {
+    if w.scripts_disabled() {
+        return;
+    }
     let saved = w.current_script.replace(node);
     // A document's scripts run in its main world, also when an isolated
     // world inserted or wrote them (Playwright's `setContent` writes from

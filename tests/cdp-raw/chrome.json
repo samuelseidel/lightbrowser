@@ -1,0 +1,5227 @@
+{
+ "browser": "HeadlessChrome/153.0.8010.12",
+ "scenarios": {
+  "puppeteer.newPage": [
+   {
+    "label": "getVersion",
+    "method": "Browser.getVersion",
+    "ok": true,
+    "shape": {
+     "jsVersion": "string",
+     "product": "string",
+     "protocolVersion": "string",
+     "revision": "string",
+     "userAgent": "string"
+    }
+   },
+   {
+    "label": "discover",
+    "method": "Target.setDiscoverTargets",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "autoAttach",
+    "method": "Target.setAutoAttach",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "createContext",
+    "method": "Target.createBrowserContext",
+    "ok": true,
+    "shape": {
+     "browserContextId": "string"
+    }
+   },
+   {
+    "label": "createTarget",
+    "method": "Target.createTarget",
+    "ok": true,
+    "shape": {
+     "targetId": "string"
+    }
+   },
+   {
+    "label": "attach",
+    "method": "Target.attachToTarget",
+    "ok": true,
+    "shape": {
+     "sessionId": "string"
+    }
+   },
+   {
+    "label": "getFrameTree",
+    "method": "Page.getFrameTree",
+    "ok": true,
+    "shape": {
+     "frameTree": {
+      "frame": {
+       "adFrameStatus": {
+        "adFrameType": "string"
+       },
+       "crossOriginIsolatedContextType": "string",
+       "domainAndRegistry": "string",
+       "gatedAPIFeatures": [],
+       "id": "string",
+       "loaderId": "string",
+       "mimeType": "string",
+       "secureContextType": "string",
+       "securityOrigin": "string",
+       "securityOriginDetails": {
+        "isLocalhost": "boolean"
+       },
+       "url": "string"
+      }
+     }
+    }
+   },
+   {
+    "label": "init Network.enable",
+    "method": "Network.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Network.setCacheDisabled",
+    "method": "Network.setCacheDisabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.enable",
+    "method": "Page.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.setLifecycleEventsEnabled",
+    "method": "Page.setLifecycleEventsEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Runtime.enable",
+    "method": "Runtime.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.createIsolatedWorld",
+    "method": "Page.createIsolatedWorld",
+    "ok": true,
+    "shape": {
+     "executionContextId": "number"
+    }
+   },
+   {
+    "label": "init Audits.enable",
+    "method": "Audits.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Performance.enable",
+    "method": "Performance.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Log.enable",
+    "method": "Log.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init WebMCP.enable",
+    "method": "WebMCP.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Target.setAutoAttach",
+    "method": "Target.setAutoAttach",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Runtime.runIfWaitingForDebugger",
+    "method": "Runtime.runIfWaitingForDebugger",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setDeviceMetrics",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setTouch",
+    "method": "Emulation.setTouchEmulationEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "getTargetInfo",
+    "method": "Target.getTargetInfo",
+    "ok": true,
+    "shape": {
+     "targetInfo": {
+      "attached": "boolean",
+      "browserContextId": "string",
+      "canAccessOpener": "boolean",
+      "targetId": "string",
+      "title": "string",
+      "type": "string",
+      "url": "string"
+     }
+    },
+    "value": {
+     "type": "page",
+     "url": "about:blank",
+     "attached": true
+    }
+   },
+   {
+    "label": "getWindowForTarget",
+    "method": "Browser.getWindowForTarget",
+    "ok": true,
+    "shape": {
+     "bounds": {
+      "height": "number",
+      "left": "number",
+      "top": "number",
+      "width": "number",
+      "windowState": "string"
+     },
+     "windowId": "number"
+    }
+   },
+   {
+    "label": "bringToFront",
+    "method": "Page.bringToFront",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "closeTargetTwice",
+    "method": "Target.closeTarget",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "No target found for targetId"
+    }
+   }
+  ],
+  "playwright.newPage": [
+   {
+    "label": "getVersion",
+    "method": "Browser.getVersion",
+    "ok": true,
+    "shape": {
+     "jsVersion": "string",
+     "product": "string",
+     "protocolVersion": "string",
+     "revision": "string",
+     "userAgent": "string"
+    }
+   },
+   {
+    "label": "autoAttach",
+    "method": "Target.setAutoAttach",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "createContext",
+    "method": "Target.createBrowserContext",
+    "ok": true,
+    "shape": {
+     "browserContextId": "string"
+    }
+   },
+   {
+    "label": "downloads",
+    "method": "Browser.setDownloadBehavior",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "createTarget",
+    "method": "Target.createTarget",
+    "ok": true,
+    "shape": {
+     "targetId": "string"
+    }
+   },
+   {
+    "label": "attach",
+    "method": "Target.attachToTarget",
+    "ok": true,
+    "shape": {
+     "sessionId": "string"
+    }
+   },
+   {
+    "label": "getFrameTree",
+    "method": "Page.getFrameTree",
+    "ok": true,
+    "shape": {
+     "frameTree": {
+      "frame": {
+       "adFrameStatus": {
+        "adFrameType": "string"
+       },
+       "crossOriginIsolatedContextType": "string",
+       "domainAndRegistry": "string",
+       "gatedAPIFeatures": [],
+       "id": "string",
+       "loaderId": "string",
+       "mimeType": "string",
+       "secureContextType": "string",
+       "securityOrigin": "string",
+       "securityOriginDetails": {
+        "isLocalhost": "boolean"
+       },
+       "url": "string"
+      }
+     }
+    }
+   },
+   {
+    "label": "init Browser.getWindowForTarget",
+    "method": "Browser.getWindowForTarget",
+    "ok": true,
+    "shape": {
+     "bounds": {
+      "height": "number",
+      "left": "number",
+      "top": "number",
+      "width": "number",
+      "windowState": "string"
+     },
+     "windowId": "number"
+    }
+   },
+   {
+    "label": "init Page.enable",
+    "method": "Page.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Log.enable",
+    "method": "Log.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.setLifecycleEventsEnabled",
+    "method": "Page.setLifecycleEventsEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Runtime.enable",
+    "method": "Runtime.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.addScriptToEvaluateOnNewDocument",
+    "method": "Page.addScriptToEvaluateOnNewDocument",
+    "ok": true,
+    "shape": {
+     "identifier": "string"
+    }
+   },
+   {
+    "label": "init Page.createIsolatedWorld",
+    "method": "Page.createIsolatedWorld",
+    "ok": true,
+    "shape": {
+     "executionContextId": "number"
+    }
+   },
+   {
+    "label": "init Network.enable",
+    "method": "Network.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Target.setAutoAttach",
+    "method": "Target.setAutoAttach",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Emulation.setFocusEmulationEnabled",
+    "method": "Emulation.setFocusEmulationEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Emulation.setDeviceMetricsOverride",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Emulation.setUserAgentOverride",
+    "method": "Emulation.setUserAgentOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.setFontFamilies",
+    "method": "Page.setFontFamilies",
+    "ok": false,
+    "error": {
+     "code": -32602
+    }
+   },
+   {
+    "label": "init Emulation.setEmulatedMedia",
+    "method": "Emulation.setEmulatedMedia",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Network.setBypassServiceWorker",
+    "method": "Network.setBypassServiceWorker",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.setBypassCSP",
+    "method": "Page.setBypassCSP",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Security.setIgnoreCertificateErrors",
+    "method": "Security.setIgnoreCertificateErrors",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Emulation.setTouchEmulationEnabled",
+    "method": "Emulation.setTouchEmulationEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Emulation.setScriptExecutionDisabled",
+    "method": "Emulation.setScriptExecutionDisabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Emulation.setTimezoneOverride",
+    "method": "Emulation.setTimezoneOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Emulation.setLocaleOverride",
+    "method": "Emulation.setLocaleOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Network.emulateNetworkConditions",
+    "method": "Network.emulateNetworkConditions",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Network.setCacheDisabled",
+    "method": "Network.setCacheDisabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Network.setExtraHTTPHeaders",
+    "method": "Network.setExtraHTTPHeaders",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Page.setInterceptFileChooserDialog",
+    "method": "Page.setInterceptFileChooserDialog",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "init Runtime.runIfWaitingForDebugger",
+    "method": "Runtime.runIfWaitingForDebugger",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "getLayoutMetrics",
+    "method": "Page.getLayoutMetrics",
+    "ok": true,
+    "shape": {
+     "contentSize": {
+      "height": "number",
+      "width": "number",
+      "x": "number",
+      "y": "number"
+     },
+     "cssContentSize": {
+      "height": "number",
+      "width": "number",
+      "x": "number",
+      "y": "number"
+     },
+     "cssLayoutViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "pageX": "number",
+      "pageY": "number"
+     },
+     "cssVisualViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "offsetX": "number",
+      "offsetY": "number",
+      "pageX": "number",
+      "pageY": "number",
+      "scale": "number",
+      "zoom": "number"
+     },
+     "layoutViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "pageX": "number",
+      "pageY": "number"
+     },
+     "visualViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "offsetX": "number",
+      "offsetY": "number",
+      "pageX": "number",
+      "pageY": "number",
+      "scale": "number",
+      "zoom": "number"
+     }
+    }
+   }
+  ],
+  "goto": [
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "hasLoader": true,
+     "frame": true
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "title",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "Page A"
+   },
+   {
+    "label": "headers: no referrer",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": null,
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: no referrer",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": ""
+   },
+   {
+    "label": "headers: unsafeUrl cross-site",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "https://ref.example.test/page?q=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: unsafeUrl cross-site",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "https://ref.example.test/page?q=1"
+   },
+   {
+    "label": "headers: unsafeUrl same-origin",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "{A}/from?x=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: unsafeUrl same-origin",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/from?x=1"
+   },
+   {
+    "label": "headers: unsafeUrl same-site",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "{B}/from?x=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: unsafeUrl same-site",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{B}/from?x=1"
+   },
+   {
+    "label": "headers: referrer only",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": null,
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: referrer only",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": ""
+   },
+   {
+    "label": "headers: no-referrer",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": null,
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: no-referrer",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": ""
+   },
+   {
+    "label": "headers: origin",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "https://ref.example.test/",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: origin",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "https://ref.example.test/"
+   },
+   {
+    "label": "headers: strict-origin-when-cross-origin",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": null,
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: strict-origin-when-cross-origin",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": ""
+   },
+   {
+    "label": "headers: same-origin vs cross-origin",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": null,
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: same-origin vs cross-origin",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": ""
+   },
+   {
+    "label": "headers: same-origin vs same-origin",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "{A}/from?x=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: same-origin vs same-origin",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/from?x=1"
+   },
+   {
+    "label": "headers: origin-when-cross-origin",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "{A}/from?x=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: origin-when-cross-origin",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/from?x=1"
+   },
+   {
+    "label": "headers: no-referrer-when-downgrade",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": null,
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: no-referrer-when-downgrade",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": ""
+   },
+   {
+    "label": "headers: unsafe-url (http referrer)",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "http://ref.example.test/page?q=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: unsafe-url (http referrer)",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "http://ref.example.test/page?q=1"
+   },
+   {
+    "label": "headers: credentials in referrer",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "https://ref.example.test/page?q=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "document.referrer: credentials in referrer",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "https://ref.example.test/page?q=1"
+   },
+   {
+    "label": "headers: cross-origin target",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "{A}/from?x=1",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "headers: cross-origin target, default policy",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "referer": "{A}/",
+     "sec-fetch-site": "none",
+     "sec-fetch-mode": "navigate",
+     "sec-fetch-dest": "document",
+     "sec-fetch-user": "?1"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "invalid url",
+    "method": "Page.navigate",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Cannot navigate to invalid URL"
+    }
+   },
+   {
+    "label": "missing url",
+    "method": "Page.navigate",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "bad frame",
+    "method": "Page.navigate",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "No frame with given id found"
+    }
+   },
+   {
+    "label": "bad referrerPolicy",
+    "method": "Page.navigate",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid referrerPolicy"
+    }
+   },
+   {
+    "label": "bad referrer type",
+    "method": "Page.navigate",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "connection refused",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "errorText": "string",
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "err": "net::ERR_UNSAFE_PORT"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "redirect",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after redirect",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/b"
+   },
+   {
+    "label": "same-document hash",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "hash navigate",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean"
+    },
+    "value": {
+     "hasLoader": false
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after hash",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/hashpage#target"
+   }
+  ],
+  "history": [
+   {
+    "label": "initial",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 0,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "after a",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 1,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "goto b",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "goto c",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "after c",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 3,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/b",
+       "userTypedURL": "{A}/b",
+       "title": "Page B",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "back to b",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after back",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/b | Page B"
+   },
+   {
+    "label": "history after back",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 2,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/b",
+       "userTypedURL": "{A}/b",
+       "title": "Page B",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "back to a",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after back 2",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/a | Page A"
+   },
+   {
+    "label": "forward to b",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after forward",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/b | Page B"
+   },
+   {
+    "label": "history after forward",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 2,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/b",
+       "userTypedURL": "{A}/b",
+       "title": "Page B",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "bad entry",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "No entry with passed id"
+    }
+   },
+   {
+    "label": "missing entryId",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "entryId string",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "back to a again",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "goto c from a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "forward entries dropped",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 2,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "history.back()",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after history.back",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/a | Page A"
+   },
+   {
+    "label": "history.forward()",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after history.forward",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/c | Page C"
+   },
+   {
+    "label": "history.go(-2)",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after history.go(-2)",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "about:blank | "
+   },
+   {
+    "label": "history after go(-2)",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 0,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "history.go(2)",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "href after history.go(2)",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/c | Page C"
+   },
+   {
+    "label": "history.go(0) reloads",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "events": [
+     "Page.frameScheduledNavigation",
+     "Page.frameRequestedNavigation",
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Page.frameClearedScheduledNavigation",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "history.go(50) does nothing",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "events": []
+   },
+   {
+    "label": "history after go(50)",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 2,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      }
+     ]
+    }
+   },
+   {
+    "label": "goto hashpage",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "pushState",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": 5,
+    "events": [
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "pushState 2",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": 6,
+    "events": [
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "replaceState",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": 6,
+    "events": [
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "history after pushState",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 5,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/pushed1",
+       "userTypedURL": "{A}/hashpage",
+       "title": "T1",
+       "transitionType": "link"
+      },
+      {
+       "url": "{A}/replaced2",
+       "userTypedURL": "{A}/hashpage",
+       "title": "T1",
+       "transitionType": "link"
+      }
+     ]
+    }
+   },
+   {
+    "label": "history.back() same document",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{\"n\":1} /pushed1",
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "history after same-document back",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 4,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/pushed1",
+       "userTypedURL": "{A}/hashpage",
+       "title": "T1",
+       "transitionType": "link"
+      },
+      {
+       "url": "{A}/replaced2",
+       "userTypedURL": "{A}/hashpage",
+       "title": "T1",
+       "transitionType": "link"
+      }
+     ]
+    }
+   },
+   {
+    "label": "navigateToHistoryEntry same document",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "state after same-document entry",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "null /hashpage"
+   },
+   {
+    "label": "navigateToHistoryEntry same document forward",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "state after same-document forward",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{\"n\":1} /pushed1"
+   },
+   {
+    "label": "goto b after pushState",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "back across documents to a pushState entry",
+    "method": "Page.navigateToHistoryEntry",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "state after cross-document back",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{\"n\":1} /pushed1 "
+   },
+   {
+    "label": "goto hashpage again",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "location.hash",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/hashpage#target",
+    "events": [
+     "Page.frameScheduledNavigation",
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading",
+     "Page.frameClearedScheduledNavigation"
+    ]
+   },
+   {
+    "label": "history after hash",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 6,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/pushed1",
+       "userTypedURL": "{A}/hashpage",
+       "title": "",
+       "transitionType": "link"
+      },
+      {
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/hashpage#target",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "link"
+      }
+     ]
+    }
+   },
+   {
+    "label": "history.back() over hash",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{A}/hashpage#target -> {A}/hashpage",
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Page.navigatedWithinDocument",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "reload",
+    "method": "Page.reload",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "history after reload",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 5,
+     "entries": [
+      {
+       "url": "about:blank",
+       "userTypedURL": "about:blank",
+       "title": "",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/a",
+       "userTypedURL": "{A}/a",
+       "title": "Page A",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/c",
+       "userTypedURL": "{A}/c",
+       "title": "Page C",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "typed"
+      },
+      {
+       "url": "{A}/pushed1",
+       "userTypedURL": "{A}/hashpage",
+       "title": "",
+       "transitionType": "link"
+      },
+      {
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "reload"
+      },
+      {
+       "url": "{A}/hashpage#target",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "link"
+      }
+     ]
+    }
+   },
+   {
+    "label": "reload ignoreCache",
+    "method": "Page.reload",
+    "ok": true,
+    "shape": {},
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "reset",
+    "method": "Page.resetNavigationHistory",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "history after reset",
+    "method": "Page.getNavigationHistory",
+    "ok": true,
+    "shape": {
+     "currentIndex": "number",
+     "entries": [
+      {
+       "id": "number",
+       "title": "string",
+       "transitionType": "string",
+       "url": "string",
+       "userTypedURL": "string"
+      }
+     ]
+    },
+    "value": {
+     "currentIndex": 0,
+     "entries": [
+      {
+       "url": "{A}/hashpage",
+       "userTypedURL": "{A}/hashpage",
+       "title": "Hash",
+       "transitionType": "reload"
+      }
+     ]
+    }
+   },
+   {
+    "label": "history.length after reset",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": 1
+   }
+  ],
+  "emulation": [
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "metrics 800x600",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "dims",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "[800,600,800,600,1,800,600,true]"
+   },
+   {
+    "label": "metrics 1024x768 dsf2",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "dims 2",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "[1024,768,800,600,2,1024,768,true]"
+   },
+   {
+    "label": "getLayoutMetrics",
+    "method": "Page.getLayoutMetrics",
+    "ok": true,
+    "shape": {
+     "contentSize": {
+      "height": "number",
+      "width": "number",
+      "x": "number",
+      "y": "number"
+     },
+     "cssContentSize": {
+      "height": "number",
+      "width": "number",
+      "x": "number",
+      "y": "number"
+     },
+     "cssLayoutViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "pageX": "number",
+      "pageY": "number"
+     },
+     "cssVisualViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "offsetX": "number",
+      "offsetY": "number",
+      "pageX": "number",
+      "pageY": "number",
+      "scale": "number",
+      "zoom": "number"
+     },
+     "layoutViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "pageX": "number",
+      "pageY": "number"
+     },
+     "visualViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "offsetX": "number",
+      "offsetY": "number",
+      "pageX": "number",
+      "pageY": "number",
+      "scale": "number",
+      "zoom": "number"
+     }
+    }
+   },
+   {
+    "label": "metrics missing width",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "metrics negative width",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Width and height values must be positive, not greater than 10000000"
+    }
+   },
+   {
+    "label": "metrics too large",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Width and height values must be positive, not greater than 10000000"
+    }
+   },
+   {
+    "label": "metrics missing mobile",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "clear metrics",
+    "method": "Emulation.clearDeviceMetricsOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "touch on",
+    "method": "Emulation.setTouchEmulationEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "touch off",
+    "method": "Emulation.setTouchEmulationEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "touch missing enabled",
+    "method": "Emulation.setTouchEmulationEnabled",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "focus on",
+    "method": "Emulation.setFocusEmulationEnabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "focus missing",
+    "method": "Emulation.setFocusEmulationEnabled",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "media print",
+    "method": "Emulation.setEmulatedMedia",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "media state",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "boolean"
+     }
+    },
+    "value": true
+   },
+   {
+    "label": "media features",
+    "method": "Emulation.setEmulatedMedia",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "media scheme",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "boolean"
+     }
+    },
+    "value": true
+   },
+   {
+    "label": "media reset",
+    "method": "Emulation.setEmulatedMedia",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "background transparent",
+    "method": "Emulation.setDefaultBackgroundColorOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "background reset",
+    "method": "Emulation.setDefaultBackgroundColorOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "geolocation",
+    "method": "Emulation.setGeolocationOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "geolocation clear",
+    "method": "Emulation.setGeolocationOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "timezone",
+    "method": "Emulation.setTimezoneOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "timezone invalid",
+    "method": "Emulation.setTimezoneOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "timezone reset",
+    "method": "Emulation.setTimezoneOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "locale",
+    "method": "Emulation.setLocaleOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "locale invalid",
+    "method": "Emulation.setLocaleOverride",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   },
+   {
+    "label": "locale reset",
+    "method": "Emulation.setLocaleOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "script execution off",
+    "method": "Emulation.setScriptExecutionDisabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "script blocked",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": 2
+   },
+   {
+    "label": "script execution missing value",
+    "method": "Emulation.setScriptExecutionDisabled",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "script execution on",
+    "method": "Emulation.setScriptExecutionDisabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "cpu throttling",
+    "method": "Emulation.setCPUThrottlingRate",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "cpu throttling invalid",
+    "method": "Emulation.setCPUThrottlingRate",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "vision deficiency",
+    "method": "Emulation.setEmulatedVisionDeficiency",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "idle override clear",
+    "method": "Emulation.clearIdleOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "geolocation clear 2",
+    "method": "Emulation.clearGeolocationOverride",
+    "ok": true,
+    "shape": {}
+   }
+  ],
+  "screenshot": [
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "metrics",
+    "method": "Emulation.setDeviceMetricsOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "layout",
+    "method": "Page.getLayoutMetrics",
+    "ok": true,
+    "shape": {
+     "contentSize": {
+      "height": "number",
+      "width": "number",
+      "x": "number",
+      "y": "number"
+     },
+     "cssContentSize": {
+      "height": "number",
+      "width": "number",
+      "x": "number",
+      "y": "number"
+     },
+     "cssLayoutViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "pageX": "number",
+      "pageY": "number"
+     },
+     "cssVisualViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "offsetX": "number",
+      "offsetY": "number",
+      "pageX": "number",
+      "pageY": "number",
+      "scale": "number",
+      "zoom": "number"
+     },
+     "layoutViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "pageX": "number",
+      "pageY": "number"
+     },
+     "visualViewport": {
+      "clientHeight": "number",
+      "clientWidth": "number",
+      "offsetX": "number",
+      "offsetY": "number",
+      "pageX": "number",
+      "pageY": "number",
+      "scale": "number",
+      "zoom": "number"
+     }
+    }
+   },
+   {
+    "label": "viewport png",
+    "method": "Page.captureScreenshot",
+    "ok": true,
+    "shape": {
+     "data": "string"
+    },
+    "value": {
+     "magic": "PNG",
+     "w": 800,
+     "h": 600
+    }
+   },
+   {
+    "label": "puppeteer default",
+    "method": "Page.captureScreenshot",
+    "ok": true,
+    "shape": {
+     "data": "string"
+    },
+    "value": {
+     "magic": "PNG",
+     "w": 800,
+     "h": 600
+    }
+   },
+   {
+    "label": "clip",
+    "method": "Page.captureScreenshot",
+    "ok": true,
+    "shape": {
+     "data": "string"
+    },
+    "value": {
+     "magic": "PNG",
+     "w": 100,
+     "h": 50
+    }
+   },
+   {
+    "label": "jpeg",
+    "method": "Page.captureScreenshot",
+    "ok": true,
+    "shape": {
+     "data": "string"
+    },
+    "value": {
+     "magic": "ffd8"
+    }
+   },
+   {
+    "label": "webp",
+    "method": "Page.captureScreenshot",
+    "ok": true,
+    "shape": {
+     "data": "string"
+    },
+    "value": {
+     "magic": "WEBP"
+    }
+   },
+   {
+    "label": "transparent",
+    "method": "Emulation.setDefaultBackgroundColorOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "transparent png",
+    "method": "Page.captureScreenshot",
+    "ok": true,
+    "shape": {
+     "data": "string"
+    },
+    "value": {
+     "magic": "PNG",
+     "w": 800,
+     "h": 600
+    }
+   },
+   {
+    "label": "transparent reset",
+    "method": "Emulation.setDefaultBackgroundColorOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "bad format",
+    "method": "Page.captureScreenshot",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid image format"
+    }
+   },
+   {
+    "label": "bad clip",
+    "method": "Page.captureScreenshot",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Cannot take screenshot with 0 width."
+    }
+   },
+   {
+    "label": "pdf",
+    "method": "Page.printToPDF",
+    "ok": true,
+    "shape": {
+     "data": "string"
+    },
+    "value": {
+     "magic": "%PDF"
+    }
+   }
+  ],
+  "evaluate": [
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "evaluate by value",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": {
+     "type": "number",
+     "value": 2,
+     "description": "2"
+    }
+   },
+   {
+    "label": "evaluate object",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "className": "string",
+      "description": "string",
+      "objectId": "string",
+      "type": "string"
+     }
+    }
+   },
+   {
+    "label": "evaluate promise",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": {
+     "type": "number",
+     "value": 5,
+     "description": "5"
+    }
+   },
+   {
+    "label": "evaluate rejected",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "exceptionDetails": {
+      "columnNumber": "number",
+      "exception": {
+       "className": "string",
+       "description": "string",
+       "objectId": "string",
+       "subtype": "string",
+       "type": "string"
+      },
+      "exceptionId": "number",
+      "lineNumber": "number",
+      "scriptId": "string",
+      "stackTrace": {
+       "callFrames": [
+        {
+         "columnNumber": "number",
+         "functionName": "string",
+         "lineNumber": "number",
+         "scriptId": "string",
+         "url": "string"
+        }
+       ]
+      },
+      "text": "string"
+     },
+     "result": {
+      "type": "string",
+      "value": {}
+     }
+    },
+    "value": {
+     "text": "Uncaught (in promise) Error: boom",
+     "desc": "Error: boom"
+    }
+   },
+   {
+    "label": "evaluate throws",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "exceptionDetails": {
+      "columnNumber": "number",
+      "exception": {
+       "className": "string",
+       "description": "string",
+       "objectId": "string",
+       "subtype": "string",
+       "type": "string"
+      },
+      "exceptionId": "number",
+      "lineNumber": "number",
+      "scriptId": "string",
+      "stackTrace": {
+       "callFrames": [
+        {
+         "columnNumber": "number",
+         "functionName": "string",
+         "lineNumber": "number",
+         "scriptId": "string",
+         "url": "string"
+        }
+       ]
+      },
+      "text": "string"
+     },
+     "result": {
+      "className": "string",
+      "description": "string",
+      "objectId": "string",
+      "subtype": "string",
+      "type": "string"
+     }
+    },
+    "value": {
+     "text": "Uncaught",
+     "desc": "TypeError: bad"
+    }
+   },
+   {
+    "label": "evaluate syntax error",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "exceptionDetails": {
+      "columnNumber": "number",
+      "exception": {
+       "className": "string",
+       "description": "string",
+       "objectId": "string",
+       "subtype": "string",
+       "type": "string"
+      },
+      "exceptionId": "number",
+      "lineNumber": "number",
+      "scriptId": "string",
+      "text": "string"
+     },
+     "result": {
+      "className": "string",
+      "description": "string",
+      "objectId": "string",
+      "subtype": "string",
+      "type": "string"
+     }
+    },
+    "value": {
+     "text": "Uncaught",
+     "desc": "SyntaxError: let is disallowed as a lexically bound name"
+    }
+   },
+   {
+    "label": "evaluate bad context",
+    "method": "Runtime.evaluate",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Cannot find context with specified id"
+    }
+   },
+   {
+    "label": "evaluate missing expression",
+    "method": "Runtime.evaluate",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "evaluate undefined",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "value": {
+     "type": "undefined"
+    }
+   },
+   {
+    "label": "evaluate bigint",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "unserializableValue": "string"
+     }
+    },
+    "value": {
+     "type": "bigint",
+     "unserializableValue": "10n",
+     "description": "10n"
+    }
+   },
+   {
+    "label": "evaluate NaN",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "unserializableValue": "string"
+     }
+    },
+    "value": {
+     "type": "number",
+     "unserializableValue": "NaN",
+     "description": "NaN"
+    }
+   },
+   {
+    "label": "evaluate function",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "className": "string",
+      "description": "string",
+      "objectId": "string",
+      "type": "string"
+     }
+    },
+    "value": {
+     "type": "function",
+     "className": "Function",
+     "desc": "function(){}"
+    }
+   },
+   {
+    "label": "evaluate window",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "className": "string",
+      "description": "string",
+      "objectId": "string",
+      "subtype": "string",
+      "type": "string"
+     }
+    }
+   },
+   {
+    "label": "callFunctionOn",
+    "method": "Runtime.callFunctionOn",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": {
+     "type": "string",
+     "value": "BODY!"
+    }
+   },
+   {
+    "label": "callFunctionOn executionContextId",
+    "method": "Runtime.callFunctionOn",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    }
+   },
+   {
+    "label": "callFunctionOn bad object",
+    "method": "Runtime.callFunctionOn",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Invalid remote object id"
+    }
+   },
+   {
+    "label": "getProperties",
+    "method": "Runtime.getProperties",
+    "ok": true,
+    "shape": {
+     "internalProperties": [
+      {
+       "name": "string",
+       "value": {
+        "className": "string",
+        "description": "string",
+        "objectId": "string",
+        "type": "string"
+       }
+      }
+     ],
+     "result": []
+    }
+   },
+   {
+    "label": "releaseObjectGroup",
+    "method": "Runtime.releaseObjectGroup",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "addBinding",
+    "method": "Runtime.addBinding",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "removeBinding",
+    "method": "Runtime.removeBinding",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "heap usage",
+    "method": "Runtime.getHeapUsage",
+    "ok": true,
+    "shape": {
+     "backingStorageSize": "number",
+     "embedderHeapUsedSize": "number",
+     "totalSize": "number",
+     "usedSize": "number"
+    }
+   },
+   {
+    "label": "queryObjects missing",
+    "method": "Runtime.queryObjects",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "set flag",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    }
+   },
+   {
+    "label": "poll flag",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": {
+     "type": "number",
+     "value": 42,
+     "description": "42"
+    }
+   },
+   {
+    "label": "DOM.describeNode",
+    "method": "DOM.describeNode",
+    "ok": true,
+    "shape": {
+     "node": {
+      "attributes": [],
+      "backendNodeId": "number",
+      "childNodeCount": "number",
+      "localName": "string",
+      "nodeId": "number",
+      "nodeName": "string",
+      "nodeType": "number",
+      "nodeValue": "string"
+     }
+    },
+    "value": {
+     "node": "BODY"
+    }
+   },
+   {
+    "label": "DOM.resolveNode",
+    "method": "DOM.resolveNode",
+    "ok": true,
+    "shape": {
+     "object": {
+      "className": "string",
+      "description": "string",
+      "objectId": "string",
+      "subtype": "string",
+      "type": "string"
+     }
+    }
+   },
+   {
+    "label": "releaseObject",
+    "method": "Runtime.releaseObject",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Accessibility",
+    "method": "Accessibility.getFullAXTree",
+    "ok": true,
+    "shape": {
+     "nodes": [
+      {
+       "backendDOMNodeId": "number",
+       "childIds": [
+        "string"
+       ],
+       "chromeRole": {
+        "type": "string",
+        "value": "number"
+       },
+       "frameId": "string",
+       "ignored": "boolean",
+       "name": {
+        "sources": [
+         {
+          "attribute": "string",
+          "type": "string"
+         }
+        ],
+        "type": "string",
+        "value": "string"
+       },
+       "nodeId": "string",
+       "properties": [
+        {
+         "name": "string",
+         "value": {
+          "type": "string",
+          "value": "boolean"
+         }
+        }
+       ],
+       "role": {
+        "type": "string",
+        "value": "string"
+       }
+      }
+     ]
+    }
+   }
+  ],
+  "frames": [
+   {
+    "label": "goto iframe page",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.frameAttached",
+     "lifecycle:init",
+     "Page.frameRequestedNavigation",
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "lifecycle:init",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "lifecycle:DOMContentLoaded",
+     "lifecycle:load",
+     "Page.frameStoppedLoading",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "getFrameTree",
+    "method": "Page.getFrameTree",
+    "ok": true,
+    "shape": {
+     "frameTree": {
+      "childFrames": [
+       {
+        "frame": {
+         "adFrameStatus": {
+          "adFrameType": "string"
+         },
+         "crossOriginIsolatedContextType": "string",
+         "domainAndRegistry": "string",
+         "gatedAPIFeatures": [],
+         "id": "string",
+         "loaderId": "string",
+         "mimeType": "string",
+         "name": "string",
+         "parentId": "string",
+         "secureContextType": "string",
+         "securityOrigin": "string",
+         "securityOriginDetails": {
+          "isLocalhost": "boolean"
+         },
+         "url": "string"
+        }
+       }
+      ],
+      "frame": {
+       "adFrameStatus": {
+        "adFrameType": "string"
+       },
+       "crossOriginIsolatedContextType": "string",
+       "domainAndRegistry": "string",
+       "gatedAPIFeatures": [],
+       "id": "string",
+       "loaderId": "string",
+       "mimeType": "string",
+       "secureContextType": "string",
+       "securityOrigin": "string",
+       "securityOriginDetails": {
+        "isLocalhost": "boolean"
+       },
+       "url": "string"
+      }
+     }
+    },
+    "value": {
+     "children": 1
+    }
+   },
+   {
+    "label": "getFrameOwner child",
+    "method": "DOM.getFrameOwner",
+    "ok": true,
+    "shape": {
+     "backendNodeId": "number"
+    },
+    "value": {
+     "backend": "number"
+    }
+   },
+   {
+    "label": "getFrameOwner main",
+    "method": "DOM.getFrameOwner",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Frame with the given id does not belong to the target."
+    }
+   },
+   {
+    "label": "getFrameOwner unknown",
+    "method": "DOM.getFrameOwner",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Frame with the given id was not found."
+    }
+   },
+   {
+    "label": "getFrameOwner missing",
+    "method": "DOM.getFrameOwner",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "DOM.enable",
+    "method": "DOM.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "getDocument",
+    "method": "DOM.getDocument",
+    "ok": true,
+    "shape": {
+     "root": {
+      "backendNodeId": "number",
+      "baseURL": "string",
+      "childNodeCount": "number",
+      "compatibilityMode": "string",
+      "documentURL": "string",
+      "localName": "string",
+      "nodeId": "number",
+      "nodeName": "string",
+      "nodeType": "number",
+      "nodeValue": "string",
+      "xmlVersion": "string"
+     }
+    }
+   },
+   {
+    "label": "createIsolatedWorld child",
+    "method": "Page.createIsolatedWorld",
+    "ok": true,
+    "shape": {
+     "executionContextId": "number"
+    }
+   },
+   {
+    "label": "createIsolatedWorld unknown",
+    "method": "Page.createIsolatedWorld",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "No frame for given id found"
+    }
+   }
+  ],
+  "network": [
+   {
+    "label": "Network.enable",
+    "method": "Network.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setCacheDisabled",
+    "method": "Network.setCacheDisabled",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setCacheDisabled missing",
+    "method": "Network.setCacheDisabled",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "setExtraHTTPHeaders",
+    "method": "Network.setExtraHTTPHeaders",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setExtraHTTPHeaders bad",
+    "method": "Network.setExtraHTTPHeaders",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "goto with extra header",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "extra header seen",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "description": "string",
+      "type": "string",
+      "value": "number"
+     }
+    },
+    "value": {
+     "header": "1"
+    }
+   },
+   {
+    "label": "clear extra headers",
+    "method": "Network.setExtraHTTPHeaders",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setUserAgentOverride",
+    "method": "Network.setUserAgentOverride",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setUserAgentOverride missing",
+    "method": "Network.setUserAgentOverride",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "setBypassServiceWorker",
+    "method": "Network.setBypassServiceWorker",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setBypassServiceWorker missing",
+    "method": "Network.setBypassServiceWorker",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "emulateNetworkConditions",
+    "method": "Network.emulateNetworkConditions",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "emulateNetworkConditions slow",
+    "method": "Network.emulateNetworkConditions",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "emulateNetworkConditions missing",
+    "method": "Network.emulateNetworkConditions",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "emulateNetworkConditions bad type",
+    "method": "Network.emulateNetworkConditions",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Unknown connection type"
+    }
+   },
+   {
+    "label": "emulateNetworkConditions offline",
+    "method": "Network.emulateNetworkConditions",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "offline navigate",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "errorText": "string",
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "value": {
+     "err": "net::ERR_INTERNET_DISCONNECTED"
+    }
+   },
+   {
+    "label": "online",
+    "method": "Network.emulateNetworkConditions",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "overrideNetworkState",
+    "method": "Network.overrideNetworkState",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "emulateNetworkConditionsByRule",
+    "method": "Network.emulateNetworkConditionsByRule",
+    "ok": true,
+    "shape": {
+     "ruleIds": [
+      "string"
+     ]
+    }
+   },
+   {
+    "label": "setBlockedURLs",
+    "method": "Network.setBlockedURLs",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setBlockedURLs missing",
+    "method": "Network.setBlockedURLs",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setBlockedURLs old form",
+    "method": "Network.setBlockedURLs",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "goto a (blocked image test)",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "blocked image",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "error"
+   },
+   {
+    "label": "unblock",
+    "method": "Network.setBlockedURLs",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "unblocked image",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "loaded"
+   },
+   {
+    "label": "blocked fetch",
+    "method": "Network.setBlockedURLs",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "blocked fetch result",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "error Failed to fetch"
+   },
+   {
+    "label": "unblock 2",
+    "method": "Network.setBlockedURLs",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "clearBrowserCache",
+    "method": "Network.clearBrowserCache",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Network.disable",
+    "method": "Network.disable",
+    "ok": true,
+    "shape": {}
+   }
+  ],
+  "fetch": [
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "Fetch.enable",
+    "method": "Fetch.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Fetch.enable bad pattern",
+    "method": "Fetch.enable",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Unsupported request stage 'Bogus'"
+    }
+   },
+   {
+    "label": "requestPaused event",
+    "method": "Fetch.requestPaused",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "networkId": "string",
+     "request": {
+      "headers": {
+       "Accept": "string",
+       "Referer": "string",
+       "User-Agent": "string",
+       "sec-ch-ua": "string",
+       "sec-ch-ua-mobile": "string",
+       "sec-ch-ua-platform": "string"
+      },
+      "initialPriority": "string",
+      "method": "string",
+      "referrerPolicy": "string",
+      "url": "string"
+     },
+     "requestId": "string",
+     "resourceType": "string"
+    }
+   },
+   {
+    "label": "continueRequest",
+    "method": "Fetch.continueRequest",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "continued fetch",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "{\"ok\":true,\"n\":1}"
+   },
+   {
+    "label": "fulfillRequest",
+    "method": "Fetch.fulfillRequest",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "fulfilled fetch",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "201 z Made"
+   },
+   {
+    "label": "failRequest",
+    "method": "Fetch.failRequest",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "failed fetch",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "error Failed to fetch"
+   },
+   {
+    "label": "failRequest unknown id",
+    "method": "Fetch.failRequest",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid InterceptionId."
+    }
+   },
+   {
+    "label": "failRequest bad reason",
+    "method": "Fetch.failRequest",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Unknown errorReason"
+    }
+   },
+   {
+    "label": "continueRequest unknown id",
+    "method": "Fetch.continueRequest",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid InterceptionId."
+    }
+   },
+   {
+    "label": "fulfillRequest unknown id",
+    "method": "Fetch.fulfillRequest",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid InterceptionId."
+    }
+   },
+   {
+    "label": "Fetch.disable",
+    "method": "Fetch.disable",
+    "ok": true,
+    "shape": {}
+   }
+  ],
+  "cookies": [
+   {
+    "label": "goto cookie",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "Network.getCookies",
+    "method": "Network.getCookies",
+    "ok": true,
+    "shape": {
+     "cookies": [
+      {
+       "domain": "string",
+       "expires": "number",
+       "httpOnly": "boolean",
+       "name": "string",
+       "path": "string",
+       "priority": "string",
+       "secure": "boolean",
+       "session": "boolean",
+       "size": "number",
+       "sourcePort": "number",
+       "sourceScheme": "string",
+       "value": "string"
+      }
+     ]
+    },
+    "value": [
+     {
+      "name": "srv",
+      "value": "1",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srvhttp",
+      "value": "2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     }
+    ]
+   },
+   {
+    "label": "Network.getAllCookies",
+    "method": "Network.getAllCookies",
+    "ok": true,
+    "shape": {
+     "cookies": [
+      {
+       "domain": "string",
+       "expires": "number",
+       "httpOnly": "boolean",
+       "name": "string",
+       "path": "string",
+       "priority": "string",
+       "secure": "boolean",
+       "session": "boolean",
+       "size": "number",
+       "sourcePort": "number",
+       "sourceScheme": "string",
+       "value": "string"
+      }
+     ]
+    },
+    "value": [
+     {
+      "name": "srv",
+      "value": "1",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srvhttp",
+      "value": "2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     }
+    ]
+   },
+   {
+    "label": "Network.setCookies",
+    "method": "Network.setCookies",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "getCookies after",
+    "method": "Network.getCookies",
+    "ok": true,
+    "shape": {
+     "cookies": [
+      {
+       "domain": "string",
+       "expires": "number",
+       "httpOnly": "boolean",
+       "name": "string",
+       "path": "string",
+       "priority": "string",
+       "secure": "boolean",
+       "session": "boolean",
+       "size": "number",
+       "sourcePort": "number",
+       "sourceScheme": "string",
+       "value": "string"
+      }
+     ]
+    },
+    "value": [
+     {
+      "name": "c1",
+      "value": "v1",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "c2",
+      "value": "v2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": false,
+      "sameSite": "Lax"
+     },
+     {
+      "name": "srv",
+      "value": "1",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srvhttp",
+      "value": "2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     }
+    ]
+   },
+   {
+    "label": "document.cookie",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "c1=v1; srv=1"
+   },
+   {
+    "label": "Network.setCookie",
+    "method": "Network.setCookie",
+    "ok": true,
+    "shape": {
+     "success": "boolean"
+    },
+    "value": {
+     "success": true
+    }
+   },
+   {
+    "label": "Network.setCookie invalid",
+    "method": "Network.setCookie",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "At least one of the url or domain needs to be specified"
+    }
+   },
+   {
+    "label": "Network.setCookies invalid",
+    "method": "Network.setCookies",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid cookie fields"
+    }
+   },
+   {
+    "label": "Network.deleteCookies",
+    "method": "Network.deleteCookies",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Network.deleteCookies missing name",
+    "method": "Network.deleteCookies",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "getCookies after delete",
+    "method": "Network.getCookies",
+    "ok": true,
+    "shape": {
+     "cookies": [
+      {
+       "domain": "string",
+       "expires": "number",
+       "httpOnly": "boolean",
+       "name": "string",
+       "path": "string",
+       "priority": "string",
+       "secure": "boolean",
+       "session": "boolean",
+       "size": "number",
+       "sourcePort": "number",
+       "sourceScheme": "string",
+       "value": "string"
+      }
+     ]
+    },
+    "value": [
+     {
+      "name": "c2",
+      "value": "v2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": false,
+      "sameSite": "Lax"
+     },
+     {
+      "name": "c3",
+      "value": "v3",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srv",
+      "value": "1",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srvhttp",
+      "value": "2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     }
+    ]
+   },
+   {
+    "label": "Storage.getCookies",
+    "method": "Storage.getCookies",
+    "ok": true,
+    "shape": {
+     "cookies": [
+      {
+       "domain": "string",
+       "expires": "number",
+       "httpOnly": "boolean",
+       "name": "string",
+       "path": "string",
+       "priority": "string",
+       "secure": "boolean",
+       "session": "boolean",
+       "size": "number",
+       "sourcePort": "number",
+       "sourceScheme": "string",
+       "value": "string"
+      }
+     ]
+    },
+    "value": [
+     {
+      "name": "c2",
+      "value": "v2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": false,
+      "sameSite": "Lax"
+     },
+     {
+      "name": "c3",
+      "value": "v3",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srv",
+      "value": "1",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srvhttp",
+      "value": "2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     }
+    ]
+   },
+   {
+    "label": "Storage.setCookies",
+    "method": "Storage.setCookies",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Storage.getCookies after",
+    "method": "Storage.getCookies",
+    "ok": true,
+    "shape": {
+     "cookies": [
+      {
+       "domain": "string",
+       "expires": "number",
+       "httpOnly": "boolean",
+       "name": "string",
+       "path": "string",
+       "priority": "string",
+       "secure": "boolean",
+       "session": "boolean",
+       "size": "number",
+       "sourcePort": "number",
+       "sourceScheme": "string",
+       "value": "string"
+      }
+     ]
+    },
+    "value": [
+     {
+      "name": "c2",
+      "value": "v2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": false,
+      "sameSite": "Lax"
+     },
+     {
+      "name": "c3",
+      "value": "v3",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "s1",
+      "value": "x",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srv",
+      "value": "1",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": false,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     },
+     {
+      "name": "srvhttp",
+      "value": "2",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "httpOnly": true,
+      "secure": false,
+      "session": true,
+      "sameSite": null
+     }
+    ]
+   },
+   {
+    "label": "Storage.clearCookies",
+    "method": "Storage.clearCookies",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Storage.getCookies cleared",
+    "method": "Storage.getCookies",
+    "ok": true,
+    "shape": {
+     "cookies": []
+    },
+    "value": []
+   },
+   {
+    "label": "Storage.getCookies on a page session",
+    "method": "Storage.getCookies",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "browserContextId is only allowed for Browser target"
+    }
+   },
+   {
+    "label": "Network.clearBrowserCookies",
+    "method": "Network.clearBrowserCookies",
+    "ok": true,
+    "shape": {}
+   }
+  ],
+  "browser": [
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "grantPermissions",
+    "method": "Browser.grantPermissions",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "grantPermissions bad",
+    "method": "Browser.grantPermissions",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Unknown permission type: bogus"
+    }
+   },
+   {
+    "label": "resetPermissions",
+    "method": "Browser.resetPermissions",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setPermission",
+    "method": "Browser.setPermission",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "setDownloadBehavior",
+    "method": "Browser.setDownloadBehavior",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "getBrowserContexts",
+    "method": "Target.getBrowserContexts",
+    "ok": true,
+    "shape": {
+     "browserContextIds": [
+      "string"
+     ],
+     "defaultBrowserContextId": "string"
+    }
+   },
+   {
+    "label": "getTargets",
+    "method": "Target.getTargets",
+    "ok": true,
+    "shape": {
+     "targetInfos": [
+      {
+       "attached": "boolean",
+       "browserContextId": "string",
+       "canAccessOpener": "boolean",
+       "targetId": "string",
+       "title": "string",
+       "type": "string",
+       "url": "string"
+      }
+     ]
+    }
+   },
+   {
+    "label": "getWindowBounds",
+    "method": "Browser.getWindowBounds",
+    "ok": true,
+    "shape": {
+     "bounds": {
+      "height": "number",
+      "left": "number",
+      "top": "number",
+      "width": "number",
+      "windowState": "string"
+     }
+    }
+   },
+   {
+    "label": "getWindowForTarget",
+    "method": "Browser.getWindowForTarget",
+    "ok": true,
+    "shape": {
+     "bounds": {
+      "height": "number",
+      "left": "number",
+      "top": "number",
+      "width": "number",
+      "windowState": "string"
+     },
+     "windowId": "number"
+    }
+   },
+   {
+    "label": "performance metrics",
+    "method": "Performance.getMetrics",
+    "ok": true,
+    "shape": {
+     "metrics": []
+    },
+    "value": {
+     "n": false
+    }
+   },
+   {
+    "label": "Page.setBypassCSP",
+    "method": "Page.setBypassCSP",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Page.setDocumentContent",
+    "method": "Page.setDocumentContent",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "content after setDocumentContent",
+    "method": "Runtime.evaluate",
+    "ok": true,
+    "shape": {
+     "result": {
+      "type": "string",
+      "value": "string"
+     }
+    },
+    "value": "setset"
+   },
+   {
+    "label": "Page.stopLoading",
+    "method": "Page.stopLoading",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Page.getResourceTree",
+    "method": "Page.getResourceTree",
+    "ok": true,
+    "shape": {
+     "frameTree": {
+      "frame": {
+       "adFrameStatus": {
+        "adFrameType": "string"
+       },
+       "crossOriginIsolatedContextType": "string",
+       "domainAndRegistry": "string",
+       "gatedAPIFeatures": [],
+       "id": "string",
+       "loaderId": "string",
+       "mimeType": "string",
+       "secureContextType": "string",
+       "securityOrigin": "string",
+       "securityOriginDetails": {
+        "isLocalhost": "boolean"
+       },
+       "url": "string"
+      },
+      "resources": []
+     }
+    }
+   },
+   {
+    "label": "Page.setInterceptFileChooserDialog",
+    "method": "Page.setInterceptFileChooserDialog",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Page.setInterceptFileChooserDialog off",
+    "method": "Page.setInterceptFileChooserDialog",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Security.setIgnoreCertificateErrors",
+    "method": "Security.setIgnoreCertificateErrors",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Audits.enable",
+    "method": "Audits.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Audits.disable",
+    "method": "Audits.disable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Audits.enable twice",
+    "method": "Audits.enable",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "Audits.checkContrast",
+    "method": "Audits.checkContrast",
+    "ok": false,
+    "error": {
+     "code": -32601,
+     "message": "'Audits.checkContrast' wasn't found"
+    }
+   }
+  ],
+  "close": [
+   {
+    "label": "goto a",
+    "method": "Page.navigate",
+    "ok": true,
+    "shape": {
+     "frameId": "string",
+     "isDownload": "boolean",
+     "loaderId": "string"
+    },
+    "events": [
+     "Page.frameStartedNavigating",
+     "Page.frameStartedLoading",
+     "Runtime.executionContextsCleared",
+     "lifecycle:init",
+     "Runtime.executionContextsCleared",
+     "Page.frameNavigated",
+     "Runtime.executionContextCreated",
+     "Page.domContentEventFired",
+     "lifecycle:DOMContentLoaded",
+     "Page.loadEventFired",
+     "lifecycle:load",
+     "Page.frameStoppedLoading"
+    ]
+   },
+   {
+    "label": "Page.close",
+    "method": "Page.close",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "getTargets after Page.close",
+    "method": "Target.getTargets",
+    "ok": true,
+    "shape": {
+     "targetInfos": [
+      {
+       "attached": "boolean",
+       "browserContextId": "string",
+       "canAccessOpener": "boolean",
+       "targetId": "string",
+       "title": "string",
+       "type": "string",
+       "url": "string"
+      }
+     ]
+    },
+    "value": {
+     "n": 0
+    }
+   },
+   {
+    "label": "Target.closeTarget",
+    "method": "Target.closeTarget",
+    "ok": true,
+    "shape": {
+     "success": "boolean"
+    },
+    "value": {
+     "success": true
+    }
+   },
+   {
+    "label": "Target.closeTarget again",
+    "method": "Target.closeTarget",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "No target found for targetId"
+    }
+   },
+   {
+    "label": "Target.closeTarget missing",
+    "method": "Target.closeTarget",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters"
+    }
+   },
+   {
+    "label": "dispose context",
+    "method": "Target.disposeBrowserContext",
+    "ok": true,
+    "shape": {}
+   },
+   {
+    "label": "dispose context again",
+    "method": "Target.disposeBrowserContext",
+    "ok": false,
+    "error": {
+     "code": -32000,
+     "message": "Failed to find context with id <id>"
+    }
+   },
+   {
+    "label": "attach to closed",
+    "method": "Target.attachToTarget",
+    "ok": false,
+    "error": {
+     "code": -32602,
+     "message": "No target with given id found"
+    }
+   }
+  ]
+ }
+}

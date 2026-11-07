@@ -51,6 +51,7 @@ mod frames;
 mod nav;
 #[cfg(feature = "chrome")]
 mod page;
+mod session;
 #[cfg(feature = "chrome")]
 mod sw;
 #[cfg(feature = "chrome")]

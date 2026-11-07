@@ -346,6 +346,48 @@ pub struct NavigateResult {
     /// Set when the navigation failed, e.g. `net::ERR_CONNECTION_REFUSED`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_text: Option<String>,
+    /// Always false: LightBrowser does not download.
+    pub is_download: bool,
+}
+
+/// `Page.NavigationEntry`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationEntry {
+    pub id: i64,
+    pub url: String,
+    #[serde(rename = "userTypedURL")]
+    pub user_typed_url: String,
+    pub title: String,
+    pub transition_type: String,
+}
+
+/// Result of `Page.getNavigationHistory`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationHistory {
+    pub current_index: i64,
+    pub entries: Vec<NavigationEntry>,
+}
+
+/// `Network.emulateNetworkConditions`: `-1` throughput is unlimited.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NetworkConditions {
+    pub offline: bool,
+    pub latency: f64,
+    pub download_throughput: f64,
+    pub upload_throughput: f64,
+}
+
+impl Default for NetworkConditions {
+    fn default() -> Self {
+        NetworkConditions {
+            offline: false,
+            latency: 0.0,
+            download_throughput: -1.0,
+            upload_throughput: -1.0,
+        }
+    }
 }
 
 /// `DOM.Node`. `node_id` equals `backend_node_id` in LightBrowser.

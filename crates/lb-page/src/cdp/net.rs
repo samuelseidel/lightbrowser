@@ -399,7 +399,25 @@ pub(crate) async fn page_fetch(
     }
     let r = match fulfilled {
         Some(r) => Ok(r),
-        None => fetch_answering_auth(&agent, page, req, top_frame, rtype, interception).await,
+        None => {
+            // Network emulation applies after interception, as in Chrome.
+            let (offline, blocked) = {
+                let st = agent.st.borrow();
+                let hit = st
+                    .blocked
+                    .iter()
+                    .find(|(p, _)| glob(p, req.url.as_str()))
+                    .is_some_and(|(_, block)| *block);
+                (st.offline, hit)
+            };
+            if blocked {
+                Err("net::ERR_BLOCKED_BY_CLIENT".to_string())
+            } else if offline && !matches!(req.url.scheme(), "data" | "blob" | "about") {
+                Err("net::ERR_INTERNET_DISCONNECTED".to_string())
+            } else {
+                fetch_answering_auth(&agent, page, req, top_frame, rtype, interception).await
+            }
+        }
     };
     match &r {
         Ok(resp) => {

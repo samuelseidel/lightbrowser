@@ -768,6 +768,23 @@ pub type OpenedParserEnd = Rc<dyn Fn(&Rc<Window>, OpenedEnd)>;
 /// is closed, or returns `None` at once when nobody shows dialogs.
 pub type DialogHost = Rc<dyn Fn(&Window, &DialogRequest) -> Option<DialogAnswer>>;
 
+/// The session history of the page that owns a top-level window (ADR
+/// 0045): `history.length` and `history.state` read it, `pushState`,
+/// `replaceState` and fragment navigations write to it, and traversals
+/// (`history.back()`, `forward()`, `go()`) are requested through the
+/// window ([`Window::take_traversal`]) and decided by the page layer.
+/// Windows without one (frames) keep a history of their own.
+pub trait SessionHost {
+    /// `history.length`: all entries, forward ones included.
+    fn length(&self) -> u32;
+    /// `history.state` of the current entry, as JSON.
+    fn state(&self) -> Option<String>;
+    /// The document changed its URL without loading: a new entry (or the
+    /// current one, for `replace`) at `url` with `state`.
+    /// `fragment` says it was a fragment navigation, not the History API.
+    fn record(&self, url: &Url, state: Option<String>, replace: bool, fragment: bool);
+}
+
 /// `document.readyState`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadyState {
@@ -985,6 +1002,13 @@ pub struct Window {
     pub in_flight: Cell<u32>,
     pub(crate) current_script: Cell<Option<NodeId>>,
     nav_request: RefCell<Option<NavRequest>>,
+    /// The page's session history (top-level windows of pages).
+    pub(crate) session: RefCell<Option<Rc<dyn SessionHost>>>,
+    /// A `history.go(delta)` the page layer has not taken yet.
+    traversal: Cell<Option<i32>>,
+    /// `Emulation.setScriptExecutionDisabled`: `<script>` elements do not
+    /// run (CDP evaluation still does).
+    scripts_disabled: Cell<bool>,
     pub(crate) helpers: RefCell<Helpers>,
     pub(crate) error_depth: Cell<u32>,
     /// Async and dynamically inserted scripts that finished loading, run by
@@ -1110,6 +1134,9 @@ impl Window {
             in_flight: Cell::new(0),
             current_script: Cell::new(None),
             nav_request: RefCell::new(None),
+            session: RefCell::new(None),
+            traversal: Cell::new(None),
+            scripts_disabled: Cell::new(false),
             helpers: RefCell::new(Helpers::default()),
             error_depth: Cell::new(0),
             closed: Cell::new(false),
@@ -1448,6 +1475,50 @@ impl Window {
     /// Same-document history entries (kept when navigating away).
     pub fn history_entry_count(&self) -> u32 {
         self.history.borrow().entries.len() as u32
+    }
+
+    /// Give this window the page's session history (see [`SessionHost`]).
+    pub fn set_session_host(&self, host: Option<Rc<dyn SessionHost>>) {
+        *self.session.borrow_mut() = host;
+    }
+
+    /// Stop (or resume) running the document's `<script>` elements.
+    pub fn set_scripts_disabled(&self, off: bool) {
+        self.scripts_disabled.set(off);
+    }
+
+    /// Whether the page's own scripts are off.
+    pub fn scripts_disabled(&self) -> bool {
+        self.scripts_disabled.get()
+    }
+
+    /// A traversal (`history.back()`, `forward()`, `go(delta)`) the
+    /// document asked for, taken by the page layer.
+    pub fn take_traversal(&self) -> Option<i32> {
+        self.traversal.take()
+    }
+
+    pub(crate) fn request_traversal(&self, delta: i32) {
+        self.traversal.set(Some(delta));
+        self.wake();
+    }
+
+    /// Run a same-document traversal the page layer decided on: the URL
+    /// and `history.state` become the entry's, `popstate` fires, then
+    /// `hashchange` if only the fragment differs.
+    pub fn traverse_same_document(
+        self: &Rc<Self>,
+        js: &mut dyn Js,
+        url: Url,
+        state: Option<String>,
+    ) {
+        window::apply_traversal(js, self, url, state);
+    }
+
+    /// A fragment navigation made by the browser (`Page.navigate` to the
+    /// current URL with another fragment).
+    pub fn navigate_fragment(self: &Rc<Self>, js: &mut dyn Js, url: Url, replace: bool) {
+        window::navigate_to(js, self, url, replace);
     }
 
     /// Serialized main document.

@@ -663,6 +663,7 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
         initiator: Some(w.url()),
         mode,
         user_activated: false,
+        referrer: None,
     };
     start_request(
         w,
@@ -1235,6 +1236,7 @@ fn send_beacon(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostE
         initiator: Some(w.url()),
         mode: if safelisted { "no-cors" } else { "cors" },
         user_activated: false,
+        referrer: None,
     };
     // Not tied to the window: the request survives the document's unload.
     let fut = w.net.fetch(req);
@@ -2034,6 +2036,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             initiator: Some(w.url()),
             mode: "cors",
             user_activated: false,
+            referrer: None,
         };
         if !is_async {
             return xhr_send_sync(cx, w, id, generation, req, origin);

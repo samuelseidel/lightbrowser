@@ -53,6 +53,9 @@ pub struct NetRequest {
     pub mode: &'static str,
     /// A navigation started by trusted user input (`Sec-Fetch-User: ?1`).
     pub user_activated: bool,
+    /// The referrer a browser-initiated navigation was given (CDP
+    /// `Page.navigate`): the URL and its policy (`None`: the default).
+    pub referrer: Option<(Url, Option<String>)>,
 }
 
 impl NetRequest {
@@ -70,6 +73,7 @@ impl NetRequest {
                 _ => "no-cors",
             },
             user_activated: false,
+            referrer: None,
         }
     }
 }
