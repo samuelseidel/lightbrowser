@@ -384,3 +384,115 @@ pub(crate) fn traverse_to(
     });
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u(s: &str) -> Url {
+        Url::parse(s).unwrap()
+    }
+
+    fn commit(s: &mut Session, kind: &NavKind, url: &str, transition: &str, doc: u64) {
+        let url = u(url);
+        s.commit(
+            kind,
+            Commit {
+                url: &url,
+                requested: &url,
+                user_typed: url.as_str(),
+                transition,
+                doc,
+                replace: false,
+                post: false,
+            },
+        );
+    }
+
+    fn view(s: &Session) -> Vec<(String, String, String)> {
+        s.entries
+            .iter()
+            .map(|e| (e.url.path().to_string(), e.title.clone(), e.transition.clone()))
+            .collect()
+    }
+
+    /// The sequence of tests/cdp-raw `history` (entries as Chrome 153
+    /// listed them): typed navigations, a pushState and a replaceState with
+    /// a title change, a traversal, a reload and the reset.
+    #[test]
+    fn entries_as_chrome_listed_them() {
+        let mut s = Session::new(false);
+        commit(&mut s, &NavKind::New, "about:blank", "typed", 1);
+        for (i, path) in ["a", "b", "c"].iter().enumerate() {
+            commit(&mut s, &NavKind::New, &format!("http://h.test/{path}"), "typed", 2 + i as u64);
+            s.sync_title(&format!("Page {}", path.to_uppercase()));
+        }
+        assert_eq!(s.current, 3);
+        assert_eq!(s.index_at(-1), Some(2));
+        assert_eq!(s.index_at(1), None);
+
+        // Back to b and a again: a new navigation drops the forward entries.
+        let b = s.entries[2].id;
+        commit(&mut s, &NavKind::History(b), "http://h.test/b", "typed", 9);
+        assert_eq!(s.current, 2);
+        assert_eq!(s.entries[2].title, "", "the new document brings its own title");
+        s.sync_title("Page B");
+        commit(&mut s, &NavKind::New, "http://h.test/c", "typed", 10);
+        s.sync_title("Page C");
+        assert_eq!(s.entries.len(), 4);
+
+        // pushState and a title change: the new entry takes the title,
+        // keeps the typed URL and has transition `link`; the entry left
+        // keeps its own title.
+        commit(&mut s, &NavKind::New, "http://h.test/hashpage", "typed", 11);
+        s.sync_title("Hash");
+        s.record(&u("http://h.test/pushed1"), None, false, "Hash");
+        s.sync_title("T1");
+        s.record(&u("http://h.test/pushed2"), None, false, "T1");
+        s.record(&u("http://h.test/replaced2"), None, true, "T1");
+        assert_eq!(
+            &view(&s)[4..],
+            [
+                ("/hashpage".into(), "Hash".into(), "typed".into()),
+                ("/pushed1".into(), "T1".into(), "link".into()),
+                ("/replaced2".into(), "T1".into(), "link".into()),
+            ]
+        );
+        assert_eq!(s.entries[5].user_typed, "http://h.test/hashpage");
+        // A traversal inside the document leaves the document's title
+        // alone: no entry takes it.
+        s.current = 4;
+        s.sync_title("T1");
+        assert_eq!(s.entries[4].title, "Hash");
+
+        // A reload keeps the position and marks the entry `reload`; the
+        // reset leaves only the current entry.
+        commit(&mut s, &NavKind::Reload, "http://h.test/hashpage", "reload", 12);
+        assert_eq!(s.entries[4].transition, "reload");
+        assert_eq!(s.entries.len(), 7);
+        s.reset();
+        assert_eq!((s.entries.len(), s.current), (1, 0));
+        assert_eq!(s.entries[0].url.path(), "/hashpage");
+    }
+
+    #[test]
+    fn same_url_replaces_and_state_stays_with_its_entry() {
+        let mut s = Session::new(true);
+        assert_eq!((s.entries.len(), s.entries[0].url.as_str()), (1, "about:blank"));
+        commit(&mut s, &NavKind::New, "http://h.test/a", "typed", 1);
+        commit(&mut s, &NavKind::New, "http://h.test/a", "typed", 2);
+        assert_eq!(s.entries.len(), 2, "a navigation to the URL the page is on replaces its entry");
+        s.record(&u("http://h.test/p"), Some("{\"n\":1}".into()), false, "");
+        s.record(&u("http://h.test/q"), Some("{\"n\":2}".into()), false, "");
+        assert_eq!(s.current_entry().unwrap().state.as_deref(), Some("{\"n\":2}"));
+        s.current = 2;
+        assert_eq!(s.current_entry().unwrap().state.as_deref(), Some("{\"n\":1}"));
+        assert_eq!(s.entries[1].state, None);
+        // Entries of one document share it; a load makes a new one.
+        assert_eq!(s.entries[2].doc, s.entries[1].doc);
+        commit(&mut s, &NavKind::New, "http://h.test/b", "link", 3);
+        assert_eq!(s.entries.len(), 4, "the forward entry (q) is gone");
+        assert_eq!(s.entries[3].url.path(), "/b");
+        assert_ne!(s.entries[3].doc, s.entries[2].doc);
+    }
+}

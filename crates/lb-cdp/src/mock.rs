@@ -901,7 +901,7 @@ impl PageHost for MockHost {
         if let Some(f) = &req.frame_id
             && f != target_id
         {
-            return Err(HostError::new("No frame for given id found"));
+            return Err(HostError::new("No frame with given id found"));
         }
         self.start_navigation(target_id, &req.url)
     }

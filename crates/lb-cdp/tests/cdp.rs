@@ -988,6 +988,113 @@ fn emulation_is_checked_against_the_persona() {
     .unwrap();
 }
 
+/// The methods stock Puppeteer and Playwright send that had no answer
+/// (ADR 0045), and Chrome's replies to bad parameters. The texts and codes
+/// are the ones tests/cdp-raw/chrome.json recorded from Chrome 153.
+#[test]
+fn coverage_methods_and_parameter_errors() {
+    block_on_local(async {
+        let (ws, _) = start(host()).await;
+        let (mut c, _, _, s) = new_page(&ws).await;
+        let sid = Some(s.as_str());
+        // Puppeteer enables Audits on every page: no events, no failure.
+        c.ok("Audits.enable", json!({}), sid).await;
+        c.ok("Audits.enable", json!({}), sid).await;
+        c.ok("Audits.disable", json!({}), sid).await;
+        c.ok("WebMCP.enable", json!({}), sid).await;
+        // Emulation.
+        c.ok("Emulation.setScriptExecutionDisabled", json!({"value": true}), sid).await;
+        c.ok("Emulation.setScriptExecutionDisabled", json!({"value": false}), sid).await;
+        let e = c.call("Emulation.setScriptExecutionDisabled", json!({}), sid).await.unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32602), Some("Invalid parameters")));
+        c.ok("Emulation.setCPUThrottlingRate", json!({"rate": 4}), sid).await;
+        c.ok("Emulation.clearIdleOverride", json!({}), sid).await;
+        c.ok("Emulation.clearGeolocationOverride", json!({}), sid).await;
+        for (m, p) in [
+            ("Emulation.setTouchEmulationEnabled", json!({})),
+            ("Emulation.setFocusEmulationEnabled", json!({})),
+            ("Emulation.setDeviceMetricsOverride", json!({"mobile": false, "height": 600, "deviceScaleFactor": 1})),
+            ("Network.setCacheDisabled", json!({})),
+            ("Network.setBypassServiceWorker", json!({})),
+            ("Network.emulateNetworkConditions", json!({})),
+            ("DOM.getFrameOwner", json!({})),
+            ("Page.navigateToHistoryEntry", json!({})),
+        ] {
+            let e = c.call(m, p, sid).await.unwrap_err();
+            assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32602), Some("Invalid parameters")), "{m}");
+        }
+        let e = c
+            .call(
+                "Emulation.setDeviceMetricsOverride",
+                json!({"mobile": false, "width": 20000000, "height": 600, "deviceScaleFactor": 1}),
+                sid,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(e["code"], -32602);
+        assert_eq!(e["message"], "Width and height values must be positive, not greater than 10000000");
+        // Network.
+        c.ok("Network.setBypassServiceWorker", json!({"bypass": true}), sid).await;
+        let net = json!({"offline": false, "latency": 0, "downloadThroughput": -1, "uploadThroughput": -1});
+        c.ok("Network.emulateNetworkConditions", net.clone(), sid).await;
+        let mut bad = net.clone();
+        bad["connectionType"] = json!("bogus");
+        let e = c.call("Network.emulateNetworkConditions", bad, sid).await.unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32000), Some("Unknown connection type")));
+        let r = c
+            .ok("Network.emulateNetworkConditionsByRule", json!({"matchedNetworkConditions": [{"urlPattern": "", "offline": false, "latency": 0, "downloadThroughput": -1, "uploadThroughput": -1}]}), sid)
+            .await;
+        assert!(r["ruleIds"].is_array());
+        c.ok("Network.overrideNetworkState", net, sid).await;
+        c.ok("Network.setBlockedURLs", json!({"urlPatterns": [{"urlPattern": "http://127.0.0.1/x", "block": true}]}), sid).await;
+        c.ok("Network.setBlockedURLs", json!({"urls": ["http://127.0.0.1/y"]}), sid).await;
+        c.ok("Network.setBlockedURLs", json!({}), sid).await;
+        // Runtime and DOM.
+        let h = c.ok("Runtime.getHeapUsage", json!({}), sid).await;
+        for k in ["usedSize", "totalSize", "embedderHeapUsedSize", "backingStorageSize"] {
+            assert!(h[k].is_number(), "{k}");
+        }
+        // Page.navigate: Chrome's checks before anything loads.
+        let e = c
+            .call("Page.navigate", json!({"url": "http://127.0.0.1:8765/", "referrerPolicy": "bogus"}), sid)
+            .await
+            .unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32602), Some("Invalid referrerPolicy")));
+        let e = c.call("Page.navigate", json!({"url": "http://127.0.0.1:8765/", "referrer": 5}), sid).await.unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32602), Some("Invalid parameters")));
+        let e = c.call("Page.navigate", json!({"url": "not a url"}), sid).await.unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32000), Some("Cannot navigate to invalid URL")));
+        let e = c
+            .call("Page.navigate", json!({"url": "http://127.0.0.1:8765/", "frameId": "nope"}), sid)
+            .await
+            .unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32000), Some("No frame with given id found")));
+        let r = c
+            .ok("Page.navigate", json!({"url": "http://127.0.0.1:8765/a", "referrer": "https://r.example.test/x", "referrerPolicy": "origin"}), sid)
+            .await;
+        assert_eq!(r["isDownload"], false);
+        // The mock keeps one history entry.
+        let h = c.ok("Page.getNavigationHistory", json!({}), sid).await;
+        assert_eq!(h["entries"].as_array().unwrap().len(), 1);
+        // Ids and enum values the client sent: -32602.
+        for (m, p, text) in [
+            ("Fetch.failRequest", json!({"requestId": "nope", "errorReason": "Bogus"}), "Unknown errorReason"),
+            ("Fetch.failRequest", json!({"requestId": "nope", "errorReason": "Failed"}), "Invalid InterceptionId."),
+            ("Fetch.enable", json!({"patterns": [{"requestStage": "Bogus"}]}), "Unsupported request stage 'Bogus'"),
+            ("Page.captureScreenshot", json!({"format": "gif"}), "Invalid image format"),
+            ("Network.setCookie", json!({"name": "a", "value": "b"}), "At least one of the url or domain needs to be specified"),
+        ] {
+            let e = c.call(m, p, sid).await.unwrap_err();
+            assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32602), Some(text)), "{m}");
+        }
+        let e = c.call("Target.closeTarget", json!({"targetId": "nope"}), None).await.unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32602), Some("No target found for targetId")));
+        let e = c.call("Target.attachToTarget", json!({"targetId": "nope", "flatten": true}), None).await.unwrap_err();
+        assert_eq!((e["code"].as_i64(), e["message"].as_str()), (Some(-32602), Some("No target with given id found")));
+    })
+    .unwrap();
+}
+
 #[test]
 fn targets_sessions_and_personas() {
     block_on_local(async {

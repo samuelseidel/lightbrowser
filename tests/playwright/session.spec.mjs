@@ -70,12 +70,21 @@ test('goBack and goForward move the page through its history', async () => {
 
   // A new navigation after going back drops the forward entries.
   await page.goBack();
-  await page.goto(`${base}/h/a`);
-  assert.equal(await page.evaluate(() => history.length), 4); // about:blank, a, b, a
+  await page.goto(`${base}/h/c`);
+  assert.equal(await page.evaluate(() => history.length), 4); // about:blank, a, b, c
   assert.equal(await page.goForward(), null);
 
-  // The same history through CDP: ids, transition types, titles.
+  await context.close();
+});
+
+test('Page.getNavigationHistory, navigateToHistoryEntry and resetNavigationHistory', async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
   const cdp = await context.newCDPSession(page);
+  await page.goto(`${base}/h/a`);
+  await page.click('#b');
+  await page.waitForURL(`${base}/h/b`);
+  await page.goto(`${base}/h/a`);
   const h = await cdp.send('Page.getNavigationHistory');
   assert.equal(h.currentIndex, 3);
   assert.deepEqual(
@@ -83,9 +92,9 @@ test('goBack and goForward move the page through its history', async () => {
     [['about:blank', '', 'typed'], ['/h/a', 'Page A', 'typed'], ['/h/b', 'Page B', 'link'], ['/h/a', 'Page A', 'typed']],
   );
   assert.equal(new Set(h.entries.map((e) => e.id)).size, 4);
-  await cdp.send('Page.navigateToHistoryEntry', { entryId: h.entries[1].id });
-  await page.waitForURL(`${base}/h/a`);
-  assert.equal((await cdp.send('Page.getNavigationHistory')).currentIndex, 1);
+  await cdp.send('Page.navigateToHistoryEntry', { entryId: h.entries[2].id });
+  await page.waitForURL(`${base}/h/b`);
+  assert.equal((await cdp.send('Page.getNavigationHistory')).currentIndex, 2);
   await assert.rejects(cdp.send('Page.navigateToHistoryEntry', { entryId: 123456789 }), /No entry with passed id/);
   await cdp.send('Page.resetNavigationHistory');
   assert.equal((await cdp.send('Page.getNavigationHistory')).entries.length, 1);
@@ -319,8 +328,10 @@ test('context.setOffline fails requests and navigations, and recovers', async ()
   const { context, page } = await newPage();
   await page.goto(`${base}/h/a`);
   await context.setOffline(true);
-  await assert.rejects(page.goto(`${base}/h/b`), /ERR_INTERNET_DISCONNECTED/);
   assert.equal(await page.evaluate(() => fetch('/h/data').then(() => 'ok', () => 'failed')), 'failed');
+  // (Chrome shows an error page after a failed navigation, LightBrowser
+  // stays on the document: nothing is evaluated in between.)
+  await assert.rejects(page.goto(`${base}/h/b`), /ERR_INTERNET_DISCONNECTED/);
   await context.setOffline(false);
   await page.goto(`${base}/h/b`);
   assert.equal(await page.title(), 'Page B');

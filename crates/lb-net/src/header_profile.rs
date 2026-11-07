@@ -1417,6 +1417,57 @@ mod tests {
         );
     }
 
+    /// `Page.navigate` with `referrer` and `referrerPolicy`: what Chrome 153
+    /// put in `Referer` (tests/cdp-raw/chrome.json, scenario `goto`; the
+    /// loopback target is `http://`, the cross-site referrer `https://`).
+    #[test]
+    fn referrer_policies_as_chrome_recorded() {
+        let u = |s: &str| Url::parse(s).unwrap();
+        let target = u("http://127.0.0.1:8000/headers");
+        let https = u("https://ref.example.test/page?q=1#frag");
+        let cases: &[(Option<&str>, Option<&str>)] = &[
+            (None, None), // https to http: a downgrade
+            (Some("noReferrer"), None),
+            (Some("noReferrerWhenDowngrade"), None),
+            (Some("origin"), Some("https://ref.example.test/")),
+            (Some("strictOriginWhenCrossOrigin"), None),
+            (Some("sameOrigin"), None),
+            (Some("unsafeUrl"), Some("https://ref.example.test/page?q=1")),
+        ];
+        for (policy, want) in cases {
+            assert_eq!(referrer_with_policy(&https, *policy, &target).as_deref(), *want, "{policy:?}");
+        }
+        // Same origin, same site (another port), cross origin: same host.
+        let a = u("http://127.0.0.1:8000/from?x=1#h");
+        let b = u("http://127.0.0.1:8001/from?x=1");
+        let full = Some("http://127.0.0.1:8000/from?x=1");
+        assert_eq!(referrer_with_policy(&a, Some("unsafeUrl"), &target).as_deref(), full);
+        assert_eq!(referrer_with_policy(&a, Some("sameOrigin"), &target).as_deref(), full);
+        assert_eq!(referrer_with_policy(&a, Some("originWhenCrossOrigin"), &target).as_deref(), full);
+        assert_eq!(referrer_with_policy(&a, None, &target).as_deref(), full);
+        assert_eq!(
+            referrer_with_policy(&b, Some("unsafeUrl"), &target).as_deref(),
+            Some("http://127.0.0.1:8001/from?x=1")
+        );
+        let other = u("http://127.0.0.1:9000/headers");
+        assert_eq!(referrer_with_policy(&a, Some("unsafeUrl"), &other).as_deref(), full);
+        assert_eq!(referrer_with_policy(&a, None, &other).as_deref(), Some("http://127.0.0.1:8000/"));
+        // Credentials and fragments never go out; http referrers work.
+        let creds = u("https://u:p@ref.example.test/page?q=1");
+        assert_eq!(
+            referrer_with_policy(&creds, Some("unsafeUrl"), &target).as_deref(),
+            Some("https://ref.example.test/page?q=1")
+        );
+        let plain = u("http://ref.example.test/page?q=1");
+        assert_eq!(
+            referrer_with_policy(&plain, Some("unsafeUrl"), &target).as_deref(),
+            Some("http://ref.example.test/page?q=1")
+        );
+        assert_eq!(referrer_with_policy(&u("about:blank"), Some("unsafeUrl"), &target), None);
+        assert_eq!(referrer_policy_token("strictOrigin"), Some("strict-origin"));
+        assert_eq!(referrer_policy_token("bogus"), None);
+    }
+
     #[test]
     fn site_and_referrer_rules() {
         let a = url("https://a.example.test/x");
