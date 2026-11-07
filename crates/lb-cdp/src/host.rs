@@ -168,6 +168,33 @@ pub struct PageMetrics {
     pub content_height: f64,
 }
 
+/// `Emulation.setGeolocationOverride` (ADR 0039): what the page's
+/// `navigator.geolocation` answers.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GeolocationOverride {
+    /// A position (validated as Chrome does: latitude, longitude, accuracy).
+    Position(GeoPosition),
+    /// Latitude, longitude or accuracy missing: `POSITION_UNAVAILABLE`.
+    Unavailable,
+}
+
+/// A position for [`GeolocationOverride`]. Optional members the page sees
+/// as `null` are `None` (Blink drops a negative `altitudeAccuracy` or
+/// `speed`, and a `heading` outside 0..=360).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeoPosition {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub accuracy: f64,
+    pub altitude: Option<f64>,
+    pub altitude_accuracy: Option<f64>,
+    pub heading: Option<f64>,
+    pub speed: Option<f64>,
+    /// Wall-clock ms since the epoch when the override was set (Chrome
+    /// stamps the position then).
+    pub timestamp: f64,
+}
+
 /// A CDP `DOM.RGBA` color (`a` in 0..=1).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rgba {
@@ -610,6 +637,12 @@ pub trait PageHost {
         Ok(())
     }
 
+    /// `Page.setBypassCSP`: the page's documents ignore their Content
+    /// Security Policy (Playwright's `bypassCSP`).
+    fn set_bypass_csp(&self, _target_id: &str, _enabled: bool) -> HostResult<()> {
+        Ok(())
+    }
+
     /// Cookies of a context; `urls` limits them to cookies sent to those URLs.
     fn cookies(&self, _context: &str, _urls: Option<&[String]>) -> HostResult<Vec<Cookie>> {
         Ok(Vec::new())
@@ -692,6 +725,60 @@ pub trait PageHost {
     }
 
     fn set_focus_emulation(&self, _target_id: &str, _enabled: bool) -> HostResult<()> {
+        Ok(())
+    }
+
+    // ---- Locale overrides (ADR 0039; the server keeps Chrome's
+    // ownership rules and calls these with the context's new values) ----
+
+    /// `Emulation.setTimezoneOverride`: make `zone` the time zone of every
+    /// realm of browser `context` (its pages, frames and workers; the
+    /// realms that exist now and later), as Chrome does for a renderer
+    /// process. `None` restores the persona's zone. `target_id` is the page
+    /// that asked. `Ok(false)`: the zone is unknown (ICU) and nothing
+    /// changed.
+    fn set_time_zone_override(
+        &self,
+        _context: &str,
+        _target_id: &str,
+        _zone: Option<&str>,
+    ) -> HostResult<bool> {
+        Ok(true)
+    }
+
+    /// `Emulation.setLocaleOverride`: ICU's default locale (the `Intl`
+    /// default, `toLocale*String`) of the context's realms; `navigator.language`
+    /// does not change. `None` restores the persona's. Already validated
+    /// ([`crate::emulation::locale_is_valid`]).
+    fn set_locale_override(
+        &self,
+        _context: &str,
+        _target_id: &str,
+        _locale: Option<&str>,
+    ) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `acceptLanguage` of `Emulation/Network.setUserAgentOverride`: the
+    /// page's `navigator.languages` (Chrome's parse of the list) and the
+    /// `Accept-Language` of its requests (Chrome's q-values). `None`
+    /// restores the persona's. Workers keep the persona's, as in Chrome.
+    fn set_accept_language_override(
+        &self,
+        _target_id: &str,
+        _languages: Option<&str>,
+    ) -> HostResult<()> {
+        Ok(())
+    }
+
+    /// `Emulation.setGeolocationOverride` / `clearGeolocationOverride`
+    /// (`None`): what the page's `navigator.geolocation` reports when the
+    /// permission is granted.
+    fn set_geolocation_override(
+        &self,
+        _target_id: &str,
+        _geo: Option<GeolocationOverride>,
+    ) -> HostResult<()> {
         Ok(())
     }
 

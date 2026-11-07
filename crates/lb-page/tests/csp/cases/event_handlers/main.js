@@ -1,0 +1,10 @@
+var b = document.getElementById('b');
+t('onclick prop', function () { return String(b.onclick); });
+b.click();
+var d = document.getElementById('d');
+d.setAttribute('onclick', "log('set attr handler ran')");
+d.click();
+d.onclick = function () { log('prop handler ran'); };
+d.click();
+t('img onerror attr', function () { var i = document.createElement('img'); i.setAttribute('onerror', "log('img onerror ran')"); i.src = 'missing.png'; document.body.appendChild(i); return 'ok'; });
+done(500);

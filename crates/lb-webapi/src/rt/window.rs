@@ -278,7 +278,7 @@ impl Window {
     }
 }
 
-fn set_timer(cx: &mut CallCtx<'_, '_, '_>, w: &Window, repeat: bool) -> Result<(), HostError> {
+fn set_timer(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>, repeat: bool) -> Result<(), HostError> {
     // A removed frame's window schedules nothing (Chrome returns 0).
     if super::frames::is_detached(w) {
         return cx.ret(0);
@@ -286,7 +286,13 @@ fn set_timer(cx: &mut CallCtx<'_, '_, '_>, w: &Window, repeat: bool) -> Result<(
     let cb = if cx.arg_kind(0) == ValueKind::Function {
         TimerCallback::Function(cx.arg_handle(0))
     } else {
-        TimerCallback::Code(cx.arg_string(0)?)
+        let code = cx.arg_string(0)?;
+        // Content Security Policy: a string is code (Blink checks it
+        // here; a blocked timer is never made and the call returns 0).
+        if !w.csp_string_timer(cx, &code) {
+            return cx.ret(0);
+        }
+        TimerCallback::Code(code)
     };
     let delay = if cx.len() > 1 { cx.arg_f64(1)? } else { 0.0 };
     let args = (2..cx.len()).map(|i| cx.arg_handle(i)).collect();
@@ -518,6 +524,28 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
     if !w.nav_can_proceed() {
         return;
     }
+    // A `javascript:` URL runs its code in the document (in a task), if
+    // the Content Security Policy allows it (`script-src-elem`, ADR 0036).
+    if url.scheme() == "javascript" {
+        let code = percent_encoding::percent_decode_str(&url.as_str()["javascript:".len()..])
+            .decode_utf8_lossy()
+            .into_owned();
+        let loc = w.csp_here(Some(&mut *js));
+        if !w.csp_inline(super::csp::Inline::Navigation, None, &code, "", false, loc) {
+            return;
+        }
+        w.queue_task(
+            TaskSource::DomManipulation,
+            Box::new(move |js, w| {
+                let doc = w.url().to_string();
+                if let Err(e) = js.eval(&code, lb_js::ScriptOrigin::new(&doc)) {
+                    w.report_exception(js, &e);
+                }
+                w.after_mutation(js);
+            }),
+        );
+        return;
+    }
     let cur = w.url();
     let same_doc = url.fragment().is_some() && {
         let (mut a, mut b) = (cur.clone(), url.clone());
@@ -704,17 +732,50 @@ fn singleton(w: &Window, name: &'static str, make: impl FnOnce() -> Obj) -> Arg 
 }
 
 fn storage_of(w: &Window, id: u32) -> Option<crate::host::StorageArea> {
-    let local = w
-        .with_obj(id, |o| match o {
-            Obj::Storage { local } => Some(*local),
-            _ => None,
-        })
-        .flatten()?;
+    let local = storage_kind(w, id)?;
     Some(if local {
         w.local_storage.clone()
     } else {
         w.session_storage.clone()
     })
+}
+
+/// `Some(local)` for a `Storage` object.
+fn storage_kind(w: &Window, id: u32) -> Option<bool> {
+    w.with_obj(id, |o| match o {
+        Obj::Storage { local } => Some(*local),
+        _ => None,
+    })
+    .flatten()
+}
+
+/// Write to the area of `Storage` object `id`; the other windows using
+/// the area get a `storage` event when something changed (ADR 0037).
+/// Returns whether a removed key existed. `None`: not a `Storage`.
+fn storage_write(w: &Window, id: u32, key: Option<&str>, value: Option<&str>) -> Option<bool> {
+    let local = storage_kind(w, id)?;
+    let area = storage_of(w, id)?;
+    let (key, old, new) = match (key, value) {
+        (Some(k), Some(v)) => {
+            let old = area.set(k, v);
+            if old.as_deref() == Some(v) {
+                return Some(true);
+            }
+            (Some(k.to_owned()), old, Some(v.to_owned()))
+        }
+        (Some(k), None) => match area.take(k) {
+            Some(old) => (Some(k.to_owned()), Some(old), None),
+            None => return Some(false),
+        },
+        (None, _) => {
+            if !area.clear() {
+                return Some(false);
+            }
+            (None, None, None)
+        }
+    };
+    super::partition::storage_changed(w, local, key, old, new);
+    Some(true)
 }
 
 /// History of a removed frame's document: Chrome throws.
@@ -873,16 +934,20 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         if super::frames::is_detached(w) {
             return cx.ret(Arg::Null);
         }
-        cx.ret(singleton(w, "localStorage", || Obj::Storage {
-            local: true,
+        w.csp_sandbox_check("read", "localStorage", "Window")?;
+        cx.ret(singleton(w, "localStorage", || {
+            super::partition::watch_storage(w, true);
+            Obj::Storage { local: true }
         }))
     });
     getter(reg, rt, "Window", "sessionStorage", |cx, w| {
         if super::frames::is_detached(w) {
             return cx.ret(Arg::Null);
         }
-        cx.ret(singleton(w, "sessionStorage", || Obj::Storage {
-            local: false,
+        w.csp_sandbox_check("read", "sessionStorage", "Window")?;
+        cx.ret(singleton(w, "sessionStorage", || {
+            super::partition::watch_storage(w, false);
+            Obj::Storage { local: false }
         }))
     });
     getter(reg, rt, "Window", "performance", |cx, w| {
@@ -892,6 +957,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         cx.ret(singleton(w, "screen", || Obj::Screen))
     });
     getter(reg, rt, "Window", "origin", |cx, w| {
+        // A CSP `sandbox` without `allow-same-origin`: an opaque origin.
+        if w.csp_opaque_origin() {
+            return cx.ret("null");
+        }
         cx.ret(w.url().origin().ascii_serialization())
     });
     getter(reg, rt, "Window", "isSecureContext", |cx, w| {
@@ -1200,19 +1269,19 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         need_args(cx, 2, "setItem", "Storage")?;
         let id = this_obj(cx)?;
         let (k, v) = (cx.arg_string(0)?, cx.arg_string(1)?);
-        storage_of(w, id).ok_or_else(illegal)?.set(&k, &v);
+        storage_write(w, id, Some(&k), Some(&v)).ok_or_else(illegal)?;
         Ok(())
     });
     method(reg, rt, "Storage", "removeItem", |cx, w| {
         need_args(cx, 1, "removeItem", "Storage")?;
         let id = this_obj(cx)?;
         let k = cx.arg_string(0)?;
-        storage_of(w, id).ok_or_else(illegal)?.remove(&k);
+        storage_write(w, id, Some(&k), None).ok_or_else(illegal)?;
         Ok(())
     });
     method(reg, rt, "Storage", "clear", |cx, w| {
         let id = this_obj(cx)?;
-        storage_of(w, id).ok_or_else(illegal)?.clear();
+        storage_write(w, id, None, None).ok_or_else(illegal)?;
         Ok(())
     });
     let rs = rt.clone();
@@ -1255,11 +1324,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
                 return Ok(false);
             };
-            let Some(s) = storage_of(&w, h.id) else {
-                return Ok(false);
-            };
-            s.set(name, value);
-            Ok(true)
+            Ok(storage_write(&w, h.id, Some(name), Some(value)).is_some())
         }),
     );
     let rs = rt.clone();
@@ -1272,10 +1337,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let Some(h) = cx.holder_host().filter(|h| h.kind == K_OBJ) else {
                 return Ok(None);
             };
-            let Some(s) = storage_of(&w, h.id) else {
-                return Ok(None);
-            };
-            Ok(s.remove(name).then_some(true))
+            Ok(storage_write(&w, h.id, Some(name), None).and_then(|had| had.then_some(true)))
         }),
     );
     let rs = rt.clone();
@@ -1456,12 +1518,21 @@ fn register_navigator(reg: &mut Registry, rt: &Runtime) {
             .try_call_handle(parse, Arg::Undefined, &[Arg::String(json)])
             .map_err(|e| HostError::Error(e.message))?;
         let _ = cx.try_call(freeze, Arg::Undefined, &[Arg::Handle(arr)]);
-        w.helpers.borrow_mut().languages = Some(arr);
+        // Under a CDP `acceptLanguage` override Chrome 153 answers a new
+        // array on every read (`navigator.languages !== navigator.languages`,
+        // recorded in `lb-page` `tests/locale/`; ADR 0039).
+        if w.net.languages_override().is_none() {
+            w.helpers.borrow_mut().languages = Some(arr);
+        }
         cx.ret(Arg::Handle(arr))
     });
 }
 
 fn languages(w: &Window) -> Vec<String> {
+    // A CDP `acceptLanguage` override (ADR 0039).
+    if let Some(l) = w.net.languages_override() {
+        return l;
+    }
     if let Some(p) = &w.profile
         && !p.locale.languages.is_empty()
     {

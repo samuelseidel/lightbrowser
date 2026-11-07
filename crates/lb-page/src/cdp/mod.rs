@@ -24,6 +24,7 @@
 
 pub(crate) mod agent;
 mod human;
+mod locale;
 pub(crate) mod net;
 mod screenshot;
 pub(crate) mod workers;
@@ -968,6 +969,22 @@ impl PageHost for CdpHost {
 
     // ---- Network / Fetch / Storage ----
 
+    fn set_bypass_csp(&self, target_id: &str, enabled: bool) -> HostResult<()> {
+        if self.worker(target_id).is_some() {
+            return Ok(());
+        }
+        // Later documents of the page, and the current frame tree (ADR 0036).
+        self.post(target_id, move |ws, p, _| {
+            p.bypass_csp.set(enabled);
+            if let Some(top) = p.window() {
+                for w in crate::frames::tree(&top) {
+                    w.set_csp_bypass(enabled);
+                    ws.with_engine(|e| w.csp_apply_codegen(e));
+                }
+            }
+        })
+    }
+
     fn set_extra_http_headers(
         &self,
         target_id: &str,
@@ -1161,6 +1178,40 @@ impl PageHost for CdpHost {
     }
 
     // ---- Emulation ----
+
+    fn set_time_zone_override(
+        &self,
+        context: &str,
+        target_id: &str,
+        zone: Option<&str>,
+    ) -> HostResult<bool> {
+        self.time_zone_override(context, target_id, zone)
+    }
+
+    fn set_locale_override(
+        &self,
+        context: &str,
+        _target_id: &str,
+        locale: Option<&str>,
+    ) -> HostResult<()> {
+        self.locale_override(context, locale)
+    }
+
+    fn set_accept_language_override(
+        &self,
+        target_id: &str,
+        languages: Option<&str>,
+    ) -> HostResult<()> {
+        self.accept_language_override(target_id, languages)
+    }
+
+    fn set_geolocation_override(
+        &self,
+        target_id: &str,
+        geo: Option<lb_cdp::GeolocationOverride>,
+    ) -> HostResult<()> {
+        self.geolocation_override(target_id, geo)
+    }
 
     fn set_viewport(&self, target_id: &str, viewport: Option<ViewportOverride>) -> HostResult<()> {
         let persona = {

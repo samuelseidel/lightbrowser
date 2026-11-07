@@ -182,12 +182,13 @@ async fn probe_service_worker(page: &Rc<PageState>, url: &url::Url) -> Value {
         origin: url.origin().ascii_serialization(),
         creator: url.clone(),
         persona: ctx.persona().clone(),
-        profile: ctx.profile().cloned(),
+        profile: ctx.effective_profile(),
         virtual_time: false,
         inbox: inbox.clone(),
         inbox_rx,
         control: control.clone(),
         parent: None,
+        csp: None,
         service: Some(sw::ServiceStart {
             version: 0,
             registration: 0,
@@ -195,6 +196,7 @@ async fn probe_service_worker(page: &Rc<PageState>, url: &url::Url) -> Value {
                 let _ = etx.send(r);
             }),
         }),
+        storage_key: None,
     };
     crate::worker::spawn(ctx, start, crate::worker::Inspect::No);
     let run = async {
@@ -397,6 +399,19 @@ const CHROME_PLUGINS: &[&str] = &[
 
 /// Compare a collected surface with the persona. Returns the report.
 pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
+    diff_with(p, s, None)
+}
+
+/// [`diff`] for a page whose window `navigator.languages` is
+/// `window_languages` (a CDP `acceptLanguage` override, ADR 0039; workers
+/// keep the persona's, as in Chrome).
+pub fn diff_with(p: &PersonaProfile, s: &Value, window_languages: Option<&[String]>) -> Value {
+    let languages = window_languages.unwrap_or(&p.locale.languages);
+    let first = |l: &[String]| {
+        l.first()
+            .cloned()
+            .unwrap_or_else(|| p.locale.language.clone())
+    };
     let mut c = Checks {
         list: Vec::new(),
         counts: [0; 4],
@@ -458,13 +473,15 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
         s,
         "navigator.language",
         "navigator.language",
-        json!(p.locale.language),
+        // `languages[0]`: the ICU locale (`locale.language`) may differ
+        // under a locale override.
+        json!(first(languages)),
     );
     c.eq(
         s,
         "navigator.languages",
         "navigator.languages",
-        json!(p.locale.languages),
+        json!(languages),
     );
     c.eq(
         s,
@@ -763,7 +780,7 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
                 ("userAgent", json!(b.user_agent)),
                 ("appVersion", json!(b.app_version)),
                 ("platform", json!(p.os.platform)),
-                ("language", json!(p.locale.language)),
+                ("language", json!(first(&p.locale.languages))),
                 ("languages", json!(p.locale.languages)),
                 (
                     "hardwareConcurrency",
@@ -1035,13 +1052,14 @@ pub fn diff(p: &PersonaProfile, s: &Value) -> Value {
 
 /// The report for the page's current document (see the module docs).
 pub(crate) async fn report(ws: &Rc<WorkerState>, page: &Rc<PageState>) -> Result<Value, String> {
+    // The persona with the CDP time zone / locale overrides (ADR 0039).
     let profile = page
         .ctx
-        .profile()
-        .cloned()
+        .effective_profile()
         .ok_or("the context has no full persona (PersonaProfile)")?;
     let surface = collect(ws, page, &profile).await?;
-    let mut r = diff(&profile, &surface);
+    let languages = page.agent().and_then(|a| a.languages_override());
+    let mut r = diff_with(&profile, &surface, languages.as_deref());
     r["surface"] = surface;
     Ok(r)
 }

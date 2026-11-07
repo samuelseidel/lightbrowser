@@ -10,8 +10,13 @@
 //!   `ready` is one resolved promise, `check()` answers like Chrome (true
 //!   unless a matching face in the set is still unloaded; a syntax error
 //!   throws), `load()` resolves with the matching loaded faces.
-//! - `FontFace`: descriptors are stored as given. `local("Name")` sources
-//!   load when the persona has the font, binary sources when they start
+//! - `FontFace`: descriptors are stored as given; `family` reads back
+//!   serialized as Chrome 153 does when the constructor's family needed it
+//!   (quoted unless one identifier). `src`
+//!   parses as Blink's `ConsumeFontFaceSrc` (invalid components dropped;
+//!   none valid is a `SyntaxError` and status `error`). `local("Name")`
+//!   loads when `Name` is a full or PostScript face name of the persona's
+//!   OS release (`lb_layout::LocalFonts`), binary sources when they start
 //!   with a font signature; `url()` sources are not fetched and end in
 //!   `error` (`NetworkError`).
 //! - `queryLocalFonts()` rejects with `SecurityError` (no user activation
@@ -60,14 +65,19 @@ const DESCRIPTORS: [(&str, &str); 12] = [
 /// Where a face loads from.
 #[derive(Clone, Debug)]
 enum Source {
-    /// `local()` names and `url()`s of a `src` string.
+    /// The `local()` names of a `src` string (its `url()`s are not fetched).
     List { locals: Vec<String> },
-    /// An `ArrayBuffer` / view that starts like a font.
+    /// An `ArrayBuffer` / view; `true` when it starts like a font.
     Binary(bool),
+    /// A `src` string with no valid component (kept for the message).
+    Invalid(String),
 }
 
 pub(crate) struct Face {
     family: String,
+    /// The constructor's family needed quoting: `family` reads back
+    /// serialized (Blink's `font_family_needs_quoting_`, kept across sets).
+    quote: bool,
     desc: Vec<String>,
     status: &'static str,
     source: Source,
@@ -82,19 +92,177 @@ fn with_font<R>(w: &Window, id: u32, f: impl FnOnce(&mut FontObj) -> Option<R>) 
     .flatten()
 }
 
-/// The `src` descriptor's `local()` names (`url()`s are not fetched).
+/// Parses a `src` string as Blink's `ConsumeFontFaceSrc` (Chrome 153):
+/// comma-separated `local(<family-name>)` and `url(...) [format(...)]
+/// [tech(...)]` components; invalid ones are dropped, none valid is an
+/// error.
 fn parse_src(s: &str) -> Source {
-    let mut locals = Vec::new();
-    for part in s.split(',') {
-        if let Some(rest) = part.trim().strip_prefix("local(") {
-            let name = rest
-                .trim_end_matches(')')
-                .trim()
-                .trim_matches(|c| c == '"' || c == '\'');
-            locals.push(name.to_owned());
+    let mut p = cssparser::Parser::new(s);
+    let items = p.parse_comma_separated_ignoring_errors(|p| src_component(p));
+    if items.is_empty() {
+        return Source::Invalid(s.to_owned());
+    }
+    Source::List {
+        locals: items.into_iter().flatten().collect(),
+    }
+}
+
+type SrcResult<T> = Result<T, cssparser::ParseError<()>>;
+
+fn bad<T>() -> SrcResult<T> {
+    Err(cssparser::ParseError::unexpected_token())
+}
+
+/// One `src` component: `Some(name)` for `local()`, `None` for `url()`.
+fn src_component(p: &mut cssparser::Parser<'_>) -> SrcResult<Option<String>> {
+    use cssparser::Token;
+    let local = match p.next()?.clone() {
+        Token::Function(f) if f.eq_ignore_ascii_case("local") => {
+            Some(p.parse_nested_block(|p| local_name(p))?)
+        }
+        Token::Function(f) if f.eq_ignore_ascii_case("url") => {
+            p.parse_nested_block(|p| {
+                p.expect_string()?;
+                Ok(())
+            })?;
+            None
+        }
+        Token::UnquotedUrl(_) => None,
+        _ => return bad(),
+    };
+    if local.is_none() {
+        if p.try_parse(|p| p.expect_function_matching("format"))
+            .is_ok()
+        {
+            p.parse_nested_block(|p| {
+                let ok = match p.next()?.clone() {
+                    Token::QuotedString(f) => matches!(
+                        f.to_ascii_lowercase().as_str(),
+                        "woff"
+                            | "woff2"
+                            | "truetype"
+                            | "opentype"
+                            | "collection"
+                            | "woff-variations"
+                            | "woff2-variations"
+                            | "truetype-variations"
+                            | "opentype-variations"
+                    ),
+                    Token::Ident(f) => matches!(
+                        f.to_ascii_lowercase().as_str(),
+                        "woff" | "woff2" | "truetype" | "opentype" | "collection"
+                    ),
+                    _ => return bad(),
+                };
+                if !ok {
+                    return bad();
+                }
+                p.expect_exhausted()?;
+                Ok(())
+            })?;
+        }
+        if p.try_parse(|p| p.expect_function_matching("tech")).is_ok() {
+            p.parse_nested_block(|p| {
+                p.parse_comma_separated(|p| {
+                    let t = p.expect_ident()?.to_ascii_lowercase();
+                    match t.as_str() {
+                        "variations" | "color-colrv1" | "color-colrv0" | "color-sbix"
+                        | "color-cbdt" | "features-opentype" | "features-aat" | "palettes" => {
+                            Ok(())
+                        }
+                        _ => bad(),
+                    }
+                })?;
+                Ok(())
+            })?;
         }
     }
-    Source::List { locals }
+    p.expect_exhausted()?;
+    Ok(local)
+}
+
+/// The argument of `local()`: one string, or identifiers joined by single
+/// spaces (one CSS-wide keyword or `default` alone is invalid).
+fn local_name(p: &mut cssparser::Parser<'_>) -> SrcResult<String> {
+    use cssparser::Token;
+    let name = match p.next()?.clone() {
+        Token::QuotedString(s) => s.to_string(),
+        Token::Ident(first) => {
+            let mut name = first.to_string();
+            let mut words = 1;
+            while let Ok(w) = p.try_parse(|p| p.expect_ident_cloned()) {
+                name.push(' ');
+                name.push_str(&w);
+                words += 1;
+            }
+            if words == 1 && (is_css_wide_keyword(&name) || name.eq_ignore_ascii_case("default")) {
+                return bad();
+            }
+            name
+        }
+        _ => return bad(),
+    };
+    p.expect_exhausted()?;
+    Ok(name)
+}
+
+fn is_css_wide_keyword(s: &str) -> bool {
+    // `revert-rule` counts in Chrome 153 (CSSRevertRule is on).
+    [
+        "initial",
+        "inherit",
+        "unset",
+        "revert",
+        "revert-layer",
+        "revert-rule",
+    ]
+    .iter()
+    .any(|k| s.eq_ignore_ascii_case(k))
+}
+
+/// `FontFace.family` as Chrome 153 serializes it (Blink
+/// `SerializeFontFamily`): as is when it is one CSS identifier and not a
+/// CSS-wide keyword, `default` or a generic family name (case-sensitive in
+/// 153), else a CSS string: `"` and backslash escaped, control characters
+/// as a hex escape and a space.
+fn serialize_family(f: &str) -> String {
+    let generic = matches!(
+        f,
+        "cursive" | "fantasy" | "monospace" | "sans-serif" | "serif" | "system-ui" | "math"
+    );
+    if is_identifier(f) && !is_css_wide_keyword(f) && !f.eq_ignore_ascii_case("default") && !generic
+    {
+        return f.to_owned();
+    }
+    let mut out = String::with_capacity(f.len() + 2);
+    out.push('"');
+    for c in f.chars() {
+        match c {
+            '\0'..='\u{1f}' | '\u{7f}' => out.push_str(&format!("\\{:x} ", c as u32)),
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// One CSS tokenizer `ident` without escapes: `-?` then a name-start code
+/// point, then name code points.
+fn is_identifier(s: &str) -> bool {
+    let start = |c: char| c.is_ascii_alphabetic() || c == '_' || !c.is_ascii();
+    let mut it = s.chars().peekable();
+    if it.peek() == Some(&'-') {
+        it.next();
+    }
+    match it.next() {
+        Some(c) if start(c) => {}
+        _ => return false,
+    }
+    it.all(|c| start(c) || c.is_ascii_digit() || c == '-')
 }
 
 fn is_font_data(b: &[u8]) -> bool {
@@ -109,45 +277,24 @@ fn is_font_data(b: &[u8]) -> bool {
     )
 }
 
-/// `local()` resolves a family of the persona or, on macOS 26, any face
-/// name (full or PostScript) Chrome resolves on a default install
-/// (`profiles/local_fonts/macos_26.json`, recorded from Chrome).
+/// `local(name)` resolves when `name` is a face name (full or PostScript,
+/// any case) of the persona's OS release (`lb_layout::LocalFonts`, from
+/// Chrome recordings and the OS font lists). A persona family the release
+/// does not ship (an extra installed font) resolves by its family name;
+/// without a list for the OS only the persona's families resolve.
 fn installed(w: &Window, name: &str) -> bool {
-    w.profile.as_ref().is_some_and(|p| {
-        p.fonts
-            .available
-            .iter()
-            .any(|f| f.eq_ignore_ascii_case(name))
-            || (p.os.name == "macOS" && os_major(&p.os.version) >= 26 && mac26_face(name))
-    })
-}
-
-fn os_major(version: &str) -> u32 {
-    version
-        .split('.')
-        .next()
-        .and_then(|m| m.parse().ok())
-        .unwrap_or(0)
-}
-
-/// Bundled table data (not persona values): the persona's OS picks it.
-fn mac26_face(name: &str) -> bool {
-    static FACES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    let faces = FACES.get_or_init(|| {
-        let f: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../profiles/local_fonts/macos_26.json"
-        ))
-        .expect("local_fonts/macos_26.json");
-        let mut v: Vec<String> = f["faces"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|s| s.as_str().map(str::to_lowercase))
-            .collect();
-        v.sort();
-        v
-    });
-    faces.binary_search(&name.to_lowercase()).is_ok()
+    let Some(p) = w.profile.as_ref() else {
+        return false;
+    };
+    let extra = p
+        .fonts
+        .available
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(name));
+    match lb_layout::LocalFonts::for_persona(p) {
+        Some(l) => l.face_family(name).is_some() || (extra && !l.has_family(name)),
+        None => extra,
+    }
 }
 
 /// Families of a CSS `font` shorthand, `None` when it does not parse.
@@ -371,6 +518,7 @@ fn load_face(w: &Window, id: u32) -> &'static str {
         FontObj::Face(face) => Some(match &face.source {
             Source::Binary(ok) => *ok,
             Source::List { locals, .. } => locals.iter().any(|n| installed(w, n)),
+            Source::Invalid(_) => false,
         }),
         _ => None,
     })
@@ -426,7 +574,21 @@ fn settle(cx: &mut CallCtx<'_, '_, '_>, w: &Window, id: u32) -> Result<Handle, H
         if status == "loaded" {
             cx.resolve_promise(r, w.obj_arg(id))?;
         } else {
-            cx.reject_promise(r, w.rt.err("NetworkError", "A network error occurred."))?;
+            let src = with_font(w, id, |f| match f {
+                FontObj::Face(face) => Some(face.source.clone()),
+                _ => None,
+            });
+            let e = match src {
+                Some(Source::Invalid(s)) => w.rt.err(
+                    "SyntaxError",
+                    format!("The source provided ('{s}') could not be parsed as a value list."),
+                ),
+                Some(Source::Binary(false)) => {
+                    w.rt.err("SyntaxError", "Invalid font data in ArrayBuffer.")
+                }
+                _ => w.rt.err("NetworkError", "A network error occurred."),
+            };
+            cx.reject_promise(r, e)?;
         }
         with_font(w, id, |f| {
             if let FontObj::Face(face) = f {
@@ -436,6 +598,16 @@ fn settle(cx: &mut CallCtx<'_, '_, '_>, w: &Window, id: u32) -> Result<Handle, H
         });
     }
     Ok(h)
+}
+
+/// A string source's initial status: `error` when it does not parse.
+fn src_status(s: Source) -> (Source, &'static str) {
+    let status = if matches!(s, Source::Invalid(_)) {
+        "error"
+    } else {
+        "unloaded"
+    };
+    (s, status)
 }
 
 fn register_face(reg: &mut Registry, rt: &Runtime) {
@@ -454,19 +626,26 @@ fn register_face(reg: &mut Registry, rt: &Runtime) {
                     let ok = is_font_data(&b);
                     (Source::Binary(ok), if ok { "loaded" } else { "error" })
                 }
-                None => (parse_src(&cx.arg_string(1)?), "unloaded"),
+                None => src_status(parse_src(&cx.arg_string(1)?)),
             }
         } else {
-            (parse_src(&cx.arg_string(1)?), "unloaded")
+            src_status(parse_src(&cx.arg_string(1)?))
         };
+        // Content Security Policy (`font-src`, ADR 0036) for `url()`s.
+        if !matches!(cx.arg_kind(1), ValueKind::Object) {
+            let src = cx.arg_string(1)?;
+            super::csp::check_font_src(cx, w, &src);
+        }
         let d = super::Dict::arg(cx, 2);
         let mut desc = Vec::with_capacity(DESCRIPTORS.len());
         for (k, def) in DESCRIPTORS {
             desc.push(d.string(cx, k)?.unwrap_or_else(|| def.to_owned()));
         }
         d.release(cx);
+        let quote = serialize_family(&family) != family;
         let id = w.new_obj(Obj::Font(Box::new(FontObj::Face(Box::new(Face {
             family,
+            quote,
             desc,
             status,
             source,
@@ -476,7 +655,12 @@ fn register_face(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, F, "family", |cx, w| {
         let id = this_face(cx, w)?;
-        let v = face_info(w, id).map(|(f, _)| f).unwrap_or_default();
+        let v = with_font(w, id, |f| match f {
+            FontObj::Face(face) if face.quote => Some(serialize_family(&face.family)),
+            FontObj::Face(face) => Some(face.family.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
         cx.ret(v)
     });
     setter(reg, rt, F, "family", |cx, w| {

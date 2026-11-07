@@ -110,8 +110,15 @@ def build_serve_args(
     profiles_dir: str | os.PathLike[str] | None = None,
     workers: int | None = None,
     extra_args: Sequence[str] = (),
+    timezone: str | None = None,
+    locale: str | None = None,
+    languages: Sequence[str] | None = None,
 ) -> list[str]:
-    """The command line for `lightbrowser serve`. The server always binds 127.0.0.1."""
+    """The command line for `lightbrowser serve`. The server always binds 127.0.0.1.
+
+    `timezone`, `locale` and `languages` override the persona's (ADR 0039),
+    e.g. to match a proxy exit: see `locale_args`.
+    """
     if not 0 <= int(port) <= 65535:
         raise ValueError(f"port out of range: {port}")
     cmd = [str(binary), "serve", "--port", str(int(port))]
@@ -125,8 +132,40 @@ def build_serve_args(
         if workers < 1:
             raise ValueError("workers must be >= 1")
         cmd += ["--workers", str(int(workers))]
+    cmd += locale_args(timezone=timezone, locale=locale, languages=languages)
     cmd += [str(a) for a in extra_args]
     return cmd
+
+
+def locale_args(
+    *,
+    timezone: str | None = None,
+    locale: str | None = None,
+    languages: Sequence[str] | None = None,
+) -> list[str]:
+    """`--timezone`, `--locale`, `--languages` for `serve` and `validate`.
+
+    `timezone` is an IANA zone (`Europe/Berlin`); `locale` a BCP 47 tag
+    (`de-DE`: Intl's default, `navigator.language(s)` and
+    `Accept-Language`); `languages` the full `navigator.languages` list.
+    """
+    out: list[str] = []
+    if timezone is not None:
+        if not timezone or any(c.isspace() for c in timezone):
+            raise ValueError(f"timezone must be an IANA zone id, got {timezone!r}")
+        out += ["--timezone", timezone]
+    if locale is not None:
+        if not locale or any(c.isspace() or c == "," for c in locale):
+            raise ValueError(f"locale must be a BCP 47 tag, got {locale!r}")
+        out += ["--locale", locale]
+    if languages is not None:
+        if isinstance(languages, str):
+            raise ValueError("languages must be a list of tags, not a string")
+        langs = [str(l) for l in languages]
+        if not langs or any(not l or "," in l or any(c.isspace() for c in l) for l in langs):
+            raise ValueError(f"languages must be non-empty BCP 47 tags, got {languages!r}")
+        out += ["--languages", ",".join(langs)]
+    return out
 
 
 class ServerProcess:

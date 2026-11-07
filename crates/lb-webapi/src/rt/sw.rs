@@ -20,8 +20,8 @@
 //! - **Fetch interception.** [`Window::net_fetch`] sends the requests of
 //!   a controlled window (fetch, XHR, scripts, style sheets, images) to
 //!   its controller first; navigations are intercepted by the page layer.
-//! - **Cache API**: `caches` per context and origin ([`CacheStorageRef`]),
-//!   in memory.
+//! - **Cache API**: `caches` per context and storage key (ADR 0037,
+//!   [`CacheStorageRef`]), in memory.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -440,7 +440,36 @@ impl Window {
 
     /// Send a request of this window to its controller first (fetch, XHR,
     /// subresources); not controlled, or not http(s): the network.
-    pub fn net_fetch(self: &Rc<Self>, req: NetRequest) -> LocalFuture<Result<NetResponse, String>> {
+    pub fn net_fetch(
+        self: &Rc<Self>,
+        mut req: NetRequest,
+    ) -> LocalFuture<Result<NetResponse, String>> {
+        if req.storage_key.is_none() {
+            req.storage_key = Some(self.storage_key());
+        }
+        // Content Security Policy (ADR 0036): `upgrade-insecure-requests`,
+        // and redirects are checked too.
+        if let Some(u) = self.csp_upgrade(&req.url) {
+            req.url = u;
+        }
+        if let Some((dir, url)) = super::csp::guard_redirects(self, &mut req) {
+            let fut = self.net_fetch_inner(req);
+            let w = Rc::downgrade(self);
+            return Box::pin(async move {
+                let r = fut.await;
+                if let (Err(e), Some(w)) = (&r, w.upgrade()) {
+                    super::csp::redirect_refused(&w, dir, &url, e);
+                }
+                r
+            });
+        }
+        self.net_fetch_inner(req)
+    }
+
+    fn net_fetch_inner(
+        self: &Rc<Self>,
+        req: NetRequest,
+    ) -> LocalFuture<Result<NetResponse, String>> {
         let ctrl = self.sw.controller.borrow().as_ref().map(|v| v.id);
         match (ctrl, self.sw_host()) {
             (Some(v), Some(host))
@@ -1276,6 +1305,21 @@ fn start_register(
             "The URL protocol of the scope ('{scope}') is not supported."
         ))));
     }
+    // Content Security Policy (`worker-src`, ADR 0036).
+    let loc = w.csp_here(Some(&mut *cx));
+    if !w.csp_url(
+        super::csp::Dir::WorkerSrc,
+        &script,
+        &super::csp::UrlCheck::default(),
+        loc,
+    ) {
+        return Err(w.rt.err(
+            "SecurityError",
+            fail(format!(
+                "The provided scriptURL ('{script}') violates the Content Security Policy."
+            )),
+        ));
+    }
     let mine = w.origin_string();
     let so = script.origin().ascii_serialization();
     if so != mine {
@@ -1982,7 +2026,7 @@ fn request_arg(w: &Window, e: &CacheEntry) -> Arg {
 }
 
 fn storage(w: &Window) -> Result<CacheStorageRef, HostError> {
-    Ok(host_of(w)?.caches(&w.origin_string()))
+    Ok(host_of(w)?.caches(&w.storage_key_string()))
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

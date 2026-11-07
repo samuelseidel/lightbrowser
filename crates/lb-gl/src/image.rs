@@ -232,8 +232,7 @@ pub struct Image {
     pub samples: u32,
     pub format: Format,
     pub data: Data,
-    /// Set once a draw rasterized into the image (readback noise applies
-    /// to rendered pixels only).
+    /// Set once a draw rasterized into the image.
     pub drawn: bool,
 }
 

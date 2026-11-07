@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>ImageBitmap</title>
+<body>
+<script>
+// ImageBitmap: createImageBitmap sources, crops, resize, errors, close,
+// OffscreenCanvas.transferToImageBitmap, drawImage and pattern use.
+const L = [];
+const log = (k, v) => L.push(k + ': ' + (typeof v === 'string' ? v : JSON.stringify(v)));
+const err = (e) => e && e.name ? `${e.name}: ${e.message}` : String(e);
+function mk(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')]; }
+function px(bm, w, h) { const [c, x] = mk(w, h); x.drawImage(bm, 0, 0); return Array.from(x.getImageData(0, 0, w, h).data); }
+const sum = (a) => a.reduce((s, v) => (s * 31 + v) >>> 0, 7);
+(async () => {
+  log('proto', Object.getOwnPropertyNames(ImageBitmap.prototype).sort().join());
+  log('ctor', (() => { try { new ImageBitmap(); return 'no'; } catch (e) { return err(e); } })());
+  const [c, x] = mk(6, 4);
+  x.fillStyle = '#f00'; x.fillRect(0, 0, 3, 4); x.fillStyle = 'rgba(0,0,255,0.5)'; x.fillRect(3, 0, 3, 2);
+  const ref = Array.from(x.getImageData(0, 0, 6, 4).data);
+  const order = [];
+  const p = createImageBitmap(c).then((b) => { order.push('bitmap'); return b; });
+  Promise.resolve().then(() => order.push('micro'));
+  setTimeout(() => order.push('timeout'), 0);
+  const b = await p;
+  log('canvas', [b.width, b.height, String(b), Object.prototype.toString.call(b), sum(px(b, 6, 4)) === sum(ref)].join(' '));
+  const crop = await createImageBitmap(c, 2, 1, 3, 2);
+  log('crop', [crop.width, crop.height, px(crop, 3, 2).join(',')].join(' '));
+  const out = await createImageBitmap(c, -2, -1, 4, 3);
+  log('crop_outside', [out.width, out.height, px(out, 4, 3).join(',')].join(' '));
+  const neg = await createImageBitmap(c, 4, 3, -2, -2);
+  log('crop_negative', [neg.width, neg.height, px(neg, 2, 2).join(',')].join(' '));
+  const rs = await createImageBitmap(c, { resizeWidth: 3, resizeHeight: 2, resizeQuality: 'pixelated' });
+  log('resize', [rs.width, rs.height, px(rs, 3, 2).join(',')].join(' '));
+  const rw = await createImageBitmap(c, { resizeWidth: 12 });
+  log('resize_width_only', [rw.width, rw.height].join(' '));
+  const id = x.getImageData(0, 0, 6, 4);
+  const fromId = await createImageBitmap(id);
+  log('imagedata', [fromId.width, fromId.height, sum(px(fromId, 6, 4)) === sum(ref)].join(' '));
+  const fromBm = await createImageBitmap(b);
+  log('bitmap_of_bitmap', [fromBm.width, fromBm.height, sum(px(fromBm, 6, 4)) === sum(ref)].join(' '));
+  const blob = await new Promise((r) => c.toBlob(r));
+  const fromBlob = await createImageBitmap(blob);
+  log('blob', [fromBlob.width, fromBlob.height, sum(px(fromBlob, 6, 4)) === sum(ref)].join(' '));
+  const img = new Image(); img.src = c.toDataURL(); await img.decode();
+  const fromImg = await createImageBitmap(img);
+  log('img', [fromImg.width, fromImg.height, sum(px(fromImg, 6, 4)) === sum(ref)].join(' '));
+  const oc = new OffscreenCanvas(5, 3);
+  try { oc.transferToImageBitmap(); log('transfer_no_ctx', 'ok'); } catch (e) { log('transfer_no_ctx', err(e)); }
+  const ox = oc.getContext('2d'); ox.fillStyle = '#0f0'; ox.fillRect(0, 0, 5, 3);
+  const fromOc = await createImageBitmap(oc);
+  log('offscreen', [fromOc.width, fromOc.height, px(fromOc, 1, 1).join(',')].join(' '));
+  const t = oc.transferToImageBitmap();
+  log('transfer', [t.width, t.height, px(t, 1, 1).join(','), Array.from(ox.getImageData(0, 0, 1, 1).data).join(','), ox.fillStyle, oc.width].join(' '));
+  ox.fillRect(0, 0, 1, 1);
+  log('after_transfer_draw', Array.from(ox.getImageData(0, 0, 2, 1).data).join(','));
+  const zero = new OffscreenCanvas(0, 3); zero.getContext('2d');
+  try { zero.transferToImageBitmap(); log('transfer_zero', 'ok'); } catch (e) { log('transfer_zero', err(e)); }
+  // pattern and close
+  const pat = x.createPattern(b, 'repeat'); log('pattern', String(pat));
+  b.close();
+  log('closed', [b.width, b.height].join(' '));
+  try { x.drawImage(b, 0, 0); log('draw_closed', 'ok'); } catch (e) { log('draw_closed', err(e)); }
+  try { x.createPattern(b, 'repeat'); log('pattern_closed', 'ok'); } catch (e) { log('pattern_closed', err(e)); }
+  for (const [k, f] of [
+    ['no_args', () => createImageBitmap()],
+    ['number', () => createImageBitmap(1)],
+    ['closed', () => createImageBitmap(b)],
+    ['sw_zero', () => createImageBitmap(c, 0, 0, 0, 2)],
+    ['sh_zero', () => createImageBitmap(c, 0, 0, 2, 0)],
+    ['three_args', () => createImageBitmap(c, 0, 0)],
+    ['zero_canvas', () => createImageBitmap(mk(0, 4)[0])],
+    ['bad_blob', () => createImageBitmap(new Blob(['nope']))],
+    ['bad_option', () => createImageBitmap(c, { resizeQuality: 'x' })],
+    ['resize_zero', () => createImageBitmap(c, { resizeWidth: 0 })],
+    ['broken_img', () => { const i = new Image(); return createImageBitmap(i); }],
+  ]) {
+    try { const r = await f(); log('err_' + k, 'resolved ' + r.width + 'x' + r.height); } catch (e) { log('err_' + k, err(e)); }
+  }
+  await new Promise((r) => setTimeout(r, 10));
+  log('order', order.join());
+  try { const s = structuredClone(fromId); log('clone', s.width + 'x' + s.height + ' ' + (s instanceof ImageBitmap)); } catch (e) { log('clone', err(e)); }
+  L.push('end');
+})().catch((e) => { L.push('error: ' + err(e)); L.push('end'); });
+</script>
+</body>

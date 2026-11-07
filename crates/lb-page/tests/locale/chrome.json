@@ -1,0 +1,799 @@
+{
+ "version": "153.0.8010.12",
+ "context": {
+  "main": {
+   "tz": "Asia/Tokyo",
+   "loc": "de-DE",
+   "nloc": "de-DE",
+   "off": [
+    -540,
+    -540
+   ],
+   "str": "Thu Jan 01 1970 09:00:00 GMT+0900 (Japanische Normalzeit)",
+   "ls": "1.1.1970, 09:00:00",
+   "lds": "1.1.1970",
+   "lts": "09:00:00",
+   "num": "1.234.567,891",
+   "lang": "de-DE",
+   "langs": [
+    "de-DE"
+   ]
+  },
+  "frame": {
+   "tz": "Asia/Tokyo",
+   "loc": "de-DE",
+   "nloc": "de-DE",
+   "off": [
+    -540,
+    -540
+   ],
+   "str": "Thu Jan 01 1970 09:00:00 GMT+0900 (Japanische Normalzeit)",
+   "ls": "1.1.1970, 09:00:00",
+   "lds": "1.1.1970",
+   "lts": "09:00:00",
+   "num": "1.234.567,891",
+   "lang": "de-DE",
+   "langs": [
+    "de-DE"
+   ]
+  },
+  "blank": {
+   "tz": "Asia/Tokyo",
+   "loc": "de-DE",
+   "nloc": "de-DE",
+   "off": [
+    -540,
+    -540
+   ],
+   "str": "Thu Jan 01 1970 09:00:00 GMT+0900 (Japanische Normalzeit)",
+   "ls": "1.1.1970, 09:00:00",
+   "lds": "1.1.1970",
+   "lts": "09:00:00",
+   "num": "1.234.567,891",
+   "lang": "de-DE",
+   "langs": [
+    "de-DE"
+   ]
+  },
+  "worker": {
+   "tz": "Asia/Tokyo",
+   "loc": "de-DE",
+   "nloc": "de-DE",
+   "off": [
+    -540,
+    -540
+   ],
+   "str": "Thu Jan 01 1970 09:00:00 GMT+0900 (Japanische Normalzeit)",
+   "ls": "1.1.1970, 09:00:00",
+   "lds": "1.1.1970",
+   "lts": "09:00:00",
+   "num": "1.234.567,891",
+   "lang": "de-DE",
+   "langs": [
+    "de-DE"
+   ]
+  },
+  "newWorker": {
+   "tz": "Asia/Tokyo",
+   "loc": "de-DE",
+   "nloc": "de-DE",
+   "off": [
+    -540,
+    -540
+   ],
+   "str": "Thu Jan 01 1970 09:00:00 GMT+0900 (Japanische Normalzeit)",
+   "ls": "1.1.1970, 09:00:00",
+   "lds": "1.1.1970",
+   "lts": "09:00:00",
+   "num": "1.234.567,891",
+   "lang": "de-DE",
+   "langs": [
+    "de-DE"
+   ]
+  },
+  "shared": {
+   "tz": "Asia/Tokyo",
+   "loc": "de-DE",
+   "nloc": "de-DE",
+   "off": [
+    -540,
+    -540
+   ],
+   "str": "Thu Jan 01 1970 09:00:00 GMT+0900 (Japanische Normalzeit)",
+   "ls": "1.1.1970, 09:00:00",
+   "lds": "1.1.1970",
+   "lts": "09:00:00",
+   "num": "1.234.567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "sw": {
+   "tz": "Asia/Tokyo",
+   "loc": "de-DE",
+   "nloc": "de-DE",
+   "off": [
+    -540,
+    -540
+   ],
+   "str": "Thu Jan 01 1970 09:00:00 GMT+0900 (Japanische Normalzeit)",
+   "ls": "1.1.1970, 09:00:00",
+   "lds": "1.1.1970",
+   "lts": "09:00:00",
+   "num": "1.234.567,891",
+   "lang": "de-DE",
+   "langs": [
+    "de-DE"
+   ]
+  },
+  "acceptLanguage": "de-DE"
+ },
+ "late": {
+  "main": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "frame": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "blank": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "worker": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "newWorker": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "shared": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "sw": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "acceptLanguage": null
+ },
+ "reload": {
+  "main": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  },
+  "worker": {
+   "tz": "America/Sao_Paulo",
+   "loc": "fr-FR",
+   "nloc": "fr-FR",
+   "off": [
+    180,
+    180
+   ],
+   "str": "Wed Dec 31 1969 21:00:00 GMT-0300 (heure normale de Brasilia)",
+   "ls": "31/12/1969 21:00:00",
+   "lds": "31/12/1969",
+   "lts": "21:00:00",
+   "num": "1 234 567,891",
+   "lang": "en-US",
+   "langs": [
+    "en-US"
+   ]
+  }
+ },
+ "ids": {
+  "UTC": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "UTC",
+    [
+     0,
+     0
+    ],
+    "Thu Jan 01 1970 00:00:00 GMT+0000 (temps universel coordonné)"
+   ]
+  },
+  "Etc/UTC": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "UTC",
+    [
+     0,
+     0
+    ],
+    "Thu Jan 01 1970 00:00:00 GMT+0000 (temps universel coordonné)"
+   ]
+  },
+  "GMT": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "+00:00",
+    [
+     0,
+     0
+    ],
+    "Thu Jan 01 1970 00:00:00 GMT+0000 (heure moyenne de Greenwich)"
+   ]
+  },
+  "Etc/GMT-14": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "Etc/GMT-14",
+    [
+     -840,
+     -840
+    ],
+    "Thu Jan 01 1970 14:00:00 GMT+1400 (UTC+14:00)"
+   ]
+  },
+  "EST": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "America/Panama",
+    [
+     300,
+     300
+    ],
+    "Wed Dec 31 1969 19:00:00 GMT-0500 (heure normale de l’Est nord-américain)"
+   ]
+  },
+  "EST5EDT": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "America/New_York",
+    [
+     300,
+     240
+    ],
+    "Wed Dec 31 1969 19:00:00 GMT-0500 (heure normale de l’Est nord-américain)"
+   ]
+  },
+  "US/Pacific": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "America/Los_Angeles",
+    [
+     480,
+     420
+    ],
+    "Wed Dec 31 1969 16:00:00 GMT-0800 (heure normale du Pacifique nord-américain)"
+   ]
+  },
+  "Asia/Calcutta": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "Asia/Calcutta",
+    [
+     -330,
+     -330
+    ],
+    "Thu Jan 01 1970 05:30:00 GMT+0530 (heure de l’Inde)"
+   ]
+  },
+  "GMT+5": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "+05:00",
+    [
+     -300,
+     -300
+    ],
+    "Thu Jan 01 1970 05:00:00 GMT+0500 (UTC+05:00)"
+   ]
+  },
+  "+05:00": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "+05:00",
+    [
+     -300,
+     -300
+    ],
+    "Thu Jan 01 1970 05:00:00 GMT+0500 (UTC+05:00)"
+   ]
+  },
+  "Europe/Kiev": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "Europe/Kiev",
+    [
+     -120,
+     -180
+    ],
+    "Thu Jan 01 1970 03:00:00 GMT+0300 (heure normale d’Europe de l’Est)"
+   ]
+  },
+  "Factory": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "Factory",
+    [
+     0,
+     0
+    ],
+    "Thu Jan 01 1970 00:00:00 GMT+0000 (UTC+00:00)"
+   ]
+  }
+ },
+ "locales": {
+  "de_DE": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "de-DE",
+    "de-DE",
+    "1.1.1970, 00:00:00",
+    "1.234.567,891",
+    "en-US"
+   ]
+  },
+  "EN-gb": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "en-GB",
+    "en-GB",
+    "01/01/1970, 00:00:00",
+    "1,234,567.891",
+    "en-US"
+   ]
+  },
+  "zh-Hant-TW": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "zh-Hant-TW",
+    "zh-Hant-TW",
+    "1970/1/1 上午12:00:00",
+    "1,234,567.891",
+    "en-US"
+   ]
+  },
+  "iw": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "he",
+    "he",
+    "1.1.1970, 0:00:00",
+    "1,234,567.891",
+    "en-US"
+   ]
+  },
+  "en-US-u-ca-buddhist": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "en-US-u-ca-buddhist",
+    "en-US",
+    "1/1/2513 BE, 12:00:00 AM",
+    "1,234,567.891",
+    "en-US"
+   ]
+  },
+  "ja": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "ja",
+    "ja",
+    "1970/1/1 0:00:00",
+    "1,234,567.891",
+    "en-US"
+   ]
+  },
+  "xx": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "xx",
+    "xx",
+    "1970-01-01 00:00:00",
+    "1,234,567.891",
+    "en-US"
+   ]
+  },
+  "C": {
+   "r": {
+    "ok": {}
+   },
+   "v": [
+    "en-US",
+    "en-US",
+    "1/1/1970, 12:00:00 AM",
+    "1,234,567.891",
+    "en-US"
+   ]
+  }
+ },
+ "cleared": [
+  true,
+  "Factory"
+ ],
+ "acceptLanguage": {
+  "langs": [
+   "fr-CH",
+   [
+    "fr-CH",
+    "fr;q=0.9",
+    "en-GB"
+   ],
+   false
+  ],
+  "worker": [
+   "en-US"
+  ],
+  "header": "fr-CH, fr;q=0.9;q=0.9,en_GB;q=0.8"
+ },
+ "geo": {
+  "surface": {
+   "noArgs": [
+    "throw",
+    "TypeError",
+    "Failed to execute 'getCurrentPosition' on 'Geolocation': 1 argument required, but only 0 present."
+   ],
+   "notFn": [
+    "throw",
+    "TypeError",
+    "Failed to execute 'getCurrentPosition' on 'Geolocation': parameter 1 is not of type 'Function'."
+   ],
+   "errNotFn": [
+    "throw",
+    "TypeError",
+    "Failed to execute 'getCurrentPosition' on 'Geolocation': parameter 2 is not of type 'Function'."
+   ],
+   "errNull": [
+    "ok",
+    "undefined"
+   ],
+   "optsBad": [
+    "throw",
+    "TypeError",
+    "Failed to execute 'getCurrentPosition' on 'Geolocation': The provided value is not of type 'PositionOptions'."
+   ],
+   "watchNoArgs": [
+    "throw",
+    "TypeError",
+    "Failed to execute 'watchPosition' on 'Geolocation': 1 argument required, but only 0 present."
+   ],
+   "watchNotFn": [
+    "throw",
+    "TypeError",
+    "Failed to execute 'watchPosition' on 'Geolocation': parameter 1 is not of type 'Function'."
+   ],
+   "watchIds": [
+    1,
+    2
+   ],
+   "clear": [
+    [
+     "throw",
+     "TypeError",
+     "Failed to execute 'clearWatch' on 'Geolocation': 1 argument required, but only 0 present."
+    ],
+    [
+     "ok",
+     "undefined"
+    ],
+    [
+     "ok",
+     "undefined"
+    ],
+    [
+     "ok",
+     "undefined"
+    ]
+   ],
+   "watchAfter": 3,
+   "illegal": [
+    "throw",
+    "TypeError",
+    "Illegal invocation"
+   ],
+   "ctors": [
+    [
+     "throw",
+     "TypeError",
+     "Failed to construct 'Geolocation': Illegal constructor"
+    ],
+    [
+     "throw",
+     "TypeError",
+     "Failed to construct 'GeolocationPosition': Illegal constructor"
+    ],
+    [
+     "throw",
+     "TypeError",
+     "Failed to construct 'GeolocationCoordinates': Illegal constructor"
+    ],
+    [
+     "throw",
+     "TypeError",
+     "Failed to construct 'GeolocationPositionError': Illegal constructor"
+    ]
+   ],
+   "consts": [
+    1,
+    2,
+    3
+   ],
+   "same": true,
+   "tag": "[object Geolocation]"
+  },
+  "granted": {
+   "ok": true,
+   "same": true,
+   "coords": {
+    "accuracy": 20,
+    "latitude": 52.52,
+    "longitude": 13.405,
+    "altitude": null,
+    "altitudeAccuracy": null,
+    "heading": null,
+    "speed": null
+   },
+   "cjson": {
+    "accuracy": 20,
+    "latitude": 52.52,
+    "longitude": 13.405,
+    "altitude": null,
+    "altitudeAccuracy": null,
+    "heading": null,
+    "speed": null
+   },
+   "keys": [
+    "timestamp",
+    "coords"
+   ],
+   "recent": true,
+   "str": "[object GeolocationPosition]",
+   "cstr": "[object GeolocationCoordinates]"
+  },
+  "full": {
+   "ok": true,
+   "same": true,
+   "coords": {
+    "accuracy": 5,
+    "latitude": -33.8688,
+    "longitude": 151.2093,
+    "altitude": 58,
+    "altitudeAccuracy": 3,
+    "heading": 90,
+    "speed": 1.5
+   },
+   "cjson": {
+    "accuracy": 5,
+    "latitude": -33.8688,
+    "longitude": 151.2093,
+    "altitude": 58,
+    "altitudeAccuracy": 3,
+    "heading": 90,
+    "speed": 1.5
+   },
+   "keys": [
+    "timestamp",
+    "coords"
+   ],
+   "recent": true,
+   "str": "[object GeolocationPosition]",
+   "cstr": "[object GeolocationCoordinates]"
+  },
+  "edge": {
+   "ok": true,
+   "same": true,
+   "coords": {
+    "accuracy": 0,
+    "latitude": 90,
+    "longitude": -180,
+    "altitude": null,
+    "altitudeAccuracy": null,
+    "heading": null,
+    "speed": null
+   },
+   "cjson": {
+    "accuracy": 0,
+    "latitude": 90,
+    "longitude": -180,
+    "altitude": null,
+    "altitudeAccuracy": null,
+    "heading": null,
+    "speed": null
+   },
+   "keys": [
+    "timestamp",
+    "coords"
+   ],
+   "recent": true,
+   "str": "[object GeolocationPosition]",
+   "cstr": "[object GeolocationCoordinates]"
+  },
+  "noAccuracy": {
+   "ok": false,
+   "code": 2,
+   "message": "",
+   "str": "[object GeolocationPositionError]",
+   "json": "{}"
+  },
+  "empty": {
+   "ok": false,
+   "code": 2,
+   "message": "",
+   "str": "[object GeolocationPositionError]",
+   "json": "{}"
+  },
+  "timeout0": {
+   "ok": false,
+   "code": 3,
+   "message": "Timeout expired",
+   "str": "[object GeolocationPositionError]",
+   "json": "{}"
+  },
+  "cleared": {
+   "ok": false,
+   "code": 3,
+   "message": "Timeout expired",
+   "str": "[object GeolocationPositionError]",
+   "json": "{}"
+  },
+  "pendingThenSet": {
+   "ok": false,
+   "code": 2,
+   "message": "",
+   "str": "[object GeolocationPositionError]",
+   "json": "{}"
+  },
+  "prompt": {
+   "ok": false,
+   "code": 1,
+   "message": "User denied Geolocation",
+   "str": "[object GeolocationPositionError]",
+   "json": "{}"
+  }
+ }
+}

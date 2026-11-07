@@ -73,6 +73,8 @@ pub(crate) enum NavObj {
     Bluetooth,
     /// WebGPU objects (`gpu`).
     Gpu(Box<super::gpu::GpuObj>),
+    /// `navigator.geolocation` and its positions (ADR 0039).
+    Geo(Box<super::emulation::GeoObj>),
 }
 
 impl NavObj {
@@ -107,6 +109,7 @@ impl NavObj {
             NavObj::KeyboardLayoutMap => "KeyboardLayoutMap",
             NavObj::Bluetooth => "Bluetooth",
             NavObj::Gpu(g) => g.iface_name(),
+            NavObj::Geo(g) => g.iface_name(),
         }
     }
 }
@@ -798,7 +801,7 @@ fn perm_rule(name: &str) -> Option<PermRule> {
 }
 
 /// The persona's state for a permission (`granted`, `denied`, `prompt`).
-fn persona_state(w: &Window, name: &str, default: &str) -> String {
+pub(crate) fn persona_state(w: &Window, name: &str, default: &str) -> String {
     let key = if name == "push" {
         "notifications"
     } else {
@@ -898,6 +901,13 @@ fn register_permissions(reg: &mut Registry, rt: &Runtime) {
                 HostError::type_error(format!("{pre}The requested origin is invalid.")),
             );
         }
+        // `storage-access` is granted to a top-level document only (Chrome:
+        // frames read `prompt` even with third-party cookies allowed).
+        let default = if name == "storage-access" && super::frames::parent(w).is_some() {
+            "prompt"
+        } else {
+            default
+        };
         let state = persona_state(w, &name, default);
         let status = new_nav(
             w,
@@ -1779,6 +1789,8 @@ pub(crate) struct NavState {
     pub ice_events: std::collections::HashMap<u32, Option<u32>>,
     /// `performance.memory` support of each main-world realm.
     pub memory: std::collections::HashMap<lb_js::RealmId, MemoryProto>,
+    /// Geolocation requests and watchers (ADR 0039).
+    pub geo: super::emulation::GeoState,
 }
 
 /// Capture the realm's intrinsic `Promise` and `Promise.resolve` (before
@@ -1848,6 +1860,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_keyboard(reg, rt);
     register_os_apis(reg, rt);
     super::rtc::register(reg, rt);
+    super::emulation::register(reg, rt);
 }
 
 // ---------------------------------------------------------------------------

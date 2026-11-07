@@ -1,19 +1,35 @@
 {
-"format": 1,
-"note": "Face names (full and PostScript) that local Chrome 156 on macOS 26.4 (25E253) loads through FontFace local(), from the faces in /System/Library/Fonts (default install, no downloaded or user fonts). Used for macOS 26 personas; see profiles/local_fonts/README.md.",
-"faces": [
+"format": 2,
+"os": "macOS 26",
+"source": "Recorded: local Chrome 156 and Chrome 153 headless shell on macOS 26.4.1 (25E253), default install; every full, PostScript and family name fontconfig lists for the system fonts tried with FontFace local(), the ones that loaded kept (tools/local_fonts/record.mjs).",
+"families": {
+".Aqua Kana": [
+"AquaKana",
+"AquaKana-Bold"
+],
+".Helvetica LT MM": [
+"HelveticaLTMM"
+],
+".LastResort": [
+"LastResort"
+],
+".Savoye LET CC.": [
+"Savoye LET Plain CC.:1.0"
+],
+".Times LT MM": [
+"TimesLTMM"
+],
+"Academy Engraved LET": [
 "Academy Engraved LET Plain:1.0",
-"AcademyEngravedLetPlain",
+"AcademyEngravedLetPlain"
+],
+"Al Bayan": [
 "Al Bayan Bold",
 "Al Bayan Plain",
-"Al Nile",
-"Al Nile Bold",
-"Al Tarikh Regular",
 "AlBayan",
-"AlBayan-Bold",
-"AlNile",
-"AlNile-Bold",
-"AlTarikh",
+"AlBayan-Bold"
+],
+"American Typewriter": [
 "American Typewriter",
 "American Typewriter Bold",
 "American Typewriter Condensed",
@@ -27,16 +43,33 @@
 "AmericanTypewriter-CondensedBold",
 "AmericanTypewriter-CondensedLight",
 "AmericanTypewriter-Light",
-"AmericanTypewriter-Semibold",
+"AmericanTypewriter-Semibold"
+],
+"Andale Mono": [
 "Andale Mono",
-"AndaleMono",
+"AndaleMono"
+],
+"Apple Braille": [
 "Apple Braille",
 "Apple Braille Outline 6 Dot",
 "Apple Braille Outline 8 Dot",
 "Apple Braille Pinpoint 6 Dot",
 "Apple Braille Pinpoint 8 Dot",
+"AppleBraille",
+"AppleBraille-Outline6Dot",
+"AppleBraille-Outline8Dot",
+"AppleBraille-Pinpoint6Dot",
+"AppleBraille-Pinpoint8Dot"
+],
+"Apple Chancery": [
 "Apple Chancery",
+"Apple-Chancery"
+],
+"Apple Color Emoji": [
 "Apple Color Emoji",
+"AppleColorEmoji"
+],
+"Apple SD Gothic Neo": [
 "Apple SD Gothic Neo Bold",
 "Apple SD Gothic Neo ExtraBold",
 "Apple SD Gothic Neo Heavy",
@@ -46,18 +79,6 @@
 "Apple SD Gothic Neo SemiBold",
 "Apple SD Gothic Neo Thin",
 "Apple SD Gothic Neo UltraLight",
-"Apple Symbols",
-"Apple-Chancery",
-"AppleBraille",
-"AppleBraille-Outline6Dot",
-"AppleBraille-Outline8Dot",
-"AppleBraille-Pinpoint6Dot",
-"AppleBraille-Pinpoint8Dot",
-"AppleColorEmoji",
-"AppleGothic",
-"AppleGothic Regular",
-"AppleMyungjo",
-"AppleMyungjo Regular",
 "AppleSDGothicNeo-Bold",
 "AppleSDGothicNeo-ExtraBold",
 "AppleSDGothicNeo-Heavy",
@@ -66,44 +87,79 @@
 "AppleSDGothicNeo-Regular",
 "AppleSDGothicNeo-SemiBold",
 "AppleSDGothicNeo-Thin",
-"AppleSDGothicNeo-UltraLight",
-"AppleSymbols",
-"AquaKana",
-"AquaKana-Bold",
+"AppleSDGothicNeo-UltraLight"
+],
+"Apple Symbols": [
+"Apple Symbols",
+"AppleSymbols"
+],
+"AppleGothic": [
+"AppleGothic",
+"AppleGothic Regular"
+],
+"AppleMyungjo": [
+"AppleMyungjo",
+"AppleMyungjo Regular"
+],
+"Arial": [
 "Arial",
-"Arial Black",
 "Arial Bold",
 "Arial Bold Italic",
+"Arial Italic",
+"Arial-BoldItalicMT",
+"Arial-BoldMT",
+"Arial-ItalicMT",
+"ArialMT"
+],
+"Arial Black": [
+"Arial Black",
+"Arial-Black"
+],
+"Arial Hebrew": [
 "Arial Hebrew",
 "Arial Hebrew Bold",
 "Arial Hebrew Light",
+"ArialHebrew",
+"ArialHebrew-Bold",
+"ArialHebrew-Light"
+],
+"Arial Hebrew Scholar": [
 "Arial Hebrew Scholar",
 "Arial Hebrew Scholar Bold",
 "Arial Hebrew Scholar Light",
-"Arial Italic",
+"ArialHebrewScholar",
+"ArialHebrewScholar-Bold",
+"ArialHebrewScholar-Light"
+],
+"Arial Narrow": [
 "Arial Narrow",
 "Arial Narrow Bold",
 "Arial Narrow Bold Italic",
 "Arial Narrow Italic",
-"Arial Rounded MT Bold",
-"Arial Unicode MS",
-"Arial-Black",
-"Arial-BoldItalicMT",
-"Arial-BoldMT",
-"Arial-ItalicMT",
-"ArialHebrew",
-"ArialHebrew-Bold",
-"ArialHebrew-Light",
-"ArialHebrewScholar",
-"ArialHebrewScholar-Bold",
-"ArialHebrewScholar-Light",
-"ArialMT",
 "ArialNarrow",
 "ArialNarrow-Bold",
 "ArialNarrow-BoldItalic",
-"ArialNarrow-Italic",
-"ArialRoundedMTBold",
-"ArialUnicodeMS",
+"ArialNarrow-Italic"
+],
+"Arial Rounded MT Bold": [
+"Arial Rounded MT Bold",
+"ArialRoundedMTBold"
+],
+"Arial Unicode MS": [
+"Arial Unicode MS",
+"ArialUnicodeMS"
+],
+"Athelas": [
+"Athelas Bold",
+"Athelas Bold Italic",
+"Athelas Italic",
+"Athelas Regular",
+"Athelas-Bold",
+"Athelas-BoldItalic",
+"Athelas-Italic",
+"Athelas-Regular"
+],
+"Avenir": [
 "Avenir Black",
 "Avenir Black Oblique",
 "Avenir Book",
@@ -114,30 +170,6 @@
 "Avenir Light Oblique",
 "Avenir Medium",
 "Avenir Medium Oblique",
-"Avenir Next Bold",
-"Avenir Next Bold Italic",
-"Avenir Next Condensed Bold",
-"Avenir Next Condensed Bold Italic",
-"Avenir Next Condensed Demi Bold",
-"Avenir Next Condensed Demi Bold Italic",
-"Avenir Next Condensed Heavy",
-"Avenir Next Condensed Heavy Italic",
-"Avenir Next Condensed Italic",
-"Avenir Next Condensed Medium",
-"Avenir Next Condensed Medium Italic",
-"Avenir Next Condensed Regular",
-"Avenir Next Condensed Ultra Light",
-"Avenir Next Condensed Ultra Light Italic",
-"Avenir Next Demi Bold",
-"Avenir Next Demi Bold Italic",
-"Avenir Next Heavy",
-"Avenir Next Heavy Italic",
-"Avenir Next Italic",
-"Avenir Next Medium",
-"Avenir Next Medium Italic",
-"Avenir Next Regular",
-"Avenir Next Ultra Light",
-"Avenir Next Ultra Light Italic",
 "Avenir Oblique",
 "Avenir Roman",
 "Avenir-Black",
@@ -151,7 +183,21 @@
 "Avenir-Medium",
 "Avenir-MediumOblique",
 "Avenir-Oblique",
-"Avenir-Roman",
+"Avenir-Roman"
+],
+"Avenir Next": [
+"Avenir Next Bold",
+"Avenir Next Bold Italic",
+"Avenir Next Demi Bold",
+"Avenir Next Demi Bold Italic",
+"Avenir Next Heavy",
+"Avenir Next Heavy Italic",
+"Avenir Next Italic",
+"Avenir Next Medium",
+"Avenir Next Medium Italic",
+"Avenir Next Regular",
+"Avenir Next Ultra Light",
+"Avenir Next Ultra Light Italic",
 "AvenirNext-Bold",
 "AvenirNext-BoldItalic",
 "AvenirNext-DemiBold",
@@ -163,7 +209,21 @@
 "AvenirNext-MediumItalic",
 "AvenirNext-Regular",
 "AvenirNext-UltraLight",
-"AvenirNext-UltraLightItalic",
+"AvenirNext-UltraLightItalic"
+],
+"Avenir Next Condensed": [
+"Avenir Next Condensed Bold",
+"Avenir Next Condensed Bold Italic",
+"Avenir Next Condensed Demi Bold",
+"Avenir Next Condensed Demi Bold Italic",
+"Avenir Next Condensed Heavy",
+"Avenir Next Condensed Heavy Italic",
+"Avenir Next Condensed Italic",
+"Avenir Next Condensed Medium",
+"Avenir Next Condensed Medium Italic",
+"Avenir Next Condensed Regular",
+"Avenir Next Condensed Ultra Light",
+"Avenir Next Condensed Ultra Light Italic",
 "AvenirNextCondensed-Bold",
 "AvenirNextCondensed-BoldItalic",
 "AvenirNextCondensed-DemiBold",
@@ -175,18 +235,24 @@
 "AvenirNextCondensed-MediumItalic",
 "AvenirNextCondensed-Regular",
 "AvenirNextCondensed-UltraLight",
-"AvenirNextCondensed-UltraLightItalic",
-"Ayuthaya",
-"Baghdad",
-"Baghdad Regular",
+"AvenirNextCondensed-UltraLightItalic"
+],
+"Ayuthaya": [
+"Ayuthaya"
+],
+"Bangla MN": [
 "Bangla MN",
 "Bangla MN Bold",
+"BanglaMN",
+"BanglaMN-Bold"
+],
+"Bangla Sangam MN": [
 "Bangla Sangam MN",
 "Bangla Sangam MN Bold",
-"BanglaMN",
-"BanglaMN-Bold",
 "BanglaSangamMN",
-"BanglaSangamMN-Bold",
+"BanglaSangamMN-Bold"
+],
+"Baskerville": [
 "Baskerville",
 "Baskerville Bold",
 "Baskerville Bold Italic",
@@ -197,41 +263,61 @@
 "Baskerville-BoldItalic",
 "Baskerville-Italic",
 "Baskerville-SemiBold",
-"Baskerville-SemiBoldItalic",
-"Beirut",
-"Beirut Regular",
+"Baskerville-SemiBoldItalic"
+],
+"Big Caslon": [
 "Big Caslon Medium",
-"BigCaslon-Medium",
+"BigCaslon-Medium"
+],
+"Bodoni 72": [
 "Bodoni 72 Bold",
 "Bodoni 72 Book",
 "Bodoni 72 Book Italic",
+"BodoniSvtyTwoITCTT-Bold",
+"BodoniSvtyTwoITCTT-Book",
+"BodoniSvtyTwoITCTT-BookIta"
+],
+"Bodoni 72 Oldstyle": [
 "Bodoni 72 Oldstyle Bold",
 "Bodoni 72 Oldstyle Book",
 "Bodoni 72 Oldstyle Book Italic",
-"Bodoni 72 Smallcaps Book",
-"Bodoni Ornaments",
-"BodoniOrnamentsITCTT",
-"BodoniSvtyTwoITCTT-Bold",
-"BodoniSvtyTwoITCTT-Book",
-"BodoniSvtyTwoITCTT-BookIta",
 "BodoniSvtyTwoOSITCTT-Bold",
 "BodoniSvtyTwoOSITCTT-Book",
-"BodoniSvtyTwoOSITCTT-BookIt",
-"BodoniSvtyTwoSCITCTT-Book",
+"BodoniSvtyTwoOSITCTT-BookIt"
+],
+"Bodoni 72 Smallcaps": [
+"Bodoni 72 Smallcaps Book",
+"BodoniSvtyTwoSCITCTT-Book"
+],
+"Bodoni Ornaments": [
+"Bodoni Ornaments",
+"BodoniOrnamentsITCTT"
+],
+"Bradley Hand": [
 "Bradley Hand Bold",
-"BradleyHandITCTT-Bold",
+"BradleyHandITCTT-Bold"
+],
+"Brush Script MT": [
 "Brush Script MT Italic",
-"BrushScriptMT",
+"BrushScriptMT"
+],
+"Chalkboard": [
 "Chalkboard",
 "Chalkboard Bold",
+"Chalkboard-Bold"
+],
+"Chalkboard SE": [
 "Chalkboard SE Bold",
 "Chalkboard SE Light",
 "Chalkboard SE Regular",
-"Chalkboard-Bold",
 "ChalkboardSE-Bold",
 "ChalkboardSE-Light",
-"ChalkboardSE-Regular",
-"Chalkduster",
+"ChalkboardSE-Regular"
+],
+"Chalkduster": [
+"Chalkduster"
+],
+"Charter": [
 "Charter Black",
 "Charter Black Italic",
 "Charter Bold",
@@ -243,27 +329,46 @@
 "Charter-Bold",
 "Charter-BoldItalic",
 "Charter-Italic",
-"Charter-Roman",
+"Charter-Roman"
+],
+"Cochin": [
 "Cochin",
 "Cochin Bold",
 "Cochin Bold Italic",
 "Cochin Italic",
 "Cochin-Bold",
 "Cochin-BoldItalic",
-"Cochin-Italic",
+"Cochin-Italic"
+],
+"Comic Sans MS": [
 "Comic Sans MS",
 "Comic Sans MS Bold",
 "ComicSansMS",
-"ComicSansMS-Bold",
+"ComicSansMS-Bold"
+],
+"Copperplate": [
 "Copperplate",
 "Copperplate Bold",
 "Copperplate Light",
 "Copperplate-Bold",
-"Copperplate-Light",
+"Copperplate-Light"
+],
+"Corsiva Hebrew": [
 "Corsiva Hebrew",
 "Corsiva Hebrew Bold",
 "CorsivaHebrew",
-"CorsivaHebrew-Bold",
+"CorsivaHebrew-Bold"
+],
+"Courier": [
+"Courier",
+"Courier Bold",
+"Courier Bold Oblique",
+"Courier Oblique",
+"Courier-Bold",
+"Courier-BoldOblique",
+"Courier-Oblique"
+],
+"Courier New": [
 "Courier New",
 "Courier New Bold",
 "Courier New Bold Italic",
@@ -271,11 +376,9 @@
 "CourierNewPS-BoldItalicMT",
 "CourierNewPS-BoldMT",
 "CourierNewPS-ItalicMT",
-"CourierNewPSMT",
-"DIN Alternate Bold",
-"DIN Condensed Bold",
-"DINAlternate-Bold",
-"DINCondensed-Bold",
+"CourierNewPSMT"
+],
+"Damascus": [
 "Damascus",
 "Damascus Bold",
 "Damascus Light",
@@ -285,38 +388,44 @@
 "DamascusBold",
 "DamascusLight",
 "DamascusMedium",
-"DamascusSemiBold",
-"DecoType Naskh Regular",
-"DecoTypeNaskh",
+"DamascusSemiBold"
+],
+"Devanagari MT": [
 "Devanagari MT",
 "Devanagari MT Bold",
+"DevanagariMT",
+"DevanagariMT-Bold"
+],
+"Devanagari Sangam MN": [
 "Devanagari Sangam MN",
 "Devanagari Sangam MN Bold",
-"DevanagariMT",
-"DevanagariMT-Bold",
 "DevanagariSangamMN",
-"DevanagariSangamMN-Bold",
+"DevanagariSangamMN-Bold"
+],
+"Didot": [
 "Didot",
 "Didot Bold",
 "Didot Italic",
 "Didot-Bold",
-"Didot-Italic",
-"Diwan Kufi Regular",
-"Diwan Thuluth Regular",
-"DiwanKufi",
-"DiwanMishafi",
-"DiwanMishafiGold",
-"DiwanThuluth",
+"Didot-Italic"
+],
+"DIN Alternate": [
+"DIN Alternate Bold",
+"DINAlternate-Bold"
+],
+"DIN Condensed": [
+"DIN Condensed Bold",
+"DINCondensed-Bold"
+],
+"Euphemia UCAS": [
 "Euphemia UCAS",
 "Euphemia UCAS Bold",
 "Euphemia UCAS Italic",
 "EuphemiaUCAS",
 "EuphemiaUCAS-Bold",
-"EuphemiaUCAS-Italic",
-"Farah",
-"Farah Regular",
-"Farisi",
-"Farisi Regular",
+"EuphemiaUCAS-Italic"
+],
+"Futura": [
 "Futura Bold",
 "Futura Condensed ExtraBold",
 "Futura Condensed Medium",
@@ -326,28 +435,40 @@
 "Futura-CondensedExtraBold",
 "Futura-CondensedMedium",
 "Futura-Medium",
-"Futura-MediumItalic",
-"GB18030 Bitmap",
-"GB18030Bitmap",
+"Futura-MediumItalic"
+],
+"Galvji": [
 "Galvji",
 "Galvji Bold",
 "Galvji Bold Oblique",
 "Galvji Oblique",
 "Galvji-Bold",
 "Galvji-BoldOblique",
-"Galvji-Oblique",
+"Galvji-Oblique"
+],
+"GB18030 Bitmap": [
+"GB18030 Bitmap",
+"GB18030Bitmap"
+],
+"Geeza Pro": [
 "Geeza Pro Bold",
 "Geeza Pro Regular",
 "GeezaPro",
-"GeezaPro-Bold",
-"Geneva",
+"GeezaPro-Bold"
+],
+"Geneva": [
+"Geneva"
+],
+"Georgia": [
 "Georgia",
 "Georgia Bold",
 "Georgia Bold Italic",
 "Georgia Italic",
 "Georgia-Bold",
 "Georgia-BoldItalic",
-"Georgia-Italic",
+"Georgia-Italic"
+],
+"Gill Sans": [
 "Gill Sans",
 "Gill Sans Bold",
 "Gill Sans Bold Italic",
@@ -365,37 +486,68 @@
 "GillSans-LightItalic",
 "GillSans-SemiBold",
 "GillSans-SemiBoldItalic",
-"GillSans-UltraBold",
+"GillSans-UltraBold"
+],
+"Grantha Sangam MN": [
 "Grantha Sangam MN Bold",
 "Grantha Sangam MN Regular",
 "GranthaSangamMN-Bold",
-"GranthaSangamMN-Regular",
+"GranthaSangamMN-Regular"
+],
+"Gujarati MT": [
 "Gujarati MT",
 "Gujarati MT Bold",
+"GujaratiMT",
+"GujaratiMT-Bold"
+],
+"Gujarati Sangam MN": [
 "Gujarati Sangam MN",
 "Gujarati Sangam MN Bold",
-"GujaratiMT",
-"GujaratiMT-Bold",
 "GujaratiSangamMN",
-"GujaratiSangamMN-Bold",
+"GujaratiSangamMN-Bold"
+],
+"Gurmukhi MN": [
 "Gurmukhi MN",
 "Gurmukhi MN Bold",
+"GurmukhiMN",
+"GurmukhiMN-Bold"
+],
+"Gurmukhi MT": [
 "Gurmukhi MT",
+"MonotypeGurmukhi"
+],
+"Gurmukhi Sangam MN": [
 "Gurmukhi Sangam MN",
 "Gurmukhi Sangam MN Bold",
-"GurmukhiMN",
-"GurmukhiMN-Bold",
 "GurmukhiSangamMN",
-"GurmukhiSangamMN-Bold",
+"GurmukhiSangamMN-Bold"
+],
+"Heiti SC": [
 "Heiti SC Light",
 "Heiti SC Medium",
+"STHeitiSC-Light",
+"STHeitiSC-Medium"
+],
+"Heiti TC": [
 "Heiti TC Light",
 "Heiti TC Medium",
+"STHeitiTC-Light",
+"STHeitiTC-Medium"
+],
+"Helvetica": [
 "Helvetica",
 "Helvetica Bold",
 "Helvetica Bold Oblique",
 "Helvetica Light",
 "Helvetica Light Oblique",
+"Helvetica Oblique",
+"Helvetica-Bold",
+"Helvetica-BoldOblique",
+"Helvetica-Light",
+"Helvetica-LightOblique",
+"Helvetica-Oblique"
+],
+"Helvetica Neue": [
 "Helvetica Neue",
 "Helvetica Neue Bold",
 "Helvetica Neue Bold Italic",
@@ -410,13 +562,6 @@
 "Helvetica Neue Thin Italic",
 "Helvetica Neue UltraLight",
 "Helvetica Neue UltraLight Italic",
-"Helvetica Oblique",
-"Helvetica-Bold",
-"Helvetica-BoldOblique",
-"Helvetica-Light",
-"Helvetica-LightOblique",
-"Helvetica-Oblique",
-"HelveticaLTMM",
 "HelveticaNeue",
 "HelveticaNeue-Bold",
 "HelveticaNeue-BoldItalic",
@@ -430,16 +575,52 @@
 "HelveticaNeue-Thin",
 "HelveticaNeue-ThinItalic",
 "HelveticaNeue-UltraLight",
-"HelveticaNeue-UltraLightItalic",
-"Herculanum",
-"HiraMaruProN-W4",
-"HiraMinProN-W3",
-"HiraMinProN-W6",
+"HelveticaNeue-UltraLightItalic"
+],
+"Herculanum": [
+"Herculanum"
+],
+"Hiragino Kaku Gothic Pro": [
+"Hiragino Kaku Gothic Pro W3",
+"Hiragino Kaku Gothic Pro W6",
+"HiraKakuPro-W3",
+"HiraKakuPro-W6"
+],
+"Hiragino Kaku Gothic ProN": [
+"Hiragino Kaku Gothic ProN W3",
+"Hiragino Kaku Gothic ProN W6",
+"HiraKakuProN-W3",
+"HiraKakuProN-W6"
+],
+"Hiragino Kaku Gothic Std": [
+"Hiragino Kaku Gothic Std W8",
+"HiraKakuStd-W8"
+],
+"Hiragino Kaku Gothic StdN": [
+"Hiragino Kaku Gothic StdN W8",
+"HiraKakuStdN-W8"
+],
+"Hiragino Maru Gothic Pro": [
+"Hiragino Maru Gothic Pro W4",
+"HiraMaruPro-W4"
+],
+"Hiragino Maru Gothic ProN": [
 "Hiragino Maru Gothic ProN W4",
+"HiraMaruProN-W4"
+],
+"Hiragino Mincho Pro": [
+"Hiragino Mincho Pro W3",
+"Hiragino Mincho Pro W6",
+"HiraMinPro-W3",
+"HiraMinPro-W6"
+],
+"Hiragino Mincho ProN": [
 "Hiragino Mincho ProN W3",
 "Hiragino Mincho ProN W6",
-"Hiragino Sans GB W3",
-"Hiragino Sans GB W6",
+"HiraMinProN-W3",
+"HiraMinProN-W6"
+],
+"Hiragino Sans": [
 "Hiragino Sans W0",
 "Hiragino Sans W1",
 "Hiragino Sans W2",
@@ -459,9 +640,15 @@
 "HiraginoSans-W6",
 "HiraginoSans-W7",
 "HiraginoSans-W8",
-"HiraginoSans-W9",
+"HiraginoSans-W9"
+],
+"Hiragino Sans GB": [
+"Hiragino Sans GB W3",
+"Hiragino Sans GB W6",
 "HiraginoSansGB-W3",
-"HiraginoSansGB-W6",
+"HiraginoSansGB-W6"
+],
+"Hoefler Text": [
 "Hoefler Text",
 "Hoefler Text Black",
 "Hoefler Text Black Italic",
@@ -471,43 +658,75 @@
 "HoeflerText-BlackItalic",
 "HoeflerText-Italic",
 "HoeflerText-Ornaments",
-"HoeflerText-Regular",
+"HoeflerText-Regular"
+],
+"Impact": [
+"Impact"
+],
+"InaiMathi": [
+"InaiMathi",
+"InaiMathi Bold",
+"InaiMathi-Bold"
+],
+"Iowan Old Style": [
+"Iowan Old Style Black",
+"Iowan Old Style Black Italic",
+"Iowan Old Style Bold",
+"Iowan Old Style Bold Italic",
+"Iowan Old Style Italic",
+"Iowan Old Style Roman",
+"Iowan Old Style Titling",
+"IowanOldStyle-Black",
+"IowanOldStyle-BlackItalic",
+"IowanOldStyle-Bold",
+"IowanOldStyle-BoldItalic",
+"IowanOldStyle-Italic",
+"IowanOldStyle-Roman",
+"IowanOldStyle-Titling"
+],
+"ITF Devanagari": [
 "ITF Devanagari Bold",
 "ITF Devanagari Book",
 "ITF Devanagari Demi",
 "ITF Devanagari Light",
-"ITF Devanagari Marathi Bold",
-"ITF Devanagari Marathi Book",
-"ITF Devanagari Marathi Demi",
-"ITF Devanagari Marathi Light",
-"ITF Devanagari Marathi Medium",
 "ITF Devanagari Medium",
 "ITFDevanagari-Bold",
 "ITFDevanagari-Book",
 "ITFDevanagari-Demi",
 "ITFDevanagari-Light",
-"ITFDevanagari-Medium",
+"ITFDevanagari-Medium"
+],
+"ITF Devanagari Marathi": [
+"ITF Devanagari Marathi Bold",
+"ITF Devanagari Marathi Book",
+"ITF Devanagari Marathi Demi",
+"ITF Devanagari Marathi Light",
+"ITF Devanagari Marathi Medium",
 "ITFDevanagariMarathi-Bold",
 "ITFDevanagariMarathi-Book",
 "ITFDevanagariMarathi-Demi",
 "ITFDevanagariMarathi-Light",
-"ITFDevanagariMarathi-Medium",
-"Impact",
-"InaiMathi",
-"InaiMathi Bold",
-"InaiMathi-Bold",
+"ITFDevanagariMarathi-Medium"
+],
+"Kailasa": [
 "Kailasa",
 "Kailasa Bold",
 "Kailasa Regular",
-"Kailasa-Bold",
+"Kailasa-Bold"
+],
+"Kannada MN": [
 "Kannada MN",
 "Kannada MN Bold",
+"KannadaMN",
+"KannadaMN-Bold"
+],
+"Kannada Sangam MN": [
 "Kannada Sangam MN",
 "Kannada Sangam MN Bold",
-"KannadaMN",
-"KannadaMN-Bold",
 "KannadaSangamMN",
-"KannadaSangamMN-Bold",
+"KannadaSangamMN-Bold"
+],
+"Kefa III": [
 "Kefa III Regular Bold",
 "Kefa III Regular ExtraBold",
 "Kefa III Regular Light",
@@ -515,83 +734,124 @@
 "KefaIII-Bold",
 "KefaIII-ExtraBold",
 "KefaIII-Light",
-"KefaIII-Regular",
+"KefaIII-Regular"
+],
+"Khmer MN": [
 "Khmer MN",
 "Khmer MN Bold",
-"Khmer Sangam MN",
 "KhmerMN",
-"KhmerMN-Bold",
-"KhmerSangamMN",
+"KhmerMN-Bold"
+],
+"Khmer Sangam MN": [
+"Khmer Sangam MN",
+"KhmerSangamMN"
+],
+"Kohinoor Bangla": [
 "Kohinoor Bangla",
 "Kohinoor Bangla Bold",
 "Kohinoor Bangla Light",
 "Kohinoor Bangla Medium",
 "Kohinoor Bangla Semibold",
+"KohinoorBangla-Bold",
+"KohinoorBangla-Light",
+"KohinoorBangla-Medium",
+"KohinoorBangla-Regular",
+"KohinoorBangla-Semibold"
+],
+"Kohinoor Devanagari": [
 "Kohinoor Devanagari Bold",
 "Kohinoor Devanagari Light",
 "Kohinoor Devanagari Medium",
 "Kohinoor Devanagari Regular",
 "Kohinoor Devanagari Semibold",
+"KohinoorDevanagari-Bold",
+"KohinoorDevanagari-Light",
+"KohinoorDevanagari-Medium",
+"KohinoorDevanagari-Regular",
+"KohinoorDevanagari-Semibold"
+],
+"Kohinoor Gujarati": [
 "Kohinoor Gujarati Bold",
 "Kohinoor Gujarati Light",
 "Kohinoor Gujarati Medium",
 "Kohinoor Gujarati Regular",
 "Kohinoor Gujarati Semibold",
+"KohinoorGujarati-Bold",
+"KohinoorGujarati-Light",
+"KohinoorGujarati-Medium",
+"KohinoorGujarati-Regular",
+"KohinoorGujarati-Semibold"
+],
+"Kohinoor Telugu": [
 "Kohinoor Telugu",
 "Kohinoor Telugu Bold",
 "Kohinoor Telugu Light",
 "Kohinoor Telugu Medium",
 "Kohinoor Telugu Semibold",
-"KohinoorBangla-Bold",
-"KohinoorBangla-Light",
-"KohinoorBangla-Medium",
-"KohinoorBangla-Regular",
-"KohinoorBangla-Semibold",
-"KohinoorDevanagari-Bold",
-"KohinoorDevanagari-Light",
-"KohinoorDevanagari-Medium",
-"KohinoorDevanagari-Regular",
-"KohinoorDevanagari-Semibold",
-"KohinoorGujarati-Bold",
-"KohinoorGujarati-Light",
-"KohinoorGujarati-Medium",
-"KohinoorGujarati-Regular",
-"KohinoorGujarati-Semibold",
 "KohinoorTelugu-Bold",
 "KohinoorTelugu-Light",
 "KohinoorTelugu-Medium",
 "KohinoorTelugu-Regular",
-"KohinoorTelugu-Semibold",
+"KohinoorTelugu-Semibold"
+],
+"Kokonor": [
 "Kokonor",
-"Kokonor Regular",
-"Krungthep",
+"Kokonor Regular"
+],
+"Krungthep": [
+"Krungthep"
+],
+"KufiStandardGK": [
 "KufiStandardGK",
-"KufiStandardGK Regular",
+"KufiStandardGK Regular"
+],
+"Lao MN": [
 "Lao MN",
 "Lao MN Bold",
-"Lao Sangam MN",
 "LaoMN",
-"LaoMN-Bold",
-"LaoSangamMN",
-"LastResort",
+"LaoMN-Bold"
+],
+"Lao Sangam MN": [
+"Lao Sangam MN",
+"LaoSangamMN"
+],
+"Lucida Grande": [
 "Lucida Grande",
 "Lucida Grande Bold",
 "LucidaGrande",
-"LucidaGrande-Bold",
+"LucidaGrande-Bold"
+],
+"Luminari": [
 "Luminari",
-"Luminari-Regular",
+"Luminari-Regular"
+],
+"Malayalam MN": [
 "Malayalam MN",
 "Malayalam MN Bold",
+"MalayalamMN",
+"MalayalamMN-Bold"
+],
+"Malayalam Sangam MN": [
 "Malayalam Sangam MN",
 "Malayalam Sangam MN Bold",
-"MalayalamMN",
-"MalayalamMN-Bold",
 "MalayalamSangamMN",
-"MalayalamSangamMN-Bold",
+"MalayalamSangamMN-Bold"
+],
+"Marion": [
+"Marion Bold",
+"Marion Italic",
+"Marion Regular",
+"Marion-Bold",
+"Marion-Italic",
+"Marion-Regular"
+],
+"Marker Felt": [
 "Marker Felt Thin",
 "Marker Felt Wide",
 "MarkerFelt-Thin",
-"MarkerFelt-Wide",
+"MarkerFelt-Wide"
+],
+"Menlo": [
 "Menlo Bold",
 "Menlo Bold Italic",
 "Menlo Italic",
@@ -599,20 +859,25 @@
 "Menlo-Bold",
 "Menlo-BoldItalic",
 "Menlo-Italic",
-"Menlo-Regular",
+"Menlo-Regular"
+],
+"Microsoft Sans Serif": [
 "Microsoft Sans Serif",
-"MicrosoftSansSerif",
-"Mishafi Gold Regular",
-"Mishafi Regular",
-"Monaco",
-"MonotypeGurmukhi",
+"MicrosoftSansSerif"
+],
+"Monaco": [
+"Monaco"
+],
+"Mshtakan": [
 "Mshtakan",
 "Mshtakan Bold",
 "Mshtakan BoldOblique",
 "Mshtakan Oblique",
 "MshtakanBold",
 "MshtakanBoldOblique",
-"MshtakanOblique",
+"MshtakanOblique"
+],
+"Mukta Mahee": [
 "MuktaMahee Bold",
 "MuktaMahee ExtraBold",
 "MuktaMahee ExtraLight",
@@ -626,23 +891,25 @@
 "MuktaMahee-Light",
 "MuktaMahee-Medium",
 "MuktaMahee-Regular",
-"MuktaMahee-SemiBold",
-"Muna",
-"Muna Black",
-"Muna Bold",
-"Muna Regular",
-"MunaBlack",
-"MunaBold",
+"MuktaMahee-SemiBold"
+],
+"Myanmar MN": [
 "Myanmar MN",
 "Myanmar MN Bold",
+"MyanmarMN",
+"MyanmarMN-Bold"
+],
+"Myanmar Sangam MN": [
 "Myanmar Sangam MN",
 "Myanmar Sangam MN Bold",
-"MyanmarMN",
-"MyanmarMN-Bold",
 "MyanmarSangamMN",
-"MyanmarSangamMN-Bold",
+"MyanmarSangamMN-Bold"
+],
+"Nadeem": [
 "Nadeem",
-"Nadeem Regular",
+"Nadeem Regular"
+],
+"New Peninim MT": [
 "New Peninim MT",
 "New Peninim MT Bold",
 "New Peninim MT Bold Inclined",
@@ -650,16 +917,165 @@
 "NewPeninimMT",
 "NewPeninimMT-Bold",
 "NewPeninimMT-BoldInclined",
-"NewPeninimMT-Inclined",
+"NewPeninimMT-Inclined"
+],
+"Noteworthy": [
 "Noteworthy Bold",
 "Noteworthy Light",
 "Noteworthy-Bold",
-"Noteworthy-Light",
+"Noteworthy-Light"
+],
+"Noto Nastaliq Urdu": [
 "Noto Nastaliq Urdu",
 "Noto Nastaliq Urdu Bold",
+"NotoNastaliqUrdu",
+"NotoNastaliqUrdu-Bold"
+],
+"Noto Sans Adlam": [
+"Noto Sans Adlam Regular",
+"NotoSansAdlam-Regular"
+],
+"Noto Sans Armenian": [
+"Noto Sans Armenian Black",
+"Noto Sans Armenian Bold",
+"Noto Sans Armenian ExtraBold",
+"Noto Sans Armenian ExtraLight",
+"Noto Sans Armenian Light",
+"Noto Sans Armenian Medium",
+"Noto Sans Armenian Regular",
+"Noto Sans Armenian SemiBold",
+"Noto Sans Armenian Thin",
+"NotoSansArmenian-Black",
+"NotoSansArmenian-Bold",
+"NotoSansArmenian-ExtraBold",
+"NotoSansArmenian-ExtraLight",
+"NotoSansArmenian-Light",
+"NotoSansArmenian-Medium",
+"NotoSansArmenian-Regular",
+"NotoSansArmenian-SemiBold",
+"NotoSansArmenian-Thin"
+],
+"Noto Sans Avestan": [
+"Noto Sans Avestan Regular",
+"NotoSansAvestan-Regular"
+],
+"Noto Sans Bamum": [
+"Noto Sans Bamum Regular",
+"NotoSansBamum-Regular"
+],
+"Noto Sans Bassa Vah": [
+"Noto Sans Bassa Vah Regular",
+"NotoSansBassaVah-Regular"
+],
+"Noto Sans Batak": [
 "Noto Sans Batak Regular",
+"NotoSansBatak-Regular"
+],
+"Noto Sans Bhaiksuki": [
+"Noto Sans Bhaiksuki Regular",
+"NotoSansBhaiksuki-Regular"
+],
+"Noto Sans Brahmi": [
+"Noto Sans Brahmi Regular",
+"NotoSansBrahmi-Regular"
+],
+"Noto Sans Buginese": [
+"Noto Sans Buginese Regular",
+"NotoSansBuginese-Regular"
+],
+"Noto Sans Buhid": [
+"Noto Sans Buhid Regular",
+"NotoSansBuhid-Regular"
+],
+"Noto Sans Canadian Aboriginal": [
 "Noto Sans Canadian Aboriginal Regular",
+"NotoSansCanadianAboriginal-Regular"
+],
+"Noto Sans Carian": [
+"Noto Sans Carian Regular",
+"NotoSansCarian-Regular"
+],
+"Noto Sans Caucasian Albanian": [
+"Noto Sans Caucasian Albanian Regular",
+"NotoSansCaucasianAlbanian-Regular"
+],
+"Noto Sans Chakma": [
+"Noto Sans Chakma Regular",
+"NotoSansChakma-Regular"
+],
+"Noto Sans Cham": [
+"Noto Sans Cham Regular",
+"NotoSansCham-Regular"
+],
+"Noto Sans Coptic": [
+"Noto Sans Coptic Regular",
+"NotoSansCoptic-Regular"
+],
+"Noto Sans Cuneiform": [
+"Noto Sans Cuneiform Regular",
+"NotoSansCuneiform-Regular"
+],
+"Noto Sans Cypriot": [
+"Noto Sans Cypriot Regular",
+"NotoSansCypriot-Regular"
+],
+"Noto Sans Duployan": [
+"Noto Sans Duployan Regular",
+"NotoSansDuployan-Regular"
+],
+"Noto Sans Egyptian Hieroglyphs": [
+"Noto Sans Egyptian Hieroglyphs Regular",
+"NotoSansEgyptianHieroglyphs-Regular"
+],
+"Noto Sans Elbasan": [
+"Noto Sans Elbasan Regular",
+"NotoSansElbasan-Regular"
+],
+"Noto Sans Glagolitic": [
+"Noto Sans Glagolitic Regular",
+"NotoSansGlagolitic-Regular"
+],
+"Noto Sans Gothic": [
+"Noto Sans Gothic Regular",
+"NotoSansGothic-Regular"
+],
+"Noto Sans Gunjala Gondi": [
 "Noto Sans Gunjala Gondi Regular",
+"NotoSansGunjalaGondi-Regular"
+],
+"Noto Sans Hanifi Rohingya": [
+"Noto Sans Hanifi Rohingya Regular",
+"NotoSansHanifiRohingya-Regular"
+],
+"Noto Sans Hanunoo": [
+"Noto Sans Hanunoo Regular",
+"NotoSansHanunoo-Regular"
+],
+"Noto Sans Hatran": [
+"Noto Sans Hatran Regular",
+"NotoSansHatran-Regular"
+],
+"Noto Sans Imperial Aramaic": [
+"Noto Sans Imperial Aramaic Regular",
+"NotoSansImperialAramaic-Regular"
+],
+"Noto Sans Inscriptional Pahlavi": [
+"Noto Sans Inscriptional Pahlavi Regular",
+"NotoSansInscriptionalPahlavi-Regular"
+],
+"Noto Sans Inscriptional Parthian": [
+"Noto Sans Inscriptional Parthian Regular",
+"NotoSansInscriptionalParthian-Regular"
+],
+"Noto Sans Javanese": [
+"Noto Sans Javanese Regular",
+"NotoSansJavanese-Regular"
+],
+"Noto Sans Kaithi": [
+"Noto Sans Kaithi Regular",
+"NotoSansKaithi-Regular"
+],
+"Noto Sans Kannada": [
 "Noto Sans Kannada Black",
 "Noto Sans Kannada Bold",
 "Noto Sans Kannada ExtraBold",
@@ -669,7 +1085,113 @@
 "Noto Sans Kannada Regular",
 "Noto Sans Kannada SemiBold",
 "Noto Sans Kannada Thin",
+"NotoSansKannada-Black",
+"NotoSansKannada-Bold",
+"NotoSansKannada-ExtraBold",
+"NotoSansKannada-ExtraLight",
+"NotoSansKannada-Light",
+"NotoSansKannada-Medium",
+"NotoSansKannada-Regular",
+"NotoSansKannada-SemiBold",
+"NotoSansKannada-Thin"
+],
+"Noto Sans Kayah Li": [
+"Noto Sans Kayah Li Regular",
+"NotoSansKayahLi-Regular"
+],
+"Noto Sans Kharoshthi": [
+"Noto Sans Kharoshthi Regular",
+"NotoSansKharoshthi-Regular"
+],
+"Noto Sans Khojki": [
+"Noto Sans Khojki Regular",
+"NotoSansKhojki-Regular"
+],
+"Noto Sans Khudawadi": [
+"Noto Sans Khudawadi Regular",
+"NotoSansKhudawadi-Regular"
+],
+"Noto Sans Lepcha": [
+"Noto Sans Lepcha Regular",
+"NotoSansLepcha-Regular"
+],
+"Noto Sans Limbu": [
+"Noto Sans Limbu Regular",
+"NotoSansLimbu-Regular"
+],
+"Noto Sans Linear A": [
+"Noto Sans Linear A Regular",
+"NotoSansLinearA-Regular"
+],
+"Noto Sans Linear B": [
+"Noto Sans Linear B Regular",
+"NotoSansLinearB-Regular"
+],
+"Noto Sans Lisu": [
+"Noto Sans Lisu Regular",
+"NotoSansLisu-Regular"
+],
+"Noto Sans Lycian": [
+"Noto Sans Lycian Regular",
+"NotoSansLycian-Regular"
+],
+"Noto Sans Lydian": [
+"Noto Sans Lydian Regular",
+"NotoSansLydian-Regular"
+],
+"Noto Sans Mahajani": [
+"Noto Sans Mahajani Regular",
+"NotoSansMahajani-Regular"
+],
+"Noto Sans Mandaic": [
+"Noto Sans Mandaic Regular",
+"NotoSansMandaic-Regular"
+],
+"Noto Sans Manichaean": [
+"Noto Sans Manichaean Regular",
+"NotoSansManichaean-Regular"
+],
+"Noto Sans Marchen": [
+"Noto Sans Marchen Regular",
+"NotoSansMarchen-Regular"
+],
+"Noto Sans Masaram Gondi": [
 "Noto Sans Masaram Gondi Regular",
+"NotoSansMasaramGondi-Regular"
+],
+"Noto Sans Meetei Mayek": [
+"Noto Sans Meetei Mayek Regular",
+"NotoSansMeeteiMayek-Regular"
+],
+"Noto Sans Mende Kikakui": [
+"Noto Sans Mende Kikakui Regular",
+"NotoSansMendeKikakui-Regular"
+],
+"Noto Sans Meroitic": [
+"Noto Sans Meroitic Regular",
+"NotoSansMeroitic-Regular"
+],
+"Noto Sans Miao": [
+"Noto Sans Miao Regular",
+"NotoSansMiao-Regular"
+],
+"Noto Sans Modi": [
+"Noto Sans Modi Regular",
+"NotoSansModi-Regular"
+],
+"Noto Sans Mongolian": [
+"Noto Sans Mongolian Regular",
+"NotoSansMongolian-Regular"
+],
+"Noto Sans Mro": [
+"Noto Sans Mro Regular",
+"NotoSansMro-Regular"
+],
+"Noto Sans Multani": [
+"Noto Sans Multani Regular",
+"NotoSansMultani-Regular"
+],
+"Noto Sans Myanmar": [
 "Noto Sans Myanmar Black",
 "Noto Sans Myanmar Bold",
 "Noto Sans Myanmar ExtraBold",
@@ -679,9 +1201,138 @@
 "Noto Sans Myanmar Regular",
 "Noto Sans Myanmar SemiBold",
 "Noto Sans Myanmar Thin",
+"NotoSansMyanmar-Black",
+"NotoSansMyanmar-Bold",
+"NotoSansMyanmar-ExtraBold",
+"NotoSansMyanmar-ExtraLight",
+"NotoSansMyanmar-Light",
+"NotoSansMyanmar-Medium",
+"NotoSansMyanmar-Regular",
+"NotoSansMyanmar-SemiBold",
+"NotoSansMyanmar-Thin"
+],
+"Noto Sans Nabataean": [
+"Noto Sans Nabataean Regular",
+"NotoSansNabataean-Regular"
+],
+"Noto Sans Nag Mundari": [
+"NotoSansNagMundari-Regular"
+],
+"Noto Sans New Tai Lue": [
+"Noto Sans New Tai Lue Regular",
+"NotoSansNewTaiLue-Regular"
+],
+"Noto Sans Newa": [
+"Noto Sans Newa Regular",
+"NotoSansNewa-Regular"
+],
+"Noto Sans NKo": [
 "Noto Sans NKo Regular",
+"NotoSansNKo-Regular"
+],
+"Noto Sans Ol Chiki": [
+"Noto Sans Ol Chiki Regular",
+"NotoSansOlChiki-Regular"
+],
+"Noto Sans Old Hungarian": [
+"Noto Sans Old Hungarian Regular",
+"NotoSansOldHungarian-Regular"
+],
+"Noto Sans Old Italic": [
+"Noto Sans Old Italic Regular",
+"NotoSansOldItalic-Regular"
+],
+"Noto Sans Old North Arabian": [
+"Noto Sans Old North Arabian Regular",
+"NotoSansOldNorthArabian-Regular"
+],
+"Noto Sans Old Permic": [
+"Noto Sans Old Permic Regular",
+"NotoSansOldPermic-Regular"
+],
+"Noto Sans Old Persian": [
+"Noto Sans Old Persian Regular",
+"NotoSansOldPersian-Regular"
+],
+"Noto Sans Old South Arabian": [
+"Noto Sans Old South Arabian Regular",
+"NotoSansOldSouthArabian-Regular"
+],
+"Noto Sans Old Turkic": [
+"Noto Sans Old Turkic Regular",
+"NotoSansOldTurkic-Regular"
+],
+"Noto Sans Oriya": [
 "Noto Sans Oriya",
 "Noto Sans Oriya Bold",
+"NotoSansOriya",
+"NotoSansOriya-Bold"
+],
+"Noto Sans Osage": [
+"Noto Sans Osage Regular",
+"NotoSansOsage-Regular"
+],
+"Noto Sans Osmanya": [
+"Noto Sans Osmanya Regular",
+"NotoSansOsmanya-Regular"
+],
+"Noto Sans Pahawh Hmong": [
+"Noto Sans Pahawh Hmong Regular",
+"NotoSansPahawhHmong-Regular"
+],
+"Noto Sans Palmyrene": [
+"Noto Sans Palmyrene Regular",
+"NotoSansPalmyrene-Regular"
+],
+"Noto Sans Pau Cin Hau": [
+"Noto Sans Pau Cin Hau Regular",
+"NotoSansPauCinHau-Regular"
+],
+"Noto Sans PhagsPa": [
+"Noto Sans PhagsPa Regular",
+"NotoSansPhagsPa-Regular"
+],
+"Noto Sans Phoenician": [
+"Noto Sans Phoenician Regular",
+"NotoSansPhoenician-Regular"
+],
+"Noto Sans Psalter Pahlavi": [
+"Noto Sans Psalter Pahlavi Regular",
+"NotoSansPsalterPahlavi-Regular"
+],
+"Noto Sans Rejang": [
+"Noto Sans Rejang Regular",
+"NotoSansRejang-Regular"
+],
+"Noto Sans Samaritan": [
+"Noto Sans Samaritan Regular",
+"NotoSansSamaritan-Regular"
+],
+"Noto Sans Saurashtra": [
+"Noto Sans Saurashtra Regular",
+"NotoSansSaurashtra-Regular"
+],
+"Noto Sans Sharada": [
+"Noto Sans Sharada Regular",
+"NotoSansSharada-Regular"
+],
+"Noto Sans Siddham": [
+"Noto Sans Siddham Regular",
+"NotoSansSiddham-Regular"
+],
+"Noto Sans Sora Sompeng": [
+"Noto Sans Sora Sompeng Regular",
+"NotoSansSoraSompeng-Regular"
+],
+"Noto Sans Sundanese": [
+"Noto Sans Sundanese Regular",
+"NotoSansSundanese-Regular"
+],
+"Noto Sans Syloti Nagri": [
+"Noto Sans Syloti Nagri Regular",
+"NotoSansSylotiNagri-Regular"
+],
+"Noto Sans Syriac": [
 "Noto Sans Syriac Regular Black",
 "Noto Sans Syriac Regular Bold",
 "Noto Sans Syriac Regular ExtraBold",
@@ -691,7 +1342,105 @@
 "Noto Sans Syriac Regular Regular",
 "Noto Sans Syriac Regular SemiBold",
 "Noto Sans Syriac Regular Thin",
+"NotoSansSyriac-Regular",
+"NotoSansSyriac-Regular_Black",
+"NotoSansSyriac-Regular_Bold",
+"NotoSansSyriac-Regular_ExtraBold",
+"NotoSansSyriac-Regular_ExtraLight",
+"NotoSansSyriac-Regular_Light",
+"NotoSansSyriac-Regular_Medium",
+"NotoSansSyriac-Regular_SemiBold",
+"NotoSansSyriac-Regular_Thin"
+],
+"Noto Sans Tagalog": [
 "Noto Sans Tagalog Regular",
+"NotoSansTagalog-Regular"
+],
+"Noto Sans Tagbanwa": [
+"Noto Sans Tagbanwa Regular",
+"NotoSansTagbanwa-Regular"
+],
+"Noto Sans Tai Le": [
+"Noto Sans Tai Le Regular",
+"NotoSansTaiLe-Regular"
+],
+"Noto Sans Tai Tham": [
+"Noto Sans Tai Tham",
+"NotoSansTaiTham"
+],
+"Noto Sans Tai Viet": [
+"Noto Sans Tai Viet Regular",
+"NotoSansTaiViet-Regular"
+],
+"Noto Sans Takri": [
+"Noto Sans Takri Regular",
+"NotoSansTakri-Regular"
+],
+"Noto Sans Thaana": [
+"Noto Sans Thaana Regular",
+"NotoSansThaana-Regular"
+],
+"Noto Sans Tifinagh": [
+"Noto Sans Tifinagh Regular",
+"NotoSansTifinagh-Regular"
+],
+"Noto Sans Tirhuta": [
+"Noto Sans Tirhuta Regular",
+"NotoSansTirhuta-Regular"
+],
+"Noto Sans Ugaritic": [
+"Noto Sans Ugaritic Regular",
+"NotoSansUgaritic-Regular"
+],
+"Noto Sans Vai": [
+"Noto Sans Vai Regular",
+"NotoSansVai-Regular"
+],
+"Noto Sans Wancho": [
+"Noto Sans Wancho Regular",
+"NotoSansWancho-Regular"
+],
+"Noto Sans Warang Citi": [
+"Noto Sans Warang Citi Regular",
+"NotoSansWarangCiti-Regular"
+],
+"Noto Sans Yi": [
+"Noto Sans Yi Regular",
+"NotoSansYi-Regular"
+],
+"Noto Sans Zawgyi": [
+"Noto Sans Zawgyi Black",
+"Noto Sans Zawgyi Bold",
+"Noto Sans Zawgyi ExtraBold",
+"Noto Sans Zawgyi ExtraLight",
+"Noto Sans Zawgyi Light",
+"Noto Sans Zawgyi Medium",
+"Noto Sans Zawgyi Regular",
+"Noto Sans Zawgyi SemiBold",
+"Noto Sans Zawgyi Thin",
+"NotoSansZawgyi-Black",
+"NotoSansZawgyi-Bold",
+"NotoSansZawgyi-ExtraBold",
+"NotoSansZawgyi-ExtraLight",
+"NotoSansZawgyi-Light",
+"NotoSansZawgyi-Medium",
+"NotoSansZawgyi-Regular",
+"NotoSansZawgyi-SemiBold",
+"NotoSansZawgyi-Thin"
+],
+"Noto Serif Ahom": [
+"Noto Serif Ahom Regular",
+"NotoSerifAhom-Regular"
+],
+"Noto Serif Balinese": [
+"Noto Serif Balinese Regular",
+"NotoSerifBalinese-Regular"
+],
+"Noto Serif Hmong Nyiakeng": [
+"Noto Serif Hmong Nyiakeng Regular",
+"NotoSerifHmongNyiakeng-Regular"
+],
+"Noto Serif Myanmar": [
 "Noto Serif Myanmar Black",
 "Noto Serif Myanmar Bold",
 "Noto Serif Myanmar ExtraBold",
@@ -701,41 +1450,6 @@
 "Noto Serif Myanmar Regular",
 "Noto Serif Myanmar SemiBold",
 "Noto Serif Myanmar Thin",
-"Noto Serif Yezidi Regular",
-"NotoNastaliqUrdu",
-"NotoNastaliqUrdu-Bold",
-"NotoSansBatak-Regular",
-"NotoSansKannada-Black",
-"NotoSansKannada-Bold",
-"NotoSansKannada-ExtraBold",
-"NotoSansKannada-ExtraLight",
-"NotoSansKannada-Light",
-"NotoSansKannada-Medium",
-"NotoSansKannada-Regular",
-"NotoSansKannada-SemiBold",
-"NotoSansKannada-Thin",
-"NotoSansMyanmar-Black",
-"NotoSansMyanmar-Bold",
-"NotoSansMyanmar-ExtraBold",
-"NotoSansMyanmar-ExtraLight",
-"NotoSansMyanmar-Light",
-"NotoSansMyanmar-Medium",
-"NotoSansMyanmar-Regular",
-"NotoSansMyanmar-SemiBold",
-"NotoSansMyanmar-Thin",
-"NotoSansNKo-Regular",
-"NotoSansOriya",
-"NotoSansOriya-Bold",
-"NotoSansSyriac-Regular",
-"NotoSansSyriac-Regular_Black",
-"NotoSansSyriac-Regular_Bold",
-"NotoSansSyriac-Regular_ExtraBold",
-"NotoSansSyriac-Regular_ExtraLight",
-"NotoSansSyriac-Regular_Light",
-"NotoSansSyriac-Regular_Medium",
-"NotoSansSyriac-Regular_SemiBold",
-"NotoSansSyriac-Regular_Thin",
-"NotoSansTagalog-Regular",
 "NotoSerifMyanmar-Black",
 "NotoSerifMyanmar-Bold",
 "NotoSerifMyanmar-ExtraBold",
@@ -744,7 +1458,13 @@
 "NotoSerifMyanmar-Medium",
 "NotoSerifMyanmar-Regular",
 "NotoSerifMyanmar-SemiBold",
-"NotoSerifMyanmar-Thin",
+"NotoSerifMyanmar-Thin"
+],
+"Noto Serif Yezidi": [
+"Noto Serif Yezidi Regular",
+"NotoSerifYezidi-Regular"
+],
+"Optima": [
 "Optima Bold",
 "Optima Bold Italic",
 "Optima ExtraBlack",
@@ -754,47 +1474,21 @@
 "Optima-BoldItalic",
 "Optima-ExtraBlack",
 "Optima-Italic",
-"Optima-Regular",
+"Optima-Regular"
+],
+"Oriya MN": [
 "Oriya MN",
 "Oriya MN Bold",
+"OriyaMN",
+"OriyaMN-Bold"
+],
+"Oriya Sangam MN": [
 "Oriya Sangam MN",
 "Oriya Sangam MN Bold",
-"OriyaMN",
-"OriyaMN-Bold",
 "OriyaSangamMN",
-"OriyaSangamMN-Bold",
-"PT Mono",
-"PT Mono Bold",
-"PT Sans",
-"PT Sans Bold",
-"PT Sans Bold Italic",
-"PT Sans Caption",
-"PT Sans Caption Bold",
-"PT Sans Italic",
-"PT Sans Narrow",
-"PT Sans Narrow Bold",
-"PT Serif",
-"PT Serif Bold",
-"PT Serif Bold Italic",
-"PT Serif Caption",
-"PT Serif Caption Italic",
-"PT Serif Italic",
-"PTMono-Bold",
-"PTMono-Regular",
-"PTSans-Bold",
-"PTSans-BoldItalic",
-"PTSans-Caption",
-"PTSans-CaptionBold",
-"PTSans-Italic",
-"PTSans-Narrow",
-"PTSans-NarrowBold",
-"PTSans-Regular",
-"PTSerif-Bold",
-"PTSerif-BoldItalic",
-"PTSerif-Caption",
-"PTSerif-CaptionItalic",
-"PTSerif-Italic",
-"PTSerif-Regular",
+"OriyaSangamMN-Bold"
+],
+"Palatino": [
 "Palatino",
 "Palatino Bold",
 "Palatino Bold Italic",
@@ -802,22 +1496,133 @@
 "Palatino-Bold",
 "Palatino-BoldItalic",
 "Palatino-Italic",
-"Palatino-Roman",
+"Palatino-Roman"
+],
+"Papyrus": [
 "Papyrus",
 "Papyrus Condensed",
-"Papyrus-Condensed",
+"Papyrus-Condensed"
+],
+"Party LET": [
 "Party LET Plain",
-"PartyLetPlain",
+"PartyLetPlain"
+],
+"Phosphate": [
 "Phosphate Inline",
 "Phosphate Solid",
 "Phosphate-Inline",
-"Phosphate-Solid",
+"Phosphate-Solid"
+],
+"PingFang HK": [
 "PingFang HK Light",
+"PingFang HK Medium",
+"PingFang HK Regular",
+"PingFang HK Semibold",
+"PingFang HK Thin",
+"PingFang HK Ultralight",
+"PingFangHK-Light",
+"PingFangHK-Medium",
+"PingFangHK-Regular",
+"PingFangHK-Semibold",
+"PingFangHK-Thin",
+"PingFangHK-Ultralight"
+],
+"PingFang MO": [
+"PingFang MO Light",
+"PingFang MO Medium",
+"PingFang MO Regular",
+"PingFang MO Semibold",
+"PingFang MO Thin",
+"PingFang MO Ultralight",
+"PingFangMO-Light",
+"PingFangMO-Medium",
+"PingFangMO-Regular",
+"PingFangMO-Semibold",
+"PingFangMO-Thin",
+"PingFangMO-Ultralight"
+],
+"PingFang SC": [
+"PingFang SC Light",
+"PingFang SC Medium",
+"PingFang SC Regular",
+"PingFang SC Semibold",
+"PingFang SC Thin",
+"PingFang SC Ultralight",
+"PingFangSC-Light",
+"PingFangSC-Medium",
+"PingFangSC-Regular",
+"PingFangSC-Semibold",
+"PingFangSC-Thin",
+"PingFangSC-Ultralight"
+],
+"PingFang TC": [
+"PingFang TC Light",
+"PingFang TC Medium",
+"PingFang TC Regular",
+"PingFang TC Semibold",
+"PingFang TC Thin",
+"PingFang TC Ultralight",
+"PingFangTC-Light",
+"PingFangTC-Medium",
+"PingFangTC-Regular",
+"PingFangTC-Semibold",
+"PingFangTC-Thin",
+"PingFangTC-Ultralight"
+],
+"Plantagenet Cherokee": [
 "Plantagenet Cherokee",
-"PlantagenetCherokee",
+"PlantagenetCherokee"
+],
+"PT Mono": [
+"PT Mono",
+"PT Mono Bold",
+"PTMono-Bold",
+"PTMono-Regular"
+],
+"PT Sans": [
+"PT Sans",
+"PT Sans Bold",
+"PT Sans Bold Italic",
+"PT Sans Italic",
+"PTSans-Bold",
+"PTSans-BoldItalic",
+"PTSans-Italic",
+"PTSans-Regular"
+],
+"PT Sans Caption": [
+"PT Sans Caption",
+"PT Sans Caption Bold",
+"PTSans-Caption",
+"PTSans-CaptionBold"
+],
+"PT Sans Narrow": [
+"PT Sans Narrow",
+"PT Sans Narrow Bold",
+"PTSans-Narrow",
+"PTSans-NarrowBold"
+],
+"PT Serif": [
+"PT Serif",
+"PT Serif Bold",
+"PT Serif Bold Italic",
+"PT Serif Italic",
+"PTSerif-Bold",
+"PTSerif-BoldItalic",
+"PTSerif-Italic",
+"PTSerif-Regular"
+],
+"PT Serif Caption": [
+"PT Serif Caption",
+"PT Serif Caption Italic",
+"PTSerif-Caption",
+"PTSerif-CaptionItalic"
+],
+"Raanana": [
 "Raanana",
 "Raanana Bold",
-"RaananaBold",
+"RaananaBold"
+],
+"Rockwell": [
 "Rockwell",
 "Rockwell Bold",
 "Rockwell Bold Italic",
@@ -825,43 +1630,37 @@
 "Rockwell-Bold",
 "Rockwell-BoldItalic",
 "Rockwell-Italic",
-"Rockwell-Regular",
-"STHeitiSC-Light",
-"STHeitiSC-Medium",
-"STHeitiTC-Light",
-"STHeitiTC-Medium",
-"STIX Two Math Regular",
-"STIX Two Text Bold",
-"STIX Two Text Italic Bold Italic",
-"STIX Two Text Italic Italic",
-"STIX Two Text Italic Medium Italic",
-"STIX Two Text Italic SemiBold Italic",
-"STIX Two Text Medium",
-"STIX Two Text Regular",
-"STIX Two Text SemiBold",
-"STIXTwoMath-Regular",
-"STIXTwoText",
-"STIXTwoText-Italic",
-"STIXTwoText-Italic_Bold-Italic",
-"STIXTwoText-Italic_Medium-Italic",
-"STIXTwoText-Italic_SemiBold-Italic",
-"STIXTwoText_Bold",
-"STIXTwoText_Medium",
-"STIXTwoText_SemiBold",
-"STSong",
-"STSongti-SC-Black",
-"STSongti-SC-Bold",
-"STSongti-SC-Light",
-"STSongti-SC-Regular",
-"STSongti-TC-Bold",
-"STSongti-TC-Light",
-"STSongti-TC-Regular",
-"Sana",
-"Sana Regular",
-"Sathu",
-"Savoye LET Plain CC.:1.0",
+"Rockwell-Regular"
+],
+"Sathu": [
+"Sathu"
+],
+"Savoye LET": [
 "Savoye LET Plain:1.0",
-"SavoyeLetPlain",
+"SavoyeLetPlain"
+],
+"Seravek": [
+"Seravek",
+"Seravek Bold",
+"Seravek Bold Italic",
+"Seravek ExtraLight",
+"Seravek ExtraLight Italic",
+"Seravek Italic",
+"Seravek Light",
+"Seravek Light Italic",
+"Seravek Medium",
+"Seravek Medium Italic",
+"Seravek-Bold",
+"Seravek-BoldItalic",
+"Seravek-ExtraLight",
+"Seravek-ExtraLightItalic",
+"Seravek-Italic",
+"Seravek-Light",
+"Seravek-LightItalic",
+"Seravek-Medium",
+"Seravek-MediumItalic"
+],
+"Shree Devanagari 714": [
 "Shree Devanagari 714",
 "Shree Devanagari 714 Bold",
 "Shree Devanagari 714 Bold Italic",
@@ -869,19 +1668,29 @@
 "ShreeDev0714",
 "ShreeDev0714-Bold",
 "ShreeDev0714-BoldItalic",
-"ShreeDev0714-Italic",
+"ShreeDev0714-Italic"
+],
+"SignPainter": [
 "SignPainter-HouseScript",
 "SignPainter-HouseScript Semibold",
-"SignPainter-HouseScriptSemibold",
-"Silom",
+"SignPainter-HouseScriptSemibold"
+],
+"Silom": [
+"Silom"
+],
+"Sinhala MN": [
 "Sinhala MN",
 "Sinhala MN Bold",
+"SinhalaMN",
+"SinhalaMN-Bold"
+],
+"Sinhala Sangam MN": [
 "Sinhala Sangam MN",
 "Sinhala Sangam MN Bold",
-"SinhalaMN",
-"SinhalaMN-Bold",
 "SinhalaSangamMN",
-"SinhalaSangamMN-Bold",
+"SinhalaSangamMN-Bold"
+],
+"Skia": [
 "Skia Black",
 "Skia Black Condensed",
 "Skia Black Extended",
@@ -901,20 +1710,115 @@
 "Skia-Regular_Extended",
 "Skia-Regular_Light",
 "Skia-Regular_Light-Condensed",
-"Skia-Regular_Light-Extended",
+"Skia-Regular_Light-Extended"
+],
+"Snell Roundhand": [
 "Snell Roundhand",
 "Snell Roundhand Black",
 "Snell Roundhand Bold",
 "SnellRoundhand",
 "SnellRoundhand-Black",
-"SnellRoundhand-Bold",
+"SnellRoundhand-Bold"
+],
+"Songti SC": [
 "Songti SC Black",
 "Songti SC Bold",
 "Songti SC Light",
 "Songti SC Regular",
+"STSongti-SC-Black",
+"STSongti-SC-Bold",
+"STSongti-SC-Light",
+"STSongti-SC-Regular"
+],
+"Songti TC": [
 "Songti TC Bold",
 "Songti TC Light",
 "Songti TC Regular",
+"STSongti-TC-Bold",
+"STSongti-TC-Light",
+"STSongti-TC-Regular"
+],
+"STIX Two Math": [
+"STIX Two Math Regular",
+"STIXTwoMath-Regular"
+],
+"STIX Two Text": [
+"STIX Two Text Bold",
+"STIX Two Text Italic Bold Italic",
+"STIX Two Text Italic Italic",
+"STIX Two Text Italic Medium Italic",
+"STIX Two Text Italic SemiBold Italic",
+"STIX Two Text Medium",
+"STIX Two Text Regular",
+"STIX Two Text SemiBold",
+"STIXTwoText",
+"STIXTwoText-Italic",
+"STIXTwoText-Italic_Bold-Italic",
+"STIXTwoText-Italic_Medium-Italic",
+"STIXTwoText-Italic_SemiBold-Italic",
+"STIXTwoText_Bold",
+"STIXTwoText_Medium",
+"STIXTwoText_SemiBold"
+],
+"STIXGeneral": [
+"STIXGeneral-Bold",
+"STIXGeneral-BoldItalic",
+"STIXGeneral-Italic",
+"STIXGeneral-Regular"
+],
+"STIXIntegralsD": [
+"STIXIntegralsD-Bold",
+"STIXIntegralsD-Regular"
+],
+"STIXIntegralsSm": [
+"STIXIntegralsSm-Bold",
+"STIXIntegralsSm-Regular"
+],
+"STIXIntegralsUp": [
+"STIXIntegralsUp-Bold",
+"STIXIntegralsUp-Regular"
+],
+"STIXIntegralsUpD": [
+"STIXIntegralsUpD-Bold",
+"STIXIntegralsUpD-Regular"
+],
+"STIXIntegralsUpSm": [
+"STIXIntegralsUpSm-Bold",
+"STIXIntegralsUpSm-Regular"
+],
+"STIXNonUnicode": [
+"STIXNonUnicode-Bold",
+"STIXNonUnicode-BoldItalic",
+"STIXNonUnicode-Italic",
+"STIXNonUnicode-Regular"
+],
+"STIXSizeFiveSym": [
+"STIXSizeFiveSym-Regular"
+],
+"STIXSizeFourSym": [
+"STIXSizeFourSym-Bold",
+"STIXSizeFourSym-Regular"
+],
+"STIXSizeOneSym": [
+"STIXSizeOneSym-Bold",
+"STIXSizeOneSym-Regular"
+],
+"STIXSizeThreeSym": [
+"STIXSizeThreeSym-Bold",
+"STIXSizeThreeSym-Regular"
+],
+"STIXSizeTwoSym": [
+"STIXSizeTwoSym-Bold",
+"STIXSizeTwoSym-Regular"
+],
+"STIXVariants": [
+"STIXVariants-Bold",
+"STIXVariants-Regular"
+],
+"STSong": [
+"STSong"
+],
+"Sukhumvit Set": [
 "Sukhumvit Set Bold",
 "Sukhumvit Set Light",
 "Sukhumvit Set Medium",
@@ -926,42 +1830,459 @@
 "SukhumvitSet-Medium",
 "SukhumvitSet-SemiBold",
 "SukhumvitSet-Text",
-"SukhumvitSet-Thin",
-"Symbol",
+"SukhumvitSet-Thin"
+],
+"Superclarendon": [
+"Superclarendon Black",
+"Superclarendon Black Italic",
+"Superclarendon Bold",
+"Superclarendon Bold Italic",
+"Superclarendon Italic",
+"Superclarendon Light",
+"Superclarendon Light Italic",
+"Superclarendon Regular",
+"Superclarendon-Black",
+"Superclarendon-BlackItalic",
+"Superclarendon-Bold",
+"Superclarendon-BoldItalic",
+"Superclarendon-Italic",
+"Superclarendon-Light",
+"Superclarendon-LightItalic",
+"Superclarendon-Regular"
+],
+"Symbol": [
+"Symbol"
+],
+"System Font": [
+"System Font Black",
+"System Font Bold",
+"System Font Bold G1",
+"System Font Bold G2",
+"System Font Bold G3",
+"System Font Bold G4",
+"System Font Compressed Black",
+"System Font Compressed Bold",
+"System Font Compressed Bold G1",
+"System Font Compressed Bold G2",
+"System Font Compressed Bold G3",
+"System Font Compressed Bold G4",
+"System Font Compressed Heavy",
+"System Font Compressed Heavy G1",
+"System Font Compressed Heavy G2",
+"System Font Compressed Heavy G3",
+"System Font Compressed Heavy G4",
+"System Font Compressed Light",
+"System Font Compressed Light G1",
+"System Font Compressed Light G2",
+"System Font Compressed Light G3",
+"System Font Compressed Light G4",
+"System Font Compressed Medium",
+"System Font Compressed Medium G1",
+"System Font Compressed Medium G2",
+"System Font Compressed Medium G3",
+"System Font Compressed Medium G4",
+"System Font Compressed Regular",
+"System Font Compressed Regular G1",
+"System Font Compressed Regular G2",
+"System Font Compressed Regular G3",
+"System Font Compressed Regular G4",
+"System Font Compressed Semibold",
+"System Font Compressed Semibold G1",
+"System Font Compressed Semibold G2",
+"System Font Compressed Semibold G3",
+"System Font Compressed Semibold G4",
+"System Font Compressed Thin",
+"System Font Compressed Thin G1",
+"System Font Compressed Thin G2",
+"System Font Compressed Thin G3",
+"System Font Compressed Thin G4",
+"System Font Compressed Ultralight",
+"System Font Compressed Ultralight G1",
+"System Font Compressed Ultralight G2",
+"System Font Compressed Ultralight G3",
+"System Font Compressed Ultralight G4",
+"System Font Condensed Black",
+"System Font Condensed Bold",
+"System Font Condensed Bold G1",
+"System Font Condensed Bold G2",
+"System Font Condensed Bold G3",
+"System Font Condensed Bold G4",
+"System Font Condensed Heavy",
+"System Font Condensed Heavy G1",
+"System Font Condensed Heavy G2",
+"System Font Condensed Heavy G3",
+"System Font Condensed Heavy G4",
+"System Font Condensed Light",
+"System Font Condensed Light G1",
+"System Font Condensed Light G2",
+"System Font Condensed Light G3",
+"System Font Condensed Light G4",
+"System Font Condensed Medium",
+"System Font Condensed Medium G1",
+"System Font Condensed Medium G2",
+"System Font Condensed Medium G3",
+"System Font Condensed Medium G4",
+"System Font Condensed Regular",
+"System Font Condensed Regular G1",
+"System Font Condensed Regular G2",
+"System Font Condensed Regular G3",
+"System Font Condensed Regular G4",
+"System Font Condensed Semibold",
+"System Font Condensed Semibold G1",
+"System Font Condensed Semibold G2",
+"System Font Condensed Semibold G3",
+"System Font Condensed Semibold G4",
+"System Font Condensed Thin",
+"System Font Condensed Thin G1",
+"System Font Condensed Thin G2",
+"System Font Condensed Thin G3",
+"System Font Condensed Thin G4",
+"System Font Condensed Ultralight",
+"System Font Condensed Ultralight G1",
+"System Font Condensed Ultralight G2",
+"System Font Condensed Ultralight G3",
+"System Font Condensed Ultralight G4",
+"System Font Expanded Black",
+"System Font Expanded Bold",
+"System Font Expanded Bold G1",
+"System Font Expanded Bold G2",
+"System Font Expanded Bold G3",
+"System Font Expanded Bold G4",
+"System Font Expanded Heavy",
+"System Font Expanded Heavy G1",
+"System Font Expanded Heavy G2",
+"System Font Expanded Heavy G3",
+"System Font Expanded Heavy G4",
+"System Font Expanded Light",
+"System Font Expanded Light G1",
+"System Font Expanded Light G2",
+"System Font Expanded Light G3",
+"System Font Expanded Light G4",
+"System Font Expanded Medium",
+"System Font Expanded Medium G1",
+"System Font Expanded Medium G2",
+"System Font Expanded Medium G3",
+"System Font Expanded Medium G4",
+"System Font Expanded Regular",
+"System Font Expanded Regular G1",
+"System Font Expanded Regular G2",
+"System Font Expanded Regular G3",
+"System Font Expanded Regular G4",
+"System Font Expanded Semibold",
+"System Font Expanded Semibold G1",
+"System Font Expanded Semibold G2",
+"System Font Expanded Semibold G3",
+"System Font Expanded Semibold G4",
+"System Font Expanded Thin",
+"System Font Expanded Thin G1",
+"System Font Expanded Thin G2",
+"System Font Expanded Thin G3",
+"System Font Expanded Thin G4",
+"System Font Expanded Ultralight",
+"System Font Expanded Ultralight G1",
+"System Font Expanded Ultralight G2",
+"System Font Expanded Ultralight G3",
+"System Font Expanded Ultralight G4",
+"System Font Extra Compressed Black",
+"System Font Extra Compressed Bold",
+"System Font Extra Compressed Bold G1",
+"System Font Extra Compressed Bold G2",
+"System Font Extra Compressed Bold G3",
+"System Font Extra Compressed Bold G4",
+"System Font Extra Compressed Heavy",
+"System Font Extra Compressed Heavy G1",
+"System Font Extra Compressed Heavy G2",
+"System Font Extra Compressed Heavy G3",
+"System Font Extra Compressed Heavy G4",
+"System Font Extra Compressed Light",
+"System Font Extra Compressed Light G1",
+"System Font Extra Compressed Light G2",
+"System Font Extra Compressed Light G3",
+"System Font Extra Compressed Light G4",
+"System Font Extra Compressed Medium",
+"System Font Extra Compressed Medium G1",
+"System Font Extra Compressed Medium G2",
+"System Font Extra Compressed Medium G3",
+"System Font Extra Compressed Medium G4",
+"System Font Extra Compressed Regular",
+"System Font Extra Compressed Regular G1",
+"System Font Extra Compressed Regular G2",
+"System Font Extra Compressed Regular G3",
+"System Font Extra Compressed Regular G4",
+"System Font Extra Compressed Semibold",
+"System Font Extra Compressed Semibold G1",
+"System Font Extra Compressed Semibold G2",
+"System Font Extra Compressed Semibold G3",
+"System Font Extra Compressed Semibold G4",
+"System Font Extra Compressed Thin",
+"System Font Extra Compressed Thin G1",
+"System Font Extra Compressed Thin G2",
+"System Font Extra Compressed Thin G3",
+"System Font Extra Compressed Thin G4",
+"System Font Extra Compressed Ultralight",
+"System Font Extra Compressed Ultralight G1",
+"System Font Extra Compressed Ultralight G2",
+"System Font Extra Compressed Ultralight G3",
+"System Font Extra Compressed Ultralight G4",
+"System Font Extra Expanded Black",
+"System Font Extra Expanded Bold",
+"System Font Extra Expanded Bold G1",
+"System Font Extra Expanded Bold G2",
+"System Font Extra Expanded Bold G3",
+"System Font Extra Expanded Bold G4",
+"System Font Extra Expanded Heavy",
+"System Font Extra Expanded Heavy G1",
+"System Font Extra Expanded Heavy G2",
+"System Font Extra Expanded Heavy G3",
+"System Font Extra Expanded Heavy G4",
+"System Font Extra Expanded Light",
+"System Font Extra Expanded Light G1",
+"System Font Extra Expanded Light G2",
+"System Font Extra Expanded Light G3",
+"System Font Extra Expanded Light G4",
+"System Font Extra Expanded Medium",
+"System Font Extra Expanded Medium G1",
+"System Font Extra Expanded Medium G2",
+"System Font Extra Expanded Medium G3",
+"System Font Extra Expanded Medium G4",
+"System Font Extra Expanded Regular",
+"System Font Extra Expanded Regular G1",
+"System Font Extra Expanded Regular G2",
+"System Font Extra Expanded Regular G3",
+"System Font Extra Expanded Regular G4",
+"System Font Extra Expanded Semibold",
+"System Font Extra Expanded Semibold G1",
+"System Font Extra Expanded Semibold G2",
+"System Font Extra Expanded Semibold G3",
+"System Font Extra Expanded Semibold G4",
+"System Font Extra Expanded Thin",
+"System Font Extra Expanded Thin G1",
+"System Font Extra Expanded Thin G2",
+"System Font Extra Expanded Thin G3",
+"System Font Extra Expanded Thin G4",
+"System Font Extra Expanded Ultralight",
+"System Font Extra Expanded Ultralight G1",
+"System Font Extra Expanded Ultralight G2",
+"System Font Extra Expanded Ultralight G3",
+"System Font Extra Expanded Ultralight G4",
+"System Font Heavy",
+"System Font Heavy G1",
+"System Font Heavy G2",
+"System Font Heavy G3",
+"System Font Heavy G4",
+"System Font Light",
+"System Font Light G1",
+"System Font Light G2",
+"System Font Light G3",
+"System Font Light G4",
+"System Font Medium",
+"System Font Medium G1",
+"System Font Medium G2",
+"System Font Medium G3",
+"System Font Medium G4",
+"System Font Regular G1",
+"System Font Regular G2",
+"System Font Regular G3",
+"System Font Regular G4",
+"System Font Semi Condensed Black",
+"System Font Semi Condensed Bold",
+"System Font Semi Condensed Bold G1",
+"System Font Semi Condensed Bold G2",
+"System Font Semi Condensed Bold G3",
+"System Font Semi Condensed Bold G4",
+"System Font Semi Condensed Heavy",
+"System Font Semi Condensed Heavy G1",
+"System Font Semi Condensed Heavy G2",
+"System Font Semi Condensed Heavy G3",
+"System Font Semi Condensed Heavy G4",
+"System Font Semi Condensed Light",
+"System Font Semi Condensed Light G1",
+"System Font Semi Condensed Light G2",
+"System Font Semi Condensed Light G3",
+"System Font Semi Condensed Light G4",
+"System Font Semi Condensed Medium",
+"System Font Semi Condensed Medium G1",
+"System Font Semi Condensed Medium G2",
+"System Font Semi Condensed Medium G3",
+"System Font Semi Condensed Medium G4",
+"System Font Semi Condensed Regular",
+"System Font Semi Condensed Regular G1",
+"System Font Semi Condensed Regular G2",
+"System Font Semi Condensed Regular G3",
+"System Font Semi Condensed Regular G4",
+"System Font Semi Condensed Semibold",
+"System Font Semi Condensed Semibold G1",
+"System Font Semi Condensed Semibold G2",
+"System Font Semi Condensed Semibold G3",
+"System Font Semi Condensed Semibold G4",
+"System Font Semi Condensed Thin",
+"System Font Semi Condensed Thin G1",
+"System Font Semi Condensed Thin G2",
+"System Font Semi Condensed Thin G3",
+"System Font Semi Condensed Thin G4",
+"System Font Semi Condensed Ultralight",
+"System Font Semi Condensed Ultralight G1",
+"System Font Semi Condensed Ultralight G2",
+"System Font Semi Condensed Ultralight G3",
+"System Font Semi Condensed Ultralight G4",
+"System Font Semi Expanded Black",
+"System Font Semi Expanded Bold",
+"System Font Semi Expanded Bold G1",
+"System Font Semi Expanded Bold G2",
+"System Font Semi Expanded Bold G3",
+"System Font Semi Expanded Bold G4",
+"System Font Semi Expanded Heavy",
+"System Font Semi Expanded Heavy G1",
+"System Font Semi Expanded Heavy G2",
+"System Font Semi Expanded Heavy G3",
+"System Font Semi Expanded Heavy G4",
+"System Font Semi Expanded Light",
+"System Font Semi Expanded Light G1",
+"System Font Semi Expanded Light G2",
+"System Font Semi Expanded Light G3",
+"System Font Semi Expanded Light G4",
+"System Font Semi Expanded Medium",
+"System Font Semi Expanded Medium G1",
+"System Font Semi Expanded Medium G2",
+"System Font Semi Expanded Medium G3",
+"System Font Semi Expanded Medium G4",
+"System Font Semi Expanded Regular",
+"System Font Semi Expanded Regular G1",
+"System Font Semi Expanded Regular G2",
+"System Font Semi Expanded Regular G3",
+"System Font Semi Expanded Regular G4",
+"System Font Semi Expanded Semibold",
+"System Font Semi Expanded Semibold G1",
+"System Font Semi Expanded Semibold G2",
+"System Font Semi Expanded Semibold G3",
+"System Font Semi Expanded Semibold G4",
+"System Font Semi Expanded Thin",
+"System Font Semi Expanded Thin G1",
+"System Font Semi Expanded Thin G2",
+"System Font Semi Expanded Thin G3",
+"System Font Semi Expanded Thin G4",
+"System Font Semi Expanded Ultralight",
+"System Font Semi Expanded Ultralight G1",
+"System Font Semi Expanded Ultralight G2",
+"System Font Semi Expanded Ultralight G3",
+"System Font Semi Expanded Ultralight G4",
+"System Font Semibold",
+"System Font Semibold G1",
+"System Font Semibold G2",
+"System Font Semibold G3",
+"System Font Semibold G4",
+"System Font Thin",
+"System Font Thin G1",
+"System Font Thin G2",
+"System Font Thin G3",
+"System Font Thin G4",
+"System Font Ultra Compressed Black",
+"System Font Ultra Compressed Bold",
+"System Font Ultra Compressed Bold G1",
+"System Font Ultra Compressed Bold G2",
+"System Font Ultra Compressed Bold G3",
+"System Font Ultra Compressed Bold G4",
+"System Font Ultra Compressed Heavy",
+"System Font Ultra Compressed Heavy G1",
+"System Font Ultra Compressed Heavy G2",
+"System Font Ultra Compressed Heavy G3",
+"System Font Ultra Compressed Heavy G4",
+"System Font Ultra Compressed Light",
+"System Font Ultra Compressed Light G1",
+"System Font Ultra Compressed Light G2",
+"System Font Ultra Compressed Light G3",
+"System Font Ultra Compressed Light G4",
+"System Font Ultra Compressed Medium",
+"System Font Ultra Compressed Medium G1",
+"System Font Ultra Compressed Medium G2",
+"System Font Ultra Compressed Medium G3",
+"System Font Ultra Compressed Medium G4",
+"System Font Ultra Compressed Regular",
+"System Font Ultra Compressed Regular G1",
+"System Font Ultra Compressed Regular G2",
+"System Font Ultra Compressed Regular G3",
+"System Font Ultra Compressed Regular G4",
+"System Font Ultra Compressed Semibold",
+"System Font Ultra Compressed Semibold G1",
+"System Font Ultra Compressed Semibold G2",
+"System Font Ultra Compressed Semibold G3",
+"System Font Ultra Compressed Semibold G4",
+"System Font Ultra Compressed Thin",
+"System Font Ultra Compressed Thin G1",
+"System Font Ultra Compressed Thin G2",
+"System Font Ultra Compressed Thin G3",
+"System Font Ultra Compressed Thin G4",
+"System Font Ultra Compressed Ultralight",
+"System Font Ultra Compressed Ultralight G1",
+"System Font Ultra Compressed Ultralight G2",
+"System Font Ultra Compressed Ultralight G3",
+"System Font Ultra Compressed Ultralight G4",
+"System Font Ultralight",
+"System Font Ultralight G1",
+"System Font Ultralight G2",
+"System Font Ultralight G3",
+"System Font Ultralight G4"
+],
+"Tahoma": [
 "Tahoma",
 "Tahoma Bold",
-"Tahoma-Bold",
+"Tahoma-Bold"
+],
+"Tamil MN": [
 "Tamil MN",
 "Tamil MN Bold",
+"TamilMN",
+"TamilMN-Bold"
+],
+"Tamil Sangam MN": [
 "Tamil Sangam MN",
 "Tamil Sangam MN Bold",
-"TamilMN",
-"TamilMN-Bold",
 "TamilSangamMN",
-"TamilSangamMN-Bold",
+"TamilSangamMN-Bold"
+],
+"Telugu MN": [
 "Telugu MN",
 "Telugu MN Bold",
+"TeluguMN",
+"TeluguMN-Bold"
+],
+"Telugu Sangam MN": [
 "Telugu Sangam MN",
 "Telugu Sangam MN Bold",
-"TeluguMN",
-"TeluguMN-Bold",
 "TeluguSangamMN",
-"TeluguSangamMN-Bold",
+"TeluguSangamMN-Bold"
+],
+"Thonburi": [
 "Thonburi",
 "Thonburi Bold",
 "Thonburi Light",
 "Thonburi-Bold",
-"Thonburi-Light",
+"Thonburi-Light"
+],
+"Times": [
+"Times Bold",
+"Times Bold Italic",
+"Times Italic",
+"Times Roman",
+"Times-Bold",
+"Times-BoldItalic",
+"Times-Italic",
+"Times-Roman"
+],
+"Times New Roman": [
 "Times New Roman",
 "Times New Roman Bold",
 "Times New Roman Bold Italic",
 "Times New Roman Italic",
-"TimesLTMM",
 "TimesNewRomanPS-BoldItalicMT",
 "TimesNewRomanPS-BoldMT",
 "TimesNewRomanPS-ItalicMT",
-"TimesNewRomanPSMT",
-"Trattatello",
+"TimesNewRomanPSMT"
+],
+"Trattatello": [
+"Trattatello"
+],
+"Trebuchet MS": [
 "Trebuchet MS",
 "Trebuchet MS Bold",
 "Trebuchet MS Bold Italic",
@@ -969,27 +2290,102 @@
 "Trebuchet-BoldItalic",
 "TrebuchetMS",
 "TrebuchetMS-Bold",
-"TrebuchetMS-Italic",
+"TrebuchetMS-Italic"
+],
+"Verdana": [
 "Verdana",
 "Verdana Bold",
 "Verdana Bold Italic",
 "Verdana Italic",
 "Verdana-Bold",
 "Verdana-BoldItalic",
-"Verdana-Italic",
+"Verdana-Italic"
+],
+"Webdings": [
+"Webdings"
+],
+"Wingdings": [
+"Wingdings",
+"Wingdings-Regular"
+],
+"Wingdings 2": [
+"Wingdings 2",
+"Wingdings2"
+],
+"Wingdings 3": [
+"Wingdings 3",
+"Wingdings3"
+],
+"Zapf Dingbats": [
+"Zapf Dingbats",
+"ZapfDingbatsITC"
+],
+"Zapfino": [
+"Zapfino"
+],
+"التاريخ": [
+"Al Tarikh Regular",
+"AlTarikh"
+],
+"النيل": [
+"Al Nile",
+"Al Nile Bold",
+"AlNile",
+"AlNile-Bold"
+],
+"بغداد": [
+"Baghdad",
+"Baghdad Regular"
+],
+"بيروت": [
+"Beirut",
+"Beirut Regular"
+],
+"ديوان ثلث": [
+"Diwan Thuluth Regular",
+"DiwanThuluth"
+],
+"ديوان كوفي": [
+"Diwan Kufi Regular",
+"DiwanKufi"
+],
+"صنعاء": [
+"Sana",
+"Sana Regular"
+],
+"فارسي": [
+"Farisi",
+"Farisi Regular"
+],
+"فرح": [
+"Farah",
+"Farah Regular"
+],
+"منى": [
+"Muna",
+"Muna Black",
+"Muna Bold",
+"Muna Regular",
+"MunaBlack",
+"MunaBold"
+],
+"مِصحفي": [
+"DiwanMishafi",
+"Mishafi Regular"
+],
+"مِصحفي ذهبي": [
+"DiwanMishafiGold",
+"Mishafi Gold Regular"
+],
+"نسخ": [
+"DecoType Naskh Regular",
+"DecoTypeNaskh"
+],
+"وسيم": [
 "Waseem",
 "Waseem Light",
 "Waseem Regular",
-"WaseemLight",
-"Webdings",
-"Wingdings",
-"Wingdings 2",
-"Wingdings 3",
-"Wingdings-Regular",
-"Wingdings2",
-"Wingdings3",
-"Zapf Dingbats",
-"ZapfDingbatsITC",
-"Zapfino"
+"WaseemLight"
 ]
+}
 }

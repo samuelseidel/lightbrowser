@@ -414,3 +414,87 @@ fn foreign_fonts_are_detectable() {
     let doc = Document::parse_html("<p>x</p>");
     let _ = e.client_size(&doc, doc.document_element().unwrap());
 }
+
+/// The persona's release and every catalog release (`profiles/catalog/os.json`
+/// with its font set) as `(label, list id, os.name, families)`.
+fn font_releases() -> Vec<(String, &'static str, String, Vec<String>)> {
+    let mut out = Vec::new();
+    for (name, p) in reference_personas() {
+        let id = lb_layout::local_font_list_id(&p).unwrap_or_else(|| panic!("{name}: no list"));
+        out.push((name, id, p.os.name.clone(), p.fonts.available.clone()));
+    }
+    let read = |f: &str| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(root().join(f)).unwrap()).unwrap()
+    };
+    let (os, sets) = (
+        read("profiles/catalog/os.json"),
+        read("profiles/catalog/fonts.json"),
+    );
+    let template = persona("chrome153_win10_rtx3060_1080p.json");
+    for r in os["releases"].as_array().unwrap() {
+        let mut p = (*template).clone();
+        let s = |k: &str| r["os"][k].as_str().map(str::to_owned);
+        p.os.name = s("name").unwrap();
+        p.os.version = s("version").unwrap();
+        p.os.build = s("build").unwrap_or_default();
+        p.os.distro = s("distro");
+        let id = lb_layout::local_font_list_id(&p).unwrap();
+        let fonts = sets["sets"][r["fonts"].as_str().unwrap()]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f.as_str().unwrap().to_owned())
+            .collect();
+        out.push((format!("catalog {}", r["id"]), id, p.os.name.clone(), fonts));
+    }
+    out
+}
+
+/// `local()` lists (`profiles/local_fonts/`) and font measurement agree:
+/// every family a persona can measure has faces `local()` loads, and every
+/// family of the release that lb-layout has a table for is one the persona
+/// lists (else `local()` would load what width probes call absent).
+#[test]
+fn local_faces_agree_with_measurable_fonts() {
+    let expect = [
+        ("chrome153_win10_rtx3060_1080p.json", "windows_10"),
+        ("chrome153_win11_irisxe_laptop_1536x864.json", "windows_11"),
+        ("chrome153_win11_rtx4060_1080p.json", "windows_11"),
+        ("chrome153_macos14_intel_irisplus_1440x900.json", "macos_14"),
+        ("chrome153_macos15_apple_m2_retina.json", "macos_15"),
+        ("chrome153_macos26_apple_m4_1512x982.json", "macos_26"),
+        (
+            "chrome153_ubuntu24_intel_uhd630_x11_1080p.json",
+            "ubuntu_24.04",
+        ),
+        (
+            "chrome153_fedora42_amd_rx6600_wayland_1440p.json",
+            "fedora_42",
+        ),
+    ];
+    let releases = font_releases();
+    for (file, id) in expect {
+        let got = releases.iter().find(|r| r.0 == file).map(|r| r.1);
+        assert_eq!(got, Some(id), "{file}");
+    }
+    let mut used = std::collections::BTreeSet::new();
+    for (label, id, os, families) in &releases {
+        used.insert(*id);
+        let list = lb_layout::LocalFonts::get(id).unwrap();
+        for f in families {
+            assert!(list.has_family(f), "{label}: {f} has no {id} faces");
+        }
+        let db = lb_layout::FontDb::for_os(lb_css::OsKind::from_name(os));
+        for f in list.families() {
+            if db.get(f).is_some() {
+                assert!(
+                    families.iter().any(|x| x.eq_ignore_ascii_case(f)),
+                    "{label}: {id} ships {f} (measurable) but the persona lacks it"
+                );
+            }
+        }
+    }
+    // Every bundled list is some release's.
+    let all: std::collections::BTreeSet<_> = lb_layout::LocalFonts::ids().collect();
+    assert_eq!(used, all);
+}

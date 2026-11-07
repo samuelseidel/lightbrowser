@@ -12,9 +12,10 @@
 //! pages have it). Values come from the page clock and [`LoadInfo`].
 //!
 //! Time zone and locale come from the persona through V8's ICU
-//! ([`lb_js::Engine::set_time_zone`]). ICU's defaults are process-wide;
-//! see that method for what this means when personas with different zones
-//! share a process.
+//! ([`lb_js::Engine::set_time_zone`]), or from the context's CDP
+//! overrides (ADR 0039). ICU's defaults are process-wide; see that method
+//! for what this means when personas with different zones share a
+//! process.
 
 use std::rc::Rc;
 
@@ -47,11 +48,20 @@ pub(crate) fn install(
     realm: RealmId,
 ) -> Result<(), JsError> {
     if let Some(p) = &w.profile {
-        engine.set_default_locale(&p.locale.language);
-        if !engine.set_time_zone(&p.locale.timezone) {
+        // The context's CDP time zone / locale overrides win (ADR 0039).
+        let mut unknown = None;
+        let mut apply = |zone: &str, locale: &str| {
+            engine.set_default_locale(locale);
+            if !engine.set_time_zone(zone) {
+                unknown = Some(zone.to_owned());
+            }
+        };
+        if !w.net.with_intl(&mut apply) {
+            apply(&p.locale.timezone, &p.locale.language);
+        }
+        if let Some(zone) = unknown {
             w.warn(format!(
-                "persona time zone {:?} is unknown to ICU; keeping {}",
-                p.locale.timezone,
+                "persona time zone {zone:?} is unknown to ICU; keeping {}",
                 lb_js::v8::icu::get_default_time_zone()
             ));
         }

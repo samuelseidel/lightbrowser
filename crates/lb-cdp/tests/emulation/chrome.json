@@ -1,0 +1,753 @@
+{
+ "version": "HeadlessChrome/153.0.8010.12",
+ "steps": [
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {},
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters",
+     "data": "Failed to deserialize params.timezoneId - BINDINGS: mandatory field missing"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": 5
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters",
+     "data": "Failed to deserialize params.timezoneId - BINDINGS: string value expected"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Mars/Olympus"
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid timezone id"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "europe/berlin"
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid timezone id"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Europe/Berlin "
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid timezone id"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Local"
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid timezone id"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "utc"
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid timezone id"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": ""
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Asia/Tokyo"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Asia/Tokyo"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Europe/London"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Timezone override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": ""
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Mars/Olympus"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Europe/London"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Asia/Tokyo"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Timezone override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": ""
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Asia/Tokyo"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": ""
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": 5
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters",
+     "data": "Failed to deserialize params.locale - BINDINGS: string value expected"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "not a locale"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "root"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "ROOT"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "abcdefgh"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "abcdefghi"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "abcdefghijk"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "abcdefghijkl"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "ab cd"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "ab1"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "X-foo"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "I-klingon"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "i"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "x"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "i-klingon"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "x-foo"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "@x"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": ".x"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "-de"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "_DE"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid locale name"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "de@calendar=x"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "de.UTF-8"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {},
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "de-DE"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "de-DE"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Another locale override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setLocaleOverride",
+   "params": {},
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Another locale override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "fr-FR"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Another locale override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "fr-FR"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {},
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "fr-FR"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "de-DE"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Another locale override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setLocaleOverride",
+   "params": {},
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setGeolocationOverride",
+   "params": {
+    "latitude": 91,
+    "longitude": 0,
+    "accuracy": 1
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid geolocation"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setGeolocationOverride",
+   "params": {
+    "latitude": "x"
+   },
+   "reply": {
+    "error": {
+     "code": -32602,
+     "message": "Invalid parameters",
+     "data": "Failed to deserialize params.latitude - BINDINGS: double value expected"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setGeolocationOverride",
+   "params": {
+    "latitude": 0,
+    "longitude": 181,
+    "accuracy": 1
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid geolocation"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setGeolocationOverride",
+   "params": {
+    "latitude": 1,
+    "longitude": 2,
+    "accuracy": -1
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Invalid geolocation"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setGeolocationOverride",
+   "params": {
+    "latitude": 0,
+    "longitude": 0,
+    "accuracy": 1,
+    "heading": 400,
+    "speed": -1
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setGeolocationOverride",
+   "params": {},
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setGeolocationOverride",
+   "params": {
+    "latitude": 1,
+    "longitude": 2
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.clearGeolocationOverride",
+   "params": {},
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setUserAgentOverride",
+   "params": {
+    "userAgent": "",
+    "acceptLanguage": "de-DE"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Asia/Tokyo"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 1,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "de-DE"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Europe/London"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Timezone override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "fr-FR"
+   },
+   "reply": {
+    "error": {
+     "code": -32000,
+     "message": "Another locale override is already in effect"
+    }
+   }
+  },
+  {
+   "session": 1,
+   "method": "detach",
+   "params": {},
+   "reply": {}
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setTimezoneOverride",
+   "params": {
+    "timezoneId": "Europe/London"
+   },
+   "reply": {
+    "result": {}
+   }
+  },
+  {
+   "session": 2,
+   "method": "Emulation.setLocaleOverride",
+   "params": {
+    "locale": "fr-FR"
+   },
+   "reply": {
+    "result": {}
+   }
+  }
+ ]
+}

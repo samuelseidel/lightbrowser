@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script src="prelude.js"></script></head>
+<body>
+<iframe name="fr1" src="child.html"></iframe>
+<iframe id="fr2" src="child.html"></iframe>
+<iframe name="clash" src="child.html"></iframe><div id="clash"></div>
+<div id="clash2"></div><iframe name="clash2" src="child.html"></iframe>
+<iframe name="dupf" src="child.html"></iframe><iframe name="dupf" src="child.html"></iframe>
+<iframe name="blank"></iframe>
+<iframe name="srcdocf" srcdoc="<p id=insrcdoc></p>"></iframe>
+<script>
+log('before load fr1', window.fr1);
+log('before load blank', window.blank);
+onload = () => {
+  log('frames.length', frames.length);
+  log('window.fr1', window.fr1);
+  log('bare fr1', fr1);
+  log('window.fr2', window.fr2);
+  log('window.clash', window.clash);
+  log('window.clash2', window.clash2);
+  log('window.dupf', window.dupf);
+  log('window.blank', window.blank);
+  log('window.srcdocf', window.srcdocf);
+  log("'fr1' in window", 'fr1' in window);
+  log('hasOwnProperty fr1', window.hasOwnProperty('fr1'));
+  note('WP desc fr1', desc(Object.getOwnPropertyDescriptor(WP, 'fr1')));
+  note('child selfSeen', frames[0].selfSeen);
+  log('frames[0].inchild', frames[0].inchild);
+  log('frames[0].childform', frames[0].childform);
+  log('fr1.document.childform', fr1.document.childform);
+  log('frames[7].insrcdoc', frames[7].insrcdoc);
+  log('child sees parent.fr1', frames[0].eval('parent.fr1 === window'));
+  log('child sees parent.clash', frames[1].eval('parent.clash === parent.frames[2]'));
+  log('child WP differs', frames[0].eval('Object.getPrototypeOf(Window.prototype)') !== WP);
+  frames[0].name = 'renamed';
+  log('after rename new', window.renamed);
+  log('after rename old', window.fr1);
+  const el = document.querySelector('iframe[name=fr1]');
+  log('iframe name attr', el.name);
+  el.name = 'attrchanged';
+  log('attr changed, frame name', frames[0].name);
+  log('attr changed, window.attrchanged', window.attrchanged);
+  log('attr changed, window.renamed', window.renamed);
+  const f = document.createElement('iframe'); f.name = 'dyn';
+  log('detached iframe', window.dyn);
+  document.body.append(f);
+  log('appended iframe', window.dyn === f.contentWindow);
+  log('appended iframe index', window.dyn);
+  f.remove();
+  log('removed iframe', window.dyn);
+  const x = document.createElement('iframe'); x.name = 'xo';
+  x.src = 'http://localhost:' + location.port + '/child.html';
+  x.onload = () => {
+    log('cross-origin by name', window.xo === x.contentWindow);
+    log("'xo' in window", 'xo' in window);
+    attempt('cross-origin inchild', () => window.xo.inchild);
+    L.push('end');
+  };
+  document.body.append(x);
+};
+</script>
+</body></html>

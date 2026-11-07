@@ -1,0 +1,7 @@
+<!doctype html><body><!--LOG--><script src="lib.js"></script><script>
+(async function(){
+log('B '+await dbs());
+await run('A','probe','BA');await run('AB','probe','BAB');
+log('B '+await dbs());
+end()})()
+</script>

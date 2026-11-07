@@ -54,12 +54,20 @@ Async: `from lightbrowser.async_api import AsyncBrowser`, with `await` on
 
 `Browser(persona=None, *, executable_path=None, port=0, insecure=False,
 profiles_dir=None, workers=None, extra_args=(), startup_timeout=60,
-validate=True, playwright=None)`
+validate=True, playwright=None, timezone=None, locale=None, languages=None)`
 
 - `persona`: a `Persona`, a path, a dict (written to a private temp dir and
   removed on close), or `None` for the binary's default Chrome persona. With
   `validate=True` it first goes through `lightbrowser validate`, so a bad
   persona raises `PersonaValidationError` with the rule text.
+- `timezone` (IANA, `"Europe/Berlin"`), `locale` (`"de-DE"`) and `languages`
+  (`["de-DE", "de", "en"]`) override the persona's for the whole process, to
+  match a proxy exit (`serve --timezone/--locale/--languages`, ADR 0039):
+  `locale` sets Intl's default, `navigator.language(s)` (`[locale, its
+  language]` unless `languages` is given) and `Accept-Language`. Validation
+  checks the persona with them. Per context, Playwright's
+  `new_context(timezone_id=..., locale=..., geolocation=...)` works as in
+  Chrome; geolocation answers when the persona grants `geolocation`.
 - The server always binds 127.0.0.1; `port=0` lets the OS choose and the SDK
   reads the port from the `DevTools listening on ws://...` line on stderr.
 - `new_context(**kw)` and `new_page(**kw)` return stock Playwright objects.

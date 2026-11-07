@@ -11,7 +11,8 @@ use std::hash::{BuildHasherDefault, Hasher};
 use std::rc::Rc;
 
 use lb_js::{
-    HostFn, IndexedGetter, IndexedLength, NamedDeleter, NamedEnumerator, NamedGetter, NamedSetter,
+    HostFn, IndexedGetter, IndexedLength, LegacyNamed, NamedDeleter, NamedEnumerator, NamedGetter,
+    NamedSetter,
 };
 
 use crate::dom_exception::DomExceptions;
@@ -140,6 +141,7 @@ pub struct Registry {
     named_enum: KeyMap<&'static str, NamedEnumerator>,
     indexed_len: KeyMap<&'static str, IndexedLength>,
     unenumerable: std::collections::HashSet<&'static str, BuildHasherDefault<KeyHasher>>,
+    legacy: KeyMap<&'static str, LegacyNamed>,
     dom_exceptions: DomExceptions,
     inherit: Option<Rc<Inherit>>,
 }
@@ -250,6 +252,17 @@ impl Registry {
         self
     }
 
+    /// Blink's handling of `iface`'s named properties (see
+    /// [`lb_js::LegacyNamed`]); needs a named getter.
+    pub fn named_legacy(&mut self, iface: &'static str, how: LegacyNamed) -> &mut Self {
+        self.legacy.insert(iface, how);
+        self
+    }
+
+    pub fn named_legacy_for(&self, iface: &'static str) -> Option<LegacyNamed> {
+        self.legacy.get(iface).copied()
+    }
+
     pub fn indexed_length_for(&self, iface: &'static str) -> Option<&IndexedLength> {
         self.indexed_len.get(iface)
     }
@@ -347,6 +360,7 @@ impl Registry {
         self.named_enum.shrink_to_fit();
         self.indexed_len.shrink_to_fit();
         self.unenumerable.shrink_to_fit();
+        self.legacy.shrink_to_fit();
     }
 
     /// Number of registered functions (getters, setters, methods, ...).

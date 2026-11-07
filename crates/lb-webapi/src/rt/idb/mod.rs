@@ -4,7 +4,7 @@
 //! `blocked` events, Chrome's checks and error texts. Pages and workers.
 //!
 //! Data lives in the browser context's [`backend::IdbBackend`] (memory
-//! only, per origin). This module keeps the per-window objects and turns
+//! only, per storage key, ADR 0037). This module keeps the per-window objects and turns
 //! backend replies into events. A transaction is active while the task
 //! that created it runs (it becomes inactive at the next task boundary,
 //! [`task_boundary`]) and while one of its request events is dispatched;
@@ -1169,7 +1169,7 @@ fn register_factory(reg: &mut Registry, rt: &Runtime) {
                 cursor: None,
             })),
         );
-        b.open(&w.origin_string(), &name, version, req, sink_of(w));
+        b.open(&w.storage_key_string(), &name, version, req, sink_of(w));
         cx.ret(w.obj_arg(req))
     });
     method(reg, rt, "IDBFactory", "deleteDatabase", move |cx, w| {
@@ -1198,7 +1198,7 @@ fn register_factory(reg: &mut Registry, rt: &Runtime) {
                 cursor: None,
             })),
         );
-        b.delete(&w.origin_string(), &name, req, sink_of(w));
+        b.delete(&w.storage_key_string(), &name, req, sink_of(w));
         cx.ret(w.obj_arg(req))
     });
     method(reg, rt, "IDBFactory", "cmp", move |cx, w| {
@@ -1227,7 +1227,7 @@ fn register_factory(reg: &mut Registry, rt: &Runtime) {
                 ),
             );
         }
-        let list = backend(w)?.databases(&w.origin_string());
+        let list = backend(w)?.databases(&w.storage_key_string());
         let json = format!(
             "[{}]",
             list.iter()

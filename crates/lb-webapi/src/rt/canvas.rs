@@ -1,14 +1,17 @@
 //! Canvas 2D on lb-paint: `HTMLCanvasElement` (`getContext`, `toDataURL`,
 //! `toBlob`, size semantics), `CanvasRenderingContext2D`,
 //! `OffscreenCanvas` + its 2D context, `CanvasGradient`, `CanvasPattern`,
-//! `Path2D`, `ImageData` and `TextMetrics`.
+//! `Path2D`, `ImageData`, `TextMetrics` and `ImageBitmap`
+//! (`createImageBitmap`, `transferToImageBitmap`).
 //!
 //! - Every canvas element with a context has a [`CanvasCtx`] in the
 //!   window's [`PaintState`]; the bitmap is an `lb_paint::Canvas2d`
 //!   (allocated on first draw). Setting `width`/`height` (or the content
 //!   attributes) clears the bitmap and resets the context state.
-//! - Readback (`toDataURL`, `toBlob`, `convertToBlob`, `getImageData`)
-//!   carries the persona's seeded noise (`lb_paint::noise`).
+//! - Readback (`toDataURL`, `toBlob`, `convertToBlob`, `getImageData`,
+//!   `drawImage` of a canvas) gives the bitmap's exact values; the
+//!   persona's variation is in text rasterization (ADR 0038,
+//!   `lb_paint::variation`).
 //! - `getContext('webgl' | 'experimental-webgl' | 'webgl2')` asks a
 //!   factory registered with [`Runtime::set_canvas_context_factory`]; with
 //!   none it returns null. Other unknown kinds return null.
@@ -46,12 +49,12 @@ pub struct ExternalContext {
     /// The object `getContext` returns (same object every call).
     pub value: Handle,
     /// Current pixels for `toDataURL`, `toBlob` and `drawImage`
-    /// (unpremultiplied RGBA). The factory applies its own noise.
+    /// (unpremultiplied RGBA), the same values the context reads back.
     pub snapshot: Option<Rc<dyn Fn() -> Option<Bitmap>>>,
     /// The canvas was resized (bitmap must be cleared).
     pub resize: Option<Rc<dyn Fn(u32, u32)>>,
-    /// Current pixels without readback noise (unpremultiplied RGBA), for
-    /// page screenshots, which the page cannot read.
+    /// Current pixels (unpremultiplied RGBA) for page screenshots, which
+    /// the page cannot read.
     pub raw: Option<Rc<dyn Fn() -> Option<Bitmap>>>,
 }
 
@@ -165,6 +168,7 @@ pub(crate) enum PaintObj {
     Metrics(Box<TextMetrics>),
     Offscreen(Box<Offscreen>),
     Matrix(Box<super::matrix::Matrix>),
+    Bitmap(Box<ImgBitmap>),
 }
 
 impl PaintObj {
@@ -182,6 +186,7 @@ impl PaintObj {
             PaintObj::Metrics(_) => "TextMetrics",
             PaintObj::Offscreen(_) => "OffscreenCanvas",
             PaintObj::Matrix(m) => m.iface_name(),
+            PaintObj::Bitmap(_) => "ImageBitmap",
         }
     }
 }
@@ -486,6 +491,20 @@ pub(crate) fn image_source(
         let clean = !matches!(&ctx, Some(CanvasCtx::TwoD { ctx, .. }) if ctx.borrow().tainted);
         return Ok(snapshot_of(ctx, size).map_or(Source::Nothing, |p| Source::Pixels(p, clean)));
     }
+    if h.kind == K_OBJ
+        && let Some((pixmap, clean)) = paint(w, h.id, |p| match p {
+            PaintObj::Bitmap(b) => Some((b.pixmap.clone(), b.clean)),
+            _ => None,
+        })
+    {
+        return match pixmap {
+            Some(p) => Ok(Source::Pixels(p, clean)),
+            None => Err(w.rt.err(
+                "InvalidStateError",
+                format!("Failed to execute '{op}' on '{iface}': The image source is detached"),
+            )),
+        };
+    }
     Err(bad())
 }
 
@@ -634,6 +653,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }
     register_objects(reg, rt);
     super::matrix::register(reg, rt);
+    register_bitmap(reg, rt);
 }
 
 /// Creates (or returns) the 2D context of a canvas.
@@ -712,7 +732,7 @@ fn ctx_arg(w: &Window, c: &CanvasCtx) -> Arg {
     }
 }
 
-/// Encoded canvas pixels (noised), or an empty vec for a zero-sized one.
+/// Encoded canvas pixels, or an empty vec for a zero-sized one.
 fn encode_canvas(
     w: &Window,
     ctx: Option<CanvasCtx>,
@@ -961,6 +981,52 @@ fn register_offscreen(reg: &mut Registry, rt: &Runtime) {
             }
             None => cx.ret(Arg::Null),
         }
+    });
+    method(reg, rt, I, "transferToImageBitmap", |cx, w| {
+        let id = this_obj(cx)?;
+        let (size, ctx) = paint(w, id, |p| match p {
+            PaintObj::Offscreen(o) => Some(((o.width, o.height), o.ctx.clone())),
+            _ => None,
+        })
+        .ok_or_else(illegal)?;
+        const PRE: &str = "Failed to execute 'transferToImageBitmap' on 'OffscreenCanvas'";
+        let Some(c) = ctx else {
+            return Err(w.rt.err(
+                "InvalidStateError",
+                format!(
+                    "{PRE}: Cannot transfer an ImageBitmap from an OffscreenCanvas with no context"
+                ),
+            ));
+        };
+        let failed = || {
+            w.rt.err(
+                "UnknownError",
+                format!("{PRE}: ImageBitmap construction failed"),
+            )
+        };
+        if size.0 == 0 || size.1 == 0 {
+            return Err(failed());
+        }
+        let clean = !is_tainted(&Some(c.clone()));
+        let pixmap = match &c {
+            CanvasCtx::TwoD { ctx, .. } => ctx.borrow_mut().take_bitmap(),
+            CanvasCtx::External { ctx: e, .. } => {
+                let p = snapshot_of(Some(c.clone()), size).map(Rc::unwrap_or_clone);
+                if let Some(f) = &e.resize {
+                    f(size.0, size.1);
+                }
+                p
+            }
+        };
+        let pixmap = pixmap.ok_or_else(failed)?;
+        let b = new_paint(
+            w,
+            PaintObj::Bitmap(Box::new(ImgBitmap {
+                pixmap: Some(Rc::new(pixmap)),
+                clean,
+            })),
+        );
+        cx.ret(w.obj_arg(b))
     });
     method(reg, rt, I, "convertToBlob", |cx, w| {
         let id = this_obj(cx)?;
@@ -2130,3 +2196,467 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
 
 // tiny-skia's transform type, through lb-paint's re-export.
 use lb_paint::tiny_skia as tiny_skia_ts;
+
+// ---------------------------------------------------------------------------
+// ImageBitmap
+// ---------------------------------------------------------------------------
+
+/// An `ImageBitmap`: premultiplied pixels, `None` once closed.
+pub(crate) struct ImgBitmap {
+    pixmap: Option<Rc<Pixmap>>,
+    /// Origin-clean (drawing it does not taint).
+    clean: bool,
+}
+
+const BITMAP_SOURCES: &str = "(Blob or HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap or ImageData or OffscreenCanvas or SVGImageElement or VideoFrame)";
+
+/// Pixels `createImageBitmap` starts from.
+enum BitmapSource {
+    Pixels(Rc<Pixmap>, bool),
+    /// A `Blob`'s bytes and type, decoded when the bitmap is made.
+    Encoded(Vec<u8>, String),
+}
+
+/// The `ImageBitmapOptions` that change pixels.
+struct BitmapOptions {
+    flip: bool,
+    resize: (Option<u32>, Option<u32>),
+    quality: String,
+}
+
+/// WebIDL `long` (ToInt32).
+fn to_long(v: f64) -> i64 {
+    if !v.is_finite() {
+        return 0;
+    }
+    i64::from(v.trunc().rem_euclid(4_294_967_296.0) as u32 as i32)
+}
+
+/// Argument 0 of `createImageBitmap`: `Err` for a type error (raised
+/// first), `Ok(Err)` for a source in an unusable state.
+fn bitmap_source(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    pre: &str,
+) -> Result<Result<BitmapSource, HostError>, HostError> {
+    let state = |m: &str| Ok(Err(w.rt.err("InvalidStateError", format!("{pre}: {m}"))));
+    let bad = || {
+        HostError::type_error(format!(
+            "{pre}: The provided value is not of type '{BITMAP_SOURCES}'."
+        ))
+    };
+    let sized = |size: (u32, u32)| -> Option<&'static str> {
+        if size.0 == 0 {
+            Some("The image source's width is 0.")
+        } else if size.1 == 0 {
+            Some("The image source's height is 0.")
+        } else {
+            None
+        }
+    };
+    let h = cx.arg_host(0).ok_or_else(bad)?;
+    if let Some((slot, n)) = w.decode_node(h) {
+        let local = w.doc_slot(slot, |d| {
+            d.element(n)
+                .filter(|e| e.is_html() || &*e.name.local == "image")
+                .map(|e| e.name.local.to_string())
+        });
+        return match local.as_deref() {
+            Some("img") => match super::image::pixels(w, slot, n) {
+                Ok(Source::Pixels(p, clean)) => Ok(Ok(BitmapSource::Pixels(p, clean))),
+                _ => state("The image source is not usable."),
+            },
+            Some("canvas") => {
+                sync_element(w, slot, n);
+                let size = canvas_size(w, CanvasTarget::Element { slot, node: n });
+                if let Some(m) = sized(size) {
+                    return state(m);
+                }
+                let ctx = element_ctx(w, slot, n);
+                let clean = !is_tainted(&ctx);
+                match snapshot_of(ctx, size) {
+                    Some(p) => Ok(Ok(BitmapSource::Pixels(p, clean))),
+                    None => state("The ImageBitmap could not be allocated."),
+                }
+            }
+            Some("video") | Some("image") => state("The image source is not usable."),
+            _ => Err(bad()),
+        };
+    }
+    if h.kind != K_OBJ {
+        return Err(bad());
+    }
+    enum Found {
+        Offscreen((u32, u32), Option<CanvasCtx>),
+        Bitmap(Option<Rc<Pixmap>>, bool),
+        Data(u32, u32, Handle),
+    }
+    let found = paint(w, h.id, |p| match p {
+        PaintObj::Offscreen(o) => Some(Found::Offscreen((o.width, o.height), o.ctx.clone())),
+        PaintObj::Bitmap(b) => Some(Found::Bitmap(b.pixmap.clone(), b.clean)),
+        PaintObj::ImageData {
+            width,
+            height,
+            data,
+        } => Some(Found::Data(*width, *height, *data)),
+        _ => None,
+    });
+    match found {
+        Some(Found::Offscreen(size, ctx)) => {
+            if let Some(m) = sized(size) {
+                return state(m);
+            }
+            if ctx.is_none() {
+                return state("The ImageBitmap could not be allocated.");
+            }
+            let clean = !is_tainted(&ctx);
+            match snapshot_of(ctx, size) {
+                Some(p) => Ok(Ok(BitmapSource::Pixels(p, clean))),
+                None => state("The ImageBitmap could not be allocated."),
+            }
+        }
+        Some(Found::Bitmap(Some(p), clean)) => Ok(Ok(BitmapSource::Pixels(p, clean))),
+        Some(Found::Bitmap(None, _)) => state("The image source is not usable."),
+        Some(Found::Data(width, height, data)) => {
+            let mut bytes = cx.handle_bytes(data).unwrap_or_default();
+            bytes.resize(width as usize * height as usize * 4, 0);
+            lb_paint::decode::premultiply(&mut bytes);
+            match tiny_size(width, height).and_then(|s| Pixmap::from_vec(bytes, s)) {
+                Some(p) => Ok(Ok(BitmapSource::Pixels(Rc::new(p), true))),
+                None => state("The ImageBitmap could not be allocated."),
+            }
+        }
+        None => {
+            let blob = w
+                .with_obj(h.id, |o| match o {
+                    Obj::Blob(b) => Some((b.bytes.clone(), b.type_.clone())),
+                    _ => None,
+                })
+                .flatten();
+            match blob {
+                Some((bytes, ty)) => Ok(Ok(BitmapSource::Encoded(bytes, ty))),
+                None => Err(bad()),
+            }
+        }
+    }
+}
+
+/// `ImageBitmapOptions` (argument `i`), members in WebIDL order.
+fn bitmap_options(
+    cx: &mut CallCtx<'_, '_, '_>,
+    i: usize,
+    pre: &str,
+) -> Result<BitmapOptions, HostError> {
+    if i < cx.len()
+        && !matches!(
+            cx.arg_kind(i),
+            ValueKind::Undefined | ValueKind::Null | ValueKind::Object | ValueKind::Function
+        )
+    {
+        return Err(HostError::type_error(format!(
+            "{pre}: The provided value is not of type 'ImageBitmapOptions'."
+        )));
+    }
+    let d = Dict::arg(cx, i);
+    let r = (|| {
+        let read = |cx: &mut CallCtx<'_, '_, '_>, key: &str, ty: &str, ok: &[&str]| match d
+            .string(cx, key)?
+        {
+            Some(v) if !ok.contains(&v.as_str()) => Err(HostError::type_error(format!(
+                "{pre}: Failed to read the '{key}' property from 'ImageBitmapOptions': The provided value '{v}' is not a valid enum value of type {ty}."
+            ))),
+            v => Ok(v),
+        };
+        let size = |cx: &mut CallCtx<'_, '_, '_>, key: &str| -> Result<Option<u32>, HostError> {
+            match d.number(cx, key)? {
+                Some(v) if v.is_finite() && (0.0..=4_294_967_295.0).contains(&v.trunc()) => {
+                    Ok(Some(v.trunc() as u32))
+                }
+                Some(_) => Err(HostError::type_error(format!(
+                    "{pre}: Failed to read the '{key}' property from 'ImageBitmapOptions': Value is outside the 'unsigned long' value range."
+                ))),
+                None => Ok(None),
+            }
+        };
+        read(
+            cx,
+            "colorSpaceConversion",
+            "ColorSpaceConversion",
+            &["none", "default"],
+        )?;
+        let orient = read(
+            cx,
+            "imageOrientation",
+            "ImageOrientation",
+            &["from-image", "flipY", "none"],
+        )?;
+        read(
+            cx,
+            "premultiplyAlpha",
+            "PremultiplyAlpha",
+            &["none", "premultiply", "default"],
+        )?;
+        let rh = size(cx, "resizeHeight")?;
+        let quality = read(
+            cx,
+            "resizeQuality",
+            "ResizeQuality",
+            &["pixelated", "low", "medium", "high"],
+        )?;
+        let rw = size(cx, "resizeWidth")?;
+        Ok(BitmapOptions {
+            flip: orient.as_deref() == Some("flipY"),
+            resize: (rw, rh),
+            quality: quality.unwrap_or_else(|| "low".into()),
+        })
+    })();
+    d.release(cx);
+    r
+}
+
+/// The bitmap's pixels: `src` cropped to `crop` (outside is transparent;
+/// negative sizes count from the far edge), resized and flipped.
+fn bitmap_pixels(src: &Pixmap, crop: Option<[i64; 4]>, o: &BitmapOptions) -> Option<Pixmap> {
+    let [mut sx, mut sy, mut sw, mut sh] =
+        crop.unwrap_or([0, 0, i64::from(src.width()), i64::from(src.height())]);
+    if sw < 0 {
+        sx += sw;
+        sw = -sw;
+    }
+    if sh < 0 {
+        sy += sh;
+        sh = -sh;
+    }
+    let ceil = |a: u32, num: i64, den: i64| (f64::from(a) / den as f64 * num as f64).ceil();
+    let (dw, dh) = match o.resize {
+        (Some(a), Some(b)) => (i64::from(a), i64::from(b)),
+        (Some(a), None) => (i64::from(a), ceil(a, sh, sw) as i64),
+        (None, Some(b)) => (ceil(b, sw, sh) as i64, i64::from(b)),
+        (None, None) => (sw, sh),
+    };
+    if dw <= 0
+        || dh <= 0
+        || dw > i64::from(lb_paint::canvas::MAX_SIDE)
+        || dh > i64::from(lb_paint::canvas::MAX_SIDE)
+        || (dw * dh) as u64 > lb_paint::canvas::MAX_AREA
+    {
+        return None;
+    }
+    let (dw, dh) = (dw as u32, dh as u32);
+    let mut out = Pixmap::new(dw, dh)?;
+    let (iw, ih) = (i64::from(src.width()), i64::from(src.height()));
+    let scaled = (i64::from(dw), i64::from(dh)) != (sw, sh);
+    if !scaled || o.quality == "pixelated" {
+        // Exact copy, or nearest source pixel (`floor(x * sw / dw)`, as
+        // Chrome picks for `pixelated`).
+        let (s, d) = (src.data(), out.data_mut());
+        for y in 0..i64::from(dh) {
+            let yy = sy + y * sh / i64::from(dh);
+            for x in 0..i64::from(dw) {
+                let xx = sx + x * sw / i64::from(dw);
+                if xx < 0 || yy < 0 || xx >= iw || yy >= ih {
+                    continue;
+                }
+                let si = ((yy * iw + xx) * 4) as usize;
+                let di = ((y * i64::from(dw) + x) * 4) as usize;
+                d[di..di + 4].copy_from_slice(&s[si..si + 4]);
+            }
+        }
+    } else {
+        let (kx, ky) = (f64::from(dw) / sw as f64, f64::from(dh) / sh as f64);
+        let paint = lb_paint::tiny_skia::PixmapPaint {
+            quality: if o.quality == "high" {
+                lb_paint::tiny_skia::FilterQuality::Bicubic
+            } else {
+                lb_paint::tiny_skia::FilterQuality::Bilinear
+            },
+            ..Default::default()
+        };
+        out.draw_pixmap(
+            0,
+            0,
+            src.as_ref(),
+            &paint,
+            lb_paint::tiny_skia::Transform::from_row(
+                kx as f32,
+                0.0,
+                0.0,
+                ky as f32,
+                (-(sx as f64) * kx) as f32,
+                (-(sy as f64) * ky) as f32,
+            ),
+            None,
+        );
+    }
+    if o.flip {
+        let row = dw as usize * 4;
+        let d = out.data_mut();
+        for y in 0..dh as usize / 2 {
+            let (a, b) = d.split_at_mut((dh as usize - 1 - y) * row);
+            a[y * row..(y + 1) * row].swap_with_slice(&mut b[..row]);
+        }
+    }
+    Some(out)
+}
+
+/// `createImageBitmap(image[, sx, sy, sw, sh][, options])`: every error
+/// rejects the promise; a bitmap resolves it in a later task, as in
+/// Chrome (after microtasks queued meanwhile, before timers).
+fn create_image_bitmap(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Rc<Window>,
+    iface: &'static str,
+) -> Result<(), HostError> {
+    let r = cx.ret_new_promise()?;
+    let pre = format!("Failed to execute 'createImageBitmap' on '{iface}'");
+    let made = (|| -> Result<(BitmapSource, Option<[i64; 4]>, BitmapOptions), HostError> {
+        need_args(cx, 1, "createImageBitmap", iface)?;
+        let n = cx.len();
+        if matches!(n, 3 | 4) {
+            return Err(HostError::type_error(format!(
+                "{pre}: Overload resolution failed."
+            )));
+        }
+        let src = bitmap_source(cx, w, &pre)?;
+        let mut crop = None;
+        if n >= 5 {
+            let mut v = [0i64; 4];
+            for (k, x) in v.iter_mut().enumerate() {
+                *x = to_long(cx.arg_f64(1 + k)?);
+            }
+            crop = Some(v);
+        }
+        let opts = bitmap_options(cx, if n >= 5 { 5 } else { 1 }, &pre)?;
+        if let Some([_, _, sw, sh]) = crop {
+            if sw == 0 {
+                return Err(HostError::range_error(format!(
+                    "{pre}: The crop rect width is 0."
+                )));
+            }
+            if sh == 0 {
+                return Err(HostError::range_error(format!(
+                    "{pre}: The crop rect height is 0."
+                )));
+            }
+        }
+        let src = src?;
+        if opts.resize.0 == Some(0) || opts.resize.1 == Some(0) {
+            return Err(w.rt.err(
+                "InvalidStateError",
+                format!("{pre}: The options's resizeWidth or resizeHeight is 0."),
+            ));
+        }
+        Ok((src, crop, opts))
+    })();
+    let (src, crop, opts) = match made {
+        Ok(v) => v,
+        Err(e) => return cx.reject_promise(r, e),
+    };
+    let (pixels, clean) = match src {
+        BitmapSource::Pixels(p, clean) => match bitmap_pixels(&p, crop, &opts) {
+            Some(px) => (Ok(px), clean),
+            None => {
+                let e = w.rt.err(
+                    "InvalidStateError",
+                    format!("{pre}: The ImageBitmap could not be allocated."),
+                );
+                return cx.reject_promise(r, e);
+            }
+        },
+        BitmapSource::Encoded(bytes, ty) => (
+            lb_paint::decode::decode(
+                &bytes,
+                Some(&ty).filter(|t| !t.is_empty()).map(String::as_str),
+            )
+            .ok()
+            .and_then(|p| bitmap_pixels(&p, crop, &opts))
+            .ok_or(()),
+            true,
+        ),
+    };
+    w.queue_task(
+        TaskSource::DomManipulation,
+        Box::new(move |js, w| match pixels {
+            Ok(px) => {
+                let b = new_paint(
+                    w,
+                    PaintObj::Bitmap(Box::new(ImgBitmap {
+                        pixmap: Some(Rc::new(px)),
+                        clean,
+                    })),
+                );
+                js.resolve(r, w.obj_arg(b));
+            }
+            Err(()) => {
+                let e = w.rt.err(
+                    "InvalidStateError",
+                    "The source image could not be decoded.",
+                );
+                js.reject(r, e);
+            }
+        }),
+    );
+    Ok(())
+}
+
+/// An `ImageBitmap` for structured clone: `None` if `id` is not one,
+/// `Err` for a closed one.
+pub(crate) fn clone_bitmap(w: &Window, id: u32) -> Option<Result<(u32, u32, Vec<u8>), String>> {
+    paint(w, id, |p| match p {
+        PaintObj::Bitmap(b) => Some(match &b.pixmap {
+            Some(px) => Ok((px.width(), px.height(), px.data().to_vec())),
+            None => Err("An ImageBitmap is detached and could not be cloned.".into()),
+        }),
+        _ => None,
+    })
+}
+
+/// A cloned `ImageBitmap` in `w` (an empty one if the data is bad).
+pub(crate) fn adopt_bitmap(w: &Window, width: u32, height: u32, data: Vec<u8>) -> u32 {
+    let pixmap = tiny_size(width, height)
+        .and_then(|s| Pixmap::from_vec(data, s))
+        .map(Rc::new);
+    new_paint(
+        w,
+        PaintObj::Bitmap(Box::new(ImgBitmap {
+            pixmap,
+            clean: true,
+        })),
+    )
+}
+
+fn register_bitmap(reg: &mut Registry, rt: &Runtime) {
+    const I: &str = "ImageBitmap";
+    for (k, attr) in ["width", "height"].into_iter().enumerate() {
+        getter(reg, rt, I, attr, move |cx, w| {
+            let id = this_obj(cx)?;
+            let v = paint(w, id, |p| match p {
+                PaintObj::Bitmap(b) => Some(
+                    b.pixmap
+                        .as_ref()
+                        .map_or(0, |p| if k == 0 { p.width() } else { p.height() }),
+                ),
+                _ => None,
+            })
+            .ok_or_else(illegal)?;
+            cx.ret(v)
+        });
+    }
+    method(reg, rt, I, "close", |cx, w| {
+        let id = this_obj(cx)?;
+        paint(w, id, |p| match p {
+            PaintObj::Bitmap(b) => {
+                b.pixmap = None;
+                Some(())
+            }
+            _ => None,
+        })
+        .ok_or_else(illegal)?;
+        Ok(())
+    });
+    for g in ["Window", "WorkerGlobalScope"] {
+        method(reg, rt, g, "createImageBitmap", move |cx, w| {
+            create_image_bitmap(cx, w, g)
+        });
+    }
+}

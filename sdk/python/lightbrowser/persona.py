@@ -16,10 +16,10 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .errors import PersonaValidationError
-from .launcher import find_binary
+from .launcher import find_binary, locale_args
 
 
 @dataclass(frozen=True)
@@ -133,19 +133,40 @@ class Persona:
 
     # -- validation -----------------------------------------------------------
 
-    def check(self, binary: str | os.PathLike[str] | None = None, timeout: float = 30.0) -> ValidationReport:
-        """Run `lightbrowser validate` and return its report (never raises on violations)."""
+    def check(
+        self,
+        binary: str | os.PathLike[str] | None = None,
+        timeout: float = 30.0,
+        *,
+        timezone: str | None = None,
+        locale: str | None = None,
+        languages: Sequence[str] | None = None,
+    ) -> ValidationReport:
+        """Run `lightbrowser validate` and return its report (never raises on violations).
+
+        With `timezone`/`locale`/`languages`, the persona is checked with those
+        overrides (`validate --timezone ...`, ADR 0039).
+        """
         exe = find_binary(binary, family=self.family)
+        extra = locale_args(timezone=timezone, locale=locale, languages=languages)
         if self.path is not None:
-            return _run_validate(exe, self.path, timeout)
+            return _run_validate(exe, self.path, timeout, extra)
         with tempfile.TemporaryDirectory(prefix="lb-persona-") as d:
             tmp = Path(d) / "persona.json"
             tmp.write_text(json.dumps(self.data), encoding="utf-8")
-            return _run_validate(exe, tmp, timeout)
+            return _run_validate(exe, tmp, timeout, extra)
 
-    def validate(self, binary: str | os.PathLike[str] | None = None, timeout: float = 30.0) -> ValidationReport:
+    def validate(
+        self,
+        binary: str | os.PathLike[str] | None = None,
+        timeout: float = 30.0,
+        *,
+        timezone: str | None = None,
+        locale: str | None = None,
+        languages: Sequence[str] | None = None,
+    ) -> ValidationReport:
         """Like `check`, but raise `PersonaValidationError` when the persona is not valid."""
-        rep = self.check(binary, timeout)
+        rep = self.check(binary, timeout, timezone=timezone, locale=locale, languages=languages)
         if not rep.ok:
             raise PersonaValidationError(f"persona {self.path or self.profile_id or '<dict>'} is invalid", rep.output)
         return rep
@@ -162,9 +183,9 @@ class Persona:
         return f"Persona({self.profile_id or '?'}, family={self.family!r}, path={str(self.path) if self.path else None!r})"
 
 
-def _run_validate(exe: str, path: Path, timeout: float) -> ValidationReport:
+def _run_validate(exe: str, path: Path, timeout: float, extra: Sequence[str] = ()) -> ValidationReport:
     proc = subprocess.run(
-        [exe, "validate", str(path)],
+        [exe, "validate", *extra, str(path)],
         capture_output=True,
         text=True,
         timeout=timeout,

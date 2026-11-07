@@ -75,4 +75,43 @@ fn main() {
     let packed = zstd::bulk::compress(all.as_bytes(), 19).expect("compress font tables");
     std::fs::write(out.join("font_tables.zst"), packed).expect("write font_tables.zst");
     std::fs::write(out.join("font_tables.rs"), index).expect("write font_tables.rs");
+    pack_local_fonts(&manifest.join("../../profiles/local_fonts"), &out);
+}
+
+/// Packs `profiles/local_fonts/*.json` (the `local()` face names of each
+/// OS release) into one zstd frame, like the metric tables: `src/local_fonts.rs`
+/// includes `local_fonts.rs` (list id and byte range of each file).
+fn pack_local_fonts(dir: &std::path::Path, out: &std::path::Path) {
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|e| e.expect("local_fonts entry").path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let mut all = String::new();
+    let mut index = String::from(
+        "/// Bundled `local()` lists: id (file stem) and byte range in the unpacked JSON.\n         const LOCAL_LISTS: &[(&str, std::ops::Range<usize>)] = &[\n",
+    );
+    for path in &files {
+        println!("cargo:rerun-if-changed={}", path.display());
+        let text =
+            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("file stem");
+        let start = all.len();
+        all.push_str(&text);
+        writeln!(index, "    ({id:?}, {start}..{}),", all.len()).unwrap();
+    }
+    writeln!(
+        index,
+        "];\n         /// Length of the unpacked JSON.\n         const PACKED_LOCAL_LEN: usize = {};\n         /// All lists, one zstd frame.\n         const PACKED_LOCAL: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/local_fonts.zst\"));",
+        all.len()
+    )
+    .unwrap();
+    let packed = zstd::bulk::compress(all.as_bytes(), 19).expect("compress local font lists");
+    std::fs::write(out.join("local_fonts.zst"), packed).expect("write local_fonts.zst");
+    std::fs::write(out.join("local_fonts.rs"), index).expect("write local_fonts.rs");
 }

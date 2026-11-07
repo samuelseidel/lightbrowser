@@ -1,0 +1,1 @@
+Content-Security-Policy: img-src 127.0.0.1:{PORT}/source_matching/dir/ http://localhost:{PORT}/source_matching/file.png *.localhost:* https://127.0.0.1:{PORT} data:

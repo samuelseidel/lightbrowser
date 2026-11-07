@@ -79,6 +79,13 @@ pub struct Fixed {
     pub rasterizer_discard: bool,
     pub alpha_to_coverage: bool,
     pub sample_coverage: Option<(f32, bool)>,
+    /// Window-space offset of primitives for coverage only: the persona's
+    /// sub-pixel rasterization variation (ADR 0038). Which samples a
+    /// triangle, line or point covers is decided as if it lay this far
+    /// away; depth, varyings and `gl_PointCoord` are not moved. At most
+    /// 1/16 px, so pixel-aligned edges (at least 1/8 px from every sample)
+    /// cover the same samples. Zero for none.
+    pub offset: [f64; 2],
 }
 
 pub enum Indices {
@@ -679,9 +686,10 @@ impl Raster<'_, '_, '_, '_> {
             let (dx, dy) = (b.x - a.x, b.y - a.y);
             dy < 0.0 || (dy == 0.0 && dx < 0.0)
         });
+        let [ox, oy] = self.d.fixed.offset;
         let covered = |px: f64, py: f64| -> bool {
             (0..3).all(|i| {
-                let e = edge(i, px, py);
+                let e = edge(i, px - ox, py - oy);
                 e > 0.0 || (e == 0.0 && top_left[i])
             })
         };
@@ -1056,9 +1064,14 @@ impl Raster<'_, '_, '_, '_> {
             return;
         }
         let (bx0, by0, bx1, by1) = self.bounds();
-        // Pixels whose center along the major axis lies in [start, end).
+        // Pixels whose center along the major axis lies in [start, end),
+        // for the line moved by the coverage offset; `t` interpolates
+        // along the unmoved line.
+        let [ox, oy] = self.d.fixed.offset;
+        let (om, on) = if xmajor { (ox, oy) } else { (oy, ox) };
         let (s0, s1) = if xmajor { (wa.x, wb.x) } else { (wa.y, wb.y) };
         let (lo, hi) = if s0 <= s1 { (s0, s1) } else { (s1, s0) };
+        let (lo, hi) = (lo + om, hi + om);
         let first = (lo - 0.5).ceil() as i32;
         let last = (hi - 0.5).ceil() as i32;
         let interps: Vec<Interp> = self
@@ -1073,9 +1086,14 @@ impl Raster<'_, '_, '_, '_> {
         let mut pixels: Vec<(i32, i32, f32)> = Vec::new();
         for m in first..last {
             let c = f64::from(m) + 0.5;
-            let t = ((c - s0) / (s1 - s0)).clamp(0.0, 1.0);
-            let minor = if xmajor { wa.y + dy * t } else { wa.x + dx * t };
+            let tc = ((c - om - s0) / (s1 - s0)).clamp(0.0, 1.0);
+            let minor = if xmajor {
+                wa.y + dy * tc
+            } else {
+                wa.x + dx * tc
+            } + on;
             let mi = minor.floor() as i32;
+            let t = ((c - s0) / (s1 - s0)).clamp(0.0, 1.0);
             let (px, py) = if xmajor { (m, mi) } else { (mi, m) };
             if px < bx0 || px >= bx1 || py < by0 || py >= by1 {
                 continue;
@@ -1122,11 +1140,15 @@ impl Raster<'_, '_, '_, '_> {
         let wv = self.to_window(v);
         let size = f64::from(v.psize.clamp(1.0, 1024.0));
         let (cx, cy) = (wv.x, wv.y);
+        // Coverage of the square moved by the offset; `gl_PointCoord`
+        // keeps the unmoved centre.
+        let [ox, oy] = self.d.fixed.offset;
+        let (qx, qy) = (cx + ox, cy + oy);
         let (bx0, by0, bx1, by1) = self.bounds();
-        let x0 = ((cx - size / 2.0).floor() as i32).max(bx0);
-        let x1 = ((cx + size / 2.0).ceil() as i32).min(bx1);
-        let y0 = ((cy - size / 2.0).floor() as i32).max(by0);
-        let y1 = ((cy + size / 2.0).ceil() as i32).min(by1);
+        let x0 = ((qx - size / 2.0).floor() as i32).max(bx0);
+        let x1 = ((qx + size / 2.0).ceil() as i32).min(bx1);
+        let y0 = ((qy - size / 2.0).floor() as i32).max(by0);
+        let y1 = ((qy + size / 2.0).ceil() as i32).min(by1);
         if x0 >= x1 || y0 >= y1 {
             return;
         }
@@ -1150,10 +1172,10 @@ impl Raster<'_, '_, '_, '_> {
                             f64::from(px) + f64::from(*sx),
                             f64::from(py) + f64::from(*sy),
                         );
-                        if x >= cx - size / 2.0
-                            && x < cx + size / 2.0
-                            && y >= cy - size / 2.0
-                            && y < cy + size / 2.0
+                        if x >= qx - size / 2.0
+                            && x < qx + size / 2.0
+                            && y >= qy - size / 2.0
+                            && y < qy + size / 2.0
                         {
                             *c |= 1 << si;
                         }

@@ -2,7 +2,9 @@
 
 Status: Accepted (2026-11-03). Scope extended by ADR 0020 (background
 images and gradients, border radius, box shadows; background images now
-load like Chrome's).
+load like Chrome's). Amended by ADR 0038 (2026-11-07): canvas and WebGL
+readback carry no noise any more, so screenshots and the page read the
+same pixels; the persona's variation is in rasterization.
 
 ## Context
 
@@ -15,8 +17,8 @@ page screenshots for M6, on the CPU rasterizer. Playwright's
 returned "not supported" or a fixed scroll of 0.
 
 Screenshots are for people and tests looking at a page, not for the page.
-The page cannot read them, so they need no fingerprint noise, and they must
-not change anything the page can observe.
+The page cannot read them, and they must not change anything the page can
+observe.
 
 ## Decision
 
@@ -28,8 +30,10 @@ not change anything the page can observe.
 - **Same inputs as layout and canvas.** Text uses the fonts layout
   resolved and the bundled glyph outlines (`profiles/fonts/outlines/`), so
   painted text has the advances the page measures. Image and canvas pixels
-  come from lb-webapi without readback noise (`rt::screenshot`); WebGL
-  contexts expose an un-noised `raw` readback for this only.
+  come from lb-webapi (`rt::screenshot`): the values the page reads back,
+  which carry no noise since ADR 0038 (the persona's glyph and WebGL
+  offsets are part of the canvas bitmap; page text is drawn without
+  them).
 - **Chrome's coordinates.** `clip` is in page coordinates; output pixels
   are CSS px times `clip.scale` times the persona's device pixel ratio.
   `captureBeyondViewport: false` paints only what lies in the visible

@@ -2043,16 +2043,20 @@ pub struct ValidateOutcome {
 pub fn validate_file(path: impl AsRef<std::path::Path>) -> ValidateOutcome {
     let path = path.as_ref();
     match PersonaProfile::from_path(path) {
-        Ok(profile) => {
-            let result = validate(&profile);
-            ValidateOutcome {
-                ok: result.is_valid(),
-                report: format!("{}\n{}", path.display(), render_report(&profile, &result)),
-            }
-        }
+        Ok(profile) => validate_profile(&path.display().to_string(), &profile),
         Err(e) => ValidateOutcome {
             ok: false,
             report: format!("{}\nERROR: {e}\n", path.display()),
         },
+    }
+}
+
+/// [`validate_file`] for a loaded persona (`label` heads the report), e.g.
+/// one with `--timezone`/`--locale` overrides applied (ADR 0039).
+pub fn validate_profile(label: &str, profile: &PersonaProfile) -> ValidateOutcome {
+    let result = validate(profile);
+    ValidateOutcome {
+        ok: result.is_valid(),
+        report: format!("{label}\n{}", render_report(profile, &result)),
     }
 }

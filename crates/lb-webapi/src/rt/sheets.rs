@@ -298,23 +298,41 @@ pub(crate) fn link_changed(w: &Rc<Window>, n: NodeId) {
     if w.css.borrow().owners.get(&n).is_some_and(|o| o.key == key) {
         return;
     }
+    // Content Security Policy (`style-src-elem`): a blocked sheet is not
+    // requested and fails.
+    let nonce = w.csp_nonce(n);
+    let check = super::csp::UrlCheck {
+        nonce: &nonce,
+        ..Default::default()
+    };
+    let allowed = w.csp_url(
+        super::csp::Dir::StyleSrcElem,
+        &url,
+        &check,
+        w.csp_parser_loc(),
+    );
+    if !allowed {
+        // No request and no sheet; `error` at the link.
+        remove_owner(w, n);
+        w.queue_task(
+            TaskSource::Networking,
+            Box::new(move |js, w| {
+                fire_event(js, w, w.node_ref(0, n), "error", false, false);
+            }),
+        );
+        return;
+    }
     let (sb, pb) = blocking(w, n, alternate);
     let seq = begin(w, n, true, key, sb, pb);
     let referrer = w.url();
     let quirks = w.with_doc(|d| d.quirks_mode() == lb_dom::QuirksMode::Quirks);
-    load_sheet(
-        w,
-        url,
-        referrer,
-        quirks,
-        Vec::new(),
-        Box::new(move |w, loaded| {
-            w.queue_task(
-                TaskSource::Networking,
-                Box::new(move |_js, w| finish_link(w, n, seq, loaded)),
-            );
-        }),
-    );
+    let done: Box<dyn FnOnce(&Rc<Window>, Loaded)> = Box::new(move |w, loaded| {
+        w.queue_task(
+            TaskSource::Networking,
+            Box::new(move |_js, w| finish_link(w, n, seq, loaded)),
+        );
+    });
+    load_sheet(w, url, referrer, quirks, Vec::new(), done);
 }
 
 /// Mutation hook (and `</style>`): a style element was inserted, removed
@@ -331,6 +349,11 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
     if w.css.borrow().owners.get(&n).is_some_and(|o| o.key == text) {
         return;
     }
+    // Content Security Policy (`style-src-elem`): a blocked style element
+    // gets an empty sheet and fires `error` (Blink's `StyleElement`).
+    let blocked = !super::csp::style_element_allowed(w, n, &text);
+    let key = text.clone();
+    let text = if blocked { String::new() } else { text };
     // New text: a new sheet (the CSSOM entry follows the text).
     let lower = text.to_ascii_lowercase();
     if lower.contains("url(") {
@@ -347,7 +370,7 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
     } else {
         blocking(w, n, false)
     };
-    let seq = begin(w, n, false, text.clone(), sb, pb);
+    let seq = begin(w, n, false, key, sb, pb);
     {
         let mut st = w.css.borrow_mut();
         if let Some(k) = st.owners.get(&n).and_then(|o| o.sheet) {
@@ -357,7 +380,10 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
             e.imports = Vec::new();
             e.rules = None;
         }
-        st.updates.push(Update::StyleOverride(n, None));
+        st.updates.push(Update::StyleOverride(
+            n,
+            blocked.then(|| Rc::new(Stylesheet::parse("", Origin::Author))),
+        ));
         st.updates.push(Update::StyleImports(n, Vec::new()));
     }
     if urls.is_empty() {
@@ -383,6 +409,7 @@ pub(crate) fn style_changed(w: &Rc<Window>, n: NodeId) {
             }
         });
         match url {
+            Some(u) if !import_allowed(w, &u) => done(w, failed(u)),
             Some(u) => load_sheet(w, u, referrer.clone(), quirks, Vec::new(), done),
             None => {
                 let bad = failed(referrer.clone());
@@ -540,7 +567,8 @@ fn finish_style(w: &Rc<Window>, n: NodeId, seq: u32, imports: Vec<Option<Loaded>
     release(w, &mut o);
     let ok = imports
         .iter()
-        .all(|i| i.as_ref().is_some_and(Loaded::all_ok));
+        .all(|i| i.as_ref().is_some_and(Loaded::all_ok))
+        && !super::csp::style_blocked(w, n);
     {
         let mut st = w.css.borrow_mut();
         let has = !imports.is_empty();
@@ -616,6 +644,16 @@ fn sheet_event(n: NodeId, ok: bool) -> super::TaskFn {
 // ---------------------------------------------------------------------------
 // Fetching
 // ---------------------------------------------------------------------------
+
+/// Content Security Policy for an `@import` (`style-src-elem`).
+fn import_allowed(w: &Rc<Window>, url: &Url) -> bool {
+    w.csp_url(
+        super::csp::Dir::StyleSrcElem,
+        url,
+        &super::csp::UrlCheck::default(),
+        None,
+    )
+}
 
 fn failed(url: Url) -> Loaded {
     Loaded {
@@ -763,6 +801,7 @@ fn got_sheet(
         });
         let target = base.join(imp.url.trim()).ok();
         match target {
+            Some(t) if !import_allowed(w, &t) => child_done(w, failed(t)),
             Some(t) if chain.len() < MAX_DEPTH && !chain.contains(&t.to_string()) => {
                 load_sheet(w, t, base.clone(), quirks, chain.clone(), child_done)
             }

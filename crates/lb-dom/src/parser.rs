@@ -380,6 +380,17 @@ impl HtmlParser {
         self.done
     }
 
+    /// Source line where a parser-created `<base>` or element with a
+    /// `style` attribute started (1-based).
+    pub fn element_line(&self, n: NodeId) -> Option<u64> {
+        self.sink().element_lines.borrow().get(&n).copied()
+    }
+
+    /// The tokenizer's current source line (1-based; 0 before any input).
+    pub fn current_line(&self) -> u64 {
+        self.sink().line.get()
+    }
+
     /// Source line where a parser-created `<script>` started (1-based).
     pub fn script_line(&self, script: NodeId) -> Option<u64> {
         self.sink().script_lines.borrow().get(&script).copied()

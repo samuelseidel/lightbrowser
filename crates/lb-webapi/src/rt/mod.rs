@@ -23,7 +23,7 @@
 //! - [`input`]: trusted user input for CDP `Input.*` (pointer, mouse and
 //!   keyboard events in Chrome's order, focus, activation, text editing)
 //!   and the UI event interfaces.
-//! - Fingerprint surfaces from the persona: `canvas` (2D, readback noise),
+//! - Fingerprint surfaces from the persona: `canvas` (2D, glyph offset),
 //!   `webgl` (stub renderer, persona GPU, limits and extensions), `audio`
 //!   (Web Audio DSP with seeded output noise), `fonts` (Font Loading API;
 //!   measurement detection runs through layout's font tables).
@@ -53,9 +53,11 @@ pub mod canvas;
 mod chrome;
 mod coll;
 mod crypto;
+pub mod csp;
 mod css_supports;
 mod custom;
 mod dom;
+pub mod emulation;
 mod events;
 mod fonts;
 mod form;
@@ -69,8 +71,10 @@ mod matrix;
 mod media;
 mod misc;
 pub mod modules;
+mod named;
 mod navigator;
 mod net;
+pub mod partition;
 mod range;
 mod rtc;
 pub mod screenshot;
@@ -202,6 +206,11 @@ pub trait Js {
     fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps;
     /// The host object behind a handle, if it is a wrapper.
     fn host_of(&mut self, h: Handle) -> Option<HostRef>;
+    /// The script position on top of the JS stack (URL, 1-based line and
+    /// column), when called from a script.
+    fn script_location(&mut self) -> Option<(String, u32, u32)> {
+        None
+    }
 }
 
 impl Js for CallCtx<'_, '_, '_> {
@@ -268,6 +277,9 @@ impl Js for CallCtx<'_, '_, '_> {
     }
     fn realm_ops(&mut self) -> &mut dyn lb_js::RealmOps {
         self
+    }
+    fn script_location(&mut self) -> Option<(String, u32, u32)> {
+        CallCtx::script_location(self)
     }
 }
 
@@ -382,6 +394,9 @@ struct RtInner {
     /// worker waited (see [`Runtime::prepare_spare_realm`]), by
     /// (insecure, OS gates).
     spare: RefCell<Vec<(SpareKey, RealmId)>>,
+    /// The native getter of document named items, once registered with
+    /// the engine (`named.rs`).
+    named_getter: Cell<Option<u32>>,
 }
 
 /// What a window realm depends on before its document is known.
@@ -475,6 +490,7 @@ impl Runtime {
             next_doc_key: Cell::new(1),
             docs_live: Cell::new(0),
             spare: RefCell::new(Vec::new()),
+            named_getter: Cell::new(None),
         }));
         dom::register(reg, &rt);
         coll::register(reg, &rt);
@@ -505,9 +521,12 @@ impl Runtime {
         websocket::register(reg, &rt);
         idb::register(reg, &rt);
         broadcast::register(reg, &rt);
+        partition::register(reg, &rt);
         css_supports::register(reg, &rt);
         svg::register(reg, &rt);
         range::register(reg, &rt);
+        csp::register(reg, &rt);
+        named::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -930,6 +949,11 @@ pub struct Window {
     pub(crate) uncaught: Cell<u32>,
     /// Live ranges and their pending notes (`range.rs`).
     pub(crate) ranges: RefCell<range::RangeState>,
+    /// Content Security Policy list and violation state (ADR 0036).
+    pub(crate) csp: csp::CspSide,
+    /// Named access indexes, document named items, forms' past names
+    /// (`named.rs`, ADR 0040).
+    pub(crate) named: RefCell<named::NamedState>,
 }
 
 impl std::fmt::Debug for Window {
@@ -1028,6 +1052,8 @@ impl Window {
             idb: idb::IdbSide::default(),
             uncaught: Cell::new(0),
             ranges: RefCell::default(),
+            csp: csp::CspSide::default(),
+            named: RefCell::default(),
         });
         rt.register_doc(key, &w, 0, &doc);
         w
@@ -1678,7 +1704,9 @@ impl Window {
                 .find(|&n| d.is_html_element_named(n, &lb_dom::local_name!("base")))
                 .and_then(|n| d.get_attribute(n, "href").map(str::to_owned))
         });
-        href.and_then(|h| url.join(&h).ok()).unwrap_or(url)
+        href.filter(|h| self.csp_base_allowed(h))
+            .and_then(|h| url.join(&h).ok())
+            .unwrap_or(url)
     }
 
     /// Release JS state before the realm is dropped.

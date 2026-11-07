@@ -365,7 +365,6 @@ pub(crate) const REFLECTED: &[(&str, &str, &str, Reflect)] = &[
     ("HTMLElement", "hidden", "hidden", Reflect::Bool),
     ("HTMLElement", "inert", "inert", Reflect::Bool),
     ("HTMLElement", "autofocus", "autofocus", Reflect::Bool),
-    ("HTMLElement", "nonce", "nonce", Reflect::Str),
     (
         "HTMLElement",
         "dir",

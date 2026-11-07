@@ -12,6 +12,12 @@
 //! the shape into a transparent layer first, then composite the
 //! (blurred) shadow and the layer over the whole bitmap. The clip is a
 //! coverage mask.
+//!
+//! Readback (`getImageData`, `toDataURL`, `toBlob`) returns the bitmap's
+//! exact values, unpremultiplied as Chrome's Skia does. The persona's
+//! variation lives in text rasterization instead (ADR 0038,
+//! [`crate::variation`]): glyph origins are snapped like Chrome's glyph
+//! cache and moved by the persona's sub-pixel offset.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -27,8 +33,9 @@ use tiny_skia::{
 
 use crate::color::to_skia;
 use crate::encode::{self, Bitmap};
-use crate::font::{CanvasFont, FontSet, TextAlign, TextBaseline, TextMetrics, TextStyle};
-use crate::noise::CanvasNoise;
+use crate::font::{
+    CanvasFont, EmojiSnap, FontSet, GlyphGrid, TextAlign, TextBaseline, TextMetrics, TextStyle,
+};
 use crate::path::{PathData, point_in};
 
 /// Largest canvas Chrome allocates (area and side).
@@ -39,17 +46,24 @@ pub const MAX_SIDE: u32 = 32_767;
 #[derive(Debug)]
 pub struct PaintEnv {
     pub fonts: FontSet,
-    /// Readback noise; `None` without a persona seed.
-    pub noise: Option<CanvasNoise>,
+    /// The persona's device-space glyph offset (`canvas_seed`, ADR 0038);
+    /// zero without a seed.
+    pub glyph_bias: (f64, f64),
+    /// How colour emoji snap on the persona's OS.
+    pub emoji_snap: EmojiSnap,
 }
 
 impl PaintEnv {
     pub fn new(profile: Option<&PersonaProfile>) -> PaintEnv {
+        let os = profile.map_or(lb_css::OsKind::Windows, |p| {
+            lb_css::OsKind::from_name(&p.os.name)
+        });
         PaintEnv {
             fonts: FontSet::new(profile),
-            noise: profile
+            glyph_bias: profile
                 .and_then(|p| p.fingerprint_seeds.canvas_bytes())
-                .map(CanvasNoise::new),
+                .map_or((0.0, 0.0), crate::variation::text_bias),
+            emoji_snap: EmojiSnap::for_os(os),
         }
     }
 }
@@ -941,13 +955,21 @@ impl Canvas2d {
         }
         let st = self.text_style();
         let ts = self.state.transform;
-        let path = self.env.fonts.text_path(&st, text, x, y, max_width, &ts);
+        let grid = self.glyph_grid();
+        let path = self
+            .env
+            .fonts
+            .text_path(&st, text, x, y, max_width, &ts, Some(&grid));
         if let Some(p) = path.to_skia() {
             let style = self.state.fill.clone();
             self.render_style(Shape::Fill(p, FillRule::Winding), &style);
         }
         // Emoji keep their own colours (Chrome's colour emoji font).
-        for (path, color) in self.env.fonts.emoji_layers(&st, text, x, y, max_width, &ts) {
+        let layers = self
+            .env
+            .fonts
+            .emoji_layers(&st, text, x, y, max_width, &ts, Some(&grid));
+        for (path, color) in layers {
             if let Some(p) = path.to_skia() {
                 self.render_style(Shape::Fill(p, FillRule::Winding), &Style::Color(color));
             }
@@ -960,12 +982,27 @@ impl Canvas2d {
             return;
         }
         let st = self.text_style();
-        let path = self
-            .env
-            .fonts
-            .text_path(&st, text, x, y, max_width, &Transform::identity());
+        let grid = self.glyph_grid();
+        let path = self.env.fonts.text_path(
+            &st,
+            text,
+            x,
+            y,
+            max_width,
+            &Transform::identity(),
+            Some(&grid),
+        );
         if let Some(p) = path.to_skia() {
             self.stroke_user(p);
+        }
+    }
+
+    /// Glyph placement for the current transform and the persona's offset.
+    fn glyph_grid(&self) -> GlyphGrid {
+        GlyphGrid {
+            ctm: self.state.transform,
+            bias: self.env.glyph_bias,
+            emoji: self.env.emoji_snap,
         }
     }
 
@@ -1074,9 +1111,17 @@ impl Canvas2d {
         }
     }
 
+    /// The bitmap for `transferToImageBitmap`: the canvas then starts over
+    /// with a blank bitmap but keeps its drawing state.
+    pub fn take_bitmap(&mut self) -> Option<Pixmap> {
+        let p = self.snapshot();
+        self.pixmap = None;
+        p
+    }
+
     /// Unpremultiplied pixels of a region; outside the canvas is
-    /// transparent. `noise` adds the persona's readback noise.
-    pub fn read(&self, sx: i64, sy: i64, sw: u32, sh: u32, noise: bool) -> Bitmap {
+    /// transparent. Every readback path uses this, so they agree.
+    pub fn read(&self, sx: i64, sy: i64, sw: u32, sh: u32) -> Bitmap {
         let mut out = Bitmap::new(sw, sh);
         let (w, h) = (i64::from(self.width), i64::from(self.height));
         let Some(pm) = &self.pixmap else {
@@ -1112,26 +1157,22 @@ impl Canvas2d {
                     out.data[o..o + 3].copy_from_slice(&data[i..i + 3]);
                 } else if a > 0 {
                     for c in 0..3 {
-                        let v = (u32::from(data[i + c]) * 255 + u32::from(a) / 2) / u32::from(a);
-                        out.data[o + c] = v.min(255) as u8;
+                        out.data[o + c] = unpremultiply(data[i + c], a);
                     }
                 }
             }
         }
-        if noise && let Some(n) = &self.env.noise {
-            n.apply(data, self.width, self.height, sx, sy, sw, &mut out.data);
-        }
         out
     }
 
-    /// `getImageData` (noised).
+    /// `getImageData`.
     pub fn get_image_data(&self, sx: i64, sy: i64, sw: u32, sh: u32) -> Bitmap {
-        self.read(sx, sy, sw, sh, true)
+        self.read(sx, sy, sw, sh)
     }
 
-    /// The whole canvas, noised (what `toDataURL` / `toBlob` encode).
+    /// The whole canvas (what `toDataURL` / `toBlob` encode).
     pub fn export(&self) -> Bitmap {
-        self.read(0, 0, self.width, self.height, true)
+        self.read(0, 0, self.width, self.height)
     }
 
     /// `toDataURL(type, quality)`.
@@ -1369,6 +1410,17 @@ impl Canvas2d {
     }
 }
 
+/// One premultiplied channel `c` of alpha `a` (0 < a < 255) unpremultiplied
+/// as Skia's raster pipeline does for Chrome's `getImageData`: in `f32`,
+/// `c / 255 * (1 / (a / 255))`, clamped to 1, times 255, rounded to
+/// nearest even. Equal to Chrome 153 for every (c, a), `putImageData`
+/// round trips included (`lb-page` `tests/canvas_chrome/`).
+pub fn unpremultiply(c: u8, a: u8) -> u8 {
+    let k = 1.0f32 / 255.0;
+    let v = (f32::from(c) * k) * (1.0 / (f32::from(a) * k));
+    (v.min(1.0) * 255.0).round_ties_even() as u8
+}
+
 /// A rectangle as a path (helper for pattern strips).
 struct PathBuilderRect(tiny_skia::Rect);
 
@@ -1451,7 +1503,7 @@ mod tests {
     }
 
     fn px(c: &Canvas2d, x: i64, y: i64) -> [u8; 4] {
-        c.read(x, y, 1, 1, false).data.try_into().unwrap()
+        c.read(x, y, 1, 1).data.try_into().unwrap()
     }
 
     #[test]
@@ -1465,11 +1517,12 @@ mod tests {
         c.clear_rect(0.0, 0.0, 2.0, 2.0);
         assert_eq!(px(&c, 1, 1), [0, 0, 0, 0]);
         assert_eq!(px(&c, 3, 3), [10, 20, 30, 255]);
-        // Solid regions are exact even with noise.
+        // Solid regions are exact with a persona offset too.
         let mut n = Canvas2d::new(
             Rc::new(PaintEnv {
                 fonts: FontSet::new(None),
-                noise: Some(CanvasNoise::new([3; 16])),
+                glyph_bias: crate::variation::text_bias([3; 16]),
+                emoji_snap: EmojiSnap::Whole,
             }),
             4,
             4,
@@ -1620,7 +1673,7 @@ mod tests {
         assert!(m.width > 40.0 && m.width < 60.0);
         t.fill_text("Hello", 2.0, 22.0, None);
         let ink = t
-            .read(0, 0, 120, 30, false)
+            .read(0, 0, 120, 30)
             .data
             .as_chunks::<4>()
             .0
@@ -1638,12 +1691,12 @@ mod tests {
         b.data
             .copy_from_slice(&[255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 255, 1, 2, 3, 0]);
         c.put_image_data(&b, 1, 1, None);
-        let r = c.read(1, 1, 2, 2, false);
+        let r = c.read(1, 1, 2, 2);
         assert_eq!(&r.data[..4], &[255, 0, 0, 255]);
         assert_eq!(r.data[7], 128);
         assert_eq!(&r.data[12..], &[0, 0, 0, 0]);
         // Out-of-bounds reads are transparent.
-        assert_eq!(c.read(-1, -1, 1, 1, false).data, vec![0, 0, 0, 0]);
+        assert_eq!(c.read(-1, -1, 1, 1).data, vec![0, 0, 0, 0]);
         let src = c.snapshot().unwrap();
         let mut d = canvas(8, 8);
         d.draw_image(&src, 0.0, 0.0, 4.0, 4.0, 0.0, 0.0, 8.0, 8.0);

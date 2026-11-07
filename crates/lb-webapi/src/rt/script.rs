@@ -133,6 +133,12 @@ pub fn script_source(body: &[u8], content_type: Option<&str>) -> String {
 /// classic scripts run now; external ones load and run when fetched
 /// (async), delaying the `load` event.
 pub(crate) fn prepare_dynamic(js: &mut dyn Js, w: &Rc<Window>, n: NodeId) {
+    prepare_inserted(js, w, n, false);
+}
+
+/// [`prepare_dynamic`]; `parser_inserted`: written by `document.write`
+/// (Content Security Policy treats it as parser-inserted).
+fn prepare_inserted(js: &mut dyn Js, w: &Rc<Window>, n: NodeId, parser_inserted: bool) {
     let kind = w.with_doc(|d| {
         if d.flags(n).contains(NodeFlags::ALREADY_STARTED) {
             return None;
@@ -155,8 +161,20 @@ pub(crate) fn prepare_dynamic(js: &mut dyn Js, w: &Rc<Window>, n: NodeId) {
         w.warn("module scripts inserted by script are not supported yet; skipped");
         return;
     }
+    let nonce = w.csp_nonce(n);
     match script_src(w, n) {
         None => {
+            let loc = w.csp_here(Some(&mut *js));
+            if !w.csp_inline(
+                super::csp::Inline::Script,
+                Some(n),
+                &text,
+                &nonce,
+                parser_inserted,
+                loc,
+            ) {
+                return;
+            }
             let url = w.url().to_string();
             execute_classic(js, w, Some(n), &text, &url, 0);
         }
@@ -168,6 +186,21 @@ pub(crate) fn prepare_dynamic(js: &mut dyn Js, w: &Rc<Window>, n: NodeId) {
             );
         }
         Some(Some(url)) => {
+            let loc = w.csp_here(Some(&mut *js));
+            let check = super::csp::UrlCheck {
+                nonce: &nonce,
+                parser_inserted,
+                ..Default::default()
+            };
+            if !w.csp_url(super::csp::Dir::ScriptSrcElem, &url, &check, loc) {
+                // Blocked: no request; `error` in a later task.
+                let w2 = w.clone();
+                w.queue_task(
+                    super::TaskSource::Networking,
+                    Box::new(move |js, _| fire_error(js, &w2, n)),
+                );
+                return;
+            }
             w.pending_loads.set(w.pending_loads.get() + 1);
             let req = NetRequest::get(url.clone(), Destination::Script, Some(w.url()));
             super::net::start_request(
@@ -192,6 +225,10 @@ pub(crate) fn prepare_dynamic(js: &mut dyn Js, w: &Rc<Window>, n: NodeId) {
 
 /// `document.write(text)`.
 pub(crate) fn document_write(js: &mut dyn Js, w: &Rc<Window>, text: &str) {
+    // Content Security Policy reports scripts written here at the
+    // `document.write` call (ADR 0036).
+    let loc = w.csp_here(Some(&mut *js));
+    let before = w.with_doc(|d| d.node_count());
     let wrote = {
         let mut p = w.parser.borrow_mut();
         match p.as_mut() {
@@ -203,6 +240,9 @@ pub(crate) fn document_write(js: &mut dyn Js, w: &Rc<Window>, text: &str) {
             None => None,
         }
     };
+    if let Some(loc) = loc {
+        w.csp_note_written(before, loc);
+    }
     match wrote {
         Some(true) => {}
         Some(false) => {
@@ -261,7 +301,7 @@ fn run_script_parser(js: &mut dyn Js, w: &Rc<Window>, to_end: bool) {
                 let is_script = w.with_doc(|d| d.is_html_element_named(n, &local_name!("script")));
                 if is_script {
                     w.with_doc_mut(|d| d.set_flags(n, NodeFlags::PARSER_INSERTED, false));
-                    prepare_dynamic(js, w, n);
+                    prepare_inserted(js, w, n, true);
                 }
             }
             ParseStep::StyleSheet(_) => {}

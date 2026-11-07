@@ -28,9 +28,9 @@
 //!   clip-space x/y (no shaders run), filled with a `vec4` uniform if one
 //!   was set, else a constant `vec4(...)` written to the fragment output,
 //!   else a color hashed from the fragment shader source. `readPixels`,
-//!   `toDataURL` and `drawImage` read the same pixels with the canvas
-//!   noise rule keyed by `webgl_noise_seed` (edges only; solid fills read
-//!   back exactly).
+//!   `toDataURL` and `drawImage` read the same pixels, exactly; the
+//!   persona's variation is a sub-pixel coverage offset from
+//!   `webgl_noise_seed` applied when rasterizing (ADR 0038).
 //!
 //! Known gaps: no shader execution, textures, framebuffer objects as render
 //! targets, blending, depth or stencil; `preserveDrawingBuffer: false`
@@ -954,7 +954,7 @@ fn make_context(
         value,
         snapshot: Some(Rc::new(move || Some(g1.borrow().readback()))),
         resize: Some(Rc::new(move |ww, hh| g2.borrow_mut().resize(ww, hh))),
-        raw: Some(Rc::new(move || Some(g3.borrow().readback_clean()))),
+        raw: Some(Rc::new(move || Some(g3.borrow().readback()))),
     }))
 }
 

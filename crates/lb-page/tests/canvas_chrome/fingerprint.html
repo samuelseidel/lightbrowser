@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>canvas fingerprints</title>
+<body>
+<script>
+// Hashes of the common canvas and WebGL fingerprint images (FingerprintJS
+// text and geometry, CreepJS text/emoji/combined, a WebGL triangle fan and
+// CreepJS's WebGL line loop). Used to check that a persona's fingerprint is
+// stable and differs between personas; the values themselves are ours.
+const L = [];
+function fnv(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16); }
+function fnvA(a) { let h = 0x811c9dc5; for (let i = 0; i < a.length; i++) { h ^= a[i]; h = Math.imul(h, 16777619) >>> 0; } return h.toString(16); }
+const c = document.createElement('canvas'); const x = c.getContext('2d');
+// FingerprintJS renderTextImage / renderGeometryImage
+c.width = 240; c.height = 60;
+x.textBaseline = 'alphabetic'; x.fillStyle = '#f60'; x.fillRect(100, 1, 62, 20);
+x.fillStyle = '#069'; x.font = '11pt "Times New Roman"';
+const t = `Cwm fjordbank gly ${String.fromCharCode(55357, 56835)}`;
+x.fillText(t, 2, 15); x.fillStyle = 'rgba(102, 204, 0, 0.2)'; x.font = '18pt Arial'; x.fillText(t, 4, 45);
+L.push('fpjs_text: ' + fnv(c.toDataURL()));
+c.width = 122; c.height = 110;
+x.globalCompositeOperation = 'multiply';
+for (const [col, X, Y] of [['#f2f', 40, 40], ['#2ff', 80, 40], ['#ff2', 60, 80]]) { x.fillStyle = col; x.beginPath(); x.arc(X, Y, 40, 0, Math.PI * 2, true); x.closePath(); x.fill(); }
+x.fillStyle = '#f9c'; x.arc(60, 60, 60, 0, Math.PI * 2, true); x.arc(60, 60, 20, 0, Math.PI * 2, true); x.fill('evenodd');
+L.push('fpjs_geometry: ' + fnv(c.toDataURL()));
+x.globalCompositeOperation = 'source-over';
+// CreepJS text and emoji
+c.width = 50; c.height = 50; x.font = '50px sans-serif'; x.fillText('A', 7, 37);
+L.push('creep_text: ' + fnv(c.toDataURL()));
+c.width = 50; c.height = 50; x.font = '35px sans-serif'; x.fillText('\u{1F47E}', 0, 37);
+L.push('creep_emoji: ' + fnv(c.toDataURL()));
+c.width = 75; c.height = 75; x.font = '25px sans-serif'; x.strokeText('\u{1F47E}A', 3, 50, 70);
+L.push('creep_stroke: ' + fnv(c.toDataURL()));
+// WebGL: a fan of slanted triangles with colour gradients (antialiased)
+{
+  const g = document.createElement('canvas'); g.width = 256; g.height = 128;
+  const gl = g.getContext('webgl');
+  const sh = (ty, s) => { const o = gl.createShader(ty); gl.shaderSource(o, s); gl.compileShader(o); return o; };
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, 'attribute vec2 a; attribute vec3 c; varying vec3 v; void main() { v = c; gl_Position = vec4(a, 0, 1); }'));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, 'precision mediump float; varying vec3 v; void main() { gl_FragColor = vec4(v, 1); }'));
+  gl.linkProgram(p); gl.useProgram(p);
+  const d = [];
+  for (let i = 0; i < 12; i++) {
+    const a0 = i * 0.5236 + 0.1, a1 = a0 + 0.3;
+    d.push(0.03, -0.02, 1, 0.2, 0.1, Math.cos(a0) * 0.93, Math.sin(a0) * 0.91, 0.1, 0.9, 0.3, Math.cos(a1) * 0.77, Math.sin(a1) * 0.83, 0.4, 0.2, 1);
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(d), gl.STATIC_DRAW);
+  const la = gl.getAttribLocation(p, 'a'), lc = gl.getAttribLocation(p, 'c');
+  gl.enableVertexAttribArray(la); gl.vertexAttribPointer(la, 2, gl.FLOAT, false, 20, 0);
+  gl.enableVertexAttribArray(lc); gl.vertexAttribPointer(lc, 3, gl.FLOAT, false, 20, 8);
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 36);
+  const px = new Uint8Array(256 * 128 * 4); gl.readPixels(0, 0, 256, 128, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  L.push('webgl_fan: ' + fnvA(px));
+  L.push('webgl_fan_dataurl: ' + fnv(g.toDataURL()));
+}
+L.push('end');
+</script>
+</body>

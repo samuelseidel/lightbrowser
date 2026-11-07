@@ -1,0 +1,12 @@
+<!doctype html><body><!--LOG--><script src="lib.js"></script><script>
+(async function(){
+await caches.open('top');
+log('A '+await reg());
+if(!navigator.serviceWorker.controller)await new Promise(function(r){navigator.serviceWorker.addEventListener('controllerchange',r,{once:true})});
+log('A '+ctl()+' '+await regs()+' '+await probe());
+await run('A','probe','AA');await run('BA','probe','ABA');
+await run('BA','register','ABA');await run('BA','probe','ABA');await run('A','probe','AA');
+await run('B','register','AB');await run('B','probe','AB');
+log('A '+ctl()+' '+await regs()+' '+await probe());
+end()})()
+</script>

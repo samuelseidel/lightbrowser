@@ -23,6 +23,8 @@ lb-layout = { path = "../lb-layout" }
 lb-paint = { path = "../lb-paint", optional = true }
 lb-gl = { path = "../lb-gl", optional = true }
 url = "2"
+# FontFace `src` descriptors (the tokenizer lb-css already links).
+cssparser = "0.38"
 # Inboxes of windows on other threads (workers, ADR 0021).
 tokio = { version = "1", default-features = false, features = ["sync"] }
 encoding_rs = "0.8"

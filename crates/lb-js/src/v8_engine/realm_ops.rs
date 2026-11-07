@@ -104,6 +104,16 @@ pub trait RealmOps {
     /// each other's globals (same-origin frames); V8 denies access
     /// between globals whose tokens differ (`TypeError: no access`).
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError>;
+    /// Gate `eval`/`Function` and WebAssembly compilation of `realm` (its
+    /// document's Content Security Policy); `None` lifts the gates.
+    fn set_code_generation(
+        &mut self,
+        realm: RealmId,
+        policy: Option<CodeGenPolicy>,
+    ) -> Result<(), JsError> {
+        let _ = (realm, policy);
+        Ok(())
+    }
     /// Replace the realm's module loader (`import()`, module scripts), for
     /// a realm made before its document was known.
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>);
@@ -132,6 +142,71 @@ pub trait RealmOps {
     /// [`RealmOps::delete_globals_except`] returned, without listing every
     /// key again).
     fn delete_globals(&mut self, realm: RealmId, names: &[String]) -> Result<(), JsError>;
+    /// Register a getter for native data properties, once per engine: the
+    /// id [`RealmOps::define_native_property`] takes.
+    fn register_native_getter(&mut self, f: NamedGetter) -> u32;
+    /// Define `key` on `object` as a native data property (V8's
+    /// `SetNativeDataProperty`, as Blink's document named items): it reads
+    /// as an enumerable, configurable, writable data property whose value
+    /// the registered getter gives (its `None` reads the prototype chain);
+    /// assignments are ignored; `delete` removes it.
+    fn define_native_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+        getter: u32,
+    ) -> Result<(), JsError>;
+    /// `delete object[key]` (sloppy): whether it is gone.
+    fn delete_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+    ) -> Result<bool, JsError>;
+}
+
+/// Shared body of [`RealmOps::register_native_getter`].
+fn push_native_getter(state: &SharedState, f: NamedGetter) -> u32 {
+    state.borrow_mut().push_callback(Callback::Native(f))
+}
+
+/// Shared body of [`RealmOps::define_native_property`].
+fn native_property_in(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    object: Handle,
+    key: &str,
+    getter: u32,
+) -> Result<(), JsError> {
+    let v = load_handle(scope, state, object)?;
+    let Ok(o) = v8::Local::<v8::Object>::try_from(v) else {
+        return Err(JsError::host("not an object"));
+    };
+    let k = v8_str(scope, key);
+    let data = v8::Integer::new_from_unsigned(scope, getter);
+    let config = v8::AccessorConfiguration::new(native_property_getter)
+        .setter(native_property_setter)
+        .data(data.into());
+    match o.set_accessor_with_configuration(scope, k.into(), config) {
+        Some(true) => Ok(()),
+        _ => Err(JsError::host("native property")),
+    }
+}
+
+/// Shared body of [`RealmOps::delete_property`].
+fn delete_property_in(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    object: Handle,
+    key: &str,
+) -> Result<bool, JsError> {
+    let v = load_handle(scope, state, object)?;
+    let Ok(o) = v8::Local::<v8::Object>::try_from(v) else {
+        return Ok(true);
+    };
+    let k = v8_str(scope, key);
+    Ok(o.delete(scope, k.into()).unwrap_or(false))
 }
 
 /// Shared body of [`RealmOps::delete_globals_except`].
@@ -326,6 +401,15 @@ impl RealmOps for Engine {
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError> {
         self.run(realm, |scope, _| set_token(scope, token))
     }
+    fn set_code_generation(
+        &mut self,
+        realm: RealmId,
+        policy: Option<CodeGenPolicy>,
+    ) -> Result<(), JsError> {
+        self.run(realm, |scope, state| {
+            super::codegen::set(scope, state, realm, policy)
+        })
+    }
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
         set_loader(&self.state, realm, loader);
     }
@@ -349,6 +433,30 @@ impl RealmOps for Engine {
     }
     fn delete_globals(&mut self, realm: RealmId, names: &[String]) -> Result<(), JsError> {
         self.run(realm, |scope, _| delete_globals_named(scope, names))
+    }
+    fn register_native_getter(&mut self, f: NamedGetter) -> u32 {
+        push_native_getter(&self.state, f)
+    }
+    fn define_native_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+        getter: u32,
+    ) -> Result<(), JsError> {
+        self.run(realm, |scope, state| {
+            native_property_in(scope, state, object, key, getter)
+        })
+    }
+    fn delete_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+    ) -> Result<bool, JsError> {
+        self.run(realm, |scope, state| {
+            delete_property_in(scope, state, object, key)
+        })
     }
 }
 
@@ -578,8 +686,8 @@ impl RealmOps for CallCtx<'_, '_, '_> {
         true
     }
     fn set_default_locale(&mut self, locale: &str) {
-        if !locale.is_empty() && !locale.contains('\0') && v8::icu::get_language_tag() != locale {
-            v8::icu::set_default_locale(&locale.replace('-', "_"));
+        if super::set_icu_locale(locale) && super::take_locale_change(&self.state, locale) {
+            super::locale_configuration_changed(self.scope);
         }
     }
     fn heap_stats(&mut self) -> HeapStats {
@@ -599,6 +707,15 @@ impl RealmOps for CallCtx<'_, '_, '_> {
     }
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError> {
         self.run_in(realm, |scope, _| set_token(scope, token))
+    }
+    fn set_code_generation(
+        &mut self,
+        realm: RealmId,
+        policy: Option<CodeGenPolicy>,
+    ) -> Result<(), JsError> {
+        self.run_in(realm, |scope, state| {
+            super::codegen::set(scope, state, realm, policy)
+        })
     }
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
         set_loader(&self.state, realm, loader);
@@ -623,5 +740,29 @@ impl RealmOps for CallCtx<'_, '_, '_> {
     }
     fn delete_globals(&mut self, realm: RealmId, names: &[String]) -> Result<(), JsError> {
         self.run_in(realm, |scope, _| delete_globals_named(scope, names))
+    }
+    fn register_native_getter(&mut self, f: NamedGetter) -> u32 {
+        push_native_getter(&self.state, f)
+    }
+    fn define_native_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+        getter: u32,
+    ) -> Result<(), JsError> {
+        self.run_in(realm, |scope, state| {
+            native_property_in(scope, state, object, key, getter)
+        })
+    }
+    fn delete_property(
+        &mut self,
+        realm: RealmId,
+        object: Handle,
+        key: &str,
+    ) -> Result<bool, JsError> {
+        self.run_in(realm, |scope, state| {
+            delete_property_in(scope, state, object, key)
+        })
     }
 }

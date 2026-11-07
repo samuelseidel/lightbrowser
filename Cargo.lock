@@ -1262,6 +1262,7 @@ dependencies = [
  "cssparser",
  "lb-dom",
  "lb-persona",
+ "serde_json",
  "url",
 ]
 
@@ -1410,6 +1411,7 @@ dependencies = [
  "boring",
  "boring-sys",
  "bytes",
+ "cssparser",
  "encoding_rs",
  "foreign-types",
  "form_urlencoded",

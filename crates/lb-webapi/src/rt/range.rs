@@ -31,6 +31,7 @@ use crate::registry::Registry;
 
 #[path = "selection.rs"]
 mod selection;
+pub(crate) use selection::{control_changed, control_focused, in_control};
 
 type R = Result<(), HostError>;
 type Bp = (NodeId, u32);
@@ -463,11 +464,19 @@ fn this_range(
 }
 
 fn put(w: &Window, id: u32, r: RangeObj) {
-    w.with_obj(id, |o| {
-        if let Obj::Range(b) = o {
-            **b = r;
-        }
-    });
+    let old = w
+        .with_obj(id, |o| match o {
+            Obj::Range(b) => {
+                let old = **b;
+                **b = r;
+                Some(old)
+            }
+            _ => None,
+        })
+        .flatten();
+    if let Some(old) = old {
+        selection::range_changed(w, id, &old, &r);
+    }
 }
 
 fn op_err(w: &Window, name: &str, op: &str, msg: impl std::fmt::Display) -> HostError {

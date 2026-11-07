@@ -1,0 +1,8 @@
+<!doctype html><body><!--LOG--><script src="lib.js"></script><script>
+(async function(){
+await put('top','top');
+log('A '+await keys()+' '+await get());
+await run('A','probe','AA');await run('BA','probe','ABA');await run('B','probe','AB');await run('BA','probe','ABA');
+log('A '+await keys()+' '+await get());
+end()})()
+</script>

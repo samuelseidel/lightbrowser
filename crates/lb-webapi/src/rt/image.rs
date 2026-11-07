@@ -454,6 +454,21 @@ fn fetch(w: &Rc<Window>, n: NodeId, url: Url, seq: u32, delay_load: bool) {
     if delay_load {
         w.pending_loads.set(w.pending_loads.get() + 1);
     }
+    // Content Security Policy (`img-src`): blocked, not requested; the
+    // element fires `error`.
+    if !w.csp_url(
+        super::csp::Dir::ImgSrc,
+        &url,
+        &super::csp::UrlCheck::default(),
+        w.csp_image_loc(n),
+    ) {
+        let w2 = w.clone();
+        w.queue_task(
+            TaskSource::Networking,
+            Box::new(move |js, _| settle(js, &w2, n, seq, false, delay_load)),
+        );
+        return;
+    }
     if url.scheme() == "data" {
         let r = data_url(&url)
             .map(|(b, m)| (b.into(), Some(m), true))

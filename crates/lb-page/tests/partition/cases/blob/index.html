@@ -1,0 +1,13 @@
+<!doctype html><body><!--LOG--><script>
+// A blob: URL made by the top document, used from other partitions.
+var url=URL.createObjectURL(new Blob(["postMessage('top blob')"],{type:'text/javascript'}));
+var made=[];window.addEventListener('message',function(e){if(e.data&&e.data.blob)made.push(e.data.blob)});
+async function use(u){try{var r=await fetch(u);return 'fetch '+r.status+' '+await r.text()}catch(e){return 'fetch '+err(e)}}
+(async function(){
+log('A '+await use(url));
+await run('A','use',url);await run('BA','use',url);await run('B','use',url);
+await run('BA','make');
+log('A made '+await use(made[0]));
+await run('A','use',made[0]);await run('BA','use',made[0]);
+end()})()
+</script>

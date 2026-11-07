@@ -1,0 +1,17 @@
+<!DOCTYPE html><title>locale</title><script src="probe.js"></script>
+<iframe id=f src="frame.html"></iframe>
+<script>
+window.dw = new Worker('worker.js');
+window.ask = (w) => new Promise(r => { w.onmessage = e => r(e.data); w.postMessage('probe'); });
+window.sw = new SharedWorker('shared.js');
+window.askShared = () => new Promise(r => { sw.port.onmessage = e => r(e.data); sw.port.postMessage('probe'); });
+window.newWorker = () => ask(new Worker('worker.js'));
+window.framed = () => document.getElementById('f').contentWindow.probe();
+window.blankFrame = () => { const f = document.createElement('iframe'); document.body.appendChild(f); return f.contentWindow.eval('(' + probe.toString() + ')()'); };
+window.askSW = async () => {
+  const reg = await navigator.serviceWorker.register('sw.js');
+  await navigator.serviceWorker.ready;
+  return new Promise(r => { navigator.serviceWorker.onmessage = e => r(e.data); reg.active.postMessage('probe'); });
+};
+window.acceptLanguage = () => fetch('/headers').then(r => r.json()).then(h => (h.find(x => x[0].toLowerCase() === 'accept-language') || [])[1] || null);
+</script>

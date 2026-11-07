@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html><head>
+<script src="/prelude.js"></script>
+<script src="http://localhost:{PORT}/meta_policy/before.js"></script>
+<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; report-uri /meta_policy/report; sandbox allow-scripts">
+<meta http-equiv="Content-Security-Policy-Report-Only" content="img-src 'none'">
+</head><body>
+<meta http-equiv="Content-Security-Policy" content="style-src 'none'">
+<script src="http://localhost:{PORT}/meta_policy/after.js"></script>
+<img id=i src="pixel.png">
+<script>log('inline ran');
+var m = document.createElement('meta'); m.httpEquiv = 'Content-Security-Policy'; m.content = "img-src 'none'"; document.head.appendChild(m);
+var i2 = new Image(); i2.onerror = function () { log('i2 error'); }; i2.onload = function () { log('i2 load'); }; i2.src = 'pixel.png?2';
+var s = document.createElement('style'); s.textContent = '#i { color: rgb(1, 2, 3); }'; document.head.appendChild(s);
+log('style color ' + getComputedStyle(document.getElementById('i')).color);
+done(500);</script>
+</body></html>

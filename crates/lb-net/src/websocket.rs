@@ -19,6 +19,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use url::Url;
 
+use crate::cookies::CookieScope;
 use crate::error::NetError;
 use crate::fetch::NetContext;
 
@@ -74,6 +75,17 @@ impl NetContext {
         &mut self,
         req: WsConnect,
     ) -> (UnboundedSender<WsCommand>, UnboundedReceiver<WsEvent>) {
+        self.websocket_in(req, None)
+    }
+
+    /// [`websocket`](Self::websocket) for a document with cookie scope
+    /// `scope` (ADR 0037): the handshake sends and stores the cookies a
+    /// subresource request of that document would. `None`: first-party.
+    pub fn websocket_in(
+        &mut self,
+        req: WsConnect,
+        scope: Option<CookieScope>,
+    ) -> (UnboundedSender<WsCommand>, UnboundedReceiver<WsEvent>) {
         let (cmd_tx, cmd_rx) = unbounded_channel();
         let (ev_tx, ev_rx) = unbounded_channel();
         let tls = if req.url.scheme() == "wss" {
@@ -83,7 +95,7 @@ impl NetContext {
         };
         let ctx = self.detached();
         let fut = async move {
-            run(ctx, tls, req, cmd_rx, ev_tx).await;
+            run(ctx, tls, req, scope, cmd_rx, ev_tx).await;
         };
         if self.pool.is_some() {
             crate::pool::net_runtime().spawn(fut);
@@ -103,6 +115,7 @@ async fn run(
     ctx: NetContext,
     tls: Option<Arc<crate::tls::TlsConnector>>,
     req: WsConnect,
+    scope: Option<CookieScope>,
     cmds: UnboundedReceiver<WsCommand>,
     events: UnboundedSender<WsEvent>,
 ) {
@@ -114,7 +127,7 @@ async fn run(
             clean: false,
         });
     };
-    let (stream, open) = match handshake(&ctx, tls, &req).await {
+    let (stream, open) = match handshake(&ctx, tls, &req, scope).await {
         Ok(v) => v,
         Err(msg) => return fail(&events, msg),
     };
@@ -206,8 +219,12 @@ async fn handshake(
     ctx: &NetContext,
     tls: Option<Arc<crate::tls::TlsConnector>>,
     req: &WsConnect,
+    scope: Option<CookieScope>,
 ) -> Result<(Box<dyn Io>, Opened), String> {
     let url = &req.url;
+    let curl = cookie_url(url);
+    let scope = scope.unwrap_or_else(|| CookieScope::first_party(&curl));
+    let cookie_ctx = scope.context(&curl);
     let host = url
         .host_str()
         .ok_or_else(|| "Invalid URL".to_owned())?
@@ -248,7 +265,7 @@ async fn handshake(
         Some(p) => format!("{host}:{p}"),
         None => host.clone(),
     };
-    let cookie = ctx.cookies.header_for(&cookie_url(url));
+    let cookie = ctx.cookies.header_in(&curl, &scope, cookie_ctx);
     // Chrome 153's handshake, in its order.
     let mut lines = vec![
         format!("GET {path} HTTP/1.1"),
@@ -321,7 +338,7 @@ async fn handshake(
         .collect();
     if !set_cookie.is_empty() {
         let mut jar = ctx.cookies.clone();
-        jar.store_response(&cookie_url(url), &set_cookie);
+        jar.store_response_in(&curl, &set_cookie, &scope, cookie_ctx);
     }
     if status != 101 {
         return Err(format!(

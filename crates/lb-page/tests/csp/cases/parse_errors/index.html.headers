@@ -1,0 +1,1 @@
+Content-Security-Policy: script-src 'self' 'none' foo$; img-src 'self'; img-src *; bogus-directive x; upgrade-insecure-requests 1; frame-ancestors 'unsafe-inline'; style-src https://a/b?c

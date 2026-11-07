@@ -25,13 +25,15 @@ mod build;
 mod display;
 mod engine;
 mod fonts;
+mod local_fonts;
 mod text;
 mod tree;
 
 pub use ax::{AxNode, AxStates, AxTree, Checked};
 pub use display::{DisplayItem, DisplayKind, DisplayList, DisplayStep, TextLine};
-pub use engine::{BoxModel, LayoutBase, LayoutEngine, LayoutStats, Rect, ScrollAlign};
+pub use engine::{BoxModel, CaretLine, LayoutBase, LayoutEngine, LayoutStats, Rect, ScrollAlign};
 pub use fonts::{
     FontAvailability, FontDb, FontFace, FontFamily, LineMetrics, TextFont, bundled_table_count,
     emoji_advance_em, is_emoji, resolve_font,
 };
+pub use local_fonts::{LocalFonts, list_id as local_font_list_id};

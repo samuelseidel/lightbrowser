@@ -40,6 +40,16 @@ pub(crate) enum Filter {
     ChildLocal(&'static str),
     /// `tr.cells`: `td` and `th` children.
     Cells,
+    /// Window named items for a name (`window[name]`, ADR 0040).
+    WindowNamed(String),
+    /// Document named items for a name (`document[name]`).
+    DocumentNamed(String),
+    /// A form's elements for a name (`RadioNodeList`): listed elements,
+    /// else `img` elements.
+    FormNamed(String),
+    /// `document.all[name]`: elements with that `id`, or "all named"
+    /// elements with that `name`.
+    AllNamed(String),
 }
 
 /// A live collection: recomputed when the document generation changes.
@@ -79,6 +89,26 @@ fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
         Filter::TableRows => return super::table::table_rows(d, root),
         Filter::ChildLocal(l) => return super::table::html_children(d, root, &[l]),
         Filter::Cells => return super::table::html_children(d, root, &["td", "th"]),
+        Filter::WindowNamed(name) => {
+            return d
+                .descendants(root)
+                .filter(|&n| d.is_element(n) && super::named::window_matches(d, n, name))
+                .collect();
+        }
+        Filter::DocumentNamed(name) => {
+            return d
+                .descendants(root)
+                .filter(|&n| d.is_element(n) && super::named::document_matches(d, n, name))
+                .collect();
+        }
+        Filter::FormNamed(name) => return super::named::form_named_elements(d, root, name, None),
+        Filter::AllNamed(name) => {
+            return d
+                .descendants(root)
+                .filter(|&n| d.is_element(n) && all_named_matches(d, n, name))
+                .collect();
+        }
+        Filter::FormControls => return super::named::listed_elements(d, root),
         _ => {}
     }
     let html_doc = d.is_html();
@@ -93,9 +123,15 @@ fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
             let q = d.qual_name(n).expect("element");
             let html = q.ns == ns!(html);
             match f {
-                Filter::Children | Filter::TableRows | Filter::ChildLocal(_) | Filter::Cells => {
-                    unreachable!()
-                }
+                Filter::Children
+                | Filter::TableRows
+                | Filter::ChildLocal(_)
+                | Filter::Cells
+                | Filter::WindowNamed(_)
+                | Filter::DocumentNamed(_)
+                | Filter::FormNamed(_)
+                | Filter::AllNamed(_)
+                | Filter::FormControls => unreachable!(),
                 Filter::All => true,
                 Filter::TagName(t) => {
                     if t == "*" {
@@ -139,26 +175,54 @@ fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
                 Filter::Anchors => {
                     html && q.local == local_name!("a") && d.has_attribute(n, "name")
                 }
-                Filter::FormControls => {
-                    d.flags(n).contains(lb_dom::NodeFlags::FORM_ASSOCIATED)
-                        || html
-                            && matches!(
-                                &*q.local,
-                                "button"
-                                    | "fieldset"
-                                    | "input"
-                                    | "object"
-                                    | "output"
-                                    | "select"
-                                    | "textarea"
-                            )
-                            && !(q.local == local_name!("input")
-                                && d.get_attribute(n, "type")
-                                    .is_some_and(|t| t.eq_ignore_ascii_case("image")))
-                }
             }
         })
         .collect()
+}
+
+/// A listed element (`form.elements`): `button`, `fieldset`, `input`
+/// (not an image button), `object`, `output`, `select`, `textarea`, or a
+/// form-associated custom element.
+pub(crate) fn is_listed(d: &Document, n: NodeId) -> bool {
+    let Some(q) = d.qual_name(n) else {
+        return false;
+    };
+    d.flags(n).contains(lb_dom::NodeFlags::FORM_ASSOCIATED)
+        || q.ns == ns!(html)
+            && matches!(
+                &*q.local,
+                "button" | "fieldset" | "input" | "object" | "output" | "select" | "textarea"
+            )
+            && !(q.local == local_name!("input")
+                && d.get_attribute(n, "type")
+                    .is_some_and(|t| t.eq_ignore_ascii_case("image")))
+}
+
+/// HTML's "all named" elements (`document.all` by `name`).
+fn is_all_named(d: &Document, n: NodeId) -> bool {
+    d.qual_name(n).is_some_and(|q| {
+        q.ns == ns!(html)
+            && matches!(
+                &*q.local,
+                "a" | "button"
+                    | "embed"
+                    | "form"
+                    | "frame"
+                    | "frameset"
+                    | "iframe"
+                    | "img"
+                    | "input"
+                    | "map"
+                    | "meta"
+                    | "object"
+                    | "select"
+                    | "textarea"
+            )
+    })
+}
+
+fn all_named_matches(d: &Document, n: NodeId, name: &str) -> bool {
+    d.element_id(n) == Some(name) || is_all_named(d, n) && d.get_attribute(n, "name") == Some(name)
 }
 
 /// The (cached) live HTMLCollection for `root` and `filter`.
@@ -170,6 +234,20 @@ pub(crate) fn collection(w: &Window, slot: u32, root: NodeId, filter: Filter) ->
         _ => "HTMLCollection",
     };
     w.cached_obj((slot, root.0, "coll", format!("{filter:?}")), || {
+        Obj::Collection(Box::new(Collection::new(iface, slot, root, filter)))
+    })
+}
+
+/// The (cached) live collection for `root` and `filter` as interface
+/// `iface` (`RadioNodeList`).
+pub(crate) fn collection_as(
+    w: &Window,
+    slot: u32,
+    root: NodeId,
+    filter: Filter,
+    iface: &'static str,
+) -> u32 {
+    w.cached_obj((slot, root.0, iface, format!("{filter:?}")), || {
         Obj::Collection(Box::new(Collection::new(iface, slot, root, filter)))
     })
 }
@@ -237,6 +315,87 @@ fn named_item(w: &Window, id: u32, name: &str) -> Option<(u32, NodeId)> {
     })
 }
 
+/// What a collection's `namedItem(name)` (and named getter) returns:
+/// `document.all` gives an `HTMLCollection` and a form's `elements` a
+/// `RadioNodeList` when several elements match; others the first match.
+fn named_value(w: &Window, id: u32, name: &str) -> Option<Arg> {
+    if name.is_empty() {
+        return None;
+    }
+    let kind = w
+        .with_obj(id, |o| match o {
+            Obj::Collection(c) => Some((c.iface, c.root, c.filter.clone())),
+            _ => None,
+        })
+        .flatten();
+    match kind {
+        Some(("HTMLAllCollection", root, _)) => {
+            let (slot, list) = items(w, id)?;
+            let found: Vec<NodeId> = w.doc_slot(slot, |d| {
+                list.into_iter()
+                    .filter(|&n| all_named_matches(d, n, name))
+                    .collect()
+            });
+            match found.as_slice() {
+                [] => None,
+                [n] => Some(w.node_arg(slot, *n)),
+                _ => Some(w.obj_arg(collection(w, slot, root, Filter::AllNamed(name.to_owned())))),
+            }
+        }
+        Some(("HTMLFormControlsCollection", form, Filter::FormControls)) => {
+            let (slot, list) = items(w, id)?;
+            let found: Vec<NodeId> = w.doc_slot(slot, |d| {
+                list.into_iter()
+                    .filter(|&n| {
+                        d.element_id(n) == Some(name) || d.get_attribute(n, "name") == Some(name)
+                    })
+                    .collect()
+            });
+            match found.as_slice() {
+                [] => None,
+                [n] => Some(w.node_arg(slot, *n)),
+                _ => Some(w.obj_arg(super::named::radio_node_list(w, slot, form, name))),
+            }
+        }
+        _ => named_item(w, id, name).map(|(slot, n)| w.node_arg(slot, n)),
+    }
+}
+
+/// Supported property names of a collection: each element's `id`, then
+/// its `name` (HTML elements; for `document.all` the "all named" ones),
+/// in order, without repeats.
+fn supported_names(w: &Window, id: u32) -> Vec<String> {
+    let all = w
+        .with_obj(
+            id,
+            |o| matches!(o, Obj::Collection(c) if c.iface == "HTMLAllCollection"),
+        )
+        .unwrap_or(false);
+    let Some((slot, list)) = items(w, id) else {
+        return Vec::new();
+    };
+    w.doc_slot(slot, |d| {
+        let mut out: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for n in list {
+            if let Some(i) = d.element_id(n).filter(|s| !s.is_empty())
+                && seen.insert(i.to_owned())
+            {
+                out.push(i.to_owned());
+            }
+            let html = d.qual_name(n).is_some_and(|q| q.ns == ns!(html));
+            if html
+                && (!all || is_all_named(d, n))
+                && let Some(nm) = d.get_attribute(n, "name").filter(|s| !s.is_empty())
+                && seen.insert(nm.to_owned())
+            {
+                out.push(nm.to_owned());
+            }
+        }
+        out
+    })
+}
+
 fn indexed(
     rt: &Runtime,
     f: impl Fn(&mut PropCtx<'_, '_, '_>, &Rc<Window>, u32, u32) -> Result<Option<Arg>, HostError>
@@ -268,6 +427,20 @@ fn named(
             return Ok(None);
         };
         f(cx, &w, h.id, name)
+    })
+}
+
+/// Number of items of the collection an interceptor's holder is.
+fn length_of(rt: &Runtime) -> lb_js::IndexedLength {
+    let r = rt.clone();
+    Rc::new(move |cx| {
+        let Some(w) = r.window(cx.holder_realm()) else {
+            return 0;
+        };
+        match cx.holder_host().filter(|h| h.kind == K_OBJ) {
+            Some(h) => collection_len(&w, h.id) as u32,
+            None => 0,
+        }
     })
 }
 
@@ -400,27 +573,105 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 })
             }),
         );
+        // Indices enumerate, read-only (ADR 0040). `HTMLOptionsCollection`
+        // has an indexed setter in Chrome, not implemented here.
+        if iface != "HTMLOptionsCollection" {
+            reg.indexed_length(iface, length_of(rt));
+        }
         if iface != "NodeList" {
             method(reg, rt, iface, "namedItem", |cx, w| {
                 let id = this_obj(cx)?;
                 let name = cx.arg_string(0)?;
-                match named_item(w, id, &name) {
-                    Some((slot, n)) => cx.ret(w.node_arg(slot, n)),
+                match named_value(w, id, &name) {
+                    Some(v) => cx.ret(v),
                     None => cx.ret(Arg::Null),
                 }
             });
+            // Blink's interceptors (ADR 0040): prototype members win, the
+            // names are read-only and listed by `getOwnPropertyNames`.
             reg.named_getter(
                 iface,
-                named(rt, |_cx, w, id, name| {
-                    if reserved(name) {
-                        return Ok(None);
+                named(rt, |_cx, w, id, name| Ok(named_value(w, id, name))),
+            );
+            let r = rt.clone();
+            reg.named_enumerator(
+                iface,
+                Rc::new(move |cx| {
+                    let Some(w) = r.window(cx.holder_realm()) else {
+                        return Vec::new();
+                    };
+                    match cx.holder_host().filter(|h| h.kind == K_OBJ) {
+                        Some(h) => supported_names(&w, h.id),
+                        None => Vec::new(),
                     }
-                    Ok(named_item(w, id, name).map(|(slot, n)| w.node_arg(slot, n)))
                 }),
+            );
+            reg.named_unenumerable(iface);
+            // Blink's error messages name the interface owning the getter.
+            let owner = match iface {
+                "HTMLFormControlsCollection" | "HTMLAllCollection" => iface,
+                _ => "HTMLCollection",
+            };
+            reg.named_legacy(
+                iface,
+                lb_js::LegacyNamed {
+                    iface: owner,
+                    override_builtins: false,
+                    not_enumerable: false,
+                    properties_object: false,
+                },
             );
         }
     }
     // NodeList entries/keys/values/forEach are Array.prototype intrinsics.
+
+    // RadioNodeList (a form's elements for a name, ADR 0040): NodeList
+    // members plus `value`.
+    reg.indexed_getter(
+        "RadioNodeList",
+        indexed(rt, |_cx, w, id, i| {
+            Ok(match item_at(w, id, i) {
+                Some((slot, Some(n))) => Some(w.node_arg(slot, n)),
+                _ => None,
+            })
+        }),
+    );
+    reg.indexed_length("RadioNodeList", length_of(rt));
+    fn radio_value(d: &Document, n: NodeId) -> String {
+        d.get_attribute(n, "value").unwrap_or("on").to_owned()
+    }
+    fn is_radio(d: &Document, n: NodeId) -> bool {
+        d.is_html_element_named(n, &local_name!("input"))
+            && d.get_attribute(n, "type")
+                .is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+    }
+    getter(reg, rt, "RadioNodeList", "value", |cx, w| {
+        let id = this_obj(cx)?;
+        let (slot, list) = items(w, id).ok_or_else(illegal)?;
+        let v = w.doc_slot(slot, |d| {
+            list.iter()
+                .copied()
+                .find(|&n| is_radio(d, n) && super::dom::checked(d, n, "checked"))
+                .map(|n| radio_value(d, n))
+        });
+        cx.ret(v.unwrap_or_default())
+    });
+    setter(reg, rt, "RadioNodeList", "value", |cx, w| {
+        let id = this_obj(cx)?;
+        let v = cx.arg_string(0)?;
+        let (slot, list) = items(w, id).ok_or_else(illegal)?;
+        w.doc_slot_mut(slot, |d| {
+            if let Some(n) = list
+                .iter()
+                .copied()
+                .find(|&n| is_radio(d, n) && radio_value(d, n) == v)
+            {
+                d.set_flags(n, lb_dom::NodeFlags::CHECKED_DIRTY, true);
+                d.set_flags(n, lb_dom::NodeFlags::CHECKED, true);
+            }
+        });
+        Ok(())
+    });
 
     // DOMTokenList
     fn tl(

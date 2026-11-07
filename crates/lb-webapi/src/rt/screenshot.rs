@@ -1,6 +1,6 @@
 //! Read-only access to element pixels and control values for page
 //! screenshots (lb-page `Page.captureScreenshot`). Nothing here is
-//! visible to the page, and canvas pixels are never noised.
+//! visible to the page; canvas pixels are what the page reads back.
 
 use std::rc::Rc;
 
@@ -12,7 +12,7 @@ use super::canvas::{CanvasCtx, Source, element_ctx, sync_element};
 use super::image;
 
 /// Pixels of a replaced element of the main document: a canvas's current
-/// bitmap (2D or WebGL, without readback noise) or a loaded `<img>`'s
+/// bitmap (2D or WebGL) or a loaded `<img>`'s
 /// decoded pixels (premultiplied). `None` when there is nothing to draw.
 pub fn element_pixels(w: &Window, node: NodeId) -> Option<Rc<Pixmap>> {
     let is_canvas = w.with_doc(|d| d.is_html_element_named(node, &lb_dom::local_name!("canvas")));

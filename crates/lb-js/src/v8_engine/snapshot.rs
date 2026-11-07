@@ -27,7 +27,7 @@ use std::borrow::Cow;
 
 use super::*;
 
-const MAGIC: &[u8; 8] = b"LBSNAP03";
+const MAGIC: &[u8; 8] = b"LBSNAP04";
 
 /// Every native function a snapshot can reference, in a fixed order (the
 /// index is what the snapshot stores). Both the creating and the restoring
@@ -74,6 +74,48 @@ pub(super) fn external_refs() -> Cow<'static, [v8::ExternalReference]> {
         R {
             pointer: {
                 let f: v8::AccessorNameGetterCallback = lazy_interface_getter.map_fn_to();
+                f as *mut std::ffi::c_void
+            },
+        },
+        R {
+            named_setter: legacy_set_trampoline.map_fn_to(),
+        },
+        R {
+            named_definer: legacy_define_trampoline.map_fn_to(),
+        },
+        R {
+            named_deleter: legacy_delete_trampoline.map_fn_to(),
+        },
+        R {
+            named_getter: legacy_descriptor_trampoline.map_fn_to(),
+        },
+        R {
+            named_query: legacy_query_trampoline.map_fn_to(),
+        },
+        R {
+            indexed_getter: legacy_index_get_trampoline.map_fn_to(),
+        },
+        R {
+            indexed_setter: legacy_index_set_trampoline.map_fn_to(),
+        },
+        R {
+            indexed_definer: legacy_index_define_trampoline.map_fn_to(),
+        },
+        R {
+            indexed_deleter: legacy_index_delete_trampoline.map_fn_to(),
+        },
+        R {
+            indexed_getter: legacy_index_descriptor_trampoline.map_fn_to(),
+        },
+        R {
+            pointer: {
+                let f: v8::AccessorNameGetterCallback = native_property_getter.map_fn_to();
+                f as *mut std::ffi::c_void
+            },
+        },
+        R {
+            pointer: {
+                let f: v8::AccessorNameSetterCallback = native_property_setter.map_fn_to();
                 f as *mut std::ffi::c_void
             },
         },
@@ -432,6 +474,18 @@ pub(super) fn spec_digest(spec: &InterfaceSpec) -> u64 {
     h.flag(spec.indexed_getter.is_some());
     h.flag(spec.indexed_length.is_some());
     h.flag(spec.named_unenumerable);
+    match spec.named_legacy {
+        None => h.flag(false),
+        Some(l) => {
+            h.flag(true);
+            h.str(l.iface);
+            h.flag(l.override_builtins);
+            h.flag(l.not_enumerable);
+            h.flag(l.properties_object);
+        }
+    }
+    h.flag(spec.no_interface_object);
+    h.flag(spec.immutable_proto_object);
     h.u32(spec.reorder_last.len() as u32);
     for k in &spec.reorder_last {
         hash_key(&mut h, k);
@@ -460,7 +514,17 @@ fn push_spec_callbacks(st: &mut State, spec: InterfaceSpec) {
     {
         push_member_callbacks(st, m);
     }
-    if let Some(getter) = spec.named_getter {
+    if let (Some(getter), Some(legacy)) = (spec.named_getter.clone(), spec.named_legacy) {
+        st.push_callback(Callback::Named(getter));
+        st.push_callback(Callback::Empty);
+        st.push_callback(Callback::Empty);
+        st.push_callback(
+            spec.named_enumerator
+                .clone()
+                .map_or(Callback::Empty, Callback::NamedEnum),
+        );
+        st.push_callback(Callback::NamedLegacy(legacy, !spec.named_unenumerable));
+    } else if let Some(getter) = spec.named_getter {
         st.push_callback(Callback::Named(getter));
         st.push_callback(
             spec.named_setter
@@ -549,6 +613,7 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
     let parent = spec.parent;
     let prototype_from = spec.prototype_from;
     let reorder_last = spec.reorder_last.clone();
+    let no_interface_object = spec.no_interface_object;
     push_spec_callbacks(st, spec.clone());
     // The replay mirrors the builder; a count mismatch is a bug in this
     // file, caught by the tests.
@@ -564,6 +629,7 @@ pub(super) fn restore_interface(st: &mut State, spec: &InterfaceSpec) -> Option<
         prototype_from,
         overflow,
         reorder_last,
+        no_interface_object,
     }));
     Some(InterfaceId(id as u32))
 }

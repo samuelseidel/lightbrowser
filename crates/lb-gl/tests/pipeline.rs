@@ -46,6 +46,7 @@ pub fn fixed(w: i32, h: i32) -> Fixed {
         rasterizer_discard: false,
         alpha_to_coverage: false,
         sample_coverage: None,
+        offset: [0.0; 2],
     }
 }
 

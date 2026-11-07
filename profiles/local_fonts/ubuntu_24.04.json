@@ -1,0 +1,1342 @@
+{
+"format": 2,
+"os": "Ubuntu 24.04 LTS",
+"source": "Recorded: Chrome 153 headless shell on Ubuntu 24.04.4 (rtx-dev, ubuntu-desktop-minimal installed); every family, full and PostScript name fc-list gives tried with local(), kept when it loaded and its file is in a default package (fonts-dejavu-core 2.37-8, fonts-dejavu-mono 2.37-8, fonts-droid-fallback 1:6.0.1r16-1.1build1, fonts-liberation 1:2.1.5-3, fonts-liberation-sans-narrow 1:1.07.6-4, fonts-noto-cjk 1:20230817+repack1-3, fonts-noto-color-emoji 2.047-0ubuntu0.24.04.1, fonts-noto-core 20201225-2, fonts-noto-mono 20201225-2, fonts-ubuntu 0.869+git20240321-0ubuntu1, fonts-urw-base35 20200910-8); plus system-ui.",
+"families": {
+"C059": [
+"C059 Bold",
+"C059 Bold Italic",
+"C059 Italic",
+"C059 Roman",
+"C059-BdIta",
+"C059-Bold",
+"C059-Italic",
+"C059-Roman"
+],
+"D050000L": [
+"D050000L"
+],
+"DejaVu Sans": [
+"DejaVu Sans",
+"DejaVu Sans Bold",
+"DejaVuSans",
+"DejaVuSans-Bold"
+],
+"DejaVu Sans Mono": [
+"DejaVu Sans Mono",
+"DejaVu Sans Mono Bold",
+"DejaVu Sans Mono Bold Oblique",
+"DejaVu Sans Mono Oblique",
+"DejaVuSansMono",
+"DejaVuSansMono-Bold",
+"DejaVuSansMono-BoldOblique",
+"DejaVuSansMono-Oblique"
+],
+"DejaVu Serif": [
+"DejaVu Serif",
+"DejaVu Serif Bold",
+"DejaVuSerif",
+"DejaVuSerif-Bold"
+],
+"Droid Sans Fallback": [
+"Droid Sans Fallback",
+"DroidSansFallback"
+],
+"Liberation Mono": [
+"Liberation Mono",
+"Liberation Mono Bold",
+"Liberation Mono Bold Italic",
+"Liberation Mono Italic",
+"LiberationMono",
+"LiberationMono-Bold",
+"LiberationMono-BoldItalic",
+"LiberationMono-Italic"
+],
+"Liberation Sans": [
+"Liberation Sans",
+"Liberation Sans Bold",
+"Liberation Sans Bold Italic",
+"Liberation Sans Italic",
+"LiberationSans",
+"LiberationSans-Bold",
+"LiberationSans-BoldItalic",
+"LiberationSans-Italic"
+],
+"Liberation Sans Narrow": [
+"Liberation Sans Narrow",
+"Liberation Sans Narrow Bold",
+"Liberation Sans Narrow Bold Italic",
+"Liberation Sans Narrow Italic",
+"LiberationSansNarrow",
+"LiberationSansNarrow-Bold",
+"LiberationSansNarrow-BoldItalic",
+"LiberationSansNarrow-Italic"
+],
+"Liberation Serif": [
+"Liberation Serif",
+"Liberation Serif Bold",
+"Liberation Serif Bold Italic",
+"Liberation Serif Italic",
+"LiberationSerif",
+"LiberationSerif-Bold",
+"LiberationSerif-BoldItalic",
+"LiberationSerif-Italic"
+],
+"Nimbus Mono PS": [
+"Nimbus Mono PS",
+"Nimbus Mono PS Bold",
+"Nimbus Mono PS Bold Italic",
+"Nimbus Mono PS Italic",
+"NimbusMonoPS-Bold",
+"NimbusMonoPS-BoldItalic",
+"NimbusMonoPS-Italic",
+"NimbusMonoPS-Regular"
+],
+"Nimbus Roman": [
+"Nimbus Roman",
+"Nimbus Roman Bold",
+"Nimbus Roman Bold Italic",
+"Nimbus Roman Italic",
+"NimbusRoman-Bold",
+"NimbusRoman-BoldItalic",
+"NimbusRoman-Italic",
+"NimbusRoman-Regular"
+],
+"Nimbus Sans": [
+"Nimbus Sans",
+"Nimbus Sans Bold",
+"Nimbus Sans Bold Italic",
+"Nimbus Sans Italic",
+"NimbusSans-Bold",
+"NimbusSans-BoldItalic",
+"NimbusSans-Italic",
+"NimbusSans-Regular"
+],
+"Nimbus Sans Narrow": [
+"Nimbus Sans Narrow",
+"Nimbus Sans Narrow Bold",
+"Nimbus Sans Narrow Bold Oblique",
+"Nimbus Sans Narrow Oblique",
+"NimbusSansNarrow-Bold",
+"NimbusSansNarrow-BoldOblique",
+"NimbusSansNarrow-Oblique",
+"NimbusSansNarrow-Regular"
+],
+"Noto Color Emoji": [
+"Noto Color Emoji",
+"NotoColorEmoji"
+],
+"Noto Kufi Arabic": [
+"Noto Kufi Arabic Bold",
+"Noto Kufi Arabic Regular",
+"NotoKufiArabic-Bold",
+"NotoKufiArabic-Regular"
+],
+"Noto Looped Lao": [
+"Noto Looped Lao Bold",
+"Noto Looped Lao Regular",
+"NotoLoopedLao-Bold",
+"NotoLoopedLao-Regular"
+],
+"Noto Looped Thai": [
+"Noto Looped Thai Bold",
+"Noto Looped Thai Regular",
+"NotoLoopedThai-Bold",
+"NotoLoopedThai-Regular"
+],
+"Noto Mono": [
+"Noto Mono",
+"NotoMono"
+],
+"Noto Music": [
+"Noto Music Regular",
+"NotoMusic-Regular"
+],
+"Noto Naskh Arabic": [
+"Noto Naskh Arabic Bold",
+"Noto Naskh Arabic Regular",
+"NotoNaskhArabic-Bold",
+"NotoNaskhArabic-Regular"
+],
+"Noto Nastaliq Urdu": [
+"Noto Nastaliq Urdu Bold",
+"Noto Nastaliq Urdu Regular",
+"NotoNastaliqUrdu-Bold",
+"NotoNastaliqUrdu-Regular"
+],
+"Noto Rashi Hebrew": [
+"Noto Rashi Hebrew Bold",
+"Noto Rashi Hebrew Regular",
+"NotoRashiHebrew-Bold",
+"NotoRashiHebrew-Regular"
+],
+"Noto Sans": [
+"Noto Sans Bold",
+"Noto Sans Bold Italic",
+"Noto Sans Italic",
+"Noto Sans Regular",
+"NotoSans-Bold",
+"NotoSans-BoldItalic",
+"NotoSans-Italic",
+"NotoSans-Regular"
+],
+"Noto Sans Adlam": [
+"Noto Sans Adlam Bold",
+"Noto Sans Adlam Regular",
+"NotoSansAdlam-Bold",
+"NotoSansAdlam-Regular"
+],
+"Noto Sans Adlam Unjoined": [
+"Noto Sans Adlam Unjoined Bold",
+"Noto Sans Adlam Unjoined Regular",
+"NotoSansAdlamUnjoined-Bold",
+"NotoSansAdlamUnjoined-Regular"
+],
+"Noto Sans Anatolian Hieroglyphs": [
+"Noto Sans Anatolian Hieroglyphs Regular",
+"NotoSansAnatolianHieroglyphs-Regular"
+],
+"Noto Sans Arabic": [
+"Noto Sans Arabic Bold",
+"Noto Sans Arabic Regular",
+"NotoSansArabic-Bold",
+"NotoSansArabic-Regular"
+],
+"Noto Sans Armenian": [
+"Noto Sans Armenian Bold",
+"Noto Sans Armenian Regular",
+"NotoSansArmenian-Bold",
+"NotoSansArmenian-Regular"
+],
+"Noto Sans Avestan": [
+"Noto Sans Avestan Regular",
+"NotoSansAvestan-Regular"
+],
+"Noto Sans Balinese": [
+"Noto Sans Balinese Bold",
+"Noto Sans Balinese Regular",
+"NotoSansBalinese-Bold",
+"NotoSansBalinese-Regular"
+],
+"Noto Sans Bamum": [
+"Noto Sans Bamum Bold",
+"Noto Sans Bamum Regular",
+"NotoSansBamum-Bold",
+"NotoSansBamum-Regular"
+],
+"Noto Sans Bassa Vah": [
+"Noto Sans Bassa Vah Regular",
+"NotoSansBassaVah-Regular"
+],
+"Noto Sans Batak": [
+"Noto Sans Batak Regular",
+"NotoSansBatak-Regular"
+],
+"Noto Sans Bengali": [
+"Noto Sans Bengali Bold",
+"Noto Sans Bengali Regular",
+"NotoSansBengali-Bold",
+"NotoSansBengali-Regular"
+],
+"Noto Sans Bhaiksuki": [
+"Noto Sans Bhaiksuki Regular",
+"NotoSansBhaiksuki-Regular"
+],
+"Noto Sans Brahmi": [
+"Noto Sans Brahmi Regular",
+"NotoSansBrahmi-Regular"
+],
+"Noto Sans Buginese": [
+"Noto Sans Buginese Regular",
+"NotoSansBuginese-Regular"
+],
+"Noto Sans Buhid": [
+"Noto Sans Buhid Regular",
+"NotoSansBuhid-Regular"
+],
+"Noto Sans Canadian Aboriginal": [
+"Noto Sans Canadian Aboriginal Bold",
+"Noto Sans Canadian Aboriginal Regular",
+"NotoSansCanadianAboriginal-Bold",
+"NotoSansCanadianAboriginal-Regular"
+],
+"Noto Sans Carian": [
+"Noto Sans Carian Regular",
+"NotoSansCarian-Regular"
+],
+"Noto Sans Caucasian Albanian": [
+"Noto Sans Caucasian Albanian Regular",
+"NotoSansCaucasianAlbanian-Regular"
+],
+"Noto Sans Chakma": [
+"Noto Sans Chakma Regular",
+"NotoSansChakma-Regular"
+],
+"Noto Sans Cham": [
+"Noto Sans Cham Bold",
+"Noto Sans Cham Regular",
+"NotoSansCham-Bold",
+"NotoSansCham-Regular"
+],
+"Noto Sans Cherokee": [
+"Noto Sans Cherokee Bold",
+"Noto Sans Cherokee Regular",
+"NotoSansCherokee-Bold",
+"NotoSansCherokee-Regular"
+],
+"Noto Sans CJK HK": [
+"Noto Sans CJK HK",
+"Noto Sans CJK HK Bold",
+"NotoSansCJKhk-Bold",
+"NotoSansCJKhk-Regular"
+],
+"Noto Sans CJK JP": [
+"Noto Sans CJK JP",
+"Noto Sans CJK JP Bold",
+"NotoSansCJKjp-Bold",
+"NotoSansCJKjp-Regular"
+],
+"Noto Sans CJK KR": [
+"Noto Sans CJK KR",
+"Noto Sans CJK KR Bold",
+"NotoSansCJKkr-Bold",
+"NotoSansCJKkr-Regular"
+],
+"Noto Sans CJK SC": [
+"Noto Sans CJK SC",
+"Noto Sans CJK SC Bold",
+"NotoSansCJKsc-Bold",
+"NotoSansCJKsc-Regular"
+],
+"Noto Sans CJK TC": [
+"Noto Sans CJK TC",
+"Noto Sans CJK TC Bold",
+"NotoSansCJKtc-Bold",
+"NotoSansCJKtc-Regular"
+],
+"Noto Sans Coptic": [
+"Noto Sans Coptic Regular",
+"NotoSansCoptic-Regular"
+],
+"Noto Sans Cuneiform": [
+"Noto Sans Cuneiform Regular",
+"NotoSansCuneiform-Regular"
+],
+"Noto Sans Cypriot": [
+"Noto Sans Cypriot Regular",
+"NotoSansCypriot-Regular"
+],
+"Noto Sans Deseret": [
+"Noto Sans Deseret Regular",
+"NotoSansDeseret-Regular"
+],
+"Noto Sans Devanagari": [
+"Noto Sans Devanagari Bold",
+"Noto Sans Devanagari Regular",
+"NotoSansDevanagari-Bold",
+"NotoSansDevanagari-Regular"
+],
+"Noto Sans Display": [
+"Noto Sans Display Bold",
+"Noto Sans Display Bold Italic",
+"Noto Sans Display Italic",
+"Noto Sans Display Regular",
+"NotoSansDisplay-Bold",
+"NotoSansDisplay-BoldItalic",
+"NotoSansDisplay-Italic",
+"NotoSansDisplay-Regular"
+],
+"Noto Sans Duployan": [
+"Noto Sans Duployan Regular",
+"NotoSansDuployan-Regular"
+],
+"Noto Sans Egyptian Hieroglyphs": [
+"Noto Sans Egyptian Hieroglyphs Regular",
+"NotoSansEgyptianHieroglyphs-Regular"
+],
+"Noto Sans Elbasan": [
+"Noto Sans Elbasan Regular",
+"NotoSansElbasan-Regular"
+],
+"Noto Sans Elymaic": [
+"Noto Sans Elymaic Regular",
+"NotoSansElymaic-Regular"
+],
+"Noto Sans Ethiopic": [
+"Noto Sans Ethiopic Bold",
+"Noto Sans Ethiopic Regular",
+"NotoSansEthiopic-Bold",
+"NotoSansEthiopic-Regular"
+],
+"Noto Sans Georgian": [
+"Noto Sans Georgian Bold",
+"Noto Sans Georgian Regular",
+"NotoSansGeorgian-Bold",
+"NotoSansGeorgian-Regular"
+],
+"Noto Sans Glagolitic": [
+"Noto Sans Glagolitic Regular",
+"NotoSansGlagolitic-Regular"
+],
+"Noto Sans Gothic": [
+"Noto Sans Gothic Regular",
+"NotoSansGothic-Regular"
+],
+"Noto Sans Grantha": [
+"Noto Sans Grantha Regular",
+"NotoSansGrantha-Regular"
+],
+"Noto Sans Gujarati": [
+"Noto Sans Gujarati Bold",
+"Noto Sans Gujarati Regular",
+"NotoSansGujarati-Bold",
+"NotoSansGujarati-Regular"
+],
+"Noto Sans Gunjala Gondi": [
+"Noto Sans Gunjala Gondi Regular",
+"NotoSansGunjalaGondi-Regular"
+],
+"Noto Sans Gurmukhi": [
+"Noto Sans Gurmukhi Bold",
+"Noto Sans Gurmukhi Regular",
+"NotoSansGurmukhi-Bold",
+"NotoSansGurmukhi-Regular"
+],
+"Noto Sans Hanifi Rohingya": [
+"Noto Sans Hanifi Rohingya Bold",
+"Noto Sans Hanifi Rohingya Regular",
+"NotoSansHanifiRohingya-Bold",
+"NotoSansHanifiRohingya-Regular"
+],
+"Noto Sans Hanunoo": [
+"Noto Sans Hanunoo Regular",
+"NotoSansHanunoo-Regular"
+],
+"Noto Sans Hatran": [
+"Noto Sans Hatran Regular",
+"NotoSansHatran-Regular"
+],
+"Noto Sans Hebrew": [
+"Noto Sans Hebrew Bold",
+"Noto Sans Hebrew Regular",
+"NotoSansHebrew-Bold",
+"NotoSansHebrew-Regular"
+],
+"Noto Sans Imperial Aramaic": [
+"Noto Sans Imperial Aramaic Regular",
+"NotoSansImperialAramaic-Regular"
+],
+"Noto Sans Indic Siyaq Numbers": [
+"Noto Sans Indic Siyaq Numbers Regular",
+"NotoSansIndicSiyaqNumbers-Regular"
+],
+"Noto Sans Inscriptional Pahlavi": [
+"Noto Sans Inscriptional Pahlavi Regular",
+"NotoSansInscriptionalPahlavi-Regular"
+],
+"Noto Sans Inscriptional Parthian": [
+"Noto Sans Inscriptional Parthian Regular",
+"NotoSansInscriptionalParthian-Regular"
+],
+"Noto Sans Javanese": [
+"Noto Sans Javanese Bold",
+"Noto Sans Javanese Regular",
+"NotoSansJavanese-Bold",
+"NotoSansJavanese-Regular"
+],
+"Noto Sans Kaithi": [
+"Noto Sans Kaithi Regular",
+"NotoSansKaithi-Regular"
+],
+"Noto Sans Kannada": [
+"Noto Sans Kannada Bold",
+"Noto Sans Kannada Regular",
+"NotoSansKannada-Bold",
+"NotoSansKannada-Regular"
+],
+"Noto Sans Kayah Li": [
+"Noto Sans Kayah Li Bold",
+"Noto Sans Kayah Li Regular",
+"NotoSansKayahLi-Bold",
+"NotoSansKayahLi-Regular"
+],
+"Noto Sans Kharoshthi": [
+"Noto Sans Kharoshthi Regular",
+"NotoSansKharoshthi-Regular"
+],
+"Noto Sans Khmer": [
+"Noto Sans Khmer Bold",
+"Noto Sans Khmer Regular",
+"NotoSansKhmer-Bold",
+"NotoSansKhmer-Regular"
+],
+"Noto Sans Khojki": [
+"Noto Sans Khojki Regular",
+"NotoSansKhojki-Regular"
+],
+"Noto Sans Khudawadi": [
+"Noto Sans Khudawadi Regular",
+"NotoSansKhudawadi-Regular"
+],
+"Noto Sans Lao": [
+"Noto Sans Lao Bold",
+"Noto Sans Lao Regular",
+"NotoSansLao-Bold",
+"NotoSansLao-Regular"
+],
+"Noto Sans Lepcha": [
+"Noto Sans Lepcha Regular",
+"NotoSansLepcha-Regular"
+],
+"Noto Sans Limbu": [
+"Noto Sans Limbu Regular",
+"NotoSansLimbu-Regular"
+],
+"Noto Sans Linear A": [
+"Noto Sans Linear A Regular",
+"NotoSansLinearA-Regular"
+],
+"Noto Sans Linear B": [
+"Noto Sans Linear B Regular",
+"NotoSansLinearB-Regular"
+],
+"Noto Sans Lisu": [
+"Noto Sans Lisu Bold",
+"Noto Sans Lisu Regular",
+"NotoSansLisu-Bold",
+"NotoSansLisu-Regular"
+],
+"Noto Sans Lycian": [
+"Noto Sans Lycian Regular",
+"NotoSansLycian-Regular"
+],
+"Noto Sans Lydian": [
+"Noto Sans Lydian Regular",
+"NotoSansLydian-Regular"
+],
+"Noto Sans Mahajani": [
+"Noto Sans Mahajani Regular",
+"NotoSansMahajani-Regular"
+],
+"Noto Sans Malayalam": [
+"Noto Sans Malayalam Bold",
+"Noto Sans Malayalam Regular",
+"NotoSansMalayalam-Bold",
+"NotoSansMalayalam-Regular"
+],
+"Noto Sans Mandaic": [
+"Noto Sans Mandaic Regular",
+"NotoSansMandaic-Regular"
+],
+"Noto Sans Manichaean": [
+"Noto Sans Manichaean Regular",
+"NotoSansManichaean-Regular"
+],
+"Noto Sans Marchen": [
+"Noto Sans Marchen Regular",
+"NotoSansMarchen-Regular"
+],
+"Noto Sans Masaram Gondi": [
+"Noto Sans Masaram Gondi Regular",
+"NotoSansMasaramGondi-Regular"
+],
+"Noto Sans Math": [
+"Noto Sans Math Regular",
+"NotoSansMath-Regular"
+],
+"Noto Sans Mayan Numerals": [
+"Noto Sans Mayan Numerals Regular",
+"NotoSansMayanNumerals-Regular"
+],
+"Noto Sans Medefaidrin": [
+"Noto Sans Medefaidrin Bold",
+"Noto Sans Medefaidrin Regular",
+"NotoSansMedefaidrin-Bold",
+"NotoSansMedefaidrin-Regular"
+],
+"Noto Sans Meetei Mayek": [
+"Noto Sans Meetei Mayek Bold",
+"Noto Sans Meetei Mayek Regular",
+"NotoSansMeeteiMayek-Bold",
+"NotoSansMeeteiMayek-Regular"
+],
+"Noto Sans Mende Kikakui": [
+"Noto Sans Mende Kikakui Regular",
+"NotoSansMendeKikakui-Regular"
+],
+"Noto Sans Meroitic": [
+"Noto Sans Meroitic Regular",
+"NotoSansMeroitic-Regular"
+],
+"Noto Sans Miao": [
+"Noto Sans Miao Regular",
+"NotoSansMiao-Regular"
+],
+"Noto Sans Modi": [
+"Noto Sans Modi Regular",
+"NotoSansModi-Regular"
+],
+"Noto Sans Mongolian": [
+"Noto Sans Mongolian Regular",
+"NotoSansMongolian-Regular"
+],
+"Noto Sans Mono": [
+"Noto Sans Mono Bold",
+"Noto Sans Mono Regular",
+"NotoSansMono-Bold",
+"NotoSansMono-Regular"
+],
+"Noto Sans Mono CJK HK": [
+"Noto Sans Mono CJK HK",
+"Noto Sans Mono CJK HK Bold",
+"NotoSansMonoCJKhk-Bold",
+"NotoSansMonoCJKhk-Regular"
+],
+"Noto Sans Mono CJK JP": [
+"Noto Sans Mono CJK JP",
+"Noto Sans Mono CJK JP Bold",
+"NotoSansMonoCJKjp-Bold",
+"NotoSansMonoCJKjp-Regular"
+],
+"Noto Sans Mono CJK KR": [
+"Noto Sans Mono CJK KR",
+"Noto Sans Mono CJK KR Bold",
+"NotoSansMonoCJKkr-Bold",
+"NotoSansMonoCJKkr-Regular"
+],
+"Noto Sans Mono CJK SC": [
+"Noto Sans Mono CJK SC",
+"Noto Sans Mono CJK SC Bold",
+"NotoSansMonoCJKsc-Bold",
+"NotoSansMonoCJKsc-Regular"
+],
+"Noto Sans Mono CJK TC": [
+"Noto Sans Mono CJK TC",
+"Noto Sans Mono CJK TC Bold",
+"NotoSansMonoCJKtc-Bold",
+"NotoSansMonoCJKtc-Regular"
+],
+"Noto Sans Mro": [
+"Noto Sans Mro Regular",
+"NotoSansMro-Regular"
+],
+"Noto Sans Multani": [
+"Noto Sans Multani Regular",
+"NotoSansMultani-Regular"
+],
+"Noto Sans Myanmar": [
+"Noto Sans Myanmar Bold",
+"Noto Sans Myanmar Regular",
+"NotoSansMyanmar-Bold",
+"NotoSansMyanmar-Regular"
+],
+"Noto Sans Nabataean": [
+"Noto Sans Nabataean Regular",
+"NotoSansNabataean-Regular"
+],
+"Noto Sans New Tai Lue": [
+"Noto Sans New Tai Lue Regular",
+"NotoSansNewTaiLue-Regular"
+],
+"Noto Sans Newa": [
+"Noto Sans Newa Regular",
+"NotoSansNewa-Regular"
+],
+"Noto Sans NKo": [
+"Noto Sans NKo Regular",
+"NotoSansNKo-Regular"
+],
+"Noto Sans Nushu": [
+"Noto Sans Nushu Regular",
+"NotoSansNushu-Regular"
+],
+"Noto Sans Ogham": [
+"Noto Sans Ogham Regular",
+"NotoSansOgham-Regular"
+],
+"Noto Sans Ol Chiki": [
+"Noto Sans Ol Chiki Bold",
+"Noto Sans Ol Chiki Regular",
+"NotoSansOlChiki-Bold",
+"NotoSansOlChiki-Regular"
+],
+"Noto Sans Old Hungarian": [
+"Noto Sans Old Hungarian Regular",
+"NotoSansOldHungarian-Regular"
+],
+"Noto Sans Old Italic": [
+"Noto Sans Old Italic Regular",
+"NotoSansOldItalic-Regular"
+],
+"Noto Sans Old North Arabian": [
+"Noto Sans Old North Arabian Regular",
+"NotoSansOldNorthArabian-Regular"
+],
+"Noto Sans Old Permic": [
+"Noto Sans Old Permic Regular",
+"NotoSansOldPermic-Regular"
+],
+"Noto Sans Old Persian": [
+"Noto Sans Old Persian Regular",
+"NotoSansOldPersian-Regular"
+],
+"Noto Sans Old Sogdian": [
+"Noto Sans Old Sogdian Regular",
+"NotoSansOldSogdian-Regular"
+],
+"Noto Sans Old South Arabian": [
+"Noto Sans Old South Arabian Regular",
+"NotoSansOldSouthArabian-Regular"
+],
+"Noto Sans Old Turkic": [
+"Noto Sans Old Turkic Regular",
+"NotoSansOldTurkic-Regular"
+],
+"Noto Sans Oriya": [
+"Noto Sans Oriya Bold",
+"Noto Sans Oriya Regular",
+"NotoSansOriya-Bold",
+"NotoSansOriya-Regular"
+],
+"Noto Sans Osage": [
+"Noto Sans Osage Regular",
+"NotoSansOsage-Regular"
+],
+"Noto Sans Osmanya": [
+"Noto Sans Osmanya Regular",
+"NotoSansOsmanya-Regular"
+],
+"Noto Sans Pahawh Hmong": [
+"Noto Sans Pahawh Hmong Regular",
+"NotoSansPahawhHmong-Regular"
+],
+"Noto Sans Palmyrene": [
+"Noto Sans Palmyrene Regular",
+"NotoSansPalmyrene-Regular"
+],
+"Noto Sans Pau Cin Hau": [
+"Noto Sans Pau Cin Hau Regular",
+"NotoSansPauCinHau-Regular"
+],
+"Noto Sans PhagsPa": [
+"Noto Sans PhagsPa Regular",
+"NotoSansPhagsPa-Regular"
+],
+"Noto Sans Phoenician": [
+"Noto Sans Phoenician Regular",
+"NotoSansPhoenician-Regular"
+],
+"Noto Sans Psalter Pahlavi": [
+"Noto Sans Psalter Pahlavi Regular",
+"NotoSansPsalterPahlavi-Regular"
+],
+"Noto Sans Rejang": [
+"Noto Sans Rejang Regular",
+"NotoSansRejang-Regular"
+],
+"Noto Sans Runic": [
+"Noto Sans Runic Regular",
+"NotoSansRunic-Regular"
+],
+"Noto Sans Samaritan": [
+"Noto Sans Samaritan Regular",
+"NotoSansSamaritan-Regular"
+],
+"Noto Sans Saurashtra": [
+"Noto Sans Saurashtra Regular",
+"NotoSansSaurashtra-Regular"
+],
+"Noto Sans Sharada": [
+"Noto Sans Sharada Regular",
+"NotoSansSharada-Regular"
+],
+"Noto Sans Shavian": [
+"Noto Sans Shavian Regular",
+"NotoSansShavian-Regular"
+],
+"Noto Sans Siddham": [
+"Noto Sans Siddham Regular",
+"NotoSansSiddham-Regular"
+],
+"Noto Sans SignWriting": [
+"Noto Sans SignWriting Regular",
+"NotoSansSignWriting-Regular"
+],
+"Noto Sans Sinhala": [
+"Noto Sans Sinhala Bold",
+"Noto Sans Sinhala Regular",
+"NotoSansSinhala-Bold",
+"NotoSansSinhala-Regular"
+],
+"Noto Sans Sogdian": [
+"Noto Sans Sogdian Regular",
+"NotoSansSogdian-Regular"
+],
+"Noto Sans Sora Sompeng": [
+"Noto Sans Sora Sompeng Bold",
+"Noto Sans Sora Sompeng Regular",
+"NotoSansSoraSompeng-Bold",
+"NotoSansSoraSompeng-Regular"
+],
+"Noto Sans Soyombo": [
+"Noto Sans Soyombo Regular",
+"NotoSansSoyombo-Regular"
+],
+"Noto Sans Sundanese": [
+"Noto Sans Sundanese Bold",
+"Noto Sans Sundanese Regular",
+"NotoSansSundanese-Bold",
+"NotoSansSundanese-Regular"
+],
+"Noto Sans Syloti Nagri": [
+"Noto Sans Syloti Nagri Regular",
+"NotoSansSylotiNagri-Regular"
+],
+"Noto Sans Symbols": [
+"Noto Sans Symbols Bold",
+"Noto Sans Symbols Regular",
+"NotoSansSymbols-Bold",
+"NotoSansSymbols-Regular"
+],
+"Noto Sans Symbols2": [
+"Noto Sans Symbols2 Regular",
+"NotoSansSymbols2-Regular"
+],
+"Noto Sans Syriac": [
+"Noto Sans Syriac Regular",
+"NotoSansSyriac-Regular"
+],
+"Noto Sans Tagalog": [
+"Noto Sans Tagalog Regular",
+"NotoSansTagalog-Regular"
+],
+"Noto Sans Tagbanwa": [
+"Noto Sans Tagbanwa Regular",
+"NotoSansTagbanwa-Regular"
+],
+"Noto Sans Tai Le": [
+"Noto Sans Tai Le Regular",
+"NotoSansTaiLe-Regular"
+],
+"Noto Sans Tai Tham": [
+"Noto Sans Tai Tham Bold",
+"Noto Sans Tai Tham Regular",
+"NotoSansTaiTham-Bold",
+"NotoSansTaiTham-Regular"
+],
+"Noto Sans Tai Viet": [
+"Noto Sans Tai Viet Regular",
+"NotoSansTaiViet-Regular"
+],
+"Noto Sans Takri": [
+"Noto Sans Takri Regular",
+"NotoSansTakri-Regular"
+],
+"Noto Sans Tamil": [
+"Noto Sans Tamil Bold",
+"Noto Sans Tamil Regular",
+"NotoSansTamil-Bold",
+"NotoSansTamil-Regular"
+],
+"Noto Sans Tamil Supplement": [
+"Noto Sans Tamil Supplement Regular",
+"NotoSansTamilSupplement-Regular"
+],
+"Noto Sans Telugu": [
+"Noto Sans Telugu Bold",
+"Noto Sans Telugu Regular",
+"NotoSansTelugu-Bold",
+"NotoSansTelugu-Regular"
+],
+"Noto Sans Thaana": [
+"Noto Sans Thaana Bold",
+"Noto Sans Thaana Regular",
+"NotoSansThaana-Bold",
+"NotoSansThaana-Regular"
+],
+"Noto Sans Thai": [
+"Noto Sans Thai Bold",
+"Noto Sans Thai Regular",
+"NotoSansThai-Bold",
+"NotoSansThai-Regular"
+],
+"Noto Sans Tifinagh": [
+"Noto Sans Tifinagh Regular",
+"NotoSansTifinagh-Regular"
+],
+"Noto Sans Tifinagh Adrar": [
+"Noto Sans Tifinagh Adrar Regular",
+"NotoSansTifinaghAdrar-Regular"
+],
+"Noto Sans Tifinagh Agraw Imazighen": [
+"Noto Sans Tifinagh Agraw Imazighen Regular",
+"NotoSansTifinaghAgrawImazighen-Regular"
+],
+"Noto Sans Tifinagh Ahaggar": [
+"Noto Sans Tifinagh Ahaggar Regular",
+"NotoSansTifinaghAhaggar-Regular"
+],
+"Noto Sans Tifinagh Air": [
+"Noto Sans Tifinagh Air Regular",
+"NotoSansTifinaghAir-Regular"
+],
+"Noto Sans Tifinagh APT": [
+"Noto Sans Tifinagh APT Regular",
+"NotoSansTifinaghAPT-Regular"
+],
+"Noto Sans Tifinagh Azawagh": [
+"Noto Sans Tifinagh Azawagh Regular",
+"NotoSansTifinaghAzawagh-Regular"
+],
+"Noto Sans Tifinagh Ghat": [
+"Noto Sans Tifinagh Ghat Regular",
+"NotoSansTifinaghGhat-Regular"
+],
+"Noto Sans Tifinagh Hawad": [
+"Noto Sans Tifinagh Hawad Regular",
+"NotoSansTifinaghHawad-Regular"
+],
+"Noto Sans Tifinagh Rhissa Ixa": [
+"Noto Sans Tifinagh Rhissa Ixa Regular",
+"NotoSansTifinaghRhissaIxa-Regular"
+],
+"Noto Sans Tifinagh SIL": [
+"Noto Sans Tifinagh SIL Regular",
+"NotoSansTifinaghSIL-Regular"
+],
+"Noto Sans Tifinagh Tawellemmet": [
+"Noto Sans Tifinagh Tawellemmet Regular",
+"NotoSansTifinaghTawellemmet-Regular"
+],
+"Noto Sans Tirhuta": [
+"Noto Sans Tirhuta Regular",
+"NotoSansTirhuta-Regular"
+],
+"Noto Sans Ugaritic": [
+"Noto Sans Ugaritic Regular",
+"NotoSansUgaritic-Regular"
+],
+"Noto Sans Vai": [
+"Noto Sans Vai Regular",
+"NotoSansVai-Regular"
+],
+"Noto Sans Wancho": [
+"Noto Sans Wancho Regular",
+"NotoSansWancho-Regular"
+],
+"Noto Sans Warang Citi": [
+"Noto Sans Warang Citi Regular",
+"NotoSansWarangCiti-Regular"
+],
+"Noto Sans Yi": [
+"Noto Sans Yi Regular",
+"NotoSansYi-Regular"
+],
+"Noto Sans Zanabazar Square": [
+"Noto Sans Zanabazar Square Regular",
+"NotoSansZanabazarSquare-Regular"
+],
+"Noto Serif": [
+"Noto Serif Bold",
+"Noto Serif Bold Italic",
+"Noto Serif Italic",
+"Noto Serif Regular",
+"NotoSerif-Bold",
+"NotoSerif-BoldItalic",
+"NotoSerif-Italic",
+"NotoSerif-Regular"
+],
+"Noto Serif Ahom": [
+"Noto Serif Ahom Regular",
+"NotoSerifAhom-Regular"
+],
+"Noto Serif Armenian": [
+"Noto Serif Armenian Bold",
+"Noto Serif Armenian Regular",
+"NotoSerifArmenian-Bold",
+"NotoSerifArmenian-Regular"
+],
+"Noto Serif Balinese": [
+"Noto Serif Balinese Regular",
+"NotoSerifBalinese-Regular"
+],
+"Noto Serif Bengali": [
+"Noto Serif Bengali Bold",
+"Noto Serif Bengali Regular",
+"NotoSerifBengali-Bold",
+"NotoSerifBengali-Regular"
+],
+"Noto Serif CJK HK": [
+"Noto Serif CJK HK",
+"Noto Serif CJK HK Bold",
+"NotoSerifCJKhk-Bold",
+"NotoSerifCJKhk-Regular"
+],
+"Noto Serif CJK JP": [
+"Noto Serif CJK JP",
+"Noto Serif CJK JP Bold",
+"NotoSerifCJKjp-Bold",
+"NotoSerifCJKjp-Regular"
+],
+"Noto Serif CJK KR": [
+"Noto Serif CJK KR",
+"Noto Serif CJK KR Bold",
+"NotoSerifCJKkr-Bold",
+"NotoSerifCJKkr-Regular"
+],
+"Noto Serif CJK SC": [
+"Noto Serif CJK SC",
+"Noto Serif CJK SC Bold",
+"NotoSerifCJKsc-Bold",
+"NotoSerifCJKsc-Regular"
+],
+"Noto Serif CJK TC": [
+"Noto Serif CJK TC",
+"Noto Serif CJK TC Bold",
+"NotoSerifCJKtc-Bold",
+"NotoSerifCJKtc-Regular"
+],
+"Noto Serif Devanagari": [
+"Noto Serif Devanagari Bold",
+"Noto Serif Devanagari Regular",
+"NotoSerifDevanagari-Bold",
+"NotoSerifDevanagari-Regular"
+],
+"Noto Serif Display": [
+"Noto Serif Display Bold",
+"Noto Serif Display Bold Italic",
+"Noto Serif Display Italic",
+"Noto Serif Display Regular",
+"NotoSerifDisplay-Bold",
+"NotoSerifDisplay-BoldItalic",
+"NotoSerifDisplay-Italic",
+"NotoSerifDisplay-Regular"
+],
+"Noto Serif Dogra": [
+"Noto Serif Dogra Regular",
+"NotoSerifDogra-Regular"
+],
+"Noto Serif Ethiopic": [
+"Noto Serif Ethiopic Bold",
+"Noto Serif Ethiopic Regular",
+"NotoSerifEthiopic-Bold",
+"NotoSerifEthiopic-Regular"
+],
+"Noto Serif Georgian": [
+"Noto Serif Georgian Bold",
+"Noto Serif Georgian Regular",
+"NotoSerifGeorgian-Bold",
+"NotoSerifGeorgian-Regular"
+],
+"Noto Serif Grantha": [
+"Noto Serif Grantha Regular",
+"NotoSerifGrantha-Regular"
+],
+"Noto Serif Gujarati": [
+"Noto Serif Gujarati Bold",
+"Noto Serif Gujarati Regular",
+"NotoSerifGujarati-Bold",
+"NotoSerifGujarati-Regular"
+],
+"Noto Serif Gurmukhi": [
+"Noto Serif Gurmukhi Bold",
+"Noto Serif Gurmukhi Regular",
+"NotoSerifGurmukhi-Bold",
+"NotoSerifGurmukhi-Regular"
+],
+"Noto Serif Hebrew": [
+"Noto Serif Hebrew Bold",
+"Noto Serif Hebrew Regular",
+"NotoSerifHebrew-Bold",
+"NotoSerifHebrew-Regular"
+],
+"Noto Serif Hmong Nyiakeng": [
+"Noto Serif Hmong Nyiakeng Bold",
+"Noto Serif Hmong Nyiakeng Regular",
+"NotoSerifHmongNyiakeng-Bold",
+"NotoSerifHmongNyiakeng-Regular"
+],
+"Noto Serif Kannada": [
+"Noto Serif Kannada Bold",
+"Noto Serif Kannada Regular",
+"NotoSerifKannada-Bold",
+"NotoSerifKannada-Regular"
+],
+"Noto Serif Khmer": [
+"Noto Serif Khmer Bold",
+"Noto Serif Khmer Regular",
+"NotoSerifKhmer-Bold",
+"NotoSerifKhmer-Regular"
+],
+"Noto Serif Khojki": [
+"Noto Serif Khojki Bold",
+"Noto Serif Khojki Regular",
+"NotoSerifKhojki-Bold",
+"NotoSerifKhojki-Regular"
+],
+"Noto Serif Lao": [
+"Noto Serif Lao Bold",
+"Noto Serif Lao Regular",
+"NotoSerifLao-Bold",
+"NotoSerifLao-Regular"
+],
+"Noto Serif Malayalam": [
+"Noto Serif Malayalam Bold",
+"Noto Serif Malayalam Regular",
+"NotoSerifMalayalam-Bold",
+"NotoSerifMalayalam-Regular"
+],
+"Noto Serif Myanmar": [
+"Noto Serif Myanmar Bold",
+"Noto Serif Myanmar Regular",
+"NotoSerifMyanmar-Bold",
+"NotoSerifMyanmar-Regular"
+],
+"Noto Serif Sinhala": [
+"Noto Serif Sinhala Bold",
+"Noto Serif Sinhala Regular",
+"NotoSerifSinhala-Bold",
+"NotoSerifSinhala-Regular"
+],
+"Noto Serif Tamil": [
+"Noto Serif Tamil Bold",
+"Noto Serif Tamil Regular",
+"NotoSerifTamil-Bold",
+"NotoSerifTamil-Regular"
+],
+"Noto Serif Tamil Slanted": [
+"Noto Serif Tamil Slanted Bold",
+"Noto Serif Tamil Slanted Regular",
+"NotoSerifTamilSlanted-Bold",
+"NotoSerifTamilSlanted-Regular"
+],
+"Noto Serif Tangut": [
+"Noto Serif Tangut Regular",
+"NotoSerifTangut-Regular"
+],
+"Noto Serif Telugu": [
+"Noto Serif Telugu Bold",
+"Noto Serif Telugu Regular",
+"NotoSerifTelugu-Bold",
+"NotoSerifTelugu-Regular"
+],
+"Noto Serif Thai": [
+"Noto Serif Thai Bold",
+"Noto Serif Thai Regular",
+"NotoSerifThai-Bold",
+"NotoSerifThai-Regular"
+],
+"Noto Serif Tibetan": [
+"Noto Serif Tibetan Bold",
+"Noto Serif Tibetan Regular",
+"NotoSerifTibetan-Bold",
+"NotoSerifTibetan-Regular"
+],
+"Noto Serif Yezidi": [
+"Noto Serif Yezidi Bold",
+"Noto Serif Yezidi Regular",
+"NotoSerifYezidi-Bold",
+"NotoSerifYezidi-Regular"
+],
+"Noto Traditional Nushu": [
+"Noto Traditional Nushu Regular",
+"NotoTraditionalNushu-Regular"
+],
+"P052": [
+"P052 Bold",
+"P052 Bold Italic",
+"P052 Italic",
+"P052 Roman",
+"P052-Bold",
+"P052-BoldItalic",
+"P052-Italic",
+"P052-Roman"
+],
+"Standard Symbols PS": [
+"Standard Symbols PS",
+"StandardSymbolsPS"
+],
+"system-ui": [
+"system-ui"
+],
+"Ubuntu": [
+"Ubuntu Bold",
+"Ubuntu Bold Italic",
+"Ubuntu Condensed",
+"Ubuntu Condensed Bold",
+"Ubuntu Condensed Bold Italic",
+"Ubuntu Condensed Extra Bold",
+"Ubuntu Condensed Extra Bold Italic",
+"Ubuntu Condensed Italic",
+"Ubuntu Condensed Light",
+"Ubuntu Condensed Light Italic",
+"Ubuntu Condensed Medium",
+"Ubuntu Condensed Medium Italic",
+"Ubuntu Condensed Thin",
+"Ubuntu Condensed Thin Italic",
+"Ubuntu Extra Bold",
+"Ubuntu Extra Bold Italic",
+"Ubuntu Italic",
+"Ubuntu Light",
+"Ubuntu Light Italic",
+"Ubuntu Medium",
+"Ubuntu Medium Italic",
+"Ubuntu Regular",
+"Ubuntu Thin",
+"Ubuntu Thin Italic",
+"Ubuntu-Bold",
+"Ubuntu-Condensed",
+"Ubuntu-CondensedBold",
+"Ubuntu-CondensedExtraBold",
+"Ubuntu-CondensedLight",
+"Ubuntu-CondensedMedium",
+"Ubuntu-CondensedThin",
+"Ubuntu-ExtraBold",
+"Ubuntu-Italic",
+"Ubuntu-Light",
+"Ubuntu-Medium",
+"Ubuntu-Regular",
+"Ubuntu-Thin",
+"UbuntuItalic-BoldItalic",
+"UbuntuItalic-CondensedBoldItalic",
+"UbuntuItalic-CondensedExtraBoldItalic",
+"UbuntuItalic-CondensedItalic",
+"UbuntuItalic-CondensedLightItalic",
+"UbuntuItalic-CondensedMediumItalic",
+"UbuntuItalic-CondensedThinItalic",
+"UbuntuItalic-ExtraBoldItalic",
+"UbuntuItalic-Italic",
+"UbuntuItalic-LightItalic",
+"UbuntuItalic-MediumItalic",
+"UbuntuItalic-ThinItalic"
+],
+"Ubuntu Mono": [
+"Ubuntu Mono Bold",
+"Ubuntu Mono Bold Italic",
+"Ubuntu Mono Italic",
+"Ubuntu Mono Medium",
+"Ubuntu Mono Medium Italic",
+"Ubuntu Mono Regular",
+"UbuntuMono-Italic",
+"UbuntuMono-Regular",
+"UbuntuMonoRoman-Bold",
+"UbuntuMonoRoman-BoldItalic",
+"UbuntuMonoRoman-Medium",
+"UbuntuMonoRoman-MediumItalic"
+],
+"Ubuntu Sans": [
+"Ubuntu Sans Bold",
+"Ubuntu Sans Bold Italic",
+"Ubuntu Sans Condensed Bold",
+"Ubuntu Sans Condensed Bold Italic",
+"Ubuntu Sans Condensed ExtraBold",
+"Ubuntu Sans Condensed ExtraBold Italic",
+"Ubuntu Sans Condensed ExtraLight",
+"Ubuntu Sans Condensed ExtraLight Italic",
+"Ubuntu Sans Condensed Italic",
+"Ubuntu Sans Condensed Light",
+"Ubuntu Sans Condensed Light Italic",
+"Ubuntu Sans Condensed Medium",
+"Ubuntu Sans Condensed Medium Italic",
+"Ubuntu Sans Condensed Regular",
+"Ubuntu Sans Condensed SemiBold",
+"Ubuntu Sans Condensed SemiBold Italic",
+"Ubuntu Sans Condensed Thin",
+"Ubuntu Sans Condensed Thin Italic",
+"Ubuntu Sans ExtraBold",
+"Ubuntu Sans ExtraBold Italic",
+"Ubuntu Sans ExtraLight",
+"Ubuntu Sans ExtraLight Italic",
+"Ubuntu Sans Italic",
+"Ubuntu Sans Light",
+"Ubuntu Sans Light Italic",
+"Ubuntu Sans Medium",
+"Ubuntu Sans Medium Italic",
+"Ubuntu Sans Regular",
+"Ubuntu Sans SemiBold",
+"Ubuntu Sans SemiBold Italic",
+"Ubuntu Sans Thin",
+"Ubuntu Sans Thin Italic",
+"UbuntuSans-Bold",
+"UbuntuSans-CondensedBold",
+"UbuntuSans-CondensedExtraBold",
+"UbuntuSans-CondensedExtraLight",
+"UbuntuSans-CondensedLight",
+"UbuntuSans-CondensedMedium",
+"UbuntuSans-CondensedRegular",
+"UbuntuSans-CondensedSemiBold",
+"UbuntuSans-CondensedThin",
+"UbuntuSans-ExtraBold",
+"UbuntuSans-ExtraLight",
+"UbuntuSans-Italic",
+"UbuntuSans-Light",
+"UbuntuSans-Medium",
+"UbuntuSans-Regular",
+"UbuntuSans-SemiBold",
+"UbuntuSans-Thin",
+"UbuntuSansItalic-BoldItalic",
+"UbuntuSansItalic-CondensedBoldItalic",
+"UbuntuSansItalic-CondensedExtraBoldItalic",
+"UbuntuSansItalic-CondensedExtraLightItalic",
+"UbuntuSansItalic-CondensedItalic",
+"UbuntuSansItalic-CondensedLightItalic",
+"UbuntuSansItalic-CondensedMediumItalic",
+"UbuntuSansItalic-CondensedSemiBoldItalic",
+"UbuntuSansItalic-CondensedThinItalic",
+"UbuntuSansItalic-ExtraBoldItalic",
+"UbuntuSansItalic-ExtraLightItalic",
+"UbuntuSansItalic-LightItalic",
+"UbuntuSansItalic-MediumItalic",
+"UbuntuSansItalic-SemiBoldItalic",
+"UbuntuSansItalic-ThinItalic"
+],
+"Ubuntu Sans Mono": [
+"Ubuntu Sans Mono Bold",
+"Ubuntu Sans Mono Bold Italic",
+"Ubuntu Sans Mono ExtraLight",
+"Ubuntu Sans Mono Italic",
+"Ubuntu Sans Mono Light",
+"Ubuntu Sans Mono Medium",
+"Ubuntu Sans Mono Medium Italic",
+"Ubuntu Sans Mono Regular",
+"Ubuntu Sans Mono SemiBold",
+"Ubuntu Sans Mono SemiBold Italic",
+"Ubuntu Sans Mono Thin",
+"UbuntuSansMono-Bold",
+"UbuntuSansMono-ExtraLight",
+"UbuntuSansMono-Italic",
+"UbuntuSansMono-Light",
+"UbuntuSansMono-Medium",
+"UbuntuSansMono-Regular",
+"UbuntuSansMono-SemiBold",
+"UbuntuSansMono-Thin",
+"UbuntuSansMonoItalic-BoldItalic",
+"UbuntuSansMonoItalic-MediumItalic",
+"UbuntuSansMonoItalic-SemiBoldItalic"
+],
+"URW Bookman": [
+"URW Bookman Demi",
+"URW Bookman Demi Italic",
+"URW Bookman Light",
+"URW Bookman Light Italic",
+"URWBookman-Demi",
+"URWBookman-DemiItalic",
+"URWBookman-Light",
+"URWBookman-LightItalic"
+],
+"URW Gothic": [
+"URW Gothic Book",
+"URW Gothic Book Oblique",
+"URW Gothic Demi",
+"URW Gothic Demi Oblique",
+"URWGothic-Book",
+"URWGothic-BookOblique",
+"URWGothic-Demi",
+"URWGothic-DemiOblique"
+],
+"Z003": [
+"Z003 Medium Italic",
+"Z003-MediumItalic"
+]
+}
+}

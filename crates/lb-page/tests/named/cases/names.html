@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script src="prelude.js"></script></head>
+<body>
+<img name="im1"><form name="f1"></form><embed name="e1"><object name="o1"></object>
+<div name="dn"></div><a name="an"></a><input name="in1"><iframe name="ifn"></iframe>
+<map name="mp"></map><meta name="mt"><select name="sel"></select><button name="bt"></button>
+<textarea name="ta"></textarea><param name="pa"><slot name="sl"></slot><output name="ou"></output>
+<fieldset name="fs"></fieldset><frame name="fr">
+<img id="imgid" name="imgname"><form id="fid" name="fname"></form>
+<img name="m1"><div id="m1"></div><form name="m1"></form>
+<object name="outer"><embed name="inner"><object name="innerobj"></object></object>
+<img name="">
+<svg><image name="svgimage"></image><a name="svga"></a></svg>
+<script>
+for (const n of ['im1', 'f1', 'e1', 'o1', 'dn', 'an', 'in1', 'ifn', 'mp', 'mt', 'sel', 'bt', 'ta', 'pa', 'sl',
+                 'ou', 'fs', 'fr', 'imgid', 'imgname', 'fid', 'fname', 'm1', 'outer', 'inner', 'innerobj',
+                 'svgimage', 'svga'])
+  log('window.' + n, window[n]);
+log("window['']", window['']);
+const im = document.querySelector('img[name=im1]');
+im.name = 'im1b';
+log('renamed old', window.im1);
+log('renamed new', window.im1b);
+im.removeAttribute('name');
+log('name removed', window.im1b);
+const fresh = document.createElement('img'); fresh.name = 'freshimg';
+log('detached img', window.freshimg);
+document.body.append(fresh);
+log('appended img', window.freshimg);
+fresh.id = 'freshid';
+log('img by id', window.freshid);
+log('img by name still', window.freshimg);
+const m1 = window.m1;
+log('m1 same object', window.m1 === m1);
+document.querySelector('form[name=m1]').remove();
+log('m1 after remove', m1);
+document.querySelector('div#m1').remove();
+log('m1 one left', window.m1);
+const ifr = document.createElement('iframe'); ifr.name = 'dynframe';
+document.body.append(ifr);
+log('dynamic iframe', window.dynframe === ifr.contentWindow);
+L.push('end');
+</script>
+</body></html>

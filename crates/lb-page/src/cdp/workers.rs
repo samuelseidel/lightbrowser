@@ -46,6 +46,10 @@ pub(crate) enum WorkerCmd {
     },
     Release(String),
     ReleaseGroup(String),
+    /// `acceptLanguage` of `Emulation.setUserAgentOverride` on the worker's
+    /// own session (Playwright sends it to dedicated and service workers;
+    /// ADR 0039).
+    AcceptLanguage(Option<String>),
 }
 
 /// What the host keeps of an inspected worker.
@@ -202,6 +206,7 @@ pub(crate) fn announce(inspector: Option<&Arc<Inspector>>, a: Announce) -> Optio
             pending: RefCell::new(Vec::new()),
             obj_prefix: mix(n ^ 0x5eed) as i64,
             inspected,
+            accept_language: RefCell::new(None),
         }),
         cmds: rx,
         resume: Some(rrx),
@@ -289,9 +294,27 @@ pub(crate) struct WorkerAgent {
     pending: RefCell<Vec<Pending>>,
     obj_prefix: i64,
     inspected: Arc<AtomicBool>,
+    accept_language: RefCell<Option<String>>,
 }
 
 impl WorkerAgent {
+    /// The worker's `navigator.languages` under an `acceptLanguage`
+    /// override of its own target.
+    pub(crate) fn languages_override(&self) -> Option<Vec<String>> {
+        self.accept_language
+            .borrow()
+            .as_deref()
+            .map(lb_cdp::emulation::navigator_languages)
+    }
+
+    /// The `Accept-Language` of the worker's requests under that override.
+    pub(crate) fn accept_language_header(&self) -> Option<String> {
+        self.accept_language
+            .borrow()
+            .as_deref()
+            .map(lb_cdp::emulation::accept_language_header)
+    }
+
     /// Whether a CDP session is attached to the worker's target.
     pub(crate) fn inspected_flag(&self) -> Arc<AtomicBool> {
         self.inspected.clone()
@@ -472,6 +495,10 @@ impl WorkerAgent {
                     })
                 });
                 let _ = reply.send(r);
+            }
+            WorkerCmd::AcceptLanguage(l) => {
+                *self.accept_language.borrow_mut() = l;
+                lb_webapi::rt::emulation::languages_changed(w);
             }
             WorkerCmd::Release(id) => {
                 if let Some((h, _)) = self.objects.borrow_mut().remove(&id) {

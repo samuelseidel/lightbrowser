@@ -60,8 +60,8 @@ pub mod types;
 pub use browser::query_ax;
 pub use host::{
     BindingScope, CallFunctionRequest, CallTarget, ContextOptions, EvaluateRequest, EventSink,
-    GetPropertiesRequest, HostError, HostEvent, HostResult, NavigateRequest, PageEvent, PageHost,
-    PageMetrics, Rgba, ViewportOverride,
+    GeoPosition, GeolocationOverride, GetPropertiesRequest, HostError, HostEvent, HostResult,
+    NavigateRequest, PageEvent, PageHost, PageMetrics, Rgba, ViewportOverride,
 };
 pub use protocol::CdpError;
 pub use server::{Server, ServerConfig, block_on_local};

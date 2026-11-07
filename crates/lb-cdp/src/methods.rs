@@ -50,6 +50,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "bringToFront",
             "close",
             "captureScreenshot",
+            "setBypassCSP",
         ],
     ),
     (
@@ -135,6 +136,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "setEmulatedMedia",
             "setTouchEmulationEnabled",
             "setGeolocationOverride",
+            "clearGeolocationOverride",
             "setDefaultBackgroundColorOverride",
         ],
     ),

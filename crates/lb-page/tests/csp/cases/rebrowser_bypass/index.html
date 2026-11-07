@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="Content-Security-Policy" content="default-src * data: 'unsafe-eval' 'unsafe-inline' blob:; script-src blob: 'self' 'unsafe-eval' 'unsafe-inline' https://static.cloudflareinsights.com https://cloudflareinsights.com;">
+<script src="/prelude.js"></script>
+</head><body>
+<script>
+var s = document.createElement('script');
+s.src = 'http://localhost:' + location.port + '/rebrowser_bypass/ext.js';
+s.addEventListener('load', function () { log('load'); });
+s.addEventListener('error', function (e) { log('error ' + e.isTrusted); });
+document.head.appendChild(s);
+log('appended');
+done();
+</script>
+</body></html>

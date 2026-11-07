@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html><head>
+<script src="/prelude.js"></script>
+<script src="main.js"></script>
+<style id=st>#d { color: rgb(1, 2, 3); }</style>
+</head><body>
+<div id=d style="background-color: rgb(4, 5, 6)">d</div>
+<img id=i1 src="http://localhost:{PORT}/default_src_fallback/pixel.png">
+<img id=i2 src="pixel.png">
+<script>log('inline ran');</script>
+<script src="after.js"></script>
+</body></html>

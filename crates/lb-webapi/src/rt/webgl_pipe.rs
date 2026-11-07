@@ -221,26 +221,10 @@ impl Gl {
         out
     }
 
-    /// Unpremultiplied, noised RGBA rows top-down (what leaves the canvas).
+    /// Unpremultiplied RGBA rows top-down: what `toDataURL`, `toBlob`,
+    /// `drawImage` and page screenshots read. Exact, as `readPixels`; the
+    /// persona's variation is in rasterization (ADR 0038, `Fixed::offset`).
     pub(super) fn readback(&self) -> lb_paint::Bitmap {
-        let fb = self.default_rgba();
-        let mut bmp = self.unpremultiplied(&fb);
-        if let Some(seed) = self.seed {
-            lb_paint::CanvasNoise::new(seed).apply(
-                &fb,
-                self.width,
-                self.height,
-                0,
-                0,
-                self.width,
-                &mut bmp.data,
-            );
-        }
-        bmp
-    }
-
-    /// Readback without noise (page screenshots only).
-    pub(super) fn readback_clean(&self) -> lb_paint::Bitmap {
         let fb = self.default_rgba();
         self.unpremultiplied(&fb)
     }
@@ -624,6 +608,10 @@ impl Gl {
             rasterizer_discard: en(0x8C89),
             alpha_to_coverage: en(0x809E),
             sample_coverage: en(0x80A0).then(|| (self.num(0x80AA) as f32, self.flag(0x80AB))),
+            offset: self.seed.map_or([0.0; 2], |s| {
+                let (x, y) = lb_paint::variation::webgl_bias(s);
+                [x, y]
+            }),
         }
     }
 
@@ -1009,42 +997,22 @@ impl Gl {
             }
             let (fw, fh) = (b.width as i32, b.height as i32);
             if ty == UNSIGNED_BYTE {
-                // Stored values with the readback noise (top-down copy).
+                // Stored values, exactly (bottom-up rows).
                 let up = img.resolve_rgba8(0);
-                let (iw, ih) = (img.width as usize, img.height as usize);
-                let mut top = vec![0u8; iw * ih * 4];
-                for yy in 0..ih {
-                    top[yy * iw * 4..(yy + 1) * iw * 4]
-                        .copy_from_slice(&up[(ih - 1 - yy) * iw * 4..(ih - yy) * iw * 4]);
-                }
-                let mut noised = top.clone();
-                // Rendered pixels carry the readback noise; uploaded or
-                // cleared framebuffer contents read back exactly.
-                if let Some(seed) = self.seed.filter(|_| b.default || img.drawn) {
-                    lb_paint::CanvasNoise::new(seed).apply(
-                        &top,
-                        iw as u32,
-                        ih as u32,
-                        0,
-                        0,
-                        iw as u32,
-                        &mut noised,
-                    );
-                }
+                let iw = img.width as usize;
                 for r in 0..h {
                     let gy = y + r;
                     if gy < 0 || gy >= fh {
                         continue;
                     }
-                    let src_row = ih - 1 - gy as usize;
                     for c in 0..w {
                         let gx = x + c;
                         if gx < 0 || gx >= fw {
                             continue;
                         }
-                        let s = (src_row * iw + gx as usize) * 4;
+                        let s = (gy as usize * iw + gx as usize) * 4;
                         let d = r as usize * row + c as usize * 4;
-                        dst[d..d + 4].copy_from_slice(&noised[s..s + 4]);
+                        dst[d..d + 4].copy_from_slice(&up[s..s + 4]);
                     }
                 }
             } else {

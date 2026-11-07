@@ -134,6 +134,24 @@ def test_build_serve_args_rejects_bad_values(kw):
         build_serve_args("lb", **kw)
 
 
+def test_serve_args_locale_overrides():
+    # ADR 0039: match a proxy exit without editing the persona file.
+    cmd = build_serve_args("lb", timezone="Europe/Berlin", locale="de-DE", languages=["de-DE", "de", "en"])
+    assert cmd == [
+        "lb", "serve", "--port", "0", "--timezone", "Europe/Berlin", "--locale", "de-DE",
+        "--languages", "de-DE,de,en",
+    ]
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [{"timezone": ""}, {"timezone": "Europe/Berlin now"}, {"locale": "de DE"}, {"languages": "de-DE"}, {"languages": []}],
+)
+def test_serve_args_reject_bad_locale_overrides(kw):
+    with pytest.raises(ValueError):
+        build_serve_args("lb", **kw)
+
+
 def test_serve_args_never_choose_a_bind_address():
     # The server binds 127.0.0.1 itself; the SDK has no way to pass another host.
     assert "--host" not in build_serve_args("lb", port=1)

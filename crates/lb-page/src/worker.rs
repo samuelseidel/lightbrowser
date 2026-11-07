@@ -8,7 +8,9 @@
 //! Requests go through the creating context's network stack and cookie
 //! jar ([`BrowserContext::fetch`]); `importScripts` blocks the worker
 //! thread on a helper thread's runtime. Shared workers are kept per
-//! context by (script URL, name) and end with the context.
+//! context by (script URL, name, storage key) and end with the context.
+//! A worker scope has its creator's storage key (a service worker: its
+//! registration's), ADR 0037.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -60,7 +62,14 @@ impl WorkerHost for Workers {
         let Some(ctx) = self.ctx.upgrade() else {
             return;
         };
-        let key = (start.url.to_string(), start.name.clone());
+        // Chrome matches a shared worker by URL, name and the creator's
+        // storage key (a third-party frame gets its own, ADR 0037).
+        let partition = start
+            .storage_key
+            .as_ref()
+            .map(|k| k.serialize())
+            .unwrap_or_default();
+        let key = (start.url.to_string(), start.name.clone(), partition);
         let mut reg = ctx
             .shared_workers()
             .lock()
@@ -113,6 +122,16 @@ impl lb_webapi::host::NetHost for WorkerNet {
             let Some(a) = agent else {
                 return ctx.fetch(req).await;
             };
+            // A CDP `acceptLanguage` override of the worker (ADR 0039).
+            let mut req = req;
+            if let Some(al) = a.accept_language_header()
+                && !req
+                    .headers
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case("accept-language"))
+            {
+                req.headers.push(("Accept-Language".into(), al));
+            }
             let empty = req.destination == Destination::Empty;
             let id = a.request_started(&req);
             let r = ctx.fetch(req).await;
@@ -136,6 +155,15 @@ impl lb_webapi::host::NetHost for WorkerNet {
     }
     fn websocket(&self, open: lb_webapi::host::WsOpen) -> Option<lb_webapi::host::WsChannels> {
         crate::context::open_websocket(&self.ctx.upgrade()?, open)
+    }
+    fn with_intl(&self, f: &mut dyn FnMut(&str, &str)) -> bool {
+        self.ctx
+            .upgrade()
+            .and_then(|c| c.with_intl(|z, l| f(z, l)))
+            .is_some()
+    }
+    fn languages_override(&self) -> Option<Vec<String>> {
+        self.agent.as_ref()?.languages_override()
     }
 }
 
@@ -201,7 +229,10 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
         control,
         parent,
         service,
+        storage_key,
+        csp,
     } = start;
+    let storage_key = storage_key.unwrap_or_else(|| lb_webapi::host::StorageKey::first_party(&url));
     if control.is_terminated() {
         return Ok(());
     }
@@ -228,6 +259,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
         None => {
             let mut req = NetRequest::get(url.clone(), Destination::Script, Some(creator.clone()));
             req.mode = if module { "cors" } else { "same-origin" };
+            req.storage_key = Some(storage_key.clone());
             match ctx.fetch(req).await {
                 Ok(r) if (200..300).contains(&r.status) => {
                     let t = lb_webapi::rt::script::script_source(&r.body, r.header("content-type"));
@@ -306,6 +338,17 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
             history_len: 0,
         },
     );
+    w.set_storage_key(storage_key.clone());
+    // Content Security Policy (ADR 0036): `blob:` and `data:` workers
+    // inherit their creator's; others take their script response's.
+    if let Some((list, bypass)) = csp {
+        w.set_csp_bypass(bypass);
+        if matches!(url.scheme(), "blob" | "data") {
+            w.set_csp_policies(list, 0);
+        } else if let Some(r) = &script_resp {
+            w.csp_deliver(&r.headers, r.status);
+        }
+    }
     w.set_worker_scope(ScopeInit {
         kind,
         name,
@@ -322,7 +365,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
         let a = a.clone();
         w.set_console_sink(Some(Rc::new(move |m| a.console(m))));
     }
-    w.set_sw_host(Some(crate::sw::host(&ctx)));
+    w.set_sw_host(Some(crate::sw::host(&ctx, &storage_key)));
     w.set_idb_backend(Some(ctx.idb().clone()));
     let sw_version = service.as_ref().map(|s| s.version);
     let evaluated = service.map(|s| {
@@ -333,6 +376,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
         .create_worker_realm(&mut engine, &bindings)
         .map_err(|e| e.to_string())?;
     control.set_isolate(engine.terminate_handle());
+    w.csp_apply_codegen(&mut engine);
     w.attach_inbox(inbox, inbox_rx);
     if evaluated.is_some() {
         w.sw_list();

@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use lb_dom::{Document, NodeFlags, NodeId, ParseStep, local_name};
 use lb_js::{JsErrorKind, ScriptOrigin};
+use lb_webapi::host::StorageKey;
 use lb_webapi::host::{Destination, NetRequest, NetResponse, decode_text};
 use lb_webapi::rt::script::{self, ScriptKind};
 use lb_webapi::rt::{
@@ -50,6 +51,16 @@ impl lb_webapi::host::NetHost for PageNet {
     fn set_cookie_string(&self, url: &Url, cookie: &str) {
         self.ctx.cookies().set_document_cookie(url, cookie);
     }
+    fn cookie_string_in(&self, url: &Url, key: &StorageKey) -> String {
+        self.ctx
+            .cookies()
+            .document_cookie_in(url, &crate::context::cookie_scope(key))
+    }
+    fn set_cookie_string_in(&self, url: &Url, cookie: &str, key: &StorageKey) {
+        self.ctx
+            .cookies()
+            .set_document_cookie_in(url, cookie, &crate::context::cookie_scope(key));
+    }
     fn websocket(&self, open: lb_webapi::host::WsOpen) -> Option<lb_webapi::host::WsChannels> {
         crate::context::open_websocket(&self.ctx, open)
     }
@@ -57,6 +68,15 @@ impl lb_webapi::host::NetHost for PageNet {
         if let Some(p) = self.page.upgrade() {
             crate::cdp::net::report_sw_answer(&p, req, r, None);
         }
+    }
+    fn with_intl(&self, f: &mut dyn FnMut(&str, &str)) -> bool {
+        self.ctx.with_intl(|z, l| f(z, l)).is_some()
+    }
+    fn languages_override(&self) -> Option<Vec<String>> {
+        self.page.upgrade()?.agent()?.languages_override()
+    }
+    fn geolocation(&self) -> Option<lb_webapi::host::GeoAnswer> {
+        self.page.upgrade()?.agent()?.geolocation()
     }
 }
 
@@ -189,7 +209,7 @@ pub(crate) async fn navigate_committed(
     let reload = page.reloading.replace(false);
     // The service worker controlling the URL (ADR 0022) and the new
     // document's client id (`resultingClientId`).
-    let sw = crate::sw::navigation_controller(&page.ctx, &url);
+    let sw = crate::sw::navigation_controller(&page.ctx, &url, &StorageKey::first_party(&url));
     let reserved = lb_webapi::rt::sw::uuid4();
 
     // Fetch (about:blank needs none).
@@ -283,21 +303,21 @@ pub(crate) async fn navigate_committed(
         .unwrap_or("text/html")
         .trim()
         .to_ascii_lowercase();
+    // A top-level document is first-party (ADR 0037).
+    let key = StorageKey::first_party(&resp.url);
     let w = Window::new(
         &rt,
         WindowInit {
             url: resp.url.clone(),
             persona: page.ctx.persona().clone(),
-            profile: page.ctx.profile().cloned(),
+            // The persona with the CDP time zone / locale overrides (ADR 0039).
+            profile: page.ctx.effective_profile(),
             net: Rc::new(PageNet {
                 ctx: page.ctx.clone(),
                 page: Rc::downgrade(&page),
             }),
-            local_storage: page
-                .ctx
-                .local_storage()
-                .area(&resp.url.origin().ascii_serialization()),
-            session_storage: page.session_area(&resp.url),
+            local_storage: page.ctx.local_storage().area(&key.serialize()),
+            session_storage: page.session_area(&key),
             virtual_time: page.ctx.options().virtual_time,
             wake: page.waker(),
             referrer: initiator
@@ -309,13 +329,20 @@ pub(crate) async fn navigate_committed(
             history_len: page.history_len(),
         },
     );
+    w.set_storage_key(key.clone());
     w.set_console_sink(Some(page.console_sink()));
     w.set_worker_host(Some(crate::worker::Workers::host(
         &page.ctx,
         page.agent().map(|a| a.target.clone()),
     )));
-    w.set_sw_host(Some(crate::sw::host(&page.ctx)));
+    w.set_sw_host(Some(crate::sw::host(&page.ctx, &key)));
     w.set_idb_backend(Some(page.ctx.idb().clone()));
+    // Content Security Policy (ADR 0036): the response's policies, unless
+    // CDP `Page.setBypassCSP` turned them off for this page.
+    w.set_csp_bypass(page.bypass_csp.get());
+    if url.scheme() != "about" {
+        w.csp_deliver(&resp.headers, resp.status);
+    }
     let controller = sw.map(|(v, _)| v);
     w.init_sw_client(Some(reserved), false, controller.clone());
     if let (Some(v), Some(h)) = (&controller, w.sw_host()) {
@@ -334,6 +361,7 @@ pub(crate) async fn navigate_committed(
         }
     };
     let _ = realm;
+    ws.with_engine(|e| w.csp_apply_codegen(e));
     crate::frames::install(&ws, &page, &w);
     w.start_parser();
     *page.window.borrow_mut() = Some(w.clone());
@@ -535,6 +563,7 @@ pub(crate) async fn load(
     text: &str,
 ) -> Result<(), PageError> {
     let chunks = split_chunks(text);
+    w.csp_set_doc_lines(text.lines().count());
     let mut next = 0;
     let mut deferred: Vec<Deferred> = Vec::new();
     if chunks.is_empty() {
@@ -793,6 +822,47 @@ async fn parser_script(
     let src = script::script_src(w, n);
     let (is_async, is_defer) = script::script_flags(w, n);
     let line = w.parser_script_line(n).unwrap_or(1).saturating_sub(1) as u32;
+    // Content Security Policy (ADR 0036): `script-src-elem` for the URL
+    // or the inline text. Blocked external scripts are not requested.
+    let nonce = w.csp_nonce(n);
+    let csp_ok = match &src {
+        None => {
+            let text = script::inline_text(w, n);
+            let loc = lb_webapi::rt::csp::SourceLoc {
+                url: w.url().to_string(),
+                line: line + 1,
+                column: 0,
+            };
+            w.csp_inline(
+                lb_webapi::rt::csp::Inline::Script,
+                Some(n),
+                &text,
+                &nonce,
+                true,
+                Some(loc),
+            )
+        }
+        Some(Some(u)) => {
+            let check = lb_webapi::rt::csp::UrlCheck {
+                nonce: &nonce,
+                parser_inserted: true,
+                ..Default::default()
+            };
+            let loc = w.csp_written_loc(n);
+            w.csp_url(lb_webapi::rt::csp::Dir::ScriptSrcElem, u, &check, loc)
+        }
+        Some(None) => true,
+    };
+    if !csp_ok {
+        if src.is_some() {
+            let w2 = w.clone();
+            w.queue_task(
+                TaskSource::DomManipulation,
+                Box::new(move |js, _| script::fire_error(js, &w2, n)),
+            );
+        }
+        return Ok(());
+    }
     match (kind, src) {
         (ScriptKind::Classic, None) => {
             let waited = w.script_blocking_sheets() > 0;
@@ -896,6 +966,15 @@ async fn run_module(
                 continue;
             };
             if w.module_map.borrow().contains_key(dep.as_str()) || fetched > 256 {
+                continue;
+            }
+            // Content Security Policy: imports are not parser-inserted.
+            if !w.csp_url(
+                lb_webapi::rt::csp::Dir::ScriptSrcElem,
+                &dep,
+                &lb_webapi::rt::csp::UrlCheck::default(),
+                None,
+            ) {
                 continue;
             }
             fetched += 1;

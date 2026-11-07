@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>createImageBitmap errors</title>
+<body>
+<script>
+// createImageBitmap rejects (never throws) with Chrome's errors; bitmaps
+// resolve later. transferToImageBitmap of a WebGL OffscreenCanvas clears it.
+const L = [];
+const err = (e) => e && e.name ? `${e.name}: ${e.message}` : String(e);
+const c = document.createElement('canvas'); c.width = 4; c.height = 4;
+for (const [k, f] of [['none', () => createImageBitmap()], ['num', () => createImageBitmap(1)], ['three', () => createImageBitmap(c, 0, 0)], ['two_num', () => createImageBitmap(c, 5)], ['opt_str', () => createImageBitmap(c, 'x')], ['opt_null', () => createImageBitmap(c, null)], ['sw0', () => createImageBitmap(c, 0, 0, 0, 1)], ['nan', () => createImageBitmap(c, NaN, 0, 2, 2)], ['big', () => createImageBitmap(c, 0, 0, 1e10, 2)], ['rw_neg', () => createImageBitmap(c, { resizeWidth: -1 })], ['flip', () => createImageBitmap(c, { imageOrientation: 'x' })], ['premul', () => createImageBitmap(c, { premultiplyAlpha: 'x' })], ['csc', () => createImageBitmap(c, { colorSpaceConversion: 'x' })], ['zh', () => { const z = document.createElement('canvas'); z.width = 3; z.height = 0; return createImageBitmap(z); }], ['unloaded', () => { const i = new Image(); i.src = 'data:image/png;base64,iVBORw0KGgo='; return createImageBitmap(i); }], ['oc_noctx', () => createImageBitmap(new OffscreenCanvas(3, 3))]]) {
+  try { const p = f(); L.push(k + ' returned ' + Object.prototype.toString.call(p)); p.then((b) => L.push(k + ' resolved ' + b.width + 'x' + b.height), (e) => L.push(k + ' rejected ' + err(e))); } catch (e) { L.push(k + ' threw ' + err(e)); }
+}
+const t = new OffscreenCanvas(3, 2); const g = t.getContext('webgl'); g.clearColor(1, 0, 0, 1); g.clear(g.COLOR_BUFFER_BIT);
+try { const b = t.transferToImageBitmap(); const k = document.createElement('canvas').getContext('2d'); k.drawImage(b, 0, 0); L.push('gl transfer ' + b.width + 'x' + b.height + ' ' + Array.from(k.getImageData(0, 0, 1, 1).data)); const px = new Uint8Array(4); g.readPixels(0, 0, 1, 1, g.RGBA, g.UNSIGNED_BYTE, px); L.push('gl after ' + Array.from(px)); } catch (e) { L.push('gl transfer ' + err(e)); }
+setTimeout(() => L.push('end'), 300);
+</script>

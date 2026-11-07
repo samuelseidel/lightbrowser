@@ -189,7 +189,16 @@ async fn load_graph(w: &Weak<Window>, top: &Url) -> Result<Vec<(String, String)>
 async fn fetch_module(w: &Weak<Window>, u: &Url) -> Result<NetResponse, ()> {
     let fut = {
         let Some(w) = w.upgrade() else { return Err(()) };
-        if let Some(r) = super::net::local_response("GET", u, &[]) {
+        // Content Security Policy (`script-src-elem`, not parser-inserted).
+        if !w.csp_url(
+            super::csp::Dir::ScriptSrcElem,
+            u,
+            &super::csp::UrlCheck::default(),
+            None,
+        ) {
+            return Err(());
+        }
+        if let Some(r) = super::net::local_response("GET", u, &[], &w.storage_key_string()) {
             return r.map_err(|_| ());
         }
         let mut req = NetRequest::get(u.clone(), Destination::Script, Some(w.url()));

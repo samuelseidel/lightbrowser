@@ -19,6 +19,11 @@
 //!   clients unless `skipWaiting()` was called.
 //! - **Fetch**: a controlled client's request waits until its version is
 //!   activated, then becomes a `fetch` event (no fetch handler: network).
+//! - **Partitions** (ADR 0037): registrations, clients, ready waiters and
+//!   caches carry a storage key. Each window's [`SwHostImpl`] is bound to
+//!   its key, so a third-party frame registers, matches and lists only
+//!   its partition's registrations, and a service worker runs with its
+//!   registration's key.
 //! - Nothing touches disk; versions end with their context.
 
 use std::collections::HashMap;
@@ -26,6 +31,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use lb_webapi::host::StorageKey;
 use lb_webapi::host::{Destination, LocalFuture, NetRequest};
 use lb_webapi::rt::sw::{
     self as s, CacheStorageRef, ClientInfo, ClientReg, FetchOutcome, RegInfo, Reply, ServiceStart,
@@ -84,12 +90,17 @@ struct Registry {
     versions: HashMap<u64, Version>,
     clients: Vec<Client>,
     next: u64,
-    ready: Vec<(Url, Reply<RegInfo>)>,
+    /// `ready` waiters: client URL, serialized storage key.
+    ready: Vec<(Url, String, Reply<RegInfo>)>,
+    /// By serialized storage key.
     caches: HashMap<String, CacheStorageRef>,
 }
 
 struct Reg {
     id: u64,
+    /// The registering client's storage key, and its serialization.
+    key: StorageKey,
+    skey: String,
     scope: Url,
     update_via_cache: String,
     installing: Option<u64>,
@@ -101,10 +112,6 @@ struct Reg {
 impl Reg {
     fn newest(&self) -> Option<u64> {
         self.installing.or(self.waiting).or(self.active)
-    }
-
-    fn origin(&self) -> String {
-        self.scope.origin().ascii_serialization()
     }
 }
 
@@ -127,6 +134,8 @@ struct Version {
 struct Client {
     info: ClientInfo,
     origin: String,
+    /// Serialized storage key.
+    key: String,
     inbox: Inbox,
     controller: Option<u64>,
     is_window: bool,
@@ -135,6 +144,15 @@ struct Client {
 impl SwShared {
     fn lock(&self) -> MutexGuard<'_, Registry> {
         self.st.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The inboxes of the running versions (ADR 0039: ICU changes).
+    pub(crate) fn inboxes(&self) -> Vec<lb_webapi::rt::Inbox> {
+        self.lock()
+            .versions
+            .values()
+            .filter_map(|v| v.inbox.clone())
+            .collect()
     }
 
     /// End every version (the context is going away).
@@ -181,20 +199,21 @@ impl Registry {
     }
 
     /// "Match Service Worker Registration": the longest scope that is a
-    /// prefix of `url`.
-    fn reg_for(&self, url: &Url) -> Option<&Reg> {
+    /// prefix of `url`, in the partition with serialized key `key`.
+    fn reg_for(&self, url: &Url, key: &str) -> Option<&Reg> {
         let mut u = url.clone();
         u.set_fragment(None);
         let s = u.as_str();
         self.regs
             .iter()
-            .filter(|r| !r.uninstalling && s.starts_with(r.scope.as_str()))
+            .filter(|r| !r.uninstalling && r.skey == key && s.starts_with(r.scope.as_str()))
             .max_by_key(|r| r.scope.as_str().len())
     }
 
-    /// Send `mk()` to every listed window and scope of `origin`.
-    fn broadcast(&self, origin: &str, mk: impl Fn() -> RemoteTask) {
-        for c in self.clients.iter().filter(|c| c.origin == origin) {
+    /// Send `mk()` to every listed window and scope with serialized
+    /// storage key `key`.
+    fn broadcast(&self, key: &str, mk: impl Fn() -> RemoteTask) {
+        for c in self.clients.iter().filter(|c| c.key == key) {
             c.inbox.send(mk());
         }
     }
@@ -202,7 +221,7 @@ impl Registry {
     fn reg_state(&self, id: u64) {
         if let Some(r) = self.reg(id) {
             let info = self.rinfo(r);
-            self.broadcast(&r.origin(), || s::reg_state_task(info.clone()));
+            self.broadcast(&r.skey, || s::reg_state_task(info.clone()));
         }
     }
 
@@ -216,9 +235,10 @@ impl Registry {
         {
             c.terminate();
         }
-        let origin = v.script_url.origin().ascii_serialization();
+        let reg = v.reg;
+        let key = self.reg(reg).map(|r| r.skey.clone()).unwrap_or_default();
         if let Some(info) = self.vinfo(vid) {
-            self.broadcast(&origin, || s::worker_state_task(info.clone()));
+            self.broadcast(&key, || s::worker_state_task(info.clone()));
         }
     }
 
@@ -247,28 +267,34 @@ impl Registry {
     /// active worker.
     fn wake_ready(&mut self, id: u64) {
         let waiters = std::mem::take(&mut self.ready);
-        for (url, reply) in waiters {
+        for (url, key, reply) in waiters {
             let hit = self
-                .reg_for(&url)
+                .reg_for(&url, &key)
                 .filter(|r| r.id == id && r.active.is_some())
                 .map(|r| self.rinfo(r));
             match hit {
                 Some(info) => reply(info),
-                None => self.ready.push((url, reply)),
+                None => self.ready.push((url, key, reply)),
             }
         }
     }
 }
 
-/// The [`SwHost`] of a context's windows and service worker scopes.
+/// The [`SwHost`] of a context's windows and service worker scopes, for
+/// one storage key.
 pub(crate) struct SwHostImpl {
     ctx: WeakContext,
+    key: StorageKey,
+    skey: String,
 }
 
-/// The registry host for windows and scopes of `ctx`.
-pub(crate) fn host(ctx: &BrowserContext) -> Rc<dyn SwHost> {
+/// The registry host for windows and scopes of `ctx` with storage key
+/// `key` (ADR 0037).
+pub(crate) fn host(ctx: &BrowserContext, key: &StorageKey) -> Rc<dyn SwHost> {
     Rc::new(SwHostImpl {
         ctx: ctx.downgrade(),
+        key: key.clone(),
+        skey: key.serialize(),
     })
 }
 
@@ -290,6 +316,7 @@ impl SwHost for SwHostImpl {
         st.clients.push(Client {
             info: c.info,
             origin: c.origin,
+            key: self.skey.clone(),
             inbox: c.inbox,
             controller: c.controller,
             is_window: c.is_window,
@@ -335,8 +362,9 @@ impl SwHost for SwHostImpl {
         let Some(ctx) = self.ctx.upgrade() else {
             return;
         };
+        let key = self.key.clone();
         tokio::task::spawn_local(async move {
-            job_register(ctx, client, script, scope, update_via_cache, reply).await;
+            job_register(ctx, key, client, script, scope, update_via_cache, reply).await;
         });
     }
 
@@ -383,7 +411,7 @@ impl SwHost for SwHostImpl {
     fn registration_for(&self, url: &Url) -> Option<RegInfo> {
         let sh = self.shared()?;
         let st = lock(&sh);
-        st.reg_for(url).map(|r| st.rinfo(r))
+        st.reg_for(url, &self.skey).map(|r| st.rinfo(r))
     }
 
     fn registrations(&self, origin: &str) -> Vec<RegInfo> {
@@ -393,7 +421,7 @@ impl SwHost for SwHostImpl {
         let st = lock(&sh);
         st.regs
             .iter()
-            .filter(|r| !r.uninstalling && r.origin() == origin)
+            .filter(|r| !r.uninstalling && r.skey == self.skey && r.key.origin == origin)
             .map(|r| st.rinfo(r))
             .collect()
     }
@@ -411,15 +439,19 @@ impl SwHost for SwHostImpl {
     }
 
     fn has_registrations(&self, origin: &str) -> bool {
-        self.shared()
-            .is_some_and(|sh| lock(&sh).regs.iter().any(|r| r.origin() == origin))
+        self.shared().is_some_and(|sh| {
+            lock(&sh)
+                .regs
+                .iter()
+                .any(|r| r.skey == self.skey && r.key.origin == origin)
+        })
     }
 
     fn when_ready(&self, url: Url, reply: Reply<RegInfo>) {
         let Some(sh) = self.shared() else { return };
         let mut st = lock(&sh);
         let hit = st
-            .reg_for(&url)
+            .reg_for(&url, &self.skey)
             .filter(|r| r.active.is_some())
             .map(|r| st.rinfo(r));
         match hit {
@@ -427,7 +459,7 @@ impl SwHost for SwHostImpl {
                 drop(st);
                 reply(info);
             }
-            None => st.ready.push((url, reply)),
+            None => st.ready.push((url, self.skey.clone(), reply)),
         }
     }
 
@@ -494,7 +526,7 @@ impl SwHost for SwHostImpl {
                 let c = &st.clients[i];
                 c.is_window
                     && c.controller != Some(version)
-                    && st.reg_for(&c.info.url).is_some_and(|r| r.id == reg)
+                    && st.reg_for(&c.info.url, &c.key).is_some_and(|r| r.id == reg)
             })
             .collect();
         for i in targets {
@@ -512,10 +544,11 @@ impl SwHost for SwHostImpl {
             return Vec::new();
         };
         let st = lock(&sh);
-        let Some(origin) = st
+        let Some(key) = st
             .versions
             .get(&version)
-            .map(|v| v.script_url.origin().ascii_serialization())
+            .and_then(|v| st.reg(v.reg))
+            .map(|r| r.skey.clone())
         else {
             return Vec::new();
         };
@@ -523,7 +556,7 @@ impl SwHost for SwHostImpl {
             .iter()
             .filter(|c| {
                 c.is_window
-                    && c.origin == origin
+                    && c.key == key
                     && (include_uncontrolled || c.controller == Some(version))
             })
             .map(|c| c.info.clone())
@@ -539,13 +572,9 @@ impl SwHost for SwHostImpl {
             .map(|c| (c.info.clone(), c.origin.clone(), c.inbox.clone()))
     }
 
-    fn caches(&self, origin: &str) -> CacheStorageRef {
+    fn caches(&self, key: &str) -> CacheStorageRef {
         match self.shared() {
-            Some(sh) => lock(&sh)
-                .caches
-                .entry(origin.to_owned())
-                .or_default()
-                .clone(),
+            Some(sh) => lock(&sh).caches.entry(key.to_owned()).or_default().clone(),
             None => CacheStorageRef::default(),
         }
     }
@@ -704,17 +733,19 @@ pub(crate) fn scope_of(ctx: &BrowserContext, reg: u64) -> Option<String> {
         .map(|r| r.scope.to_string())
 }
 
-/// The controller of a navigation to `url` (the matching registration's
-/// active worker, activating or activated) and whether it handles fetch.
+/// The controller of a navigation to `url` by a document that will have
+/// storage key `key` (the matching registration's active worker,
+/// activating or activated) and whether it handles fetch.
 pub(crate) fn navigation_controller(
     ctx: &BrowserContext,
     url: &Url,
+    key: &StorageKey,
 ) -> Option<(VersionInfo, bool)> {
     if !matches!(url.scheme(), "http" | "https") {
         return None;
     }
     let st = lock(ctx.service_workers());
-    let r = st.reg_for(url)?;
+    let r = st.reg_for(url, &key.serialize())?;
     let vid = r.active?;
     let v = st.versions.get(&vid)?;
     matches!(v.state, SwState::Activating | SwState::Activated)
@@ -737,6 +768,7 @@ pub(crate) async fn navigation_fetch(
 
 async fn job_register(
     ctx: BrowserContext,
+    key: StorageKey,
     client: ClientInfo,
     script: Url,
     scope: Url,
@@ -747,10 +779,11 @@ async fn job_register(
     let _job = sh.jobs.lock().await;
     let (reg, created) = {
         let mut st = lock(&sh);
+        let skey = key.serialize();
         let found = st
             .regs
             .iter()
-            .find(|r| r.scope == scope && !r.uninstalling)
+            .find(|r| r.scope == scope && r.skey == skey && !r.uninstalling)
             .map(|r| (r.id, r.newest(), r.update_via_cache.clone()));
         match found {
             Some((id, newest, old_uvc)) => {
@@ -775,6 +808,8 @@ async fn job_register(
                 let id = st.next;
                 st.regs.push(Reg {
                     id,
+                    key: key.clone(),
+                    skey,
                     scope: scope.clone(),
                     update_via_cache: uvc,
                     installing: None,
@@ -1019,10 +1054,14 @@ fn start_version(
     let (tx, rx) = oneshot::channel();
     let (inbox, inbox_rx) = lb_webapi::rt::worker::inbox();
     let control = WorkerControl::new(inbox.clone());
-    if let Some(v) = lock(sh).versions.get_mut(&vid) {
-        v.inbox = Some(inbox.clone());
-        v.control = Some(control.clone());
-    }
+    let key = {
+        let mut st = lock(sh);
+        if let Some(v) = st.versions.get_mut(&vid) {
+            v.inbox = Some(inbox.clone());
+            v.control = Some(control.clone());
+        }
+        st.reg(reg).map(|r| r.key.clone())
+    };
     let start = WorkerStart {
         kind: WorkerKind::Service,
         url: script.clone(),
@@ -1032,7 +1071,8 @@ fn start_version(
         origin: script.origin().ascii_serialization(),
         creator: creator.clone(),
         persona: ctx.persona().clone(),
-        profile: ctx.profile().cloned(),
+        // With the CDP time zone / locale overrides (ADR 0039).
+        profile: ctx.effective_profile(),
         virtual_time: ctx.options().virtual_time,
         inbox,
         inbox_rx,
@@ -1045,6 +1085,8 @@ fn start_version(
                 let _ = tx.send(r);
             }),
         }),
+        storage_key: key,
+        csp: None,
     };
     crate::worker::spawn(ctx.clone(), start, crate::worker::Inspect::Yes(None));
     rx
@@ -1091,7 +1133,7 @@ async fn install(
         let mut st = lock(sh);
         let Some(r) = st.reg_mut(reg) else { return };
         let old = r.installing.replace(vid);
-        let origin = r.origin();
+        let origin = r.skey.clone();
         st.reg_state(reg);
         if let Some(old) = old {
             st.set_state(old, SwState::Redundant);

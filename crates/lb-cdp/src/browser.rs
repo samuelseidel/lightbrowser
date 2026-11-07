@@ -27,6 +27,8 @@ use crate::protocol::{self, CdpError, Command, params};
 use crate::server::Outgoing;
 use crate::types::*;
 
+mod overrides;
+
 pub(crate) type ConnId = u64;
 
 /// Key of a connection's root session (messages without `sessionId`).
@@ -112,6 +114,9 @@ pub(crate) struct State {
     pub sessions: HashMap<String, Session>,
     pub exec: HashMap<TargetId, Vec<ExecutionContext>>,
     pub next_conn: ConnId,
+    /// Time zone, locale, `acceptLanguage` and geolocation overrides
+    /// (ADR 0039).
+    pub overrides: overrides::Overrides,
 }
 
 impl State {
@@ -232,6 +237,7 @@ impl<H: PageHost + 'static> Shared<H> {
     /// Drops a connection's sessions and the contexts it asked to dispose
     /// on detach.
     pub fn close_conn(&self, conn: ConnId) {
+        let mut released = Vec::new();
         let (owned, mut workers): (Vec<BrowserContextId>, Vec<TargetId>) = {
             let mut st = self.state.borrow_mut();
             st.conns.remove(&conn);
@@ -242,6 +248,9 @@ impl<H: PageHost + 'static> Shared<H> {
                 .map(|(k, _)| k.clone())
                 .collect();
             st.sessions.retain(|_, s| s.conn != conn);
+            for g in &gone {
+                released.push(st.overrides.release_session(g));
+            }
             // Workers waiting for these sessions run now; every worker's
             // session count is reported again.
             let workers: Vec<TargetId> = st
@@ -261,6 +270,9 @@ impl<H: PageHost + 'static> Shared<H> {
                 .collect();
             (owned, workers)
         };
+        for r in released {
+            r.apply(&*self.host);
+        }
         for w in workers.drain(..) {
             self.count_worker_sessions(&w);
             self.maybe_resume(&w);
@@ -495,6 +507,8 @@ impl<H: PageHost + 'static> Shared<H> {
 
     fn detach_session(&self, sid: &str) {
         let removed = self.state.borrow_mut().sessions.remove(sid);
+        let released = self.state.borrow_mut().overrides.release_session(sid);
+        released.apply(&*self.host);
         if let Some(s) = removed
             && let (Some(parent), Some(target)) = (s.parent, s.target)
         {
@@ -699,16 +713,20 @@ impl<H: PageHost + 'static> Shared<H> {
         for sid in sessions {
             self.detach_session(&sid);
         }
-        let discover: Vec<String> = {
+        let (discover, released): (Vec<String>, _) = {
             let mut st = self.state.borrow_mut();
             st.targets.retain(|t| t.info.target_id != id);
+            let released = st.overrides.release_target(id);
             st.exec.remove(id);
-            st.sessions
+            let discover = st
+                .sessions
                 .iter()
                 .filter(|(_, s)| s.discover)
                 .map(|(k, _)| k.clone())
-                .collect()
+                .collect();
+            (discover, released)
         };
+        released.apply(&*self.host);
         for key in discover {
             self.queue_event(&key, "Target.targetDestroyed", json!({ "targetId": id }));
         }
@@ -1577,6 +1595,11 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
             c.sh.close_target(&t)?;
             Ok(json!({}))
         }
+        "Page.setBypassCSP" => {
+            host.set_bypass_csp(&t, bool_param(c.p, "enabled"))
+                .map_err(host_err)?;
+            Ok(json!({}))
+        }
         "Page.captureScreenshot" => {
             let data = host.capture_screenshot(&t, c.p).map_err(host_err)?;
             Ok(json!({ "data": data }))
@@ -1943,6 +1966,9 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
         }
         "Network.setUserAgentOverride" => {
             emulation::check_user_agent(&c.persona(), &params(c.p)?)?;
+            if let Some(t) = c.target.clone() {
+                overrides::set_accept_language(c, &t)?;
+            }
             Ok(json!({}))
         }
         _ => Err(CdpError::method_not_found(c.method)),
@@ -2025,14 +2051,12 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
                 ts.viewport = None;
             }
         }
-        "Emulation.setUserAgentOverride" => emulation::check_user_agent(&persona, &params(c.p)?)?,
-        "Emulation.setTimezoneOverride" => emulation::check_timezone(
-            &persona,
-            c.p.get("timezoneId").and_then(Value::as_str).unwrap_or(""),
-        )?,
-        "Emulation.setLocaleOverride" => {
-            emulation::check_locale(&persona, c.p.get("locale").and_then(Value::as_str))?
+        "Emulation.setUserAgentOverride" => {
+            emulation::check_user_agent(&persona, &params(c.p)?)?;
+            overrides::set_accept_language(c, &t)?;
         }
+        "Emulation.setTimezoneOverride" => overrides::set_time_zone(c)?,
+        "Emulation.setLocaleOverride" => overrides::set_locale(c)?,
         "Emulation.setFocusEmulationEnabled" => host
             .set_focus_emulation(&t, bool_param(c.p, "enabled"))
             .map_err(host_err)?,
@@ -2065,13 +2089,8 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
             host.set_default_background_color(&t, color)
                 .map_err(host_err)?;
         }
-        "Emulation.setGeolocationOverride" => {
-            if c.p.get("latitude").is_some() || c.p.get("longitude").is_some() {
-                return Err(CdpError::server(
-                    "Emulation.setGeolocationOverride: the persona has no geolocation; only clearing is accepted",
-                ));
-            }
-        }
+        "Emulation.setGeolocationOverride" => overrides::set_geolocation(c, false)?,
+        "Emulation.clearGeolocationOverride" => overrides::set_geolocation(c, true)?,
         _ => return Err(CdpError::method_not_found(c.method)),
     }
     Ok(json!({}))

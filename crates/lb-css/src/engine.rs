@@ -103,6 +103,9 @@ pub struct StyleEngine {
     /// The document's base URL, for relative `url()`s in `<style>` and
     /// `style` attributes (link sheets come with absolute URLs).
     base_url: Option<url::Url>,
+    /// Inline styles used instead of `style` attributes Content Security
+    /// Policy blocked (`None`: no inline style).
+    inline_override: HashMap<NodeId, Option<String>>,
 }
 
 impl std::fmt::Debug for StyleEngine {
@@ -152,6 +155,7 @@ impl StyleEngine {
             epoch: 0,
             stats: StyleStats::default(),
             base_url: None,
+            inline_override: HashMap::new(),
         }
     }
 
@@ -187,6 +191,19 @@ impl StyleEngine {
     pub fn set_base_url(&mut self, base: Option<url::Url>) {
         if base != self.base_url {
             self.base_url = base;
+            self.invalidate();
+        }
+    }
+
+    /// Use `style` as `n`'s inline style instead of its `style` attribute
+    /// (a Content Security Policy blocked the attribute); `None` goes back
+    /// to the attribute.
+    pub fn set_inline_style_override(&mut self, n: NodeId, style: Option<Option<String>>) {
+        let changed = match style {
+            Some(s) => self.inline_override.insert(n, s.clone()) != Some(s),
+            None => self.inline_override.remove(&n).is_some(),
+        };
+        if changed {
             self.invalidate();
         }
     }
@@ -637,7 +654,11 @@ impl StyleEngine {
         if let Some(h) = presentational_hints(doc, id) {
             matched.push((RANK_HINT, 0, 0, Rc::new(h)));
         }
-        if let Some(style) = doc.get_attribute(id, "style")
+        let style = match self.inline_override.get(&id) {
+            Some(o) => o.as_deref(),
+            None => doc.get_attribute(id, "style"),
+        };
+        if let Some(style) = style
             && !style.is_empty()
         {
             matched.push((RANK_INLINE, 0, 0, Rc::new(DeclarationBlock::parse(style))));

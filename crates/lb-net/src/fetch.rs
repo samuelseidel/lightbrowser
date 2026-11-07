@@ -13,7 +13,7 @@ use url::Url;
 
 use crate::HttpVersion;
 use crate::client_hints::{self, ClientHintsStore, UaHint};
-use crate::cookies::CookieJar;
+use crate::cookies::{self, CookieJar, CookieScope, SameSiteContext};
 use crate::error::NetError;
 use crate::header_profile::{BuildInput, HeaderProfile, RequestKind, RequestMeta, Site};
 use crate::headers::{self, OrderedHeaders};
@@ -382,6 +382,11 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             if !matches!(next.scheme(), "http" | "https") {
                 return Err(NetError::UnsupportedScheme(next.scheme().to_owned()));
             }
+            if let Some(check) = &meta.redirect_check
+                && !(check.0)(&next)
+            {
+                return Err(NetError::BlockedByCsp(next.to_string()));
+            }
             redirects.push(RedirectHop {
                 url: req.url.clone(),
                 method: req.method.clone(),
@@ -471,6 +476,34 @@ async fn fetch_once(
     }
 }
 
+/// The cookie scope and same-site context of one hop (ADR 0037): a
+/// top-level navigation is first-party to its target (`Lax` when another
+/// site started it); other requests use the requester's scope.
+fn cookie_access(url: &Url, meta: &RequestMeta) -> (CookieScope, SameSiteContext) {
+    if meta.kind == RequestKind::Document {
+        let cross = meta
+            .initiator
+            .as_ref()
+            .is_some_and(|i| cookies::site(i) != cookies::site(url));
+        let ctx = if cross {
+            SameSiteContext::Lax
+        } else {
+            SameSiteContext::Strict
+        };
+        return (CookieScope::first_party(url), ctx);
+    }
+    let scope = meta.cookie_scope.clone().unwrap_or_else(|| {
+        CookieScope::first_party(
+            meta.top_frame
+                .as_ref()
+                .or(meta.initiator.as_ref())
+                .unwrap_or(url),
+        )
+    });
+    let ctx = scope.context(url);
+    (scope, ctx)
+}
+
 async fn fetch_once_inner(
     ctx: &mut NetContext,
     req: &Request,
@@ -498,10 +531,11 @@ async fn fetch_once_inner(
 
     // Final headers for this hop. The set depends on the HTTP version
     // (ALPN), so it is built once the version is known.
-    let cookie = ctx.cookies.header_for(&req.url);
+    let meta = req.meta.clone().unwrap_or_default();
+    let (cookie_scope, cookie_ctx) = cookie_access(&req.url, &meta);
+    let cookie = ctx.cookies.header_in(&req.url, &cookie_scope, cookie_ctx);
     let persona = Arc::clone(&ctx.persona);
     let header_profile = ctx.header_profile.clone();
-    let meta = req.meta.clone().unwrap_or_default();
     let proxy = ctx.proxy_for(&req.url);
     // An HTTP proxy gets `http:` requests in absolute form.
     let forward = proxy.as_ref().filter(|p| p.forwards(&req.url)).cloned();
@@ -601,7 +635,8 @@ async fn fetch_once_inner(
 
     let set_cookies = header_values(&raw.headers, "set-cookie");
     if !set_cookies.is_empty() {
-        ctx.cookies.store_response(&req.url, &set_cookies);
+        ctx.cookies
+            .store_response_in(&req.url, &set_cookies, &cookie_scope, cookie_ctx);
     }
 
     let encoding = header_values(&raw.headers, "content-encoding").join(",");

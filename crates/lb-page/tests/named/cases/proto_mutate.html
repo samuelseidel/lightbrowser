@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script src="prelude.js"></script></head>
+<body>
+<div id="d1"></div><div id="d2"></div><div id="d3"></div>
+<script>
+// Writes to the named properties object.
+attempt('sloppy delete WP.d1', () => delete WP.d1);
+attempt('strict delete WP.d1', () => { 'use strict'; return delete WP.d1; });
+log('d1 after delete', window.d1);
+attempt('Reflect.deleteProperty(WP, d1)', () => Reflect.deleteProperty(WP, 'd1'));
+attempt('Reflect.deleteProperty(WP, absent)', () => Reflect.deleteProperty(WP, 'absent'));
+attempt('defineProperty(WP, d2)', () => Object.defineProperty(WP, 'd2', { value: 1, configurable: true }));
+log('window.d2 after define', window.d2);
+attempt('Reflect.defineProperty(WP, d3)', () => Reflect.defineProperty(WP, 'd3', { value: 1, configurable: true }));
+attempt('defineProperty(WP, fresh)', () => Object.defineProperty(WP, 'fresh', { value: 1, configurable: true }));
+note('WP desc fresh', desc(Object.getOwnPropertyDescriptor(WP, 'fresh')));
+log('window.fresh', window.fresh);
+attempt('WP.assigned = 7', () => { WP.assigned = 7; return WP.hasOwnProperty('assigned'); });
+attempt('strict WP.d3 = 7', () => { 'use strict'; WP.d3 = 7; return WP.hasOwnProperty('d3'); });
+log('WP.d3', WP.d3);
+attempt('Reflect.setPrototypeOf(WP, same)', () => Reflect.setPrototypeOf(WP, EventTarget.prototype));
+attempt('Reflect.setPrototypeOf(WP, Object.prototype)', () => Reflect.setPrototypeOf(WP, Object.prototype));
+attempt('Object.setPrototypeOf(WP, null)', () => Object.setPrototypeOf(WP, null));
+log('WP proto after', Object.getPrototypeOf(WP) === EventTarget.prototype);
+attempt('Reflect.setPrototypeOf(Window.prototype, {})', () => Reflect.setPrototypeOf(Window.prototype, {}));
+attempt('Reflect.setPrototypeOf(EventTarget.prototype, {})', () => Reflect.setPrototypeOf(EventTarget.prototype, {}));
+attempt('Object.setPrototypeOf(EventTarget.prototype, null)', () => Object.setPrototypeOf(EventTarget.prototype, null));
+attempt('Reflect.setPrototypeOf(Node.prototype, {})', () => Reflect.setPrototypeOf(Node.prototype, Object.create(EventTarget.prototype)));
+attempt('Reflect.setPrototypeOf(window, {})', () => Reflect.setPrototypeOf(window, {}));
+attempt('Reflect.preventExtensions(WP)', () => Reflect.preventExtensions(WP));
+attempt('Object.preventExtensions(WP)', () => Object.preventExtensions(WP));
+log('extensible after', Object.isExtensible(WP));
+attempt('Object.freeze(WP)', () => Object.freeze(WP) === WP);
+L.push('end');
+</script>
+</body></html>

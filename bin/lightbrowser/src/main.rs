@@ -18,15 +18,19 @@ USAGE:
   lightbrowser serve [--port 9222] [--persona FILE] [--remote-allow-origins O]
                     [--profiles-dir DIR] [--insecure] [--workers N]
                     [--proxy URL] [--proxy-bypass-list LIST]
+                    [--timezone IANA] [--locale TAG] [--languages L]
                                             CDP server on 127.0.0.1 for Playwright
                                             connectOverCDP
   lightbrowser fetch <url> [OPTIONS]
   lightbrowser tcp-shim [--queue N] [--tcp-dir DIR] [--no-rules]   (Linux, root)
-  lightbrowser validate <persona.json>...   check v1/v2 personas against the
-                                            consistency rules (exit 1 on any
-                                            violation or load error)
+  lightbrowser validate [--timezone IANA] [--locale TAG] [--languages L]
+                    <persona.json>...       check v1/v2 personas (with these
+                                            overrides) against the consistency
+                                            rules (exit 1 on any violation or
+                                            load error)
   lightbrowser fingerprint-report [--persona P] [--url URL] [--profiles-dir DIR]
-                    [--insecure] [--timeout SECS]
+                    [--insecure] [--timeout SECS] [--timezone IANA] [--locale TAG]
+                    [--languages L]
                                             load URL (default about:blank),
                                             compare the live fingerprint
                                             surface with the persona, print
@@ -55,6 +59,14 @@ FETCH OPTIONS:
                          with their own proxyServer use theirs)
   --proxy-bypass-list L  Chrome's bypass rules (`*.a.com,10.0.0.0/8,<local>`);
                          loopback is never proxied unless L has <-loopback>
+  --timezone IANA        the persona's time zone (`Europe/Berlin`): match a
+                         proxy exit's location; also for `serve`, `validate`
+                         and `fingerprint-report` (ADR 0039)
+  --locale TAG           the persona's locale (`de-DE`): Intl's default,
+                         navigator.language(s) [TAG, its language] and
+                         Accept-Language (Chrome's q-values)
+  --languages L          navigator.languages and Accept-Language from the
+                         comma-separated list L (`de-DE,de,en-US,en`)
   -v, --verbose          print the status line and headers to stderr
 
 TCP-SHIM OPTIONS:
@@ -67,6 +79,49 @@ TCP-SHIM OPTIONS:
 
 Exit code: 0 on 2xx/3xx, 1 on other statuses or errors, 2 on bad usage.
 ";
+
+/// `--timezone`, `--locale` and `--languages` (ADR 0039): consume `flag`
+/// when it is one of them.
+fn parse_locale_flag(
+    o: &mut lb_persona::LocaleOverride,
+    flag: &str,
+    value: &mut dyn FnMut(&str) -> Result<String, String>,
+) -> Result<bool, String> {
+    match flag {
+        "--timezone" => o.timezone = Some(value("--timezone")?),
+        "--locale" => o.locale = Some(value("--locale")?),
+        "--languages" => {
+            o.languages = Some(
+                value("--languages")?
+                    .split(',')
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+            )
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// `p` with the operator's locale overrides; in the chrome build the zone
+/// must be one ICU knows (as Chrome's `Emulation.setTimezoneOverride`).
+fn apply_locale(
+    p: PersonaProfile,
+    o: &lb_persona::LocaleOverride,
+) -> Result<PersonaProfile, String> {
+    if o.is_empty() {
+        return Ok(p);
+    }
+    #[cfg(feature = "chrome")]
+    if let Some(tz) = &o.timezone
+        && !lb_js::set_process_time_zone(tz)
+    {
+        return Err(format!("--timezone: {tz:?} is not a time zone ICU knows"));
+    }
+    p.with_locale_override(o)
+        .map_err(|e| format!("--timezone/--locale: {e}"))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Dump {
@@ -88,6 +143,7 @@ struct FetchArgs {
     verbose: bool,
     proxy: Option<String>,
     proxy_bypass: Option<String>,
+    locale: lb_persona::LocaleOverride,
 }
 
 fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
@@ -104,6 +160,7 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
         verbose: false,
         proxy: None,
         proxy_bypass: None,
+        locale: Default::default(),
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -118,6 +175,9 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
                 .or_else(|| it.next().cloned())
                 .ok_or_else(|| format!("{name} needs a value"))
         };
+        if parse_locale_flag(&mut out.locale, flag, &mut value)? {
+            continue;
+        }
         match flag {
             "--dump" => {
                 out.dump = match value("--dump")?.as_str() {
@@ -283,7 +343,10 @@ fn find_profiles_dir(kind: &str) -> Option<PathBuf> {
 }
 
 fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
-    let full = Arc::new(select_persona(args.persona.as_deref())?);
+    let full = Arc::new(apply_locale(
+        select_persona(args.persona.as_deref())?,
+        &args.locale,
+    )?);
     let url = url::Url::parse(&args.url).map_err(|e| format!("invalid url {:?}: {e}", args.url))?;
 
     let dir = match &args.profiles_dir {
@@ -468,6 +531,7 @@ struct ReportArgs {
     profiles_dir: Option<PathBuf>,
     insecure: bool,
     timeout: u64,
+    locale: lb_persona::LocaleOverride,
 }
 
 fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
@@ -487,6 +551,9 @@ fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
                 .or_else(|| it.next().cloned())
                 .ok_or_else(|| format!("{name} needs a value"))
         };
+        if parse_locale_flag(&mut out.locale, flag, &mut value)? {
+            continue;
+        }
         match flag {
             "--persona" => out.persona = Some(value("--persona")?),
             "--url" => out.url = Some(value("--url")?),
@@ -508,7 +575,10 @@ fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
 #[cfg(feature = "chrome")]
 fn run_report(args: &ReportArgs) -> Result<bool, String> {
     use std::time::Duration;
-    let full = Arc::new(select_persona(args.persona.as_deref())?);
+    let full = Arc::new(apply_locale(
+        select_persona(args.persona.as_deref())?,
+        &args.locale,
+    )?);
     let url = args.url.clone().unwrap_or_else(|| "about:blank".into());
     let url = url::Url::parse(&url).map_err(|e| format!("invalid url {url:?}: {e}"))?;
     let dir = match &args.profiles_dir {
@@ -582,6 +652,7 @@ struct ServeArgs {
     workers: Option<usize>,
     proxy: Option<String>,
     proxy_bypass: Option<String>,
+    locale: lb_persona::LocaleOverride,
 }
 
 fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
@@ -595,6 +666,7 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
         workers: None,
         proxy: None,
         proxy_bypass: None,
+        locale: Default::default(),
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -608,6 +680,9 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
                 .or_else(|| it.next().cloned())
                 .ok_or_else(|| format!("{name} needs a value"))
         };
+        if parse_locale_flag(&mut out.locale, flag, &mut value)? {
+            continue;
+        }
         match flag {
             "--port" => {
                 out.port = value("--port")?
@@ -683,6 +758,7 @@ fn run_serve(args: &ServeArgs) -> Result<(), String> {
         (Some(path), true) => serve_unchecked_persona(path)?,
         (path, _) => serve_persona(path.as_deref())?,
     };
+    let persona = apply_locale(persona, &args.locale)?;
     let tls_dir = match &args.profiles_dir {
         Some(d) => d.clone(),
         None => find_profiles_dir("tls").ok_or(
@@ -753,12 +829,48 @@ fn serve_with(
     .map_err(|e| e.to_string())
 }
 
+/// `validate` arguments: persona files and the locale overrides.
+fn parse_validate_args(
+    args: &[String],
+) -> Result<(Vec<String>, lb_persona::LocaleOverride), String> {
+    let mut o = lb_persona::LocaleOverride::default();
+    let mut paths = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let (flag, inline) = match arg.split_once('=') {
+            Some((f, v)) if f.starts_with("--") => (f, Some(v.to_owned())),
+            _ => (arg.as_str(), None),
+        };
+        let mut value = |name: &str| {
+            inline
+                .clone()
+                .or_else(|| it.next().cloned())
+                .ok_or_else(|| format!("{name} needs a value"))
+        };
+        if parse_locale_flag(&mut o, flag, &mut value)? {
+            continue;
+        }
+        if flag.starts_with('-') {
+            return Err(format!("unknown option: {flag}"));
+        }
+        paths.push(arg.clone());
+    }
+    if paths.is_empty() {
+        return Err("validate takes one or more persona files".into());
+    }
+    Ok((paths, o))
+}
+
 /// Validate each persona file, print its report, and fail if any is invalid.
 /// Works on personas of either family, whatever engine this build has.
-fn run_validate(paths: &[String]) -> ExitCode {
+fn run_validate(paths: &[String], o: &lb_persona::LocaleOverride) -> ExitCode {
     let mut all_ok = true;
     for path in paths {
-        let outcome = lb_persona::validate_file(path);
+        let outcome = if o.is_empty() {
+            lb_persona::validate_file(path)
+        } else {
+            validate_with_locale(path, o)
+        };
         print!("{}", outcome.report);
         all_ok &= outcome.ok;
     }
@@ -766,6 +878,34 @@ fn run_validate(paths: &[String]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+/// `validate` of a persona with the operator's overrides applied.
+fn validate_with_locale(path: &str, o: &lb_persona::LocaleOverride) -> lb_persona::ValidateOutcome {
+    let fail = |e: String| lb_persona::ValidateOutcome {
+        ok: false,
+        report: format!("{path}\nERROR: {e}\n"),
+    };
+    let p = match PersonaProfile::from_path(path) {
+        Ok(p) => p,
+        Err(e) => return fail(e.to_string()),
+    };
+    #[cfg(feature = "chrome")]
+    if let Some(tz) = &o.timezone
+        && !lb_js::set_process_time_zone(tz)
+    {
+        return fail(format!("time zone {tz:?} is not one ICU knows"));
+    }
+    match p.with_locale_override(o) {
+        Ok(p) => lb_persona::consistency::validate_profile(
+            &format!(
+                "{path} (timezone {}, locale {})",
+                p.locale.timezone, p.locale.language
+            ),
+            &p,
+        ),
+        Err(e) => fail(e),
     }
 }
 
@@ -806,17 +946,19 @@ fn main() -> ExitCode {
             }
         },
         Some("validate") => {
-            let paths = &args[1..];
-            if paths.iter().any(|a| a == "--help" || a == "-h") {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
                 print!("{USAGE}");
                 return ExitCode::SUCCESS;
             }
-            if paths.is_empty() || paths.iter().any(|a| a.starts_with('-')) {
-                eprintln!("error: validate takes one or more persona files\n");
-                eprint!("{USAGE}");
-                return ExitCode::from(2);
-            }
-            run_validate(paths)
+            let (paths, o) = match parse_validate_args(&args[1..]) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: {e}\n");
+                    eprint!("{USAGE}");
+                    return ExitCode::from(2);
+                }
+            };
+            run_validate(&paths, &o)
         }
         Some("serve") => {
             if args[1..].iter().any(|a| a == "--help" || a == "-h") {
@@ -999,6 +1141,79 @@ mod tests {
         let u = a(&["--unchecked-persona", "bad.json"]).unwrap();
         assert!(u.unchecked);
         assert_eq!(u.persona.as_deref(), Some(Path::new("bad.json")));
+    }
+
+    // ADR 0039: --timezone/--locale/--languages for fetch, serve,
+    // fingerprint-report and validate.
+    #[test]
+    fn parses_locale_overrides() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let f = parse_fetch_args(&v(&[
+            "u",
+            "--timezone",
+            "Europe/Berlin",
+            "--locale=de-DE",
+            "--languages",
+            "de-DE, de,en",
+        ]))
+        .unwrap();
+        assert_eq!(f.locale.timezone.as_deref(), Some("Europe/Berlin"));
+        assert_eq!(f.locale.locale.as_deref(), Some("de-DE"));
+        assert_eq!(
+            f.locale.languages.as_deref(),
+            Some(&["de-DE".to_string(), "de".into(), "en".into()][..])
+        );
+        let s = parse_serve_args(&v(&["--timezone=Asia/Tokyo"])).unwrap();
+        assert_eq!(s.locale.timezone.as_deref(), Some("Asia/Tokyo"));
+        let r = parse_report_args(&v(&["--locale", "fr-FR"])).unwrap();
+        assert_eq!(r.locale.locale.as_deref(), Some("fr-FR"));
+        let (paths, o) =
+            parse_validate_args(&v(&["--timezone", "Europe/Paris", "p.json"])).unwrap();
+        assert_eq!(
+            (paths.as_slice(), o.timezone.as_deref()),
+            (&["p.json".to_string()][..], Some("Europe/Paris"))
+        );
+        assert!(parse_validate_args(&v(&["--timezone", "Europe/Paris"])).is_err());
+        assert!(parse_validate_args(&v(&["--bogus", "p.json"])).is_err());
+        assert!(parse_fetch_args(&v(&["u", "--timezone"])).is_err());
+    }
+
+    #[test]
+    fn locale_overrides_apply_to_the_persona() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles/reference");
+        let file = match lb_js::COMPILED_FAMILY {
+            Some(lb_persona::BrowserFamily::Chrome) => "chrome/chrome153_win10_rtx3060_1080p.json",
+            _ => "firefox/win10_rtx3060_1080p.json",
+        };
+        let path = root.join(file);
+        let p = load_persona(Some(path.to_str().unwrap()), true).unwrap();
+        let o = lb_persona::LocaleOverride {
+            timezone: Some("Europe/Berlin".into()),
+            locale: Some("de-DE".into()),
+            languages: None,
+        };
+        let q = apply_locale(p.clone(), &o).unwrap();
+        assert_eq!(q.locale.timezone, "Europe/Berlin");
+        assert_eq!(q.browser.accept_language, "de-DE,de;q=0.9");
+        let out = validate_with_locale(path.to_str().unwrap(), &o);
+        assert!(out.ok, "{}", out.report);
+        assert!(
+            out.report.contains("timezone Europe/Berlin"),
+            "{}",
+            out.report
+        );
+        // ICU decides in the chrome build, as Chrome's "Invalid timezone id".
+        #[cfg(feature = "chrome")]
+        assert!(
+            apply_locale(
+                p,
+                &lb_persona::LocaleOverride {
+                    timezone: Some("Mars/Olympus".into()),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]

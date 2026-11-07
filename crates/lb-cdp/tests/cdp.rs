@@ -958,18 +958,122 @@ fn emulation_is_checked_against_the_persona() {
         c.ok("Emulation.setUserAgentOverride", json!({"userAgent": "", "acceptLanguage": "en-US"}), sid).await;
         let ua = persona(WIN).browser.user_agent;
         c.ok("Emulation.setUserAgentOverride", json!({"userAgent": ua}), sid).await;
-        assert!(c.call("Emulation.setLocaleOverride", json!({"locale": "de-DE"}), sid).await.is_err());
-        c.ok("Emulation.setLocaleOverride", json!({"locale": "en-US"}), sid).await;
-        assert!(c.call("Emulation.setTimezoneOverride", json!({"timezoneId": "Asia/Tokyo"}), sid).await.is_err());
-        c.ok("Emulation.setTimezoneOverride", json!({"timezoneId": "America/New_York"}), sid).await;
+        // Time zone and locale follow a proxy (ADR 0039; see
+        // `locale_overrides_match_chrome`).
+        c.ok("Emulation.setLocaleOverride", json!({"locale": "de-DE"}), sid).await;
+        c.ok("Emulation.setTimezoneOverride", json!({"timezoneId": "Asia/Tokyo"}), sid).await;
         let e = c
             .call("Emulation.setEmulatedMedia", json!({"features": [{"name": "prefers-color-scheme", "value": "dark"}]}), sid)
             .await;
         assert!(e.is_err());
         assert!(c.call("Emulation.setTouchEmulationEnabled", json!({"enabled": true}), sid).await.is_err());
         c.ok("Emulation.setTouchEmulationEnabled", json!({"enabled": false}), sid).await;
-        assert!(c.call("Emulation.setGeolocationOverride", json!({"latitude": 1, "longitude": 2}), sid).await.is_err());
+        c.ok("Emulation.setGeolocationOverride", json!({"latitude": 1, "longitude": 2}), sid).await;
         c.ok("Emulation.setGeolocationOverride", json!({}), sid).await;
+    })
+    .unwrap();
+}
+
+/// Chrome 153's replies to the locale override commands, replayed: two
+/// sessions on one page, then the owner detaches
+/// (`tests/emulation/chrome.json`, `record.mjs`; ADR 0039).
+#[test]
+fn locale_overrides_match_chrome() {
+    let fixture: Value = serde_json::from_str(include_str!("emulation/chrome.json")).unwrap();
+    block_on_local(async {
+        let h = host();
+        let (ws, _) = start(h.clone()).await;
+        let (mut c, ctx, t, s1) = new_page(&ws).await;
+        let s2 = c
+            .ok(
+                "Target.attachToTarget",
+                json!({"targetId": t, "flatten": true}),
+                None,
+            )
+            .await["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        for step in fixture["steps"].as_array().unwrap() {
+            let method = step["method"].as_str().unwrap();
+            let sid = if step["session"] == 1 { &s1 } else { &s2 };
+            if method == "detach" {
+                c.ok("Target.detachFromTarget", json!({"sessionId": sid}), None)
+                    .await;
+                continue;
+            }
+            let got = c.call(method, step["params"].clone(), Some(sid)).await;
+            let want = &step["reply"];
+            match (&got, want.get("error")) {
+                (Ok(r), None) => assert_eq!(r, &want["result"], "{step}"),
+                (Err(e), Some(w)) => {
+                    assert_eq!(e["code"], w["code"], "{step}");
+                    assert_eq!(e["message"], w["message"], "{step}");
+                    assert_eq!(e.get("data"), w.get("data"), "{step}");
+                }
+                _ => panic!("{step}: got {got:?}"),
+            }
+        }
+        // After the owner detached, the second session's values hold.
+        assert_eq!(h.time_zone_override(&ctx).as_deref(), Some("Europe/London"));
+        assert_eq!(h.locale_override(&ctx).as_deref(), Some("fr-FR"));
+        // The acceptLanguage and geolocation of the detached session ended.
+        assert_eq!(h.accept_language_override(&t), None);
+        assert_eq!(h.geolocation_override(&t), None);
+    })
+    .unwrap();
+}
+
+/// Pages of one context that set the same zone (Playwright's
+/// `newContext({timezoneId})`) each hold it, as each Chrome renderer
+/// holds its own: closing one keeps the zone for the other.
+#[test]
+fn locale_overrides_held_per_page() {
+    block_on_local(async {
+        let h = host();
+        let (ws, _) = start(h.clone()).await;
+        let (mut c, ctx, t1, s) = new_page(&ws).await;
+        let t2 = c
+            .ok(
+                "Target.createTarget",
+                json!({"url": "about:blank", "browserContextId": ctx}),
+                None,
+            )
+            .await["targetId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let a = c.event("Target.attachedToTarget", None).await;
+        let s2 = a["sessionId"].as_str().unwrap().to_string();
+        for sid in [&s, &s2] {
+            c.ok(
+                "Emulation.setTimezoneOverride",
+                json!({"timezoneId": "Asia/Tokyo"}),
+                Some(sid),
+            )
+            .await;
+            c.ok(
+                "Emulation.setLocaleOverride",
+                json!({"locale": "de-DE"}),
+                Some(sid),
+            )
+            .await;
+            c.ok(
+                "Emulation.setUserAgentOverride",
+                json!({"userAgent": "", "acceptLanguage": "de-DE"}),
+                Some(sid),
+            )
+            .await;
+        }
+        assert_eq!(h.accept_language_override(&t2).as_deref(), Some("de-DE"));
+        c.ok("Target.closeTarget", json!({"targetId": t1}), None)
+            .await;
+        assert_eq!(h.time_zone_override(&ctx).as_deref(), Some("Asia/Tokyo"));
+        assert_eq!(h.locale_override(&ctx).as_deref(), Some("de-DE"));
+        c.ok("Target.closeTarget", json!({"targetId": t2}), None)
+            .await;
+        assert_eq!(h.time_zone_override(&ctx), None);
+        assert_eq!(h.locale_override(&ctx), None);
     })
     .unwrap();
 }

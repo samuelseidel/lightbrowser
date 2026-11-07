@@ -6,6 +6,10 @@ pub enum NetError {
     Url(#[from] url::ParseError),
     #[error("unsupported scheme: {0}")]
     UnsupportedScheme(String),
+    /// A redirect to this URL was refused by the request's redirect check
+    /// (Content Security Policy).
+    #[error("net::ERR_BLOCKED_BY_CSP {0}")]
+    BlockedByCsp(String),
     #[error("dns: {0}")]
     Dns(String),
     #[error("connect: {0}")]

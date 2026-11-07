@@ -239,6 +239,12 @@ fn text_control(d: &Document, n: NodeId) -> bool {
     }
 }
 
+/// The control supports the selection API (text, search, URL, telephone,
+/// password inputs and textareas).
+pub(crate) fn has_text_selection(d: &Document, n: NodeId) -> bool {
+    has_selection(d, n)
+}
+
 /// `<input>` types with a selection API.
 fn has_selection(d: &Document, n: NodeId) -> bool {
     match local(d, n).as_str() {
@@ -365,12 +371,20 @@ pub(crate) fn selection(w: &Window, slot: u32, n: NodeId) -> Sel {
 }
 
 pub(crate) fn set_selection(w: &Window, slot: u32, n: NodeId, start: usize, end: usize, dir: u8) {
+    let before = selection(w, slot, n);
     let len = utf16(&control_value(w, slot, n)).len();
     let end = end.min(len);
     let start = start.min(end);
-    w.selections
-        .borrow_mut()
-        .insert((slot, n), Sel { start, end, dir });
+    let new = Sel { start, end, dir };
+    w.selections.borrow_mut().insert((slot, n), new);
+    // Setting a focused control's selection puts the document's there.
+    let moved = slot == 0 && w.focused.get() == Some(n) && !super::range::in_control(w, n);
+    if moved {
+        super::range::control_focused(w, n);
+    }
+    if before != new || moved {
+        super::range::control_changed(w, slot, n);
+    }
 }
 
 /// Replace UTF-16 range `[start, end)` of `value` with `text`.
@@ -993,7 +1007,8 @@ fn submit(js: &mut dyn Js, w: &Rc<Window>, form: NodeId, submitter: Option<NodeI
         }
     });
     if dispatch(js, w, w.node_ref(0, form), ev) {
-        super::form::submit_form(w, form, submitter, trusted);
+        let loc = w.csp_here(Some(&mut *js));
+        super::form::submit_form(w, form, submitter, trusted, loc);
     }
 }
 
@@ -1064,6 +1079,9 @@ pub(crate) fn before_blur(js: &mut dyn Js, w: &Rc<Window>, old: NodeId) {
 pub(crate) fn after_focus(w: &Window, n: NodeId) {
     let is_text = w.with_doc(|d| text_control(d, n));
     w.input.borrow_mut().focus_value = is_text.then(|| (n, control_value(w, 0, n)));
+    if w.with_doc(|d| has_selection(d, n)) {
+        super::range::control_focused(w, n);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2050,6 +2068,11 @@ fn register_controls(reg: &mut Registry, rt: &Runtime) {
     for iface in ["HTMLInputElement", "HTMLTextAreaElement"] {
         method(reg, rt, iface, "select", |cx, w| {
             let (slot, n) = this_control(cx, w)?;
+            // Blink's `TextControlElement::select` focuses the control
+            // first.
+            if slot == 0 && w.with_doc(|d| d.is_connected(n) && !disabled(d, n)) {
+                super::window::focus(cx, w, Some(n));
+            }
             let len = utf16(&control_value(w, slot, n)).len();
             set_selection(w, slot, n, 0, len, 0);
             if slot == 0 && w.with_doc(|d| editable_host(d, n)).is_none() {
@@ -2071,17 +2094,28 @@ fn register_controls(reg: &mut Registry, rt: &Runtime) {
             }
             Ok(())
         });
-        getter(reg, rt, iface, "selectionStart", |cx, w| {
+        // While the control has focus Blink computes these from the
+        // document's selection: 0 when it is elsewhere.
+        let elsewhere = |w: &Window, slot: u32, n: NodeId| {
+            slot == 0 && w.focused.get() == Some(n) && !super::range::in_control(w, n)
+        };
+        getter(reg, rt, iface, "selectionStart", move |cx, w| {
             let (slot, n) = this_control(cx, w)?;
             if !w.doc_slot(slot, |d| has_selection(d, n)) {
                 return cx.ret(Arg::Null);
             }
+            if elsewhere(w, slot, n) {
+                return cx.ret(0u32);
+            }
             cx.ret(selection(w, slot, n).start as u32)
         });
-        getter(reg, rt, iface, "selectionEnd", |cx, w| {
+        getter(reg, rt, iface, "selectionEnd", move |cx, w| {
             let (slot, n) = this_control(cx, w)?;
             if !w.doc_slot(slot, |d| has_selection(d, n)) {
                 return cx.ret(Arg::Null);
+            }
+            if elsewhere(w, slot, n) {
+                return cx.ret(0u32);
             }
             cx.ret(selection(w, slot, n).end as u32)
         });
@@ -2090,10 +2124,17 @@ fn register_controls(reg: &mut Registry, rt: &Runtime) {
             if !w.doc_slot(slot, |d| has_selection(d, n)) {
                 return cx.ret(Arg::Null);
             }
+            // No direction reads "forward" where selections are
+            // directional (all but macOS), as Blink's default.
+            let mac = w
+                .profile
+                .as_deref()
+                .is_some_and(|p| p.os_kind() == lb_persona::OsKind::MacOs);
             cx.ret(match selection(w, slot, n).dir {
                 1 => "forward",
                 2 => "backward",
-                _ => "none",
+                _ if mac => "none",
+                _ => "forward",
             })
         });
         setter(reg, rt, iface, "selectionStart", |cx, w| {

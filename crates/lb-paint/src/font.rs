@@ -411,6 +411,77 @@ struct Laid {
     width: f32,
 }
 
+/// Where canvas glyphs land on the device pixel grid, as in Chrome's
+/// glyph cache (Skia, recorded in Chrome 153 on macOS and Linux: `lb-page`
+/// `tests/canvas_chrome/subpixel.html`): an axis-aligned glyph's origin
+/// goes to the nearest quarter pixel in x (`floor(4x + 1/2) / 4`) and the
+/// nearest whole pixel in y (`floor(y + 1/2)`); a colour emoji goes to the
+/// nearest whole pixel in x as well ([`EmojiSnap`]). Rotated or skewed
+/// text is not snapped. `bias`, the persona's offset (ADR 0038,
+/// `variation::text_bias`), is added to every origin after snapping.
+#[derive(Clone, Copy, Debug)]
+pub struct GlyphGrid {
+    /// User space to device space (the canvas transform).
+    pub ctm: Transform,
+    /// Device-space offset in px.
+    pub bias: (f64, f64),
+    pub emoji: EmojiSnap,
+}
+
+/// How a colour emoji's x reaches a whole pixel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmojiSnap {
+    /// Quarter pixel first, then the nearest whole pixel: x moves on at
+    /// a fraction of 3/8 (macOS, Apple Color Emoji). Also used for
+    /// Windows, which was not recorded.
+    QuarterThenWhole,
+    /// Straight to the nearest whole pixel: x moves on at 1/2 (Linux,
+    /// Noto Color Emoji).
+    Whole,
+}
+
+impl EmojiSnap {
+    /// The rule of the persona's OS.
+    pub fn for_os(os: OsKind) -> EmojiSnap {
+        match os {
+            OsKind::Linux => EmojiSnap::Whole,
+            _ => EmojiSnap::QuarterThenWhole,
+        }
+    }
+}
+
+impl GlyphGrid {
+    /// How far (in user space) a glyph whose origin is (`ux`, `uy`) in
+    /// user space moves; zero when the transform is not invertible.
+    fn user_shift(&self, ux: f64, uy: f64, emoji: bool) -> (f64, f64) {
+        let t = &self.ctm;
+        let o = map(t, ux, uy);
+        let (mut qx, mut qy) = (o.x, o.y);
+        if t.kx == 0.0 && t.ky == 0.0 {
+            qx = match (emoji, self.emoji) {
+                (false, _) => (o.x * 4.0 + 0.5).floor() / 4.0,
+                (true, EmojiSnap::QuarterThenWhole) => {
+                    ((o.x * 4.0 + 0.5).floor() / 4.0 + 0.5).floor()
+                }
+                (true, EmojiSnap::Whole) => (o.x + 0.5).floor(),
+            };
+            qy = (o.y + 0.5).floor();
+        }
+        let (dx, dy) = (qx + self.bias.0 - o.x, qy + self.bias.1 - o.y);
+        let (a, b, c, d) = (
+            f64::from(t.sx),
+            f64::from(t.kx),
+            f64::from(t.ky),
+            f64::from(t.sy),
+        );
+        let det = a * d - b * c;
+        if det == 0.0 || !det.is_finite() {
+            return (0.0, 0.0);
+        }
+        ((d * dx - b * dy) / det, (a * dy - c * dx) / det)
+    }
+}
+
 impl FontSet {
     /// Fonts for a persona (OS tables, installed list); without one,
     /// Windows tables with every family installed.
@@ -574,7 +645,10 @@ impl FontSet {
     }
 
     /// Glyph outlines of `text` anchored at (`x`, `y`) in user space,
-    /// squeezed to `max_width`, mapped through `ts` to device space.
+    /// squeezed to `max_width`, mapped through `ts` (to device space for
+    /// fills, the identity for strokes). With `grid`, glyph origins are
+    /// placed as canvas text is ([`GlyphGrid`]).
+    #[allow(clippy::too_many_arguments)]
     pub fn text_path(
         &self,
         st: &TextStyle,
@@ -583,6 +657,7 @@ impl FontSet {
         y: f64,
         max_width: Option<f64>,
         ts: &Transform,
+        grid: Option<&GlyphGrid>,
     ) -> PathData {
         let mut path = PathData::new();
         let text = prepare_text(text);
@@ -606,9 +681,10 @@ impl FontSet {
         for &(c, px) in &laid.glyphs {
             let Some(g) = pack.glyph(c) else { continue };
             let pen = f64::from(ax + px);
+            let (du, dv) = grid.map_or((0.0, 0.0), |g| g.user_shift(x + pen * sx, base_y, false));
             let pt = |gx: f64, gy: f64| {
-                let ux = x + (pen + (gx + skew * gy) * s) * sx;
-                let uy = base_y - gy * s;
+                let ux = x + (pen + (gx + skew * gy) * s) * sx + du;
+                let uy = base_y - gy * s + dv;
                 let p = map(ts, ux, uy);
                 (p.x, p.y)
             };
@@ -645,7 +721,8 @@ impl FontSet {
     /// in paint order. Chrome draws emoji in the emoji font's colours
     /// whatever the fill style; we have no emoji images, so each emoji is a
     /// flat stand-in in its box: a yellow face for smileys, else a disc
-    /// coloured by code point.
+    /// coloured by code point. With `grid`, each emoji is placed as a
+    /// colour emoji glyph is ([`GlyphGrid`]).
     #[allow(clippy::too_many_arguments)]
     pub fn emoji_layers(
         &self,
@@ -655,6 +732,7 @@ impl FontSet {
         y: f64,
         max_width: Option<f64>,
         ts: &Transform,
+        grid: Option<&GlyphGrid>,
     ) -> Vec<(PathData, Color)> {
         let text = prepare_text(text);
         if !text.chars().any(is_emoji) {
@@ -673,8 +751,15 @@ impl FontSet {
             if !is_emoji(c) {
                 continue;
             }
+            let (du, dv) = grid.map_or((0.0, 0.0), |g| {
+                g.user_shift(x + f64::from(ax + px) * sx, y + f64::from(dy), true)
+            });
             let (cx, cy, r) = emoji_disc(ax + px, dy, tf);
-            let (cx, cy, r) = (x + f64::from(cx) * sx, y + f64::from(cy), f64::from(r));
+            let (cx, cy, r) = (
+                x + f64::from(cx) * sx + du,
+                y + f64::from(cy) + dv,
+                f64::from(r),
+            );
             let ell = |ox: f64, oy: f64, rx: f64, ry: f64, color: Color| {
                 let mut p = PathData::new();
                 p.ellipse(
@@ -811,7 +896,7 @@ mod tests {
         assert!((e.width - 16.0 * 1.3).abs() < 1e-3, "{}", e.width);
         assert!(e.actual_bounding_box_ascent > 0.0);
         assert!(
-            !fs.text_path(&st, "Hi", 0.0, 20.0, None, &Transform::identity())
+            !fs.text_path(&st, "Hi", 0.0, 20.0, None, &Transform::identity(), None)
                 .is_empty()
         );
     }

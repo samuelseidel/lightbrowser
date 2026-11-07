@@ -1,6 +1,8 @@
 //! Canvas 2D and image loading through real pages on a loopback server:
-//! seeded readback noise is stable per persona seed, and `<img>` loads go
-//! through the network with load/error events, sizes and `drawImage`.
+//! the persona's canvas fingerprint is stable per seed, readback is exact
+//! and consistent across every path as in Chrome (ADR 0038,
+//! `canvas_chrome/`), and `<img>` loads go through the network with
+//! load/error events, sizes and `drawImage`.
 #![cfg(feature = "chrome")]
 
 mod common;
@@ -62,8 +64,7 @@ sx.fillRect(0, 0, 4, 4);
 const d = sx.getImageData(0, 0, 4, 4).data;
 let solid = true;
 for (let i = 0; i < d.length; i += 4) if (d[i] !== 10 || d[i+1] !== 20 || d[i+2] !== 30 || d[i+3] !== 255) solid = false;
-// Readback is idempotent on opaque pixels: put a noised read back and
-// read it again.
+// Readback is idempotent: put a read back and read it again.
 const o = document.createElement('canvas');
 o.width = 120; o.height = 40;
 const ox = o.getContext('2d');
@@ -139,7 +140,7 @@ async fn canvas_hash_is_stable_per_seed() {
     }
     assert_eq!(a1["hash"], a2["hash"], "same seed, same output");
     assert_ne!(a1["hash"], b1["hash"], "different seed, different output");
-    assert_ne!(a1["hash"], plain["hash"], "noise applied");
+    assert_ne!(a1["hash"], plain["hash"], "persona glyph offset applied");
     // Arial 14px "Hello": (1479 + 1139 + 455 * 2 + 1139) * 14 / 2048.
     let m = a1["m"].as_f64().unwrap();
     assert!((m - 31.9).abs() < 0.1, "{m}");
@@ -305,4 +306,213 @@ data:image/jpeg;base64,|data:image/webp;base64|true|false|2|3|24|true|true|0 0 0
     );
     assert_eq!(get("blob").await, "image/png true");
     assert_eq!(get("oblob").await, "image/png");
+}
+
+// ---------------------------------------------------------------------------
+// Readback consistency and placement against Chrome (ADR 0038)
+// ---------------------------------------------------------------------------
+
+/// The reference Chrome personas.
+const PERSONAS: [&str; 8] = [
+    "chrome153_win10_rtx3060_1080p.json",
+    "chrome153_win11_irisxe_laptop_1536x864.json",
+    "chrome153_win11_rtx4060_1080p.json",
+    "chrome153_macos14_intel_irisplus_1440x900.json",
+    "chrome153_macos15_apple_m2_retina.json",
+    "chrome153_macos26_apple_m4_1512x982.json",
+    "chrome153_ubuntu24_intel_uhd630_x11_1080p.json",
+    "chrome153_fedora42_amd_rx6600_wayland_1440p.json",
+];
+
+/// Cases in `canvas_chrome/`; `chrome_linux.json` (Ubuntu 24.04 x86_64)
+/// and `chrome_mac.json` (macOS 26 arm64) hold Chrome for Testing
+/// 153.0.8010.12's log of each (headless shell, loopback; re-record with
+/// `canvas_chrome/chrome.mjs`). Both agree except where an OS's emoji
+/// font snaps differently (`subpixel`) and on image hashes.
+fn case(name: &str) -> &'static str {
+    match name {
+        "probe" => include_str!("canvas_chrome/probe.html"),
+        "creep" => include_str!("canvas_chrome/creep.html"),
+        "subpixel" => include_str!("canvas_chrome/subpixel.html"),
+        "fingerprint" => include_str!("canvas_chrome/fingerprint.html"),
+        "imagebitmap" => include_str!("canvas_chrome/imagebitmap.html"),
+        "imagebitmap_errors" => include_str!("canvas_chrome/imagebitmap_errors.html"),
+        _ => unreachable!(),
+    }
+}
+
+fn chrome_log(mac: bool, name: &str) -> String {
+    let src = if mac {
+        include_str!("canvas_chrome/chrome_mac.json")
+    } else {
+        include_str!("canvas_chrome/chrome_linux.json")
+    };
+    let all: serde_json::Value = serde_json::from_str(src).unwrap();
+    all[name].as_str().unwrap().to_owned()
+}
+
+fn reference_ctx(file: &str) -> BrowserContext {
+    let persona = Arc::new(Persona::default_chrome());
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../profiles");
+    let tls = Arc::new(
+        ClientHelloProfile::load(std::path::Path::new(&format!(
+            "{dir}/tls/{}.json",
+            persona.tls_profile_id
+        )))
+        .unwrap(),
+    );
+    let p = PersonaProfile::from_path(format!("{dir}/reference/chrome/{file}")).unwrap();
+    BrowserContext::new(ContextOptions {
+        persona,
+        profile: Some(Arc::new(p)),
+        tls_profile: tls,
+        accept_invalid_certs: false,
+        // Real time: the probe's worker answers on another thread while
+        // the page waits on a timer.
+        virtual_time: false,
+    })
+    .unwrap()
+}
+
+/// The case's log (`L` up to 'end') in LightBrowser with `ctx`.
+async fn case_log(name: &str, ctx: &BrowserContext) -> String {
+    let s = serve(vec![("/", Resource::html(case(name)))]).await;
+    let b = browser();
+    let page = open(&b, ctx, &s.url("/"), WaitUntil::Load).await;
+    let t0 = std::time::Instant::now();
+    loop {
+        let log = match page.evaluate("L.join('\\n')").await.unwrap() {
+            JsValue::String(s) => s,
+            v => panic!("{v:?}"),
+        };
+        if log.ends_with("end") || t0.elapsed() > Duration::from_secs(20) {
+            return log;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Lines of `got` that differ from `want`, except lines whose key is in
+/// `skip` (values that depend on the rasterizer, not on consistency).
+fn line_diffs(want: &str, got: &str, skip: &[&str]) -> Vec<String> {
+    let key = |l: &str| l.split(':').next().unwrap_or_default().to_owned();
+    let (w, g): (Vec<&str>, Vec<&str>) = (want.lines().collect(), got.lines().collect());
+    let mut out = Vec::new();
+    if w.iter().map(|l| key(l)).ne(g.iter().map(|l| key(l))) {
+        out.push(format!("keys differ:\n{got}"));
+        return out;
+    }
+    for (a, b) in w.iter().zip(&g) {
+        if a != b && !skip.contains(&key(a).as_str()) {
+            out.push(format!("chrome `{a}`, lightbrowser `{b}`"));
+        }
+    }
+    out
+}
+
+/// Every readback path agrees as in Chrome, for every reference persona:
+/// CreepJS's pixel-modification and blank checks, solid and translucent
+/// fills, `putImageData` round trips (every value and alpha), sub-rect and
+/// 1x1 reads, `toDataURL`/`toBlob` decoded back, `drawImage` of a canvas
+/// at an offset, whole-pixel translation, `OffscreenCanvas` and a worker's
+/// `OffscreenCanvas`, gradients, and WebGL `readPixels` against
+/// `toDataURL` and `drawImage`. Only CreepJS's 2x2 arc value depends on
+/// the rasterizer; `creep` checks it against CreepJS's own list of Blink
+/// values.
+#[tokio::test]
+async fn readback_is_consistent_as_in_chrome() {
+    let want = chrome_log(false, "probe");
+    for p in PERSONAS {
+        let got = case_log("probe", &reference_ctx(p)).await;
+        let d = line_diffs(&want, &got, &["creep_low_entropy"]);
+        assert!(d.is_empty(), "{p}:\n{}", d.join("\n"));
+    }
+}
+
+/// CreepJS's canvas and WebGL checks (reconstructed from its source in
+/// `canvas_chrome/creep.html`) find no lie, no "rgba noise", no modified
+/// pixel data and no suspicious low-entropy value, as in Chrome. Image
+/// hashes are LightBrowser's own and only checked for stability.
+#[tokio::test]
+async fn creepjs_finds_no_canvas_lie() {
+    let want = chrome_log(false, "creep");
+    for p in PERSONAS {
+        let got = case_log("creep", &reference_ctx(p)).await;
+        let d = line_diffs(&want, &got, &["hashes", "webgl_hashes", "webgl2_hashes"]);
+        assert!(d.is_empty(), "{p}:\n{}", d.join("\n"));
+    }
+}
+
+/// `createImageBitmap` (sources, crops, resize, errors, `close`, order
+/// against microtasks and timers, structured clone) and
+/// `transferToImageBitmap` behave as in Chrome.
+#[tokio::test]
+async fn image_bitmaps_as_in_chrome() {
+    for name in ["imagebitmap", "imagebitmap_errors"] {
+        let want = chrome_log(false, name);
+        let got = case_log(name, &reference_ctx(PERSONAS[0])).await;
+        let d = line_diffs(&want, &got, &[]);
+        assert!(d.is_empty(), "{name}:\n{}", d.join("\n"));
+    }
+}
+
+/// Glyph origins snap to Chrome's grid (quarter pixels in x, whole pixels
+/// in y, whole pixels for emoji), so the same text at nearby positions
+/// gives the same images exactly where Chrome's does: macOS personas as
+/// Chrome on macOS, Linux personas as Chrome on Linux. Windows was not
+/// recorded; its personas use the macOS emoji rule, so only their other
+/// lines are checked.
+#[tokio::test]
+async fn glyphs_land_on_chromes_grid() {
+    for (p, mac, skip) in [
+        (
+            PERSONAS[0],
+            true,
+            &["\u{1F603} 16px Arial fill x", "\u{1F603} 30px Arial fill x"][..],
+        ),
+        (PERSONAS[3], true, &[][..]),
+        (PERSONAS[5], true, &[][..]),
+        (PERSONAS[6], false, &[][..]),
+        (PERSONAS[7], false, &[][..]),
+    ] {
+        let want = chrome_log(mac, "subpixel");
+        let got = case_log("subpixel", &reference_ctx(p)).await;
+        let d = line_diffs(&want, &got, skip);
+        assert!(d.is_empty(), "{p}:\n{}", d.join("\n"));
+    }
+}
+
+/// Each reference persona has its own text and WebGL fingerprint, the
+/// same on every run; the FingerprintJS geometry image (no text) is the
+/// same for all, as on real machines with the same rasterizer.
+#[tokio::test]
+async fn persona_fingerprints_are_unique_and_stable() {
+    let field = |log: &str, k: &str| -> String {
+        log.lines()
+            .find_map(|l| l.strip_prefix(&format!("{k}: ")))
+            .unwrap_or_else(|| panic!("{k} missing in {log}"))
+            .to_owned()
+    };
+    let mut logs = Vec::new();
+    for p in PERSONAS {
+        logs.push(case_log("fingerprint", &reference_ctx(p)).await);
+    }
+    let again = case_log("fingerprint", &reference_ctx(PERSONAS[2])).await;
+    assert_eq!(logs[2], again, "same persona, same fingerprints");
+    for k in [
+        "fpjs_text",
+        "creep_text",
+        "creep_emoji",
+        "creep_stroke",
+        "webgl_fan",
+    ] {
+        let vals: std::collections::HashSet<String> = logs.iter().map(|l| field(l, k)).collect();
+        assert_eq!(vals.len(), PERSONAS.len(), "{k}: {vals:?}");
+    }
+    let geometry: std::collections::HashSet<String> =
+        logs.iter().map(|l| field(l, "fpjs_geometry")).collect();
+    assert_eq!(geometry.len(), 1, "{geometry:?}");
+    for l in &logs {
+        assert_ne!(field(l, "webgl_fan"), "", "{l}");
+    }
 }

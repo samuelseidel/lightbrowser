@@ -449,11 +449,13 @@ fn is_cross_origin(origin: &url::Origin, resp: &NetResponse) -> bool {
 
 /// The response of a `blob:` or `data:` URL as Chrome's blob and data URL
 /// loaders give it, or `Err(detail)` (empty: no detail). `None` for other
-/// schemes.
+/// schemes. A `blob:` URL answers only requesters with the creator's
+/// serialized storage key `key` (ADR 0037).
 pub(crate) fn local_response(
     method: &str,
     url: &Url,
     headers: &[(String, String)],
+    key: &str,
 ) -> Option<Result<NetResponse, String>> {
     let ok = |status: u16, headers: Vec<(String, String)>, body: Vec<u8>| NetResponse {
         status,
@@ -470,7 +472,7 @@ pub(crate) fn local_response(
                     "'GET' is the only method allowed for 'blob:' URLs.".into()
                 ));
             }
-            let Some((body, ty)) = super::worker::resolve_blob_url(url.as_str()) else {
+            let Some((body, ty)) = super::worker::resolve_blob_url_for(url.as_str(), key) else {
                 return Some(Err(String::new()));
             };
             let range = headers
@@ -593,7 +595,7 @@ pub(crate) fn start_request(
     req: NetRequest,
     done: Box<dyn FnOnce(&mut dyn Js, &Rc<Window>, Result<NetResponse, String>)>,
 ) {
-    if let Some(r) = local_response(&req.method, &req.url, &req.headers) {
+    if let Some(r) = local_response(&req.method, &req.url, &req.headers, &w.storage_key_string()) {
         w.queue_task(
             TaskSource::Networking,
             Box::new(move |js, w| done(js, w, r)),
@@ -651,6 +653,20 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
     if mode == "same-origin" && url.origin() != origin {
         return cx.reject_promise(r, HostError::type_error("Failed to fetch"));
     }
+    // Content Security Policy (`connect-src`): no request, a TypeError.
+    let loc = w.csp_here(Some(&mut *cx));
+    if !w.csp_url(
+        super::csp::Dir::ConnectSrc,
+        &url,
+        &super::csp::UrlCheck::default(),
+        loc,
+    ) {
+        w.csp_console(
+            "error",
+            format!("Fetch API cannot load {url}. Refused to connect because it violates the document's Content Security Policy."),
+        );
+        return cx.reject_promise(r, HostError::type_error("Failed to fetch"));
+    }
     let pending = Rc::new(RefCell::new(Some(r)));
     signal_on_abort(w, signal, AbortAlgo::RejectFetch(pending.clone()));
     let req = NetRequest {
@@ -662,6 +678,8 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
         initiator: Some(w.url()),
         mode,
         user_activated: false,
+        storage_key: Some(w.storage_key()),
+        redirect_check: None,
     };
     start_request(
         w,
@@ -1095,7 +1113,17 @@ fn xhr_send_sync(
         w.warn("[Deprecation] Synchronous XMLHttpRequest on the main thread is deprecated because of its detrimental effects to the end user's experience. For more help, check https://xhr.spec.whatwg.org/.");
     }
     let url = req.url.clone();
-    let result = match local_response(&req.method, &req.url, &req.headers) {
+    // Content Security Policy (`connect-src`): a network error.
+    let loc = w.csp_here(Some(&mut *cx));
+    let allowed = w.csp_url(
+        super::csp::Dir::ConnectSrc,
+        &url,
+        &super::csp::UrlCheck::default(),
+        loc,
+    );
+    let result = match local_response(&req.method, &req.url, &req.headers, &w.storage_key_string())
+    {
+        _ if !allowed => Err(String::new()),
         Some(r) => r,
         None => match w.worker_host() {
             Some(h) => h.fetch_sync(req).map_err(|_| String::new()),
@@ -1210,6 +1238,16 @@ fn send_beacon(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostE
     if body.len() > BEACON_QUOTA {
         return cx.ret(false);
     }
+    // Content Security Policy (`connect-src`): not sent, yet `true`.
+    let loc = w.csp_here(Some(&mut *cx));
+    if !w.csp_url(
+        super::csp::Dir::ConnectSrc,
+        &url,
+        &super::csp::UrlCheck::default(),
+        loc,
+    ) {
+        return cx.ret(true);
+    }
     // A content type outside the CORS-safelisted ones makes it a cors request.
     let safelisted = ct.as_deref().is_none_or(|t| {
         let mime = t
@@ -1234,6 +1272,8 @@ fn send_beacon(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostE
         initiator: Some(w.url()),
         mode: if safelisted { "no-cors" } else { "cors" },
         user_activated: false,
+        storage_key: Some(w.storage_key()),
+        redirect_check: None,
     };
     // Not tied to the window: the request survives the document's unload.
     let fut = w.net.fetch(req);
@@ -2033,11 +2073,30 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             initiator: Some(w.url()),
             mode: "cors",
             user_activated: false,
+            storage_key: Some(w.storage_key()),
+            redirect_check: None,
         };
         if !is_async {
             return xhr_send_sync(cx, w, id, generation, req, origin);
         }
+        // Content Security Policy (`connect-src`): no request, `error`.
+        let loc = w.csp_here(Some(&mut *cx));
+        let allowed = w.csp_url(
+            super::csp::Dir::ConnectSrc,
+            &req.url,
+            &super::csp::UrlCheck::default(),
+            loc,
+        );
         xhr_event(cx, w, id, "loadstart", 0.0, 0.0);
+        if !allowed {
+            w.queue_task(
+                TaskSource::Networking,
+                Box::new(move |js, w| {
+                    xhr_complete(js, w, id, generation, Err(String::new()), origin)
+                }),
+            );
+            return Ok(());
+        }
         if timeout > 0 {
             w.add_timer(
                 TimerCallback::Task(Some(Box::new(move |js, w| {

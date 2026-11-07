@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html><head>
+<script nonce="n1" src="/prelude.js"></script>
+</head><body>
+<script src="ok.js"></script>
+<script>log('plain inline ran');</script>
+<script nonce="n1">
+var s = document.createElement('script'); s.src = 'http://localhost:' + location.port + '/strict_dynamic/x.js'; s.onload = function () { log('x load'); }; document.body.appendChild(s);
+var s2 = document.createElement('script'); s2.textContent = "log('dynamic inline ran')"; document.body.appendChild(s2);
+document.write('<script src="w.js"><\/script>');
+done(500);
+</script>
+</body></html>

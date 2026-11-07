@@ -1,7 +1,22 @@
 //! In-memory cookie jar, one per browsing context. Never persisted.
 //!
-//! Owner: M1 task 4. Thin wrapper over `cookie_store`.
+//! Owner: M1 task 4. Thin wrapper over `cookie_store`, with Chrome 153's
+//! rules on top (ADR 0037):
+//!
+//! - **SameSite.** Every access has a [`CookieScope`] (the requesting
+//!   context's top-level site and whether it or an ancestor frame is
+//!   cross-site with it). A cross-site access (null site for cookies, or a
+//!   URL cross-site to it) gets and sets only `SameSite=None` cookies; a
+//!   top-level navigation from another site ([`SameSiteContext::Lax`])
+//!   leaves out `Strict` ones. Unspecified `SameSite` counts as `Lax`.
+//!   `SameSite=None` needs `Secure`; `Secure` needs a secure URL (https,
+//!   `localhost`, loopback).
+//! - **CHIPS.** A `Partitioned; Secure` cookie lives in the partition of
+//!   the access that set it: the top-level site and the ancestor chain bit
+//!   (Chrome's `CookiePartitionKey::FromNetworkIsolationKey`), and is sent
+//!   only in that partition. Unpartitioned cookies are shared by all.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use url::Url;
@@ -11,6 +26,120 @@ use url::Url;
 #[derive(Default, Clone)]
 pub struct CookieJar {
     store: Arc<Mutex<cookie_store::CookieStore>>,
+    /// Partitioned (CHIPS) cookies by [`CookieScope::partition`] key.
+    parts: Arc<Mutex<HashMap<String, cookie_store::CookieStore>>>,
+}
+
+/// Who accesses cookies (ADR 0037): the requesting document's or worker's
+/// top-level site and ancestor chain bit (for a frame navigation, the
+/// parent document's).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct CookieScope {
+    /// Schemeful top-level site (`https://example.com`).
+    pub top_site: String,
+    /// The context or one of its ancestors is cross-site with the
+    /// top-level site: its site for cookies is null.
+    pub cross_site: bool,
+}
+
+/// Chrome's same-site cookie context of one access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SameSiteContext {
+    /// Same-site: every cookie.
+    Strict,
+    /// A top-level navigation from another site: not `Strict` cookies.
+    Lax,
+    /// Cross-site: `SameSite=None` cookies only.
+    CrossSite,
+}
+
+/// Schemeful site: scheme and the last two labels of a domain, or the IP
+/// literal (the rule of `Sec-Fetch-Site`; no public-suffix list).
+pub fn site(u: &Url) -> String {
+    let host = match u.host() {
+        Some(url::Host::Domain(d)) => {
+            let labels: Vec<&str> = d.split('.').collect();
+            labels[labels.len().saturating_sub(2)..].join(".")
+        }
+        Some(h) => h.to_string(),
+        None => return "null".into(),
+    };
+    format!("{}://{host}", u.scheme())
+}
+
+/// https, `localhost`, `*.localhost` or a loopback address: may set and
+/// get `Secure` cookies (Chrome treats them as trustworthy).
+fn is_secure(u: &Url) -> bool {
+    match u.scheme() {
+        "https" | "wss" => true,
+        "http" | "ws" => match u.host() {
+            Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+impl CookieScope {
+    /// A top-level document at `url` (or a request without a known
+    /// requester).
+    pub fn first_party(url: &Url) -> CookieScope {
+        CookieScope {
+            top_site: site(url),
+            cross_site: false,
+        }
+    }
+
+    /// The access to `url` is same-site: the site for cookies is not null
+    /// and `url` is same-site with it.
+    pub fn same_site(&self, url: &Url) -> bool {
+        !self.cross_site && site(url) == self.top_site
+    }
+
+    /// Cookie partition key of an access to `url`: the top-level site and
+    /// the ancestor chain bit (`!site_for_cookies.IsFirstParty(url)`).
+    pub fn partition(&self, url: &Url) -> String {
+        let bit = if self.same_site(url) { "0" } else { "1" };
+        format!("{} {bit}", self.top_site)
+    }
+
+    /// The context of a subresource or frame access to `url`.
+    pub fn context(&self, url: &Url) -> SameSiteContext {
+        if self.same_site(url) {
+            SameSiteContext::Strict
+        } else {
+            SameSiteContext::CrossSite
+        }
+    }
+}
+
+/// Whether a cookie with `same_site` goes with an access in `ctx`.
+fn same_site_ok(same_site: Option<cookie::SameSite>, ctx: SameSiteContext) -> bool {
+    match (ctx, same_site) {
+        (SameSiteContext::Strict, _) => true,
+        (_, Some(cookie::SameSite::None)) => true,
+        (SameSiteContext::Lax, Some(cookie::SameSite::Strict)) => false,
+        (SameSiteContext::Lax, _) => true,
+        (SameSiteContext::CrossSite, _) => false,
+    }
+}
+
+/// Chrome's checks before storing `c` from `url` in `ctx`.
+fn may_set(c: &cookie::Cookie<'_>, url: &Url, ctx: SameSiteContext) -> bool {
+    let secure = c.secure().unwrap_or(false);
+    if secure && !is_secure(url) {
+        return false;
+    }
+    if c.same_site() == Some(cookie::SameSite::None) && !secure {
+        return false;
+    }
+    if c.partitioned().unwrap_or(false) && !secure {
+        return false;
+    }
+    // Setting Lax and Strict cookies needs at least a lax context.
+    ctx != SameSiteContext::CrossSite || c.same_site() == Some(cookie::SameSite::None)
 }
 
 impl CookieJar {
@@ -22,51 +151,127 @@ impl CookieJar {
         self.store.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn parts(&self) -> std::sync::MutexGuard<'_, HashMap<String, cookie_store::CookieStore>> {
+        self.parts.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `name=value` pairs for an access to `url` (HTTP or script), in the
+    /// jar's order, partitioned cookies after unpartitioned ones.
+    fn pairs(
+        &self,
+        url: &Url,
+        scope: &CookieScope,
+        ctx: SameSiteContext,
+        http: bool,
+    ) -> Vec<String> {
+        let pick = |cs: Vec<&cookie_store::Cookie<'static>>| -> Vec<String> {
+            cs.into_iter()
+                .filter(|c| {
+                    same_site_ok(c.same_site(), ctx) && (http || !c.http_only().unwrap_or(false))
+                })
+                .map(|c| format!("{}={}", c.name(), c.value()))
+                .collect()
+        };
+        let mut out = pick(self.lock().matches(url));
+        if let Some(p) = self.parts().get(&scope.partition(url)) {
+            out.extend(pick(p.matches(url)));
+        }
+        out
+    }
+
+    fn store_one(&self, url: &Url, raw: &str, scope: &CookieScope, ctx: SameSiteContext) {
+        let Ok(c) = cookie::Cookie::parse(raw.to_owned()) else {
+            tracing::debug!("dropped Set-Cookie for {url}: unparsable");
+            return;
+        };
+        if !may_set(&c, url, ctx) {
+            tracing::debug!("dropped Set-Cookie for {url}: not allowed in this context");
+            return;
+        }
+        let r = if c.partitioned().unwrap_or(false) {
+            self.parts()
+                .entry(scope.partition(url))
+                .or_default()
+                .insert_raw(&c, url)
+                .map(|_| ())
+        } else {
+            self.lock().insert_raw(&c, url).map(|_| ())
+        };
+        if let Err(e) = r {
+            tracing::debug!("dropped Set-Cookie for {url}: {e}");
+        }
+    }
+
     /// `Cookie:` header value for `url` (`name=value; name2=value2`), or
-    /// `None` if nothing matches.
+    /// `None` if nothing matches. A first-party access.
     pub fn header_for(&self, url: &Url) -> Option<String> {
-        let value = self
-            .lock()
-            .get_request_values(url)
-            .map(|(n, v)| format!("{n}={v}"))
-            .collect::<Vec<_>>()
-            .join("; ");
+        self.header_in(url, &CookieScope::first_party(url), SameSiteContext::Strict)
+    }
+
+    /// `Cookie:` header value of a request to `url` by `scope` in `ctx`.
+    pub fn header_in(
+        &self,
+        url: &Url,
+        scope: &CookieScope,
+        ctx: SameSiteContext,
+    ) -> Option<String> {
+        let value = self.pairs(url, scope, ctx, true).join("; ");
         (!value.is_empty()).then_some(value)
     }
 
     /// Store every `Set-Cookie` value from a response for `url`. Invalid or
-    /// rejected cookies are dropped silently, as browsers do.
+    /// rejected cookies are dropped silently, as browsers do. A
+    /// first-party access.
     pub fn store_response(&mut self, url: &Url, set_cookie: &[String]) {
-        let mut store = self.lock();
+        self.store_response_in(
+            url,
+            set_cookie,
+            &CookieScope::first_party(url),
+            SameSiteContext::Strict,
+        );
+    }
+
+    /// [`store_response`](Self::store_response) for a request by `scope`
+    /// in `ctx`.
+    pub fn store_response_in(
+        &mut self,
+        url: &Url,
+        set_cookie: &[String],
+        scope: &CookieScope,
+        ctx: SameSiteContext,
+    ) {
         for raw in set_cookie {
-            if let Err(e) = store.parse(raw, url) {
-                tracing::debug!("dropped Set-Cookie for {url}: {e}");
-            }
+            self.store_one(url, raw, scope, ctx);
         }
     }
 
     /// `document.cookie` getter: the cookies for `url` without `HttpOnly`
-    /// ones, `name=value; ...` (empty string if none).
+    /// ones, `name=value; ...` (empty string if none). First-party.
     pub fn document_cookie(&self, url: &Url) -> String {
-        self.lock()
-            .matches(url)
-            .into_iter()
-            .filter(|c| !c.http_only().unwrap_or(false))
-            .map(|c| format!("{}={}", c.name(), c.value()))
-            .collect::<Vec<_>>()
-            .join("; ")
+        self.document_cookie_in(url, &CookieScope::first_party(url))
+    }
+
+    /// `document.cookie` getter of a document at `url` with `scope`.
+    pub fn document_cookie_in(&self, url: &Url, scope: &CookieScope) -> String {
+        self.pairs(url, scope, scope.context(url), false).join("; ")
     }
 
     /// `document.cookie` setter: store one cookie string for `url`. An
     /// `HttpOnly` cookie from script is ignored, as browsers do.
+    /// First-party.
     pub fn set_document_cookie(&mut self, url: &Url, cookie: &str) {
+        self.set_document_cookie_in(url, cookie, &CookieScope::first_party(url));
+    }
+
+    /// `document.cookie` setter of a document at `url` with `scope`.
+    pub fn set_document_cookie_in(&mut self, url: &Url, cookie: &str, scope: &CookieScope) {
         let Ok(parsed) = cookie::Cookie::parse(cookie.to_owned()) else {
             return;
         };
         if parsed.http_only().unwrap_or(false) {
             return;
         }
-        let _ = self.lock().insert_raw(&parsed, url);
+        self.store_one(url, cookie, scope, scope.context(url));
     }
 }
 
@@ -178,9 +383,10 @@ impl CookieJar {
             .count()
     }
 
-    /// Drop every cookie.
+    /// Drop every cookie, partitioned ones too.
     pub fn clear(&self) {
         self.lock().clear();
+        self.parts().clear();
     }
 }
 
@@ -276,6 +482,52 @@ mod tests {
         let u = url("https://example.test/");
         jar.store_response(&u, &["".into(), "no-equals".into()]);
         assert_eq!(jar.header_for(&u), None);
+    }
+
+    /// The rules Chrome 153 showed in `lb-page` `tests/partition/` (case
+    /// `cookies`): A = 127.0.0.1, B = localhost, http.
+    #[test]
+    fn same_site_and_partitioned_cookies_as_in_chrome() {
+        let mut jar = CookieJar::new();
+        let a = url("http://127.0.0.1:1/cookies/x");
+        let b = url("http://localhost:1/cookies/x");
+        let top_a = CookieScope::first_party(&a);
+        // A frame of B in a page of A: cross-site, partition (A, cross).
+        let b_in_a = CookieScope {
+            top_site: "http://127.0.0.1".into(),
+            cross_site: true,
+        };
+        // A frame of A below a B frame in a page of A (ABA).
+        let aba = b_in_a.clone();
+        jar.set_document_cookie_in(&a, "a_lax=1", &top_a);
+        jar.set_document_cookie_in(&a, "a_none=1; SameSite=None; Secure", &top_a);
+        jar.set_document_cookie_in(&a, "a_part=1; SameSite=None; Secure; Partitioned", &top_a);
+        jar.set_document_cookie_in(&a, "a_nosec=1; SameSite=None; Partitioned", &top_a);
+        jar.set_document_cookie_in(&b, "b_lax=1", &b_in_a);
+        jar.set_document_cookie_in(&b, "b_none=1; SameSite=None; Secure", &b_in_a);
+        jar.set_document_cookie_in(&b, "b_part=1; SameSite=None; Secure; Partitioned", &b_in_a);
+        let sorted = |s: String| {
+            let mut v: Vec<String> = s.split("; ").map(str::to_owned).collect();
+            v.sort();
+            v.join("; ")
+        };
+        assert_eq!(
+            sorted(jar.document_cookie_in(&a, &top_a)),
+            "a_lax=1; a_none=1; a_part=1"
+        );
+        assert_eq!(
+            sorted(jar.document_cookie_in(&b, &b_in_a)),
+            "b_none=1; b_part=1"
+        );
+        assert_eq!(jar.document_cookie_in(&a, &aba), "a_none=1");
+        // B first-party: the unpartitioned third-party cookie only.
+        assert_eq!(
+            jar.document_cookie_in(&b, &CookieScope::first_party(&b)),
+            "b_none=1"
+        );
+        // Secure needs a secure URL; loopback and localhost count.
+        jar.store_response(&url("http://example.test/"), &["s=1; Secure".into()]);
+        assert_eq!(jar.header_for(&url("https://example.test/")), None);
     }
 
     #[test]

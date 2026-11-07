@@ -56,7 +56,7 @@ pub(crate) struct PageState {
     pub life: watch::Sender<Life>,
     pub nav_seq: Cell<u64>,
     pub observer: RefCell<Option<Arc<dyn PageObserver>>>,
-    /// `sessionStorage` areas of this page, by origin.
+    /// `sessionStorage` areas of this page, by serialized storage key.
     pub session: lb_webapi::host::StoragePartition,
     pub closed: Cell<bool>,
     /// Navigation in progress (parser or network): the virtual clock
@@ -72,6 +72,9 @@ pub(crate) struct PageState {
     /// The next navigation is a reload (service worker `FetchEvent`
     /// request cache mode).
     pub reloading: Cell<bool>,
+    /// CDP `Page.setBypassCSP`: documents committed from now on ignore
+    /// their Content Security Policy (ADR 0036).
+    pub bypass_csp: Cell<bool>,
 }
 
 impl PageState {
@@ -102,8 +105,10 @@ impl PageState {
         self.life.send_modify(f);
     }
 
-    pub(crate) fn session_area(&self, url: &Url) -> StorageArea {
-        self.session.area(&url.origin().ascii_serialization())
+    /// The `sessionStorage` area of documents with storage key `key` in
+    /// this page (ADR 0037).
+    pub(crate) fn session_area(&self, key: &lb_webapi::host::StorageKey) -> StorageArea {
+        self.session.area(&key.serialize())
     }
 
     pub(crate) fn history_len(&self) -> u32 {
@@ -457,6 +462,7 @@ impl Page {
                     turn: Rc::new(Notify::new()),
                     cdp: RefCell::new(None),
                     reloading: Cell::new(false),
+                    bypass_csp: Cell::new(false),
                 });
                 if let Some(setup) = setup {
                     setup(&page);
@@ -681,9 +687,31 @@ impl Page {
         self.run(|h| h.window.url().to_string()).await
     }
 
+    /// CDP `Page.setBypassCSP`: documents committed from now on (and their
+    /// frames) ignore their Content Security Policy.
+    pub async fn set_bypass_csp(&self, on: bool) -> Result<(), PageError> {
+        self.call(move |_ws, page| async move {
+            page.bypass_csp.set(on);
+            Ok(())
+        })
+        .await
+    }
+
     /// Console messages of the current document.
     pub async fn console_messages(&self) -> Result<Vec<ConsoleMessage>, PageError> {
         self.run(|h| h.window.console_messages()).await
+    }
+
+    /// Console messages of the current document and of its frames' (in
+    /// frame tree order), as a CDP client of the page sees them.
+    pub async fn frame_tree_console_messages(&self) -> Result<Vec<ConsoleMessage>, PageError> {
+        self.run(|h| {
+            crate::frames::tree(&h.window)
+                .iter()
+                .flat_map(|w| w.console_messages())
+                .collect()
+        })
+        .await
     }
 
     /// Receive lifecycle and console events.

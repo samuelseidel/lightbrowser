@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>T</title><script src="prelude.js"></script></head>
+<body>
+<form name="f1"></form><img name="im1"><img id="imid"><img id="imid2" name="imn2"><img id="imid3" name="">
+<embed name="e1"><embed id="eid"><object name="o1"></object><object id="oid"></object>
+<iframe name="if1"></iframe><iframe id="ifid"></iframe><div name="dn"></div><div id="did"></div>
+<input name="in1"><a name="an"></a><form id="formid"></form>
+<form name="cookie"></form><img name="title"><form name="getElementById"></form><img name="URL">
+<form name="dupn"></form><img name="dupn">
+<object name="outer"><embed name="inner"></object>
+<script>
+for (const n of ['f1', 'im1', 'imid', 'imid2', 'imn2', 'imid3', 'e1', 'eid', 'o1', 'oid', 'if1', 'ifid',
+                 'dn', 'did', 'in1', 'an', 'formid', 'cookie', 'title', 'getElementById', 'URL', 'dupn',
+                 'outer', 'inner', 'body', 'nothing'])
+  log('document.' + n, document[n]);
+log('document.if1 is frames[0]', document.if1 === frames[0]);
+log("'f1' in document", 'f1' in document);
+log('hasOwnProperty f1', document.hasOwnProperty('f1'));
+note('desc f1', desc(Object.getOwnPropertyDescriptor(document, 'f1')));
+note('desc cookie', desc(Object.getOwnPropertyDescriptor(document, 'cookie')));
+note('keys', JSON.stringify(Object.keys(document)));
+note('own names', JSON.stringify(Object.getOwnPropertyNames(document)));
+const forIn = []; for (const k in document) if (['f1', 'im1', 'dupn'].includes(k)) forIn.push(k);
+note('for-in', JSON.stringify(forIn));
+log('dupn same object', document.dupn === document.dupn);
+log('dupn is window.dupn', document.dupn === window.dupn);
+document.f1 = 5;
+log('assigned f1', document.f1);
+log('assigned f1 own', document.hasOwnProperty('f1'));
+note('assigned f1 desc', desc(Object.getOwnPropertyDescriptor(document, 'f1')));
+log('delete f1', delete document.f1);
+log('f1 after delete', document.f1);
+attempt('strict assign im1', () => { 'use strict'; document.im1 = 1; return document.im1; });
+attempt('defineProperty im1', () => { Object.defineProperty(document, 'im1', { value: 2, configurable: true }); return document.im1; });
+const df = document.createElement('form'); df.name = 'dynform';
+log('detached form', document.dynform);
+document.body.append(df);
+log('appended form', document.dynform);
+df.name = 'dynform2';
+log('renamed form', document.dynform2);
+df.remove();
+log('removed form', document.dynform2);
+log('forms.f1', document.forms.f1);
+log('forms.formid', document.forms.formid);
+log('images.im1', document.images.im1);
+log('images.imid', document.images.imid);
+log('embeds.e1', document.embeds.e1);
+log('all.f1', document.all.f1);
+log('all.did', document.all.did);
+log('all.dupn', document.all.dupn);
+log('all.namedItem(dupn)', document.all.namedItem('dupn'));
+note('forms own names', JSON.stringify(Object.getOwnPropertyNames(document.forms)));
+note('forms keys', JSON.stringify(Object.keys(document.forms)));
+const sd = new DOMParser().parseFromString('<form name="pf"></form>', 'text/html');
+log('parsed doc named', sd.pf);
+const xd = document.implementation.createDocument(null, 'root');
+log('xml doc named', xd.pf);
+L.push('end');
+</script>
+</body></html>

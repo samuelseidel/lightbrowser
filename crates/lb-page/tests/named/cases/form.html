@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script src="prelude.js"></script></head>
+<body>
+<form id="fm" name="fmn" action="/x">
+<input name="a"><input name="b" type="radio" value="1"><input name="b" type="radio" value="2" checked>
+<input id="c"><input name="action"><input name="length"><input id="submit"><input id="c" name="c2">
+<img name="fimg"><img id="fimgid"><fieldset name="fs"><input name="infs"></fieldset><output name="out"></output>
+<object name="fobj"></object><button name="btn"></button><select name="sel"></select><textarea name="ta"></textarea>
+<input type="image" name="imginput"><div name="divx"></div><label id="lab"></label>
+</form>
+<input name="outside" form="fm">
+<script>
+const fm = document.getElementById('fm');
+for (const n of ['a', 'b', 'c', 'c2', 'action', 'length', 'submit', 'fimg', 'fimgid', 'fs', 'infs', 'out',
+                 'fobj', 'btn', 'sel', 'ta', 'imginput', 'divx', 'lab', 'outside', 'id', 'nothing'])
+  log('fm.' + n, fm[n]);
+log('fm.b.value', fm.b.value);
+log('fm.b same', fm.b === fm.b);
+log('fm[0]', fm[0]);
+log('fm[100]', fm[100]);
+log('fm.elements.length', fm.elements.length);
+note('own names', JSON.stringify(Object.getOwnPropertyNames(fm)));
+note('keys', JSON.stringify(Object.keys(fm)));
+log("'a' in fm", 'a' in fm);
+log('hasOwnProperty a', fm.hasOwnProperty('a'));
+note('desc a', desc(Object.getOwnPropertyDescriptor(fm, 'a')));
+note('desc 0', desc(Object.getOwnPropertyDescriptor(fm, '0')));
+note('desc action', desc(Object.getOwnPropertyDescriptor(fm, 'action')));
+log('elements.b', fm.elements.b);
+log('elements.namedItem(b)', fm.elements.namedItem('b'));
+log('elements.c', fm.elements.c);
+log('elements.action', fm.elements.action);
+log('elements.fimg', fm.elements.fimg);
+log('elements.outside', fm.elements.outside);
+note('elements own names', JSON.stringify(Object.getOwnPropertyNames(fm.elements)));
+log('window.fmn', window.fmn);
+log('window.fm', window.fm);
+log('document.fmn', document.fmn);
+const a = fm.a;
+a.name = 'a2';
+log('past name a', fm.a === a);
+log('new name a2', fm.a2 === a);
+log('elements.a after rename', fm.elements.a);
+const fimg = fm.fimg;
+fimg.name = 'fimg2';
+log('past name fimg', fm.fimg === fimg);
+a.remove();
+log('past name after remove', fm.a);
+log('a2 after remove', fm.a2);
+const added = document.createElement('input'); added.name = 'added';
+fm.append(added);
+log('added', fm.added);
+fm.a = 5;
+log('assigned a', fm.a);
+log('assigned own', fm.hasOwnProperty('a'));
+attempt('strict assign btn', () => { 'use strict'; fm.btn = 1; return fm.btn; });
+L.push('end');
+</script>
+</body></html>

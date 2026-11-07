@@ -30,6 +30,7 @@ mod serialize;
 mod sheet;
 mod supports;
 mod supports_data;
+mod supports_value;
 mod ua;
 mod values;
 

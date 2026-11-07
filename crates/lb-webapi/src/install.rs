@@ -233,6 +233,19 @@ impl Bindings {
         let shared: Rc<RefCell<HashMap<&'static str, InterfaceId>>> =
             Rc::new(RefCell::new(HashMap::with_capacity(table.interfaces.len())));
         let mut global_desc = None;
+        // The global's interface and its ancestors: their prototype
+        // objects are immutable-prototype exotic objects (Blink's
+        // `SetImmutableProto` on the prototype templates of a `[Global]`
+        // interface and of every interface it inherits from).
+        let mut global_chain: std::collections::HashSet<&'static str> = Default::default();
+        let mut next = table
+            .interfaces
+            .iter()
+            .find(|d| d.is_global && d.name == global_name);
+        while let Some(d) = next {
+            global_chain.insert(d.name.get());
+            next = d.parent.and_then(|p| table.interface(p.get()));
+        }
 
         for desc in table.interfaces {
             if desc.is_global && desc.name == global_name {
@@ -249,10 +262,13 @@ impl Bindings {
             }
             let (reg, st, ids) = (registry.clone(), stubs.clone(), shared.clone());
             let order = scope.and_then(|w| w.order(desc.name.get()));
+            let in_global_chain = global_chain.contains(desc.name.get());
             let id = engine.define_interface_lazy(Box::new(move || {
                 let ids = ids.borrow();
-                interface_spec(table, desc, order, &reg, &st, &ids)
-                    .unwrap_or_else(|_| InterfaceSpec::new(desc.name.get()))
+                let mut spec = interface_spec(table, desc, order, &reg, &st, &ids)
+                    .unwrap_or_else(|_| InterfaceSpec::new(desc.name.get()));
+                spec.immutable_proto_object = in_global_chain;
+                spec
             }));
             shared.borrow_mut().insert(desc.name.get(), id);
             if desc.name == "DOMException" {
@@ -296,6 +312,20 @@ impl Bindings {
         }
 
         let window_desc = global_desc.ok_or(InstallError::Unknown("global"))?;
+        // The window's named properties object, between `Window.prototype`
+        // and `EventTarget.prototype` (ADR 0040).
+        let named_properties = match (scope, window_desc.parent) {
+            (None, Some(parent)) => {
+                let parent = *shared
+                    .borrow()
+                    .get(parent.get())
+                    .ok_or(InstallError::Unknown(parent.get()))?;
+                let id = engine.define_interface(window_properties_spec(&registry, parent));
+                shared.borrow_mut().insert(WINDOW_PROPERTIES, id);
+                Some(id)
+            }
+            _ => None,
+        };
         shared
             .borrow_mut()
             .insert(window_desc.name.get(), engine.next_interface_id());
@@ -314,6 +344,10 @@ impl Bindings {
             spec
         };
         spec.immutable_proto = true;
+        spec.immutable_proto_object = true;
+        if named_properties.is_some() {
+            spec.parent = named_properties;
+        }
         // Members Chrome installs after the engine's late globals, in
         // order (with those globals).
         spec.reorder_last = props[late_start.min(props.len())..]
@@ -544,6 +578,31 @@ pub fn install_window_realm(
     let bindings = Bindings::define(engine, registry)?;
     let realm = bindings.new_window_realm(engine, options)?;
     Ok((bindings, realm))
+}
+
+/// The named properties object's interface name (Blink's
+/// `[LegacyNoInterfaceObject] interface WindowProperties : EventTarget`).
+pub const WINDOW_PROPERTIES: &str = "WindowProperties";
+
+/// `WindowProperties`: no interface object or `constructor`, the tag
+/// `WindowProperties`, an immutable prototype, and the registered named
+/// getter on the prototype object as Blink's named properties object
+/// (`[NotEnumerable]` getter, `[LegacyUnenumerableNamedProperties]`).
+fn window_properties_spec(registry: &Registry, parent: InterfaceId) -> InterfaceSpec {
+    let mut spec = InterfaceSpec::new(WINDOW_PROPERTIES).parent(parent);
+    spec.no_interface_object = true;
+    spec.immutable_proto_object = true;
+    if let Some(f) = registry.named_getter_for(WINDOW_PROPERTIES) {
+        spec = spec.named_getter(f.clone());
+        spec.named_unenumerable = true;
+        spec.named_legacy = Some(lb_js::LegacyNamed {
+            iface: WINDOW_PROPERTIES,
+            override_builtins: false,
+            not_enumerable: true,
+            properties_object: true,
+        });
+    }
+    spec
 }
 
 /// `window`, `self`, `frames`, `top` and `parent` return the global
@@ -871,6 +930,7 @@ fn interface_spec(
             spec = spec.named_enumerator(f.clone());
         }
         spec.named_unenumerable = registry.is_named_unenumerable(d.name.get());
+        spec.named_legacy = registry.named_legacy_for(d.name.get());
     }
     if let Some(f) = registry.indexed_getter_for(d.name.get()) {
         spec = spec.indexed_getter(f.clone());

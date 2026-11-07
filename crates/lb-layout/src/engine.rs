@@ -90,6 +90,18 @@ pub struct BoxModel {
     pub margin: Rect,
 }
 
+/// One line of a text node's box ([`LayoutEngine::caret_lines`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CaretLine {
+    /// UTF-16 offsets into the node's data the line covers.
+    pub start: u32,
+    pub end: u32,
+    /// The line's text box, as [`LayoutEngine::text_rects`] places it.
+    pub rect: Rect,
+    /// Caret x at each offset from `start` to `end` (inclusive).
+    pub xs: Vec<f32>,
+}
+
 /// How `scroll_into_view` aligns the element.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ScrollAlign {
@@ -475,6 +487,91 @@ impl LayoutEngine {
             if chars.get(cursor) == Some(&'\n') {
                 cursor += 1;
             }
+        }
+        out
+    }
+
+    /// The lines of a text node's box for caret movement
+    /// (`Selection.modify` by line): each line's UTF-16 range of the node's
+    /// data (spaces dropped at a soft wrap and a forced break belong to
+    /// the line they end), its rect as [`Self::text_rects`] places the
+    /// text, and the caret x at every offset of the range. Empty for text
+    /// without a box.
+    pub fn caret_lines(&mut self, doc: &Document, node: NodeId) -> Vec<CaretLine> {
+        let Some(b) = self.box_of(doc, node) else {
+            return Vec::new();
+        };
+        let raw = doc.character_data(node).unwrap_or("");
+        let st = self.state(doc);
+        let lb = &st.built.tree.boxes[b];
+        let rect = st.geo[b].rect;
+        let units = raw.encode_utf16().count() as u32;
+        let (BoxKind::Text(run), Some(css)) = (&lb.kind, &lb.css) else {
+            return vec![CaretLine {
+                start: 0,
+                end: units,
+                rect,
+                xs: vec![rect.x; units as usize + 1],
+            }];
+        };
+        let Some(font) = run.font() else {
+            return Vec::new();
+        };
+        let ws = css.white_space;
+        let total = run.text.chars().count();
+        let strip = ws.collapses_spaces()
+            && raw.starts_with([' ', '\t', '\n', '\r', '\x0c'])
+            && !run.text.starts_with(' ');
+        let col = collapsed_offsets(raw, ws, strip, total);
+        let lm = font.line_metrics();
+        let lh = run.line_height;
+        let height = if css.line_height == lb_css::LineHeight::Normal {
+            lh
+        } else {
+            lm.ascent.round() + lm.descent.round()
+        };
+        let half_leading = ((lh - height) / 2.0).floor();
+        let factor = crate::display::align_factor(css.text_align, css.direction);
+        let chars: Vec<char> = run.text.chars().collect();
+        let lines = run.lines(Some(rect.width));
+        let last = lines.len().saturating_sub(1);
+        // (collapsed start, collapsed end, next line's start, x, y, width)
+        let mut spans = Vec::new();
+        let mut cursor = 0;
+        for (n, (text, width)) in lines.into_iter().enumerate() {
+            let (l0, l1) = (cursor, cursor + text.chars().count());
+            cursor = l1;
+            while chars.get(cursor) == Some(&' ') && n != last {
+                cursor += 1;
+            }
+            if chars.get(cursor) == Some(&'\n') {
+                cursor += 1;
+            }
+            let x = rect.x + (rect.width - width).max(0.0) * factor;
+            let y = rect.y + n as f32 * lh + half_leading;
+            spans.push((l0, l1, cursor, x, y, width));
+        }
+        let first_at = |k: usize| col.iter().position(|&c| c >= k).unwrap_or(col.len() - 1) as u32;
+        let mut out = Vec::new();
+        for (i, &(l0, l1, next, x, y, width)) in spans.iter().enumerate() {
+            let start = if i == 0 { 0 } else { first_at(l0) };
+            let end = if i == last { units } else { first_at(next) };
+            let mut widths = Vec::with_capacity(l1 - l0 + 1);
+            let mut pre = String::new();
+            widths.push(0.0);
+            for &c in &chars[l0..l1] {
+                pre.push(c);
+                widths.push(font.measure(&pre));
+            }
+            let xs = (start..=end)
+                .map(|o| x + widths[col[o as usize].clamp(l0, l1) - l0])
+                .collect();
+            out.push(CaretLine {
+                start,
+                end,
+                rect: Rect::new(x, y, width, height),
+                xs,
+            });
         }
         out
     }
@@ -952,6 +1049,56 @@ impl LayoutEngine {
     pub fn box_count(&self) -> usize {
         self.state.as_ref().map_or(0, |s| s.built.tree.boxes.len())
     }
+}
+
+/// For each UTF-16 offset into `raw` (0 to its length), the number of
+/// characters `text::collapse(&raw[..offset], ws, strip)` keeps (at most
+/// `total`): the index in the run's text of the character there.
+fn collapsed_offsets(raw: &str, ws: lb_css::WhiteSpace, strip: bool, total: usize) -> Vec<usize> {
+    let mut col = Vec::with_capacity(raw.len() + 1);
+    let collapse = ws.collapses_spaces();
+    let keep_newlines = ws.preserves_newlines();
+    let (mut len, mut pending, mut ends_newline) = (0usize, false, false);
+    // A pending collapsible space is kept unless it leads the text or
+    // follows a preserved newline.
+    let kept = |len: usize, pending: bool, ends_newline: bool| {
+        pending && !(len == 0 && strip) && !ends_newline
+    };
+    let at = |len: usize, pending: bool, ends_newline: bool| {
+        (len + usize::from(collapse && kept(len, pending, ends_newline))).min(total)
+    };
+    for c in raw.chars() {
+        col.push(at(len, pending, ends_newline));
+        if !collapse {
+            len += match c {
+                '\t' => 8,
+                '\r' => 0,
+                _ => 1,
+            };
+        } else {
+            match c {
+                '\n' if keep_newlines => {
+                    pending = false;
+                    len += 1;
+                    ends_newline = true;
+                }
+                ' ' | '\t' | '\n' | '\r' | '\x0c' => pending = true,
+                _ => {
+                    if kept(len, pending, ends_newline) {
+                        len += 1;
+                    }
+                    pending = false;
+                    ends_newline = false;
+                    len += 1;
+                }
+            }
+        }
+        if c.len_utf16() == 2 {
+            col.push(at(len, pending, ends_newline));
+        }
+    }
+    col.push(at(len, pending, ends_newline));
+    col
 }
 
 fn union(rects: &[Rect]) -> Rect {

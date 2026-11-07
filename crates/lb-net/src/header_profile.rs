@@ -159,6 +159,24 @@ pub struct RequestMeta {
     /// `<kind>_post_redirect` for its redirect hops (also after a 303 turned
     /// it into a GET; Chrome keeps `Cache-Control: max-age=0` there).
     pub form_post: bool,
+    /// The requester's cookie scope (ADR 0037; for a frame navigation, the
+    /// parent document's). `None`: first-party of `top_frame`, else of the
+    /// initiator. Ignored for top-level navigations.
+    pub cookie_scope: Option<crate::cookies::CookieScope>,
+    /// May the request follow a redirect to this URL (the page's Content
+    /// Security Policy)? A refused hop fails the fetch with
+    /// [`crate::NetError::BlockedByCsp`].
+    pub redirect_check: Option<RedirectCheck>,
+}
+
+/// See [`RequestMeta::redirect_check`].
+#[derive(Clone)]
+pub struct RedirectCheck(pub std::sync::Arc<dyn Fn(&Url) -> bool + Send + Sync>);
+
+impl std::fmt::Debug for RedirectCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RedirectCheck")
+    }
 }
 
 impl RequestMeta {
@@ -172,6 +190,8 @@ impl RequestMeta {
             preflight: None,
             top_frame: None,
             form_post: false,
+            cookie_scope: None,
+            redirect_check: None,
         }
     }
 

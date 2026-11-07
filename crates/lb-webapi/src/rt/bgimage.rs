@@ -117,6 +117,20 @@ fn start(w: &Rc<Window>, key: String, url: Url) {
         }
         w.wake();
     };
+    // Content Security Policy (`img-src`): blocked, not requested.
+    // Style recalc asks for these: the parser's position (Blink).
+    if !w.csp_url(
+        super::csp::Dir::ImgSrc,
+        &url,
+        &super::csp::UrlCheck::default(),
+        w.csp_style_loc(),
+    ) {
+        w.queue_task(
+            TaskSource::Networking,
+            Box::new(move |_, w| done(w, Err(()))),
+        );
+        return;
+    }
     if url.scheme() == "data" {
         let r = super::image::data_url(&url)
             .map(|(b, m)| (b.into(), Some(m)))

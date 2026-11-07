@@ -1,0 +1,10 @@
+t('eval', function () { return eval('1 + 1'); });
+t('new Function', function () { return new Function('return 2')(); });
+t('Function call', function () { return Function('a', 'return a')(3); });
+t('indirect eval', function () { return (0, eval)('4'); });
+t('eval non-string', function () { return eval(5); });
+t('instanceof', function () { try { eval('1'); } catch (e) { return (e instanceof EvalError) + ' ' + e.constructor.name; } });
+t('setTimeout string', function () { return typeof setTimeout("log('string timer ran')", 0); });
+t('setInterval string', function () { var id = setInterval("log('string interval ran')", 0); later(function () { clearInterval(id); }, 50); return typeof id; });
+t('setTimeout fn', function () { setTimeout(function () { log('fn timer ran'); }, 0); return 'ok'; });
+done();

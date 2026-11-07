@@ -21,15 +21,18 @@ use lb_persona::{BrowserFamily, Persona};
 pub use v8;
 
 mod clone;
+mod codegen;
 mod console;
 #[doc(hidden)]
 pub mod icu_data;
 mod inspect;
 mod realm_ops;
 mod snapshot;
+pub mod text_break;
 #[doc(hidden)]
 pub mod unused_v8;
 pub use clone::{HostWriter, Serialized};
+pub use codegen::{CodeGenKind, CodeGenPolicy, CodeGenRequest};
 pub use inspect::{Caught, Inspected, InspectedObject, PromiseOutcome, PropertyEntry};
 pub use realm_ops::RealmOps;
 pub use snapshot::SnapshotStatus;
@@ -149,6 +152,30 @@ pub type NamedDeleter =
     Rc<dyn Fn(&mut PropCtx<'_, '_, '_>, &str) -> Result<Option<bool>, HostError>>;
 /// Names the named getter supports, for `Object.keys` / `for in`.
 pub type NamedEnumerator = Rc<dyn Fn(&mut PropCtx<'_, '_, '_>) -> Vec<String>>;
+
+/// Named properties of a WebIDL interface with a named getter but no
+/// named setter or deleter, handled as Blink's bindings do (`bind_gen`'s
+/// `make_named_property_*_callback`): assigning, defining or deleting a
+/// supported name is refused (a `TypeError` in strict code), its
+/// descriptor is read-only and configurable, and supported names are
+/// those the getter answers. See [`InterfaceSpec::named_legacy`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LegacyNamed {
+    /// The interface error messages name (`Failed to set a named property
+    /// 'x' on 'HTMLCollection': ...`).
+    pub iface: &'static str,
+    /// `[LegacyOverrideBuiltIns]`: named properties shadow prototype
+    /// members (a masking interceptor). Otherwise V8 asks the getter only
+    /// for names nothing in the prototype chain has.
+    pub override_builtins: bool,
+    /// The getter is `[NotEnumerable]`: no query or enumerator, and
+    /// `delete` is not intercepted.
+    pub not_enumerable: bool,
+    /// The named properties object (`WindowProperties`): the handlers sit
+    /// on the prototype object, index keys go to the getter as strings,
+    /// every define and delete is refused and descriptors are writable.
+    pub properties_object: bool,
+}
 /// Number of supported property indices (`list.length`). With it, indexed
 /// properties enumerate (`Object.keys`, `for in`, `JSON.stringify`) and
 /// have Blink's read-only descriptor; assigning or deleting them is a
@@ -491,6 +518,17 @@ pub struct InterfaceSpec {
     /// read-only and not enumerable (`Object.keys` skips them,
     /// `getOwnPropertyNames` lists them). Needs a named getter.
     pub named_unenumerable: bool,
+    /// Blink's handling of the named getter (see [`LegacyNamed`]). Needs a
+    /// named getter; `named_setter` and `named_deleter` are then unused.
+    pub named_legacy: Option<LegacyNamed>,
+    /// `[LegacyNoInterfaceObject]` (`WindowProperties`): the prototype
+    /// object has no `constructor`, and children's interface objects
+    /// inherit from this interface's parent's.
+    pub no_interface_object: bool,
+    /// The prototype object is an immutable-prototype exotic object (the
+    /// prototypes in a global's chain, as Blink's `SetImmutableProto` on
+    /// their prototype templates).
+    pub immutable_proto_object: bool,
     /// For a global interface: own properties of the global (its
     /// `instance` members or the engine's built-ins) moved to the end, in
     /// this order, once the members are defined, in every realm
@@ -519,6 +557,9 @@ impl InterfaceSpec {
             named_enumerator: None,
             indexed_length: None,
             named_unenumerable: false,
+            named_legacy: None,
+            no_interface_object: false,
+            immutable_proto_object: false,
             reorder_last: Vec::new(),
         }
     }
@@ -662,6 +703,11 @@ enum Callback {
     NamedDelete(NamedDeleter),
     NamedEnum(NamedEnumerator),
     IndexedLen(IndexedLength),
+    /// After a named getter's four slots: its [`LegacyNamed`] handling and
+    /// whether its properties are enumerable.
+    NamedLegacy(LegacyNamed, bool),
+    /// A native data property getter ([`RealmOps::define_native_property`]).
+    Native(NamedGetter),
     /// Placeholder keeping named callbacks at consecutive indexes.
     Empty,
 }
@@ -698,6 +744,8 @@ struct IfaceEntry {
     overflow: Rc<Overflow>,
     /// See [`InterfaceSpec::reorder_last`].
     reorder_last: Vec<PropKey>,
+    /// See [`InterfaceSpec::no_interface_object`].
+    no_interface_object: bool,
 }
 
 /// Instance members defined after creation: interface objects directly
@@ -984,6 +1032,8 @@ struct RealmEntry {
     /// V8's own functions the console's string builder calls, taken before
     /// any page script ran ([`CallCtx::console_args`]).
     console: Option<console::ConsoleBuiltins>,
+    /// `eval` and WebAssembly gates (Content Security Policy).
+    codegen: Option<Rc<codegen::CodeGenPolicy>>,
 }
 
 /// Shared with the near-heap-limit callback through a raw pointer.
@@ -1032,6 +1082,9 @@ struct State {
     /// `import()`s settled in the next microtask: (realm, resolver, module
     /// URL or `TypeError` message).
     ready_imports: VecDeque<(RealmId, Resolver, Result<String, String>)>,
+    /// The ICU default locale this isolate was last told about
+    /// ([`Engine::set_default_locale`]).
+    icu_locale: Option<String>,
 }
 
 type SharedState = Rc<RefCell<State>>;
@@ -1278,6 +1331,7 @@ impl Engine {
             last_exception: None,
             dyn_hook: None,
             ready_imports: VecDeque::new(),
+            icu_locale: None,
         }));
         {
             let mut iso = Entered::new(&mut isolate);
@@ -1285,6 +1339,7 @@ impl Engine {
             iso.set_slot(state.clone());
             iso.set_host_initialize_import_meta_object_callback(import_meta);
             iso.set_host_import_module_dynamically_callback(dynamic_import);
+            codegen::install(&mut iso);
             // As Blink: errors keep a detailed stack trace, whose top frame
             // is where error events say the error happened.
             iso.set_capture_stack_trace_for_uncaught_exceptions(true, 10);
@@ -1717,13 +1772,19 @@ impl Engine {
     }
 
     /// Set ICU's default locale (`Intl` default, e.g. `en-US`). Process
-    /// wide; an isolate caches its default locale on first `Intl` use, so
-    /// call it before the first page script of the engine.
+    /// wide. The tag goes to ICU as given, as Blink's `LocaleController`
+    /// does (`icu::Locale` reads `-` and `_` alike, and BCP 47 extensions
+    /// such as `-u-ca-buddhist`). When it changes, this isolate drops its
+    /// cached default locale and ICU objects
+    /// (`LocaleConfigurationChangeNotification`), so `Intl` in realms that
+    /// already ran sees the new locale (ADR 0039); other isolates need
+    /// their own call.
     pub fn set_default_locale(&mut self, locale: &str) {
-        if !locale.is_empty() && !locale.contains('\0') && v8::icu::get_language_tag() != locale {
-            // ICU locale ids use `_` (`en_US`).
-            v8::icu::set_default_locale(&locale.replace('-', "_"));
+        if !set_icu_locale(locale) || !take_locale_change(&self.state, locale) {
+            return;
         }
+        let iso = Entered::new(&mut self.isolate);
+        locale_configuration_changed(&iso);
     }
 
     /// Materialize an [`Arg`] as a held value in `realm`.
@@ -2097,7 +2158,56 @@ fn build_into(
     if spec.immutable_proto {
         inst.set_immutable_proto();
     }
-    if let Some(getter) = spec.named_getter {
+    if spec.immutable_proto_object {
+        proto.set_immutable_proto();
+    }
+    if let (Some(getter), Some(legacy)) = (spec.named_getter.clone(), spec.named_legacy) {
+        // Same slots as below (get, set, delete, enum) plus the handling.
+        let base = st.push_callback(Callback::Named(getter));
+        st.push_callback(Callback::Empty);
+        st.push_callback(Callback::Empty);
+        let has_enum = spec.named_enumerator.is_some();
+        st.push_callback(
+            spec.named_enumerator
+                .clone()
+                .map_or(Callback::Empty, Callback::NamedEnum),
+        );
+        st.push_callback(Callback::NamedLegacy(legacy, !spec.named_unenumerable));
+        let data = v8::Integer::new_from_unsigned(scope, base);
+        let mut flags = v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS;
+        if !legacy.override_builtins {
+            flags = flags | v8::PropertyHandlerFlags::NON_MASKING;
+        }
+        let mut config = v8::NamedPropertyHandlerConfiguration::new()
+            .getter(named_trampoline)
+            .setter(legacy_set_trampoline)
+            .definer(legacy_define_trampoline)
+            .descriptor(legacy_descriptor_trampoline)
+            .data(data.into())
+            .flags(flags);
+        if legacy.properties_object || !legacy.not_enumerable {
+            config = config.deleter(legacy_delete_trampoline);
+        }
+        if !legacy.not_enumerable {
+            config = config.query(legacy_query_trampoline);
+            if has_enum {
+                config = config.enumerator(named_enum_trampoline);
+            }
+        }
+        if legacy.properties_object {
+            proto.set_named_property_handler(config);
+            let config = v8::IndexedPropertyHandlerConfiguration::new()
+                .getter(legacy_index_get_trampoline)
+                .setter(legacy_index_set_trampoline)
+                .deleter(legacy_index_delete_trampoline)
+                .definer(legacy_index_define_trampoline)
+                .descriptor(legacy_index_descriptor_trampoline)
+                .data(data.into());
+            proto.set_indexed_property_handler(config);
+        } else {
+            inst.set_named_property_handler(config);
+        }
+    } else if let Some(getter) = spec.named_getter {
         // The named callbacks sit at consecutive indexes (get, set,
         // delete, enum) so one integer of data reaches all four.
         let has = (
@@ -2160,6 +2270,7 @@ fn build_into(
         prototype_from: spec.prototype_from,
         overflow,
         reorder_last: spec.reorder_last,
+        no_interface_object: spec.no_interface_object,
     });
 }
 
@@ -2188,6 +2299,66 @@ fn ensure_template<'s>(
     st.entry(id).map(|e| v8::Local::new(scope, &e.template))
 }
 
+/// Make `locale` ICU's (process-wide) default locale unless it already
+/// is. False for a tag ICU cannot take (empty, NUL).
+fn set_icu_locale(locale: &str) -> bool {
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    if locale.is_empty() || locale.contains('\0') {
+        return false;
+    }
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if last.as_deref() != Some(locale) {
+        v8::icu::set_default_locale(locale);
+        *last = Some(locale.to_owned());
+    }
+    true
+}
+
+/// Whether the isolate of `state` has yet to hear that ICU's default
+/// locale is `locale` (and remember that it now has). A new isolate has
+/// already cached one while it set up its first context (the host's), so
+/// it hears the first time too.
+fn take_locale_change(state: &SharedState, locale: &str) -> bool {
+    let mut st = state.borrow_mut();
+    if st.icu_locale.as_deref() == Some(locale) {
+        return false;
+    }
+    st.icu_locale = Some(locale.to_owned());
+    true
+}
+
+/// `v8::Isolate::LocaleConfigurationChangeNotification()`, which rusty_v8
+/// does not bind: the isolate forgets its cached default locale and ICU
+/// objects, so the next `Intl` use reads ICU's default locale again.
+pub(crate) fn locale_configuration_changed(isolate: &v8::Isolate) {
+    unsafe extern "C" {
+        // A C++ member function of the prebuilt V8 archive; on the Itanium
+        // C++ ABI (Linux, macOS) `this` is the first argument.
+        #[link_name = "_ZN2v87Isolate37LocaleConfigurationChangeNotificationEv"]
+        fn v8_isolate_locale_configuration_change_notification(isolate: *mut c_void);
+    }
+    // SAFETY: `UnsafeRawIsolatePtr` is a transparent wrapper of the C++
+    // `v8::Isolate*`; the isolate is alive (we hold a reference) and used
+    // on its own thread, and the function takes no other argument and
+    // returns nothing.
+    unsafe {
+        let raw: *mut c_void = std::mem::transmute(isolate.as_raw_isolate_ptr());
+        v8_isolate_locale_configuration_change_notification(raw);
+    }
+}
+
+/// Make `time_zone` ICU's process-wide default zone, as
+/// [`Engine::set_time_zone`] does, without notifying any isolate (each
+/// engine's next `set_time_zone` call with the same zone resets its date
+/// cache). Returns false for a zone ICU does not know (nothing changes):
+/// Blink's check for `Emulation.setTimezoneOverride` (ADR 0039). Starts
+/// V8 (with no flags, as [`Engine::new`]) when nothing did yet: ICU's
+/// data is installed then.
+pub fn set_process_time_zone(time_zone: &str) -> bool {
+    init_v8("");
+    set_icu_time_zone(time_zone)
+}
+
 /// Make `time_zone` ICU's (process-wide) default zone unless it already
 /// is. The default changes only here, so the last zone set says whether
 /// it is: asking ICU instead would make it detect the host's zone first
@@ -2198,7 +2369,12 @@ fn set_icu_time_zone(time_zone: &str) -> bool {
     if last.as_deref() == Some(time_zone) {
         return true;
     }
-    if !v8::icu::set_default_time_zone(time_zone) {
+    // An offset id (`+05:00`) is ICU's custom id `GMT+05:00`: Chrome
+    // takes both for `Emulation.setTimezoneOverride` (ADR 0039).
+    let ok = v8::icu::set_default_time_zone(time_zone)
+        || (time_zone.starts_with(['+', '-'])
+            && v8::icu::set_default_time_zone(&format!("GMT{time_zone}")));
+    if !ok {
         return false;
     }
     *last = Some(time_zone.to_owned());
@@ -2266,6 +2442,7 @@ fn new_realm_in(
                 modules: Vec::new(),
                 detached: false,
                 console,
+                codegen: None,
             },
         );
     }
@@ -2369,7 +2546,20 @@ fn interface_object<'s>(
     }
     let parent = state.borrow().entry(id).and_then(|e| e.parent);
     let pf = match parent {
-        Some(p) => Some(interface_object(scope, state, mat, p)?),
+        Some(p) => {
+            let pf = interface_object(scope, state, mat, p)?;
+            // A `[LegacyNoInterfaceObject]` parent (`WindowProperties`) is
+            // not in the interface objects' chain: link to its parent's.
+            let skip = state
+                .borrow()
+                .entry(p)
+                .filter(|e| e.no_interface_object)
+                .and_then(|e| e.parent);
+            match skip {
+                Some(gp) => Some(interface_object(scope, state, mat, gp)?),
+                None => Some(pf),
+            }
+        }
         None => None,
     };
     let f = ft.get_function(scope)?;
@@ -2377,6 +2567,18 @@ fn interface_object<'s>(
         f.set_prototype(scope, pf.into());
     }
     mat.set_made(id);
+    if state.borrow().entry(id).is_some_and(|e| e.no_interface_object) {
+        // V8 gives every prototype object a `constructor`; Blink deletes
+        // it for `[LegacyNoInterfaceObject]` interfaces.
+        let key = v8_str(scope, "prototype");
+        if let Some(proto) = f
+            .get(scope, key.into())
+            .and_then(|p| v8::Local::<v8::Object>::try_from(p).ok())
+        {
+            let ctor = v8_str(scope, "constructor");
+            proto.delete(scope, ctor.into());
+        }
+    }
     let from = state.borrow().entry(id).and_then(|e| e.prototype_from);
     if let Some(target) = from
         && let Some(tf) = interface_object(scope, state, mat, target)
@@ -3184,6 +3386,12 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
     }
 
     /// `a === b` for two held values.
+    /// The script position on top of the JS stack: URL, 1-based line and
+    /// column (Blink's `SourceLocation::Capture`).
+    pub fn script_location(&mut self) -> Option<(String, u32, u32)> {
+        codegen::script_location(self.scope)
+    }
+
     pub fn strict_equals(&mut self, a: Handle, b: Handle) -> bool {
         match (
             load_handle(self.scope, &self.state, a),
@@ -3394,6 +3602,14 @@ impl<'s, 'i> PropCtx<'_, 's, 'i> {
     pub fn scope(&mut self) -> &mut v8::PinScope<'s, 'i> {
         self.scope
     }
+    /// The realm a getter's host object result is wrapped in: the
+    /// holder's (whose window owns the object), the caller's otherwise.
+    fn result_realm(&mut self, result: &Result<Option<Arg>, HostError>) -> RealmId {
+        match result {
+            Ok(Some(Arg::Host(..))) => self.holder_realm(),
+            _ => self.realm,
+        }
+    }
     /// The realm the holder object was created in. For a window global
     /// read from another frame (`frames[0][0]`) this is the holder's own
     /// realm, while [`PropCtx::realm`] is the caller's.
@@ -3527,7 +3743,8 @@ fn named_trampoline<'s>(
     let realm = current_realm(scope);
     let mut cx = PropCtx { scope, args, realm };
     let result = f(&mut cx, &name);
-    finish_interceptor(cx.scope, &state, realm, result, &mut rv)
+    let wrap = cx.result_realm(&result);
+    finish_interceptor(cx.scope, &state, wrap, result, &mut rv)
 }
 
 /// Callback index `slot` (0 get, 1 set, 2 delete, 3 enum) of a named
@@ -3645,6 +3862,416 @@ fn named_query_trampoline<'s>(
         }
         _ => v8::Intercepted::kNo,
     }
+}
+
+// --- Blink's named property handling ([`LegacyNamed`]) -------------------
+
+/// The getter and handling of a [`LegacyNamed`] handler whose data is the
+/// getter's index.
+fn legacy_parts(state: &SharedState, base: usize) -> Option<(NamedGetter, LegacyNamed, bool)> {
+    let st = state.borrow();
+    let getter = match st.callbacks.get(base) {
+        Some(Callback::Named(f)) => f.clone(),
+        _ => return None,
+    };
+    match st.callbacks.get(base.saturating_add(4)) {
+        Some(Callback::NamedLegacy(cfg, enumerable)) => Some((getter, *cfg, *enumerable)),
+        _ => None,
+    }
+}
+
+/// Whether a real (non-intercepted) property `key` is in the prototype
+/// chain of `holder` (V8's `GetRealNamedPropertyAttributesInPrototypeChain`).
+fn real_in_prototype_chain<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    holder: v8::Local<'s, v8::Object>,
+    key: v8::Local<'s, v8::Name>,
+) -> bool {
+    holder
+        .get_prototype(scope)
+        .and_then(|p| v8::Local::<v8::Object>::try_from(p).ok())
+        .is_some_and(|p| p.get_real_named_property_attributes(scope, key).is_some())
+}
+
+/// `PropertyCallbackInfo::ShouldThrowOnError` of a setter, definer or
+/// deleter interceptor call: true for strict code and
+/// `Object.defineProperty`, false for sloppy code and `Reflect.*`.
+///
+/// rusty_v8's `PropertyCallbackArguments::should_throw_on_error` binds it
+/// for `PropertyCallbackInfo<Value>`, which V8 always answers `false` for
+/// (only `<Boolean>`/`<void>` infos carry the mode), so the mode slot is
+/// read here: the slot after the holder's (`kShouldThrowOnErrorIndex =
+/// kHolderIndex + 1` in `v8-function-callback.h`), found from the holder
+/// handle's address. `kInferShouldThrowMode` (store ICs) asks V8's
+/// `internal::ShouldThrowOnError(isolate)`, as the inline header does.
+fn should_throw(args: &v8::PropertyCallbackArguments<'_>) -> bool {
+    const SLOT: usize = std::mem::size_of::<usize>();
+    const _: () = assert!(
+        std::mem::size_of::<v8::PropertyCallbackArguments<'static>>() == SLOT,
+        "PropertyCallbackArguments is one pointer"
+    );
+    unsafe extern "C" {
+        // `bool v8::internal::ShouldThrowOnError(v8::internal::Isolate*)`,
+        // exported by the prebuilt V8 archive (`src/api/api.cc`) for the
+        // inline `ShouldThrowOnError`; Itanium C++ ABI (Linux, macOS).
+        #[link_name = "_ZN2v88internal18ShouldThrowOnErrorEPNS0_7IsolateE"]
+        fn v8_internal_should_throw_on_error(isolate: *mut c_void) -> bool;
+    }
+    // SAFETY: `PropertyCallbackArguments` is a one-field wrapper of a
+    // reference to the C++ `PropertyCallbackInfo`, whose storage is its
+    // `Address args_[]` array (size checked above). The holder's handle is
+    // `&args_[kHolderIndex]` (`Holder()` is `FromSlot`), so its address
+    // gives that index; the index is checked to lie in the array's
+    // mandatory part (at most 16 slots) before the next slot is read. The
+    // isolate slot (`kIsolateIndex = kHolderIndex - 3`) holds the running
+    // isolate, which is alive and on this thread for the whole callback.
+    unsafe {
+        let base: usize = std::mem::transmute_copy(args);
+        let holder = &*args.holder() as *const v8::Object as usize;
+        let Some(off) = holder.checked_sub(base) else {
+            return false;
+        };
+        let idx = off / SLOT;
+        if off % SLOT != 0 || !(3..16).contains(&idx) {
+            return false;
+        }
+        let slots = base as *const usize;
+        let mode = *slots.add(idx + 1);
+        // Smis: `value << 1` (pointer compression) or `value << 32`.
+        let is = |v: usize| mode == v << 1 || mode == v << 32;
+        if mode == 0 {
+            false
+        } else if is(1) {
+            true
+        } else if is(2) {
+            let isolate = *slots.add(idx - 3) as *mut c_void;
+            !isolate.is_null() && v8_internal_should_throw_on_error(isolate)
+        } else {
+            false
+        }
+    }
+}
+
+/// What a [`LegacyNamed`] callback does once it knows the name.
+enum LegacyOp {
+    Set,
+    Define,
+    Delete,
+}
+
+/// Blink's named setter, definer and deleter for an interface without a
+/// named setter or deleter: refuse supported names (a `TypeError` when the
+/// caller should throw), let the rest through.
+fn legacy_refuse<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    name: &str,
+    args: v8::PropertyCallbackArguments<'s>,
+    op: LegacyOp,
+    rv: Option<&mut v8::ReturnValue<v8::Boolean>>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let base = callback_index(scope, args.data());
+    let Some((f, cfg, _)) = legacy_parts(&state, base) else {
+        return v8::Intercepted::kNo;
+    };
+    let realm = current_realm(scope);
+    let throws = should_throw(&args);
+    if !cfg.properties_object {
+        if matches!(op, LegacyOp::Set)
+            && cfg.override_builtins
+            && real_in_prototype_chain(scope, args.holder(), key)
+        {
+            return v8::Intercepted::kNo;
+        }
+        let mut cx = PropCtx { scope, args, realm };
+        let found = f(&mut cx, name);
+        let scope = cx.scope;
+        match found {
+            Ok(Some(_)) => {}
+            Ok(None) => return v8::Intercepted::kNo,
+            Err(e) => {
+                throw(scope, &state, realm, e);
+                return v8::Intercepted::kYes;
+            }
+        }
+        return legacy_refused(scope, &state, realm, cfg, name, op, throws, rv);
+    }
+    legacy_refused(scope, &state, realm, cfg, name, op, throws, rv)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn legacy_refused(
+    scope: &mut v8::PinScope<'_, '_>,
+    state: &SharedState,
+    realm: RealmId,
+    cfg: LegacyNamed,
+    name: &str,
+    op: LegacyOp,
+    throws: bool,
+    rv: Option<&mut v8::ReturnValue<v8::Boolean>>,
+) -> v8::Intercepted {
+    let msg = match op {
+        LegacyOp::Delete => {
+            if let Some(rv) = rv {
+                rv.set_bool(false);
+            }
+            format!(
+                "Failed to delete a named property '{name}' from '{}': Named property deleter is not supported.",
+                cfg.iface
+            )
+        }
+        LegacyOp::Set | LegacyOp::Define => format!(
+            "Failed to set a named property '{name}' on '{}': Named property setter is not supported.",
+            cfg.iface
+        ),
+    };
+    if throws {
+        throw(scope, state, realm, HostError::TypeError(msg));
+    }
+    v8::Intercepted::kYes
+}
+
+fn legacy_set_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    _value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
+    _rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let name = key.to_rust_string_lossy(scope);
+    legacy_refuse(scope, key, &name, args, LegacyOp::Set, None)
+}
+
+fn legacy_define_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    _desc: &v8::PropertyDescriptor,
+    args: v8::PropertyCallbackArguments<'s>,
+    _rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let name = key.to_rust_string_lossy(scope);
+    legacy_refuse(scope, key, &name, args, LegacyOp::Define, None)
+}
+
+fn legacy_delete_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let name = key.to_rust_string_lossy(scope);
+    legacy_refuse(scope, key, &name, args, LegacyOp::Delete, Some(&mut rv))
+}
+
+/// `[[GetOwnProperty]]` of a supported name: the value, read-only unless
+/// it is the named properties object, configurable.
+fn legacy_descriptor<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    name: &str,
+    args: v8::PropertyCallbackArguments<'s>,
+    rv: &mut v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let base = callback_index(scope, args.data());
+    let Some((f, cfg, enumerable)) = legacy_parts(&state, base) else {
+        return v8::Intercepted::kNo;
+    };
+    if !cfg.override_builtins && real_in_prototype_chain(scope, args.holder(), key) {
+        return v8::Intercepted::kNo;
+    }
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    let result = f(&mut cx, name);
+    let wrap = cx.result_realm(&result);
+    let scope = cx.scope;
+    let value = match result {
+        Ok(None) => return v8::Intercepted::kNo,
+        Ok(Some(arg)) => match arg_to_v8(scope, &state, wrap, &arg) {
+            Ok(v) => v,
+            Err(e) => {
+                throw(scope, &state, realm, e);
+                return v8::Intercepted::kYes;
+            }
+        },
+        Err(e) => {
+            throw(scope, &state, realm, e);
+            return v8::Intercepted::kYes;
+        }
+    };
+    let desc = v8::Object::new(scope);
+    let t = v8::Boolean::new(scope, true);
+    let fields: [(&str, v8::Local<v8::Value>); 4] = [
+        ("value", value),
+        ("writable", v8::Boolean::new(scope, cfg.properties_object).into()),
+        ("enumerable", v8::Boolean::new(scope, enumerable).into()),
+        ("configurable", t.into()),
+    ];
+    for (k, v) in fields {
+        let k = v8_str(scope, k);
+        desc.create_data_property(scope, k.into(), v);
+    }
+    rv.set(desc.into());
+    v8::Intercepted::kYes
+}
+
+fn legacy_descriptor_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
+    let name = key.to_rust_string_lossy(scope);
+    legacy_descriptor(scope, key, &name, args, &mut rv)
+}
+
+/// Supported names: read-only, not enumerable under
+/// `[LegacyUnenumerableNamedProperties]`.
+fn legacy_query_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Integer>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let base = callback_index(scope, args.data());
+    let Some((f, _, enumerable)) = legacy_parts(&state, base) else {
+        return v8::Intercepted::kNo;
+    };
+    let name = key.to_rust_string_lossy(scope);
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    match f(&mut cx, &name) {
+        Ok(Some(_)) => {
+            let mut attrs = v8::PropertyAttribute::READ_ONLY;
+            if !enumerable {
+                attrs = attrs | v8::PropertyAttribute::DONT_ENUM;
+            }
+            rv.set_int32(attrs.as_u32() as i32);
+            v8::Intercepted::kYes
+        }
+        _ => v8::Intercepted::kNo,
+    }
+}
+
+// The named properties object answers index keys through its named
+// callbacks, the index as a string (Blink's indexed callbacks of an
+// interface without an indexed getter).
+
+fn legacy_index_get_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
+    let state = shared_state(scope);
+    let idx = callback_index(scope, args.data());
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::Named(f)) => f.clone(),
+        _ => return v8::Intercepted::kNo,
+    };
+    let realm = current_realm(scope);
+    let mut cx = PropCtx { scope, args, realm };
+    let result = f(&mut cx, &index.to_string());
+    let wrap = cx.result_realm(&result);
+    finish_interceptor(cx.scope, &state, wrap, result, &mut rv)
+}
+
+fn legacy_index_set_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    _value: v8::Local<'s, v8::Value>,
+    args: v8::PropertyCallbackArguments<'s>,
+    _rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let name = index.to_string();
+    let key = v8_str(scope, &name);
+    legacy_refuse(scope, key.into(), &name, args, LegacyOp::Set, None)
+}
+
+fn legacy_index_define_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    _desc: &v8::PropertyDescriptor,
+    args: v8::PropertyCallbackArguments<'s>,
+    _rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let name = index.to_string();
+    let key = v8_str(scope, &name);
+    legacy_refuse(scope, key.into(), &name, args, LegacyOp::Define, None)
+}
+
+fn legacy_index_delete_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Boolean>,
+) -> v8::Intercepted {
+    let name = index.to_string();
+    let key = v8_str(scope, &name);
+    legacy_refuse(scope, key.into(), &name, args, LegacyOp::Delete, Some(&mut rv))
+}
+
+fn legacy_index_descriptor_trampoline<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    index: u32,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Value>,
+) -> v8::Intercepted {
+    let name = index.to_string();
+    let key = v8_str(scope, &name);
+    legacy_descriptor(scope, key.into(), &name, args, &mut rv)
+}
+
+/// Getter of a native data property: the host getter's value, else the
+/// prototype chain's (Blink's document named item accessor).
+fn native_property_getter<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    key: v8::Local<'s, v8::Name>,
+    args: v8::PropertyCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<v8::Value>,
+) {
+    let state = shared_state(scope);
+    let idx = callback_index(scope, args.data());
+    let f = match state.borrow().callbacks.get(idx) {
+        Some(Callback::Native(f)) => f.clone(),
+        _ => return,
+    };
+    let name = key.to_rust_string_lossy(scope);
+    let realm = current_realm(scope);
+    let holder = args.holder();
+    let mut cx = PropCtx { scope, args, realm };
+    let result = f(&mut cx, &name);
+    let wrap = cx.result_realm(&result);
+    let scope = cx.scope;
+    match result {
+        Ok(Some(arg)) => match arg_to_v8(scope, &state, wrap, &arg) {
+            Ok(v) => rv.set(v),
+            Err(e) => throw(scope, &state, realm, e),
+        },
+        Ok(None) => {
+            let proto = holder
+                .get_prototype(scope)
+                .and_then(|p| v8::Local::<v8::Object>::try_from(p).ok());
+            if let Some(v) = proto.and_then(|p| p.get_real_named_property(scope, key)) {
+                rv.set(v);
+            }
+        }
+        Err(e) => throw(scope, &state, realm, e),
+    }
+}
+
+/// Setter of a native data property: assignments are ignored (Blink's
+/// document named items; without a setter V8 would turn the property
+/// into a plain data property).
+fn native_property_setter<'s>(
+    _scope: &mut v8::PinScope<'s, '_>,
+    _key: v8::Local<'s, v8::Name>,
+    _value: v8::Local<'s, v8::Value>,
+    _args: v8::PropertyCallbackArguments<'s>,
+    _rv: v8::ReturnValue<()>,
+) {
 }
 
 /// Supported indices of an interface with [`IndexedLength`].

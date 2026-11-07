@@ -190,6 +190,14 @@ pub struct WorkerStart {
     /// Service workers: the version and what to report after the script
     /// ran.
     pub service: Option<super::sw::ServiceStart>,
+    /// The scope's storage key (ADR 0037): its creator's (a dedicated or
+    /// shared worker), its registration's (a service worker). `None`:
+    /// first-party of `origin`.
+    pub storage_key: Option<super::partition::StorageKey>,
+    /// The creator's Content Security Policy and CDP bypass (ADR 0036):
+    /// `blob:` and `data:` workers inherit the policies, others take their
+    /// script response's.
+    pub csp: Option<(super::csp::CspList, bool)>,
 }
 
 /// Worker threads, provided by the page layer.
@@ -229,10 +237,15 @@ pub(crate) struct WorkerSide {
 // Blob URLs
 // ---------------------------------------------------------------------------
 
+/// One live blob URL: bytes, type, and the creator's serialized storage
+/// key.
+type BlobEntry = (Vec<u8>, String, String);
+
 /// Blob URLs of the process, by URL. Not fingerprint data: the URLs are
-/// random, scoped by origin on lookup, and revoked with their document.
-fn blob_store() -> &'static Mutex<HashMap<String, (Vec<u8>, String)>> {
-    static STORE: std::sync::OnceLock<Mutex<HashMap<String, (Vec<u8>, String)>>> =
+/// random, scoped by storage key on lookup (ADR 0037), and revoked with
+/// their document.
+fn blob_store() -> &'static Mutex<HashMap<String, BlobEntry>> {
+    static STORE: std::sync::OnceLock<Mutex<HashMap<String, BlobEntry>>> =
         std::sync::OnceLock::new();
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -259,7 +272,7 @@ pub(crate) fn create_blob_url(w: &Window, bytes: Vec<u8>, type_: String) -> Stri
     blob_store()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(url.clone(), (bytes, type_));
+        .insert(url.clone(), (bytes, type_, w.storage_key_string()));
     w.wk.blob_urls.borrow_mut().push(url.clone());
     url
 }
@@ -271,14 +284,28 @@ pub(crate) fn revoke_blob_url(url: &str) {
         .remove(url);
 }
 
-/// The contents of a live blob URL (fragment ignored).
+/// The contents of a live blob URL (fragment ignored), whatever its
+/// storage key.
 pub fn resolve_blob_url(url: &str) -> Option<(Vec<u8>, String)> {
     let key = url.split('#').next().unwrap_or(url);
     blob_store()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(key)
-        .cloned()
+        .map(|(b, t, _)| (b.clone(), t.clone()))
+}
+
+/// The contents of a live blob URL for a requester with serialized
+/// storage key `storage_key`: Chrome 153 answers only requests from the
+/// creator's partition (fetch, XHR, workers, `importScripts`, modules).
+pub fn resolve_blob_url_for(url: &str, storage_key: &str) -> Option<(Vec<u8>, String)> {
+    let key = url.split('#').next().unwrap_or(url);
+    blob_store()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(key)
+        .filter(|(_, _, k)| k == storage_key)
+        .map(|(b, t, _)| (b.clone(), t.clone()))
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +320,8 @@ enum HostEntry {
     Blob(Vec<u8>, String),
     /// A `CryptoKey` (keys are immutable; both sides share it).
     Key(std::sync::Arc<super::crypto::CryptoKey>),
+    /// An `ImageBitmap`: width, height, premultiplied RGBA.
+    Bitmap(u32, u32, Vec<u8>),
 }
 
 /// One posted message: the clone and what travels beside it.
@@ -625,6 +654,11 @@ fn write_host(
             entries.push(HostEntry::Key(k));
             return Ok((entries.len() - 1) as u32);
         }
+        if let Some(b) = super::canvas::clone_bitmap(w, h.id) {
+            let (bw, bh, data) = b?;
+            entries.push(HostEntry::Bitmap(bw, bh, data));
+            return Ok((entries.len() - 1) as u32);
+        }
     }
     Err(format!("{class} object could not be cloned."))
 }
@@ -681,6 +715,10 @@ pub(crate) fn unpack(
             HostEntry::Key(k) => {
                 let id = w.new_obj(Obj::Crypto(Box::new(super::crypto::CryptoObj::Key(k))));
                 (w.rt.iface("CryptoKey"), HostRef::new(K_OBJ, id))
+            }
+            HostEntry::Bitmap(bw, bh, data) => {
+                let id = super::canvas::adopt_bitmap(w, bw, bh, data);
+                (w.rt.iface("ImageBitmap"), HostRef::new(K_OBJ, id))
             }
         })
         .collect();
@@ -810,6 +848,7 @@ impl Window {
     ) -> Result<lb_js::RealmId, JsError> {
         let map = self.module_map.clone();
         let base = self.url();
+        let key = self.storage_key_string();
         let loader: lb_js::ModuleLoader = Rc::new(move |spec: &str, referrer: &str| {
             let from = Url::parse(referrer).unwrap_or_else(|_| base.clone());
             let url = super::modules::resolve_specifier(spec, &from)
@@ -821,10 +860,12 @@ impl Window {
                 });
             }
             match url.scheme() {
-                "blob" => resolve_blob_url(url.as_str()).map(|(b, _)| lb_js::ModuleSource {
-                    url: url.to_string(),
-                    source: String::from_utf8_lossy(&b).into_owned(),
-                }),
+                "blob" => {
+                    resolve_blob_url_for(url.as_str(), &key).map(|(b, _)| lb_js::ModuleSource {
+                        url: url.to_string(),
+                        source: String::from_utf8_lossy(&b).into_owned(),
+                    })
+                }
                 "data" => decode_data_url(&url).map(|source| lb_js::ModuleSource {
                     url: url.to_string(),
                     source,
@@ -837,8 +878,14 @@ impl Window {
         self.set_realm(realm);
         self.rt.attach(realm, self.clone());
         if let Some(p) = &self.profile {
-            engine.set_default_locale(&p.locale.language);
-            engine.set_time_zone(&p.locale.timezone);
+            // The context's CDP time zone / locale overrides win (ADR 0039).
+            let mut apply = |zone: &str, locale: &str| {
+                engine.set_default_locale(locale);
+                engine.set_time_zone(zone);
+            };
+            if !self.net.with_intl(&mut apply) {
+                apply(&p.locale.timezone, &p.locale.language);
+            }
         }
         self.setup_helpers(engine, realm)?;
         if self.sw.scope_set() {
@@ -850,6 +897,17 @@ impl Window {
     }
 
     /// Workers and blob URLs of this window end with it.
+    /// The workers this window started that still run (ADR 0039).
+    pub(crate) fn child_workers(&self) -> Vec<Arc<WorkerControl>> {
+        self.wk
+            .children
+            .borrow()
+            .iter()
+            .filter(|c| !c.is_done())
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn close_workers(&self) {
         if let Some(i) = self.wk.inbox.borrow().as_ref() {
             super::broadcast::forget_inbox(i);
@@ -909,6 +967,21 @@ pub(crate) fn forward_error(w: &Window, message: &str, e: &JsError) {
                 from_worker: true,
             });
         }
+    }));
+}
+
+/// A console message of a dedicated worker scope that Chrome also shows
+/// in its creator's console (Content Security Policy texts, ADR 0036).
+pub(crate) fn forward_console(w: &Window, msg: crate::host::ConsoleMessage) {
+    let scope = w.wk.scope.borrow().clone();
+    let Some((parent, _)) = scope.and_then(|s| s.parent.clone()) else {
+        return;
+    };
+    parent.send(Box::new(move |_js, pw| {
+        pw.log(crate::host::ConsoleMessage {
+            from_worker: true,
+            ..msg
+        });
     }));
 }
 
@@ -978,14 +1051,6 @@ fn script_url(
             })?;
             Ok((url, Some(src), "null".into()))
         }
-        "blob" => {
-            let (bytes, _) = resolve_blob_url(url.as_str()).unwrap_or_default();
-            Ok((
-                url,
-                Some(String::from_utf8_lossy(&bytes).into_owned()),
-                mine,
-            ))
-        }
         _ => {
             if url.origin().ascii_serialization() != mine {
                 return Err(w.rt.err(
@@ -994,6 +1059,13 @@ fn script_url(
                         "Failed to construct '{iface}': Script at '{url}' cannot be accessed from origin '{mine}'."
                     ),
                 ));
+            }
+            if url.scheme() == "blob" {
+                // Another partition's blob URL (or a revoked one) fails to
+                // load: the page layer cannot fetch it, so `error` fires.
+                let src = resolve_blob_url_for(url.as_str(), &w.storage_key_string())
+                    .map(|(b, _)| String::from_utf8_lossy(&b).into_owned());
+                return Ok((url, src, mine));
             }
             Ok((url, None, mine))
         }
@@ -1097,7 +1169,31 @@ fn new_start(
         inbox_rx: rx,
         parent: None,
         service: None,
+        storage_key: Some(w.storage_key()),
+        csp: Some((w.csp_policies(), w.csp_bypass())),
     }
+}
+
+/// Content Security Policy (`worker-src`) for a new worker: a blocked one
+/// is not started and fires `error` at its object.
+fn worker_allowed(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>, url: &Url, obj: u32) -> bool {
+    let loc = w.csp_here(Some(&mut *cx));
+    if w.csp_url(
+        super::csp::Dir::WorkerSrc,
+        url,
+        &super::csp::UrlCheck::default(),
+        loc,
+    ) {
+        return true;
+    }
+    let w2 = w.clone();
+    w.queue_task(
+        TaskSource::Networking,
+        Box::new(move |js, _| {
+            super::events::fire_event(js, &w2, HostRef::new(K_OBJ, obj), "error", false, false);
+        }),
+    );
+    false
 }
 
 fn scope_of(w: &Window) -> Option<Rc<ScopeInit>> {
@@ -1195,6 +1291,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             control: control.clone(),
         }))));
         start.parent = Some((w.inbox(), id));
+        let url = start.url.clone();
+        if !worker_allowed(cx, w, &url, id) {
+            return cx.init_this(HostRef::new(K_OBJ, id));
+        }
         w.wk.children.borrow_mut().push(control);
         if let Some(host) = w.worker_host() {
             host.start(start);
@@ -1231,6 +1331,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         let (mine, theirs) = PortCore::pair();
         let port = adopt_port(w, mine);
         let id = w.new_obj(Obj::Worker(Box::new(WorkerHostObj::SharedWorker { port })));
+        let url = start.url.clone();
+        if !worker_allowed(cx, w, &url, id) {
+            return cx.init_this(HostRef::new(K_OBJ, id));
+        }
         if let Some(host) = w.worker_host() {
             host.connect_shared(start, connect_task(theirs));
         }
@@ -1442,6 +1546,10 @@ fn structured_clone(
                 let id = w.new_obj(Obj::Crypto(Box::new(super::crypto::CryptoObj::Key(k))));
                 (w.rt.iface("CryptoKey"), HostRef::new(K_OBJ, id))
             }
+            HostEntry::Bitmap(bw, bh, data) => {
+                let id = super::canvas::adopt_bitmap(w, bw, bh, data);
+                (w.rt.iface("ImageBitmap"), HostRef::new(K_OBJ, id))
+            }
         })
         .collect();
     let h = cx
@@ -1478,13 +1586,15 @@ fn import_scripts(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), Ho
             )
         };
         let text = if u.scheme() == "blob" {
-            let (bytes, _) = resolve_blob_url(u.as_str()).ok_or_else(failed)?;
+            let (bytes, _) =
+                resolve_blob_url_for(u.as_str(), &w.storage_key_string()).ok_or_else(failed)?;
             String::from_utf8_lossy(&bytes).into_owned()
         } else if u.scheme() == "data" {
             decode_data_url(&u).ok_or_else(failed)?
         } else {
             let mut req = NetRequest::get(u.clone(), Destination::Script, Some(w.url()));
             req.mode = "no-cors";
+            req.storage_key = Some(w.storage_key());
             let resp = host.fetch_sync(req).map_err(|_| failed())?;
             if !(200..300).contains(&resp.status) {
                 return Err(failed());

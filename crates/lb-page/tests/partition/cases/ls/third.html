@@ -1,0 +1,8 @@
+<!doctype html><body><!--LOG--><script>
+// A again in a new page: localStorage kept, a new sessionStorage.
+function rd(){return JSON.stringify([localStorage.getItem('rebrowserStoragePartitioning'),sessionStorage.getItem('ss'),localStorage.length,sessionStorage.length])}
+(async function(){
+log('A '+rd());
+await run('BA','read');await run('B','read');
+end()})()
+</script>

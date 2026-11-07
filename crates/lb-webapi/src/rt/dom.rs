@@ -1536,13 +1536,15 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         if slot != 0 {
             return cx.ret("");
         }
-        cx.ret(w.net.cookie_string(&w.url()))
+        w.csp_sandbox_check("read", "cookie", "Document")?;
+        cx.ret(w.net.cookie_string_in(&w.url(), &w.storage_key()))
     });
     setter(reg, rt, "Document", "cookie", |cx, w| {
         let (slot, _) = this_node(cx, w)?;
         let v = cx.arg_string(0)?;
         if slot == 0 {
-            w.net.set_cookie_string(&w.url(), &v);
+            w.csp_sandbox_check("set", "cookie", "Document")?;
+            w.net.set_cookie_string_in(&w.url(), &v, &w.storage_key());
         }
         Ok(())
     });
@@ -2207,9 +2209,15 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
             } else {
                 cx.arg_string(0)?
             };
+            let before = super::input::selection(w, slot, n);
             w.values.borrow_mut().insert((slot, n), v);
             // A value set by script puts the caret at the end.
             w.selections.borrow_mut().remove(&(slot, n));
+            if super::input::selection(w, slot, n) != before
+                && w.doc_slot(slot, |d| super::input::has_text_selection(d, n))
+            {
+                super::range::control_changed(w, slot, n);
+            }
             Ok(())
         });
         getter(reg, rt, iface, "defaultValue", |cx, w| {
@@ -2421,7 +2429,8 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "HTMLFormElement", "submit", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;
         if slot == 0 {
-            super::form::submit_form(w, n, None, false);
+            let loc = w.csp_here(Some(&mut *cx));
+            super::form::submit_form(w, n, None, false, loc);
         }
         Ok(())
     });

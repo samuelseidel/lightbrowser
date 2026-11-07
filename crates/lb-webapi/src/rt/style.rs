@@ -440,6 +440,9 @@ fn write_decls(w: &Rc<Window>, src: Src, decls: &[(String, String, bool)]) {
     let text = serialize_decls(decls);
     match src {
         Src::Node { slot, node, .. } => {
+            if slot == 0 {
+                w.csp_cssom_wrote(node, &text);
+            }
             let _ = w.doc_slot_mut(slot, |d| d.set_attribute(node, "style", &text));
         }
         Src::Rule { sheet, uid } => super::sheets::set_rule_decls(w, sheet, uid, text),
@@ -513,6 +516,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         setter(reg, rt, iface, "style", |cx, w| {
             let (slot, n) = this_node(cx, w)?;
             let v = cx.arg_string(0)?;
+            if slot == 0 {
+                w.csp_cssom_wrote(n, &v);
+            }
             let _ = w.doc_slot_mut(slot, |d| d.set_attribute(n, "style", &v));
             w.after_mutation(cx);
             Ok(())

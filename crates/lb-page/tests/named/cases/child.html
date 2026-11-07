@@ -1,0 +1,6 @@
+<!DOCTYPE html>
+<html><body><div id="inchild"></div><form name="childform"></form>
+<script>
+window.selfSeen = typeof inchild + ':' + (window.inchild === document.getElementById('inchild')) +
+  ':' + (Object.getPrototypeOf(Window.prototype) !== EventTarget.prototype);
+</script></body></html>

@@ -1,0 +1,11 @@
+<!doctype html><body><!--LOG--><script>
+// BroadcastChannel 'x' reaches the same storage key only.
+var got=[];var ch=new BroadcastChannel('x');ch.onmessage=function(e){got.push(e.data)};
+(async function(){
+var p1=run('BA','listen','ABA-1');await sleep(300);
+await run('A','post','AA');await run('BA','post','ABA-2');await run('B','post','AB');await run('AB','post','AAB');
+var w=new Worker('/bc/worker.js?A-w');
+await p1;await sleep(300);
+log('A got '+JSON.stringify(got.sort()));
+end()})()
+</script>

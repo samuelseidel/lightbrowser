@@ -1,0 +1,43 @@
+<!doctype html><meta charset=utf-8><body><script>
+// FontFace family serialization, src parsing and local() lookups. Each
+// line: input, then what Chrome gave. Recorded on macOS 26 (see chrome.mjs).
+window.R = null;
+(async () => {
+  const out = [];
+  const settle = async (f) => { try { await f.load(); return 'loaded'; } catch (e) { return e.name + ': ' + e.message; } };
+  const fams = ['X', 'Helvetica Neue', 'a"b', "it's", '123', '1a', '  spaced  ', '', 'serif', 'sans-serif', 'monospace',
+    'system-ui', 'math', 'cursive', 'fantasy', 'emoji', 'initial', 'inherit', 'unset', 'revert', 'revert-layer', 'revert-rule',
+    'default', 'Default', 'INITIAL', 'Serif', 'auto', 'none', 'normal', '"quoted"', 'a-b', '-a', '--x', '-', '-1', '-_', '_x',
+    'é', 'a b', 'x\u{1F600}', 'a,b', 'a\\b', 'A\tB', 'a\u0000b', 'a\u007fb', 'a\nb', 'Font 2', 'A-1', 'a.b', 'ui-serif',
+    '-webkit-body', 'SignPainter-HouseScript Semibold', null, undefined, 0];
+  for (const f of fams) out.push(['family', String(f), new FontFace(f, 'local(x)').family]);
+  const ff = new FontFace('A', 'local(x)');
+  for (const v of ['B C', 'D', 'serif']) { ff.family = v; out.push(['set family', v, ff.family]); }
+  const fq = new FontFace('A B', 'local(x)');
+  for (const v of ['X', 'C D', 'serif']) { fq.family = v; out.push(['set quoted family', v, fq.family]); }
+  const srcs = ['local("Arial")', "local('Arial')", 'local(Arial)', 'local(Arial Bold)', 'local( Arial )', 'local(arial bold)',
+    'local(Arial    Bold)', 'local("Arial    Bold")', 'local(ARIAL)', 'Local(Arial)', 'LOCAL("Arial")', 'local("Ar\\69 al")',
+    'local(Ar\\69 al)', 'local(\\41 rial)', 'local(/**/Arial)', 'local(Ar/**/ial)', 'local(Arial', 'local("Arial"',
+    'local("Nope"), local("Arial")', 'url(x.woff), local("Arial")', 'local("Arial"), url(x.woff)', 'local(Arial), garbage',
+    'local("Arial"),', ', local(Arial)', 'local(Arial),,local(Arial)', 'local("Arial") format("truetype")', '', 'garbage',
+    'local()', 'local("")', 'local(123)', 'local("Arial";)', 'local(initial)', 'local(default)', 'local(serif)',
+    'local(inherit Arial)', 'local("Arial" "x")', 'local(Arial,)', 'local(Arial) local(Arial)', 'url(x.woff)',
+    'url("x.woff") format("woff")', 'url(x) format(woff2)', 'url(x) format("nope")', 'url(x) format("svg")',
+    'url(x) format(collection)', 'url(x) format("WOFF")', 'url(x) format("woff2-variations")', 'url(x) format("woff", "woff2")',
+    'url(x) format()', 'url(x) tech(variations)', 'url(x) tech(color-SVG)', 'url(x) tech(variations, palettes)',
+    'url(x) tech("variations")', 'url(x) tech(variations) format(woff)', 'url(x) format(woff) tech(variations)', 'url()',
+    'url(x) y', 'URL(x)', '"x.woff"'];
+  for (const s of srcs) { const f = new FontFace('s', s); out.push(['src', s, f.status + ' / ' + await settle(f)]); }
+  const bin = new FontFace('b', new Uint8Array([1, 2, 3, 4]));
+  out.push(['binary', '01020304', bin.status + ' / ' + await settle(bin)]);
+  const names = ['Arial', 'ArialMT', 'arialmt', 'Arial Bold', 'Arial-BoldMT', 'Arial Negrita', 'Menlo', 'Menlo Regular',
+    'Menlo-Regular', 'Avenir Next', 'Avenir Next Regular', 'AvenirNext-Regular', 'Times', 'Times Roman', 'Futura', 'Futura Medium',
+    'Helvetica', 'Helvetica Neue', 'HelveticaNeue', 'Courier', 'Courier Bold', 'Geneva', 'Monaco', 'Apple Color Emoji',
+    'AppleColorEmoji', 'Arial Unicode MS', 'Microsoft Sans Serif', 'PingFang SC Regular', 'PingFangSC-Regular', 'PingFang HK Light',
+    'Kefa III Regular Regular', 'Kefa Regular', 'Noto Sans Syriac Regular Bold', 'Skia-Regular_Black', 'Athelas Regular',
+    'System Font Bold', '.SF NS', 'system-ui', 'Segoe UI', 'Calibri', 'Consolas', 'DejaVu Sans', 'Ubuntu', 'Liberation Mono',
+    'Noto Color Emoji', 'Roboto'];
+  for (const n of names) out.push(['local', n, await settle(new FontFace('l', `local("${n}")`))]);
+  window.R = out.map((l) => l.join(' | ')).join('\n');
+})();
+</script></body>

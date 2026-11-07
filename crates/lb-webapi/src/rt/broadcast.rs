@@ -3,16 +3,16 @@
 //!
 //! Every open channel is listed in one process-wide table with its
 //! browser context (the context's IndexedDB backend names it, see
-//! [`ContextToken`]), its origin, its name and the [`Inbox`] of the window
-//! or worker scope that owns it. `postMessage` serializes the message once
-//! (V8 structured clone, as `postMessage` of ports and workers) and sends a
-//! copy to the inbox of every other open channel with the same context,
-//! origin and name, in creation order; the receiving scope fires
+//! [`ContextToken`]), its storage key (ADR 0037), its name and the
+//! [`Inbox`] of the window or worker scope that owns it. `postMessage`
+//! serializes the message once (V8 structured clone, as `postMessage` of
+//! ports and workers) and sends a copy to the inbox of every other open
+//! channel with the same context, storage key and name, in creation order; the receiving scope fires
 //! `message` (or `messageerror`) as a posted-message task, on its own
 //! thread, unless the channel was closed in between. So windows, frames,
-//! workers and service workers of one context all reach each other.
-//! Opaque origins reach no one. Chrome also partitions by top-level site
-//! (third-party frames); this does not.
+//! workers and service workers of one context and storage partition reach
+//! each other; a third-party frame's channels (and its workers') reach
+//! only that partition, as in Chrome. Opaque origins reach no one.
 
 use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
@@ -35,7 +35,8 @@ pub(crate) struct BcState {
 struct Entry {
     seq: u64,
     context: Option<ContextToken>,
-    origin: String,
+    /// Serialized storage key (it includes the origin).
+    key: String,
     name: String,
     inbox: Inbox,
     obj: u32,
@@ -48,7 +49,7 @@ struct Table {
 }
 
 /// The open channels of the process. Not fingerprint data: rows hold
-/// channel names and inboxes, matched by context and origin.
+/// channel names and inboxes, matched by context and storage key.
 fn table() -> &'static Mutex<Table> {
     static T: OnceLock<Mutex<Table>> = OnceLock::new();
     T.get_or_init(Default::default)
@@ -102,7 +103,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             ));
         }
         let name = cx.arg_string(0)?;
-        let origin = w.origin_string();
+        let key = w.storage_key_string();
         let inbox = w.inbox();
         let id = w.new_obj(Obj::Broadcast(Box::new(BcState {
             name: name.clone(),
@@ -118,7 +119,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             t.rows.push(Entry {
                 seq,
                 context: w.idb_backend().map(|b| b.token()),
-                origin,
+                key,
                 name,
                 inbox,
                 obj: id,
@@ -151,11 +152,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         if origin == "null" {
             return Ok(());
         }
+        let key = w.storage_key_string();
         let targets: Vec<(Inbox, u32)> = lock()
             .rows
             .iter()
             .filter(|r| {
-                r.seq != seq && r.name == name && r.origin == origin && same_context(&r.context, w)
+                r.seq != seq && r.name == name && r.key == key && same_context(&r.context, w)
             })
             .map(|r| (r.inbox.clone(), r.obj))
             .collect();

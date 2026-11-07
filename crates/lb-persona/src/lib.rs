@@ -10,10 +10,13 @@
 //! - [`os`]: the OS axis ([`OsKind`], display server, distro) and the
 //!   per-OS defaults behind the accessors on [`PersonaProfile`] (ADR 0015).
 //! - [`generate`]: builds consistent personas from `profiles/catalog/`.
+//! - [`locale`]: time zone and locale overrides that follow a proxy
+//!   (ADR 0039).
 //! - [`sfc32`]: deterministic noise.
 
 pub mod consistency;
 pub mod generate;
+pub mod locale;
 pub mod os;
 pub mod profile;
 pub mod sfc32;
@@ -22,6 +25,7 @@ pub mod uach;
 pub use consistency::{
     ValidateOutcome, ValidationResult, Violation, Warning, validate, validate_file,
 };
+pub use locale::LocaleOverride;
 pub use os::{
     AudioDefaults, Codecs, DisplayServer, Distro, FontDefaults, HighEntropyHints, OsApis, OsKind,
     WebGpuAdapter, WheelModel, os_font_aliases, os_font_defaults,

@@ -1,0 +1,6 @@
+<!doctype html><body><!--LOG--><script src="lib.js"></script><script>
+(async function(){
+log('B doc '+sorted(document.cookie));log('B http '+await echo());
+await run('A','read');await run('AB','read');
+end()})()
+</script>

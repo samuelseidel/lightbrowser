@@ -175,11 +175,40 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             failed: false,
         })));
         cx.init_this(HostRef::new(K_OBJ, id))?;
+        // Content Security Policy (`connect-src`): closed at once, then
+        // `error` (no `close`), as in Chrome.
+        let loc = w.csp_here(Some(&mut *cx));
+        if !w.csp_url(
+            super::csp::Dir::ConnectSrc,
+            &url,
+            &super::csp::UrlCheck::default(),
+            loc,
+        ) {
+            with_ws(w, id, |s| {
+                s.ready = CLOSED;
+                s.failed = true;
+            });
+            w.queue_task(
+                TaskSource::Networking,
+                Box::new(move |js, w| {
+                    super::events::fire_event(
+                        js,
+                        w,
+                        HostRef::new(K_OBJ, id),
+                        "error",
+                        false,
+                        false,
+                    );
+                }),
+            );
+            return Ok(());
+        }
         let origin = super::frames::origin(w);
         match w.net.websocket(WsOpen {
             url,
             protocols,
             origin,
+            storage_key: Some(w.storage_key()),
         }) {
             Some(ch) => {
                 with_ws(w, id, |s| s.commands = Some(ch.commands));

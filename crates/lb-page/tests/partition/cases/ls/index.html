@@ -1,0 +1,15 @@
+<!doctype html><body><!--LOG--><script>
+// rebrowser's storagePartitioning check and more: A writes, frames read.
+function rd(){return JSON.stringify([localStorage.getItem('rebrowserStoragePartitioning'),sessionStorage.getItem('ss'),localStorage.length,sessionStorage.length])}
+var EV=[];window.addEventListener('storage',function(e){EV.push('A storage event '+e.key+'='+e.newValue+' old='+e.oldValue+' area='+(e.storageArea===localStorage?'local':e.storageArea===sessionStorage?'session':e.storageArea)+' url='+e.url.replace(P,'PORT'))});
+(async function(){
+localStorage.setItem('rebrowserStoragePartitioning','top');sessionStorage.setItem('ss','top');
+log('A '+rd());
+await run('A','read');await run('B','read');await run('BA','read');await run('AB','read');await run('BB','read');await run('AA','read');
+await run('BA','write','ABA');await run('B','write','AB');
+await run('BA','read');await run('B','read');await run('A','read');await run('AB','read');
+await run('A','write','AA');await sleep(300);
+EV.sort().forEach(log);
+log('A '+rd());
+end()})()
+</script>

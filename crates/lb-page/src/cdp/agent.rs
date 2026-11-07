@@ -91,6 +91,9 @@ pub(crate) struct AgentState {
     pub human: super::human::HumanState,
     /// `Emulation.setDefaultBackgroundColorOverride` (screenshots only).
     pub screenshot_bg: Option<lb_cdp::Rgba>,
+    /// `acceptLanguage` and geolocation overrides (ADR 0039, `locale.rs`).
+    pub accept_language: Option<String>,
+    pub geolocation: Option<lb_cdp::GeolocationOverride>,
 }
 
 /// Responses kept for `Network.getResponseBody`.

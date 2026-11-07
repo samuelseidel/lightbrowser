@@ -1,0 +1,8 @@
+<!doctype html><body><!--LOG--><script>
+// B as the top-level site: its own storage, then A and B below it.
+function rd(){return JSON.stringify([localStorage.getItem('rebrowserStoragePartitioning'),sessionStorage.getItem('ss'),localStorage.length,sessionStorage.length])}
+(async function(){
+log('B '+rd());
+await run('A','read');await run('AB','read');await run('B','read');
+end()})()
+</script>

@@ -1,0 +1,17 @@
+<script>var L=[];function log(s){L.push(String(s))}function end(){log('end')}
+var P=location.port,H={A:'http://127.0.0.1:'+P,B:'http://localhost:'+P},CASE=location.pathname.split('/')[1];
+var ME=location.hostname=='localhost'?'B':'A';
+function err(e){return e&&e.name!==undefined?e.name+': '+e.message:'value '+String(e)}
+function t(n,f){try{log(n+': '+f())}catch(e){log(n+' threw '+err(e))}}
+async function a(n,f){try{log(n+': '+await f())}catch(e){log(n+' rejected '+err(e))}}
+function show(v){return JSON.stringify(v===undefined?'undefined':v)}
+function frame(url){return new Promise(function(r){var f=document.createElement('iframe');f.onload=function(){r(f)};f.src=url;document.body.appendChild(f)})}
+var waiting={},seq=0;
+window.addEventListener('message',function(e){var d=e.data;if(d&&d.tag&&waiting[d.tag]){var r=waiting[d.tag];delete waiting[d.tag];r(d.lines)}});
+// run(chain, script): a frame chain below this window (e.g. 'BA': a B
+// frame embedding an A frame); the innermost frame loads CASE/<script>.js
+// and runs its main(); its log lines come back here, prefixed by chain.
+function run(chain,script,x){var tag='t'+(++seq);return new Promise(function(r){waiting[tag]=function(lines){lines.forEach(function(l){log(ME+chain+' '+l)});r(lines)};
+ frame(H[chain[0]]+'/'+CASE+'/f.html?c='+chain+'&s='+script+'&t='+tag+(x?'&x='+encodeURIComponent(x):''))})}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+</script>

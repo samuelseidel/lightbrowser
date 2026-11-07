@@ -58,6 +58,9 @@ plausible software reference.
   `webgl_noise_seed`): applied to the drawing buffer and to framebuffers a
   draw rasterized into; uploaded or cleared contents read back exactly, as
   on a GPU. The same seed gives the same pixels; seeds differ per persona.
+  *Replaced by ADR 0038:* readback is exact; `webgl_noise_seed` now gives
+  a sub-pixel coverage offset (`Fixed::offset`, at most 1/16 px) used
+  when rasterizing.
 
 ## Consequences
 

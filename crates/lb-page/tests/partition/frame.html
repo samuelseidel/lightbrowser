@@ -1,0 +1,7 @@
+<!doctype html><body><!--LOG--><script>
+// One frame of a chain (prelude's run()): embed the next site, or run
+// CASE/<s>.js's main() here and post the log lines to the top.
+var Q=new URLSearchParams(location.search),C=Q.get('c'),S=Q.get('s'),TAG=Q.get('t'),X=Q.get('x');
+if(C.length>1){var rest=C.slice(1);frame(H[rest[0]]+'/'+CASE+'/f.html?c='+rest+'&s='+S+'&t='+TAG+(X?'&x='+encodeURIComponent(X):''))}
+else{var sc=document.createElement('script');sc.src='/'+CASE+'/'+S+'.js';sc.onload=function(){Promise.resolve().then(function(){return main(X)}).catch(function(e){log('main threw '+err(e))}).then(function(){top.postMessage({tag:TAG,lines:L},'*')})};document.body.appendChild(sc)}
+</script>

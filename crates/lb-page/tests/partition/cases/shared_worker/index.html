@@ -1,0 +1,8 @@
+<!doctype html><body><!--LOG--><script src="lib.js"></script><script>
+(async function(){
+await opendb('top');
+log('A '+await connect('A'));
+await run('A','probe','AA');await run('BA','probe','ABA');await run('BA','probe','ABA2');await run('B','probe','AB');
+log('A '+await connect('A2'));
+end()})()
+</script>

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html><head>
+<script nonce="abc123" src="/prelude.js"></script>
+</head><body>
+<script nonce="abc123">log('nonced inline ran'); var cs = document.currentScript; log('attr ' + JSON.stringify(cs.getAttribute('nonce')) + ' prop ' + cs.nonce + ' has ' + cs.hasAttribute('nonce'));</script>
+<script nonce="wrong">log('wrong nonce ran');</script>
+<script>log('no nonce ran');</script>
+<script nonce="abc123" src="http://localhost:{PORT}/nonce/x.js"></script>
+<script src="ok.js"></script>
+<script nonce="abc123">
+var s1 = document.createElement('script'); s1.nonce = 'abc123'; s1.textContent = "log('dynamic nonced ran')"; document.body.appendChild(s1);
+var s2 = document.createElement('script'); s2.textContent = "log('dynamic plain ran')"; document.body.appendChild(s2);
+var s3 = document.createElement('script'); s3.setAttribute('nonce', 'abc123'); s3.textContent = "log('dynamic attr nonce ran')"; document.body.appendChild(s3);
+log('s1 attr ' + JSON.stringify(s1.getAttribute('nonce')) + ' s3 attr ' + JSON.stringify(s3.getAttribute('nonce')) + ' s3 prop ' + s3.nonce);
+done();
+</script>
+</body></html>

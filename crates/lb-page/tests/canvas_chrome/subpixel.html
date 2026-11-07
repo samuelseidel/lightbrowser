@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>glyph placement</title>
+<body>
+<script>
+// Where canvas glyphs land on the pixel grid: for each glyph, the same
+// text drawn at x (or y) = 10 + i/32 for i = 0..32; equal images get the
+// same class number. Chrome snaps glyph origins to quarter pixels in x and
+// whole pixels in y; emoji to whole pixels in x too.
+const L = [];
+function img(x, y, txt, font, op) {
+  const c = document.createElement('canvas'); c.width = 200; c.height = 80; const g = c.getContext('2d');
+  g.font = font; g.fillStyle = '#000';
+  if (op === 'stroke') g.strokeText(txt, x, y); else g.fillText(txt, x, y);
+  return Array.from(g.getImageData(0, 0, 200, 80).data).join();
+}
+function classes(f) {
+  const seen = new Map(); const out = [];
+  for (let i = 0; i <= 32; i++) { const k = f(i / 32); if (!seen.has(k)) seen.set(k, seen.size); out.push(String.fromCharCode(97 + seen.get(k))); }
+  return out.join('');
+}
+for (const [t, f, op] of [['l', '16px Arial'], ['Cwm', '16px Arial'], ['l', '60px Arial'], ['l', '30px Arial', 'stroke'], ['\u{1F603}', '16px Arial'], ['\u{1F603}', '30px Arial'], ['A', '11pt "Times New Roman"']]) {
+  L.push(`${t} ${f} ${op || 'fill'} x: ` + classes((d) => img(10 + d, 40, t, f, op)));
+  L.push(`${t} ${f} ${op || 'fill'} y: ` + classes((d) => img(10, 40 + d, t, f, op)));
+}
+// Under a scale the grid is in device pixels.
+L.push('scale 2 y: ' + classes((d) => { const c = document.createElement('canvas'); c.width = 200; c.height = 80; const g = c.getContext('2d'); g.scale(2, 2); g.font = '16px Arial'; g.fillText('l', 5, 20 + d); return Array.from(g.getImageData(0, 0, 200, 80).data).join(); }));
+// Whole-pixel moves shift the image exactly.
+{
+  const a = img(10, 40, 'Cwm fjordbank \u{1F603}', '16px Arial'), b = img(13, 45, 'Cwm fjordbank \u{1F603}', '16px Arial');
+  const A = a.split(','), B = b.split(','); let same = true;
+  for (let y = 0; y < 75; y++) for (let x = 0; x < 197; x++) for (let k = 0; k < 4; k++) if (A[(y * 200 + x) * 4 + k] !== B[((y + 5) * 200 + x + 3) * 4 + k]) same = false;
+  L.push('whole pixel move exact: ' + same);
+}
+L.push('end');
+</script>
+</body>

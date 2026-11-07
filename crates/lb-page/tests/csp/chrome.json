@@ -1,0 +1,443 @@
+{
+ "base_uri": {
+  "log": "baseURI http://127.0.0.1:19110/base_uri/\nsame-origin base http://127.0.0.1:19110/base_uri/\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/base_uri/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/elsewhere/\",\"violatedDirective\":\"base-uri\",\"effectiveDirective\":\"base-uri\",\"originalPolicy\":\"base-uri 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/base_uri/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":4,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/base_uri/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/elsewhere/\",\"violatedDirective\":\"base-uri\",\"effectiveDirective\":\"base-uri\",\"originalPolicy\":\"base-uri 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/base_uri/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":48}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/base_uri/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/elsewhere/\",\"violatedDirective\":\"base-uri\",\"effectiveDirective\":\"base-uri\",\"originalPolicy\":\"base-uri 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/base_uri/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":72}\nend",
+  "console": [
+   "error Setting the document's base URI to 'http://localhost:19110/elsewhere/' violates the following Content Security Policy directive: \"base-uri 'self'\". The action has been blocked.",
+   "error Setting the document's base URI to 'http://localhost:19110/elsewhere/' violates the following Content Security Policy directive: \"base-uri 'self'\". The action has been blocked.",
+   "error Setting the document's base URI to 'http://localhost:19110/elsewhere/' violates the following Content Security Policy directive: \"base-uri 'self'\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /base_uri/",
+   "GET /base_uri/main.js"
+  ]
+ },
+ "child_src": {
+  "log": "worker: made\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/child_src/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/child_src/w.js\",\"violatedDirective\":\"worker-src\",\"effectiveDirective\":\"worker-src\",\"originalPolicy\":\"child-src 'none'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/child_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":35}\nworker error\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/child_src/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/child_src/child.html\",\"violatedDirective\":\"frame-src\",\"effectiveDirective\":\"frame-src\",\"originalPolicy\":\"child-src 'none'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/child_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":126}\nframe load\nend",
+  "console": [
+   "error Creating a worker from 'http://127.0.0.1:19110/child_src/w.js' violates the following Content Security Policy directive: \"child-src 'none'\". Note that 'worker-src' was not explicitly set, so 'child-src' is used as a fallback. The action has been blocked.",
+   "error Framing 'http://127.0.0.1:19110/child_src/child.html' violates the following Content Security Policy directive: \"child-src 'none'\". The request has been blocked. Note that 'frame-src' was not explicitly set, so 'child-src' is used as a fallback.\n"
+  ],
+  "requests": [
+   "GET /child_src/",
+   "GET /child_src/main.js"
+  ]
+ },
+ "connect_src": {
+  "log": "fetch cross rejected [object Error] TypeError: Failed to fetch\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/connect_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/connect_src/a.txt\",\"violatedDirective\":\"connect-src\",\"effectiveDirective\":\"connect-src\",\"originalPolicy\":\"connect-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/connect_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":39}\nfetch redirect rejected [object Error] TypeError: Failed to fetch\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/connect_src/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/connect_src/redirect?to=http%3A%2F%2Flocalhost%3A19110%2Fconnect_src%2Fb.txt\",\"violatedDirective\":\"connect-src\",\"effectiveDirective\":\"connect-src\",\"originalPolicy\":\"connect-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/connect_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/connect_src/c.txt\",\"violatedDirective\":\"connect-src\",\"effectiveDirective\":\"connect-src\",\"originalPolicy\":\"connect-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/connect_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":4,\"columnNumber\":257}\nxhr error 4 0\nsync xhr threw [object DOMException] NetworkError: Failed to execute 'send' on 'XMLHttpRequest': Failed to load 'http://localhost:19110/connect_src/d.txt'.\nbeacon: true\nwebsocket: 3\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/connect_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/connect_src/d.txt\",\"violatedDirective\":\"connect-src\",\"effectiveDirective\":\"connect-src\",\"originalPolicy\":\"connect-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/connect_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":5,\"columnNumber\":116}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/connect_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/connect_src/e.txt\",\"violatedDirective\":\"connect-src\",\"effectiveDirective\":\"connect-src\",\"originalPolicy\":\"connect-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/connect_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":64}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/connect_src/\",\"referrer\":\"\",\"blockedURI\":\"ws://localhost:19110/connect_src/ws\",\"violatedDirective\":\"connect-src\",\"effectiveDirective\":\"connect-src\",\"originalPolicy\":\"connect-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/connect_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":7,\"columnNumber\":59}\nws error 3\nend",
+  "console": [
+   "error Connecting to 'http://localhost:19110/connect_src/a.txt' violates the following Content Security Policy directive: \"connect-src 'self'\". The action has been blocked.",
+   "error Fetch API cannot load http://localhost:19110/connect_src/a.txt. Refused to connect because it violates the document's Content Security Policy.",
+   "error Connecting to 'http://localhost:19110/connect_src/b.txt' violates the following Content Security Policy directive: \"connect-src 'self'\". The action has been blocked.",
+   "error Connecting to 'http://localhost:19110/connect_src/c.txt' violates the following Content Security Policy directive: \"connect-src 'self'\". The action has been blocked.",
+   "error Connecting to 'http://localhost:19110/connect_src/d.txt' violates the following Content Security Policy directive: \"connect-src 'self'\". The action has been blocked.",
+   "error Connecting to 'http://localhost:19110/connect_src/e.txt' violates the following Content Security Policy directive: \"connect-src 'self'\". The action has been blocked.",
+   "error Connecting to 'ws://localhost:19110/connect_src/ws' violates the following Content Security Policy directive: \"connect-src 'self'\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /connect_src/",
+   "GET /connect_src/main.js",
+   "GET /connect_src/redirect?to=http%3A%2F%2Flocalhost%3A19110%2Fconnect_src%2Fb.txt"
+  ]
+ },
+ "default_src_fallback": {
+  "log": "load script\ncolor rgb(0, 0, 0) bg rgba(0, 0, 0, 0)\nfetch cross rejected [object Error] TypeError: Failed to fetch\nload script\nviolation style#st {\"documentURI\":\"http://127.0.0.1:19110/default_src_fallback/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"style-src-elem\",\"effectiveDirective\":\"style-src-elem\",\"originalPolicy\":\"default-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/default_src_fallback/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":5,\"columnNumber\":0}\nerror style#st\nviolation div#d {\"documentURI\":\"http://127.0.0.1:19110/default_src_fallback/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"style-src-attr\",\"effectiveDirective\":\"style-src-attr\",\"originalPolicy\":\"default-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/default_src_fallback/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":7,\"columnNumber\":0}\nload img#i2\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/default_src_fallback/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/default_src_fallback/pixel.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"default-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/default_src_fallback/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":10,\"columnNumber\":0}\nerror img#i1\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/default_src_fallback/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"default-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/default_src_fallback/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":10,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/default_src_fallback/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/default_src_fallback/x.txt\",\"violatedDirective\":\"connect-src\",\"effectiveDirective\":\"connect-src\",\"originalPolicy\":\"default-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/default_src_fallback/after.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":3,\"columnNumber\":39}\nend",
+  "console": [
+   "error Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-NFwAESMOypZdwFHfMy2Ou7YBfABtFifkMCgebeAjgAo='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.",
+   "error Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-AHpvCGNfGD805NmDPMJvcF0PdGqXjt19N8djK9iqB24='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. Note also that 'style-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.",
+   "error Loading the image 'http://localhost:19110/default_src_fallback/pixel.png' violates the following Content Security Policy directive: \"default-src 'self'\". Note that 'img-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.",
+   "error Executing inline script violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-GGYnolcguDFeCZYEsAV91x0KU9SelJSWpDyvMdxAx6Y='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'script-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.",
+   "error Connecting to 'http://localhost:19110/default_src_fallback/x.txt' violates the following Content Security Policy directive: \"default-src 'self'\". Note that 'connect-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.",
+   "error Fetch API cannot load http://localhost:19110/default_src_fallback/x.txt. Refused to connect because it violates the document's Content Security Policy."
+  ],
+  "requests": [
+   "GET /default_src_fallback/",
+   "GET /default_src_fallback/main.js",
+   "GET /default_src_fallback/pixel.png",
+   "GET /default_src_fallback/after.js"
+  ]
+ },
+ "eval_blocked": {
+  "log": "eval threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'unsafe-inline'\".\n\nnew Function threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'unsafe-inline'\".\n\nFunction call threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'unsafe-inline'\".\n\nindirect eval threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'unsafe-inline'\".\n\neval non-string: 5\ninstanceof: true EvalError\nsetTimeout string: number\nsetInterval string: number\nsetTimeout fn: ok\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_blocked/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":25}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_blocked/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":40}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_blocked/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":3,\"columnNumber\":41}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_blocked/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":4,\"columnNumber\":50}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_blocked/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":37}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_blocked/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":7,\"columnNumber\":52}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_blocked/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":8,\"columnNumber\":48}\nfn timer ran\nend",
+  "console": [
+   "error Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: \"script-src 'self' 'unsafe-inline'\".\n The action has been blocked.",
+   "error Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: \"script-src 'self' 'unsafe-inline'\".\n The action has been blocked."
+  ],
+  "requests": [
+   "GET /eval_blocked/",
+   "GET /eval_blocked/main.js"
+  ]
+ },
+ "eval_report_sample": {
+  "log": "eval threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'report-sample'\".\n\nnew Function threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'report-sample'\".\n\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_report_sample/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'report-sample'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_report_sample/main.js\",\"sample\":\"var someLongVariableName = 1 + 2 + 3 + 4\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":25}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/eval_report_sample/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self' 'report-sample'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_report_sample/main.js\",\"sample\":\"(function anonymous(a,b\\n) {\\nreturn a + b\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":40}\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/eval_report_sample/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self' 'report-sample'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/eval_report_sample/\",\"sample\":\"log(\\\"inline with a sample that is longer\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":0}\nend",
+  "console": [
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'self' 'report-sample''. Either the 'unsafe-inline' keyword, a hash ('sha256-7VymnCgyvqeaA4dKWQ6QOnAOVZ+2b5r7vweadxK5Br0='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked."
+  ],
+  "requests": [
+   "GET /eval_report_sample/",
+   "GET /eval_report_sample/main.js",
+   "GET /eval_report_sample/end.js"
+  ]
+ },
+ "event_handlers": {
+  "log": "onclick prop: null\nprop handler ran\nimg onerror attr: ok\nviolation button#b {\"documentURI\":\"http://127.0.0.1:19110/event_handlers/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-attr\",\"effectiveDirective\":\"script-src-attr\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/event_handlers/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":49}\nviolation div#d {\"documentURI\":\"http://127.0.0.1:19110/event_handlers/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-attr\",\"effectiveDirective\":\"script-src-attr\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/event_handlers/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":3}\nviolation img {\"documentURI\":\"http://127.0.0.1:19110/event_handlers/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-attr\",\"effectiveDirective\":\"script-src-attr\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/event_handlers/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":7,\"columnNumber\":0}\nend",
+  "console": [
+   "error Executing inline event handler violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-...'), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.",
+   "error Executing inline event handler violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-...'), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.",
+   "error Executing inline event handler violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-...'), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked."
+  ],
+  "requests": [
+   "GET /event_handlers/",
+   "GET /event_handlers/main.js",
+   "GET /event_handlers/missing.png"
+  ]
+ },
+ "font_src": {
+  "log": "cross rejected [object DOMException] NetworkError: A network error occurred.\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/font_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/font_src/f.woff2\",\"violatedDirective\":\"font-src\",\"effectiveDirective\":\"font-src\",\"originalPolicy\":\"font-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/font_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":33}\nend",
+  "console": [
+   "error Loading the font 'http://localhost:19110/font_src/f.woff2' violates the following Content Security Policy directive: \"font-src 'self'\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /font_src/",
+   "GET /font_src/main.js"
+  ]
+ },
+ "form_action": {
+  "log": "violation #document {\"documentURI\":\"http://127.0.0.1:19110/form_action/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/form_action/target\",\"violatedDirective\":\"form-action\",\"effectiveDirective\":\"form-action\",\"originalPolicy\":\"form-action 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/form_action/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":60}\nstill here /form_action/\nend",
+  "console": [
+   "error Sending form data to 'http://localhost:19110/form_action/target' violates the following Content Security Policy directive: \"form-action 'self'\". The request has been blocked.\n"
+  ],
+  "requests": [
+   "GET /form_action/",
+   "GET /form_action/main.js"
+  ]
+ },
+ "frame_src": {
+  "log": "frame load threw SecurityError\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/frame_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110\",\"violatedDirective\":\"frame-src\",\"effectiveDirective\":\"frame-src\",\"originalPolicy\":\"frame-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/frame_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":4,\"columnNumber\":86}\nsame frame load child\nend",
+  "console": [
+   "error Framing 'http://localhost:19110/' violates the following Content Security Policy directive: \"frame-src 'self'\". The request has been blocked.\n"
+  ],
+  "requests": [
+   "GET /frame_src/",
+   "GET /frame_src/main.js",
+   "GET /frame_src/child.html"
+  ]
+ },
+ "hash": {
+  "log": "hashed inline ran\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/hash/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline' 'sha256-pIOQjPwarCaMUKS9aIZULrreUNDdzTCuxf30qyx99w8='\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/hash/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":0}\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/hash/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline' 'sha256-pIOQjPwarCaMUKS9aIZULrreUNDdzTCuxf30qyx99w8='\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/hash/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":7,\"columnNumber\":0}\nend",
+  "console": [
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'self' 'unsafe-inline' 'sha256-pIOQjPwarCaMUKS9aIZULrreUNDdzTCuxf30qyx99w8=''. Note that 'unsafe-inline' is ignored if either a hash or nonce value is present in the source list. The action has been blocked.",
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'self' 'unsafe-inline' 'sha256-pIOQjPwarCaMUKS9aIZULrreUNDdzTCuxf30qyx99w8=''. Note that 'unsafe-inline' is ignored if either a hash or nonce value is present in the source list. The action has been blocked."
+  ],
+  "requests": [
+   "GET /hash/",
+   "GET /hash/end.js"
+  ]
+ },
+ "iframe_inherit": {
+  "log": "blank eval threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self'\".\n\nblank inline: appended\nblank violation [object HTMLDocument] {\"documentURI\":\"about\",\"referrer\":\"http://127.0.0.1:19110/iframe_inherit/\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/iframe_inherit/main.js\",\"sample\":\"\",\"statusCode\":0,\"lineNumber\":4,\"columnNumber\":54}\nblank violation script {\"documentURI\":\"about\",\"referrer\":\"http://127.0.0.1:19110/iframe_inherit/\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/iframe_inherit/main.js\",\"sample\":\"\",\"statusCode\":0,\"lineNumber\":5,\"columnNumber\":125}\nend",
+  "console": [
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-H8FTHQNGZcnJ+8unQreNdd4fiCPPV0QtbuzNGNOojR0='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.",
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-rREkaR7aTLQ80kXf5rAE16trfBjyUO4dFLKj/7ejYDw='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked."
+  ],
+  "requests": [
+   "GET /iframe_inherit/",
+   "GET /iframe_inherit/main.js"
+  ]
+ },
+ "img_src": {
+  "log": "violation #document {\"documentURI\":\"http://127.0.0.1:19110/img_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/img_src/pixel.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'self' data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\ncross error\ndata load\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/img_src/\",\"referrer\":\"\",\"blockedURI\":\"blob\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'self' data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nblob error\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/img_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/img_src/bg.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'self' data:\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/img_src/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":9,\"columnNumber\":0}\nsame load\nend",
+  "console": [
+   "error Loading the image 'http://localhost:19110/img_src/pixel.png' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked.",
+   "error Loading the image 'blob:http://127.0.0.1:19110/bade0ec3-9d93-4713-8aab-bb3bfddc6a77' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked.",
+   "error Loading the image 'http://localhost:19110/img_src/bg.png' violates the following Content Security Policy directive: \"img-src 'self' data:\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /img_src/",
+   "GET /img_src/main.js",
+   "GET /img_src/pixel.png"
+  ]
+ },
+ "javascript_url": {
+  "log": "violation #document {\"documentURI\":\"http://127.0.0.1:19110/javascript_url/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/javascript_url/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":30}\nhref \nend",
+  "console": [
+   "error Running the JavaScript URL violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-...'), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked."
+  ],
+  "requests": [
+   "GET /javascript_url/",
+   "GET /javascript_url/main.js"
+  ]
+ },
+ "meta_policy": {
+  "log": "before.js ran\ninline ran\nstyle color rgb(1, 2, 3)\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/meta_policy/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/meta_policy/after.js\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; report-uri /meta_policy/report; sandbox allow-scripts\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/meta_policy/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/meta_policy/pixel.png?2\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'none'\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\ni2 error\nend",
+  "console": [
+   "error The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.",
+   "error The Content Security Policy directive 'report-uri' is ignored when delivered via a <meta> element.",
+   "error The Content Security Policy directive 'sandbox' is ignored when delivered via a <meta> element.",
+   "error The report-only Content Security Policy 'img-src 'none'' was delivered via a <meta> element, which is disallowed. The policy has been ignored.",
+   "error The Content Security Policy 'style-src 'none'' was delivered via a <meta> element outside the document's <head>, which is disallowed. The policy has been ignored.",
+   "error Loading the script 'http://localhost:19110/meta_policy/after.js' violates the following Content Security Policy directive: \"script-src 'self' 'unsafe-inline'\". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+   "error Loading the image 'http://127.0.0.1:19110/meta_policy/pixel.png?2' violates the following Content Security Policy directive: \"img-src 'none'\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /meta_policy/",
+   "GET /meta_policy/before.js",
+   "GET /meta_policy/pixel.png"
+  ]
+ },
+ "multiple_policies": {
+  "log": "inline ran\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/multiple_policies/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/multiple_policies/x.js\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self' 'unsafe-inline'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/multiple_policies/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":113}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/multiple_policies/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/multiple_policies/pixel.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nimg error\nscript error\nend",
+  "console": [
+   "error Loading the script 'http://localhost:19110/multiple_policies/x.js' violates the following Content Security Policy directive: \"script-src 'self' 'unsafe-inline'\". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+   "error Loading the image 'http://localhost:19110/multiple_policies/pixel.png' violates the following Content Security Policy directive: \"img-src 'self'\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /multiple_policies/",
+   "GET /multiple_policies/main.js"
+  ]
+ },
+ "nonce": {
+  "log": "nonced inline ran\nattr \"\" prop abc123 has true\nx.js ran\ndynamic nonced ran\ndynamic attr nonce ran\ns1 attr null s3 attr \"\" s3 prop abc123\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/nonce/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'nonce-abc123'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/nonce/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":0}\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/nonce/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'nonce-abc123'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/nonce/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":7,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/nonce/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/nonce/ok.js\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'nonce-abc123'\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/nonce/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'nonce-abc123'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/nonce/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":12,\"columnNumber\":103}\nend",
+  "console": [
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'nonce-abc123''. Either the 'unsafe-inline' keyword, a hash ('sha256-z7KZMUEcGtYhpOiBVrffueH1Kw4MUHMwCRrnHvtu69Y='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.",
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'nonce-abc123''. Either the 'unsafe-inline' keyword, a hash ('sha256-+S3uKxKWAAg5/Y7LI8c9YOOgrVP1XgVUo41xhGr41GE='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.",
+   "error Loading the script 'http://127.0.0.1:19110/nonce/ok.js' violates the following Content Security Policy directive: \"script-src 'nonce-abc123'\". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'nonce-abc123''. Either the 'unsafe-inline' keyword, a hash ('sha256-VztCO61QHvc+hE3v4L/dbA4azu/nTngyAYOxt5oTxcA='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked."
+  ],
+  "requests": [
+   "GET /nonce/",
+   "GET /nonce/x.js"
+  ]
+ },
+ "parse_errors": {
+  "log": "end",
+  "console": [
+   "error The source list for the Content Security Policy directive 'script-src' contains an invalid source: 'foo$'. It will be ignored.",
+   "error The Content-Security-Policy directive 'script-src' contains the keyword 'none' alongside with other source expressions. The keyword 'none' must be the only source expression in the directive value, otherwise it is ignored.",
+   "error Ignoring duplicate Content-Security-Policy directive 'img-src'.",
+   "error Unrecognized Content-Security-Policy directive 'bogus-directive'.",
+   "error The Content Security Policy directive 'upgrade-insecure-requests' should be empty, but was delivered with a value of '1'. The directive has been applied, and the value ignored.",
+   "error The Content-Security-Policy directive 'frame-ancestors' does not support the source expression ''unsafe-inline''",
+   "error The source list for Content Security Policy directive 'style-src' contains a source with an invalid path: '/b?c'. The query component, including the '?', will be ignored."
+  ],
+  "requests": [
+   "GET /parse_errors/",
+   "GET /parse_errors/main.js"
+  ]
+ },
+ "rebrowser_bypass": {
+  "log": "appended\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/rebrowser_bypass/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/rebrowser_bypass/ext.js\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"default-src * data: 'unsafe-eval' 'unsafe-inline' blob:; script-src blob: 'self' 'unsafe-eval' 'unsafe-inline' https://static.cloudflareinsights.com https://cloudflareinsights.com;\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/rebrowser_bypass/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":11,\"columnNumber\":15}\nerror true\nend",
+  "console": [
+   "error Loading the script 'http://localhost:19110/rebrowser_bypass/ext.js' violates the following Content Security Policy directive: \"script-src blob: 'self' 'unsafe-eval' 'unsafe-inline' https://static.cloudflareinsights.com https://cloudflareinsights.com\". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked."
+  ],
+  "requests": [
+   "GET /rebrowser_bypass/"
+  ]
+ },
+ "report_only": {
+  "log": "inline ran\neval: 2\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/report_only/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self'; img-src 'none'; report-uri /report_only/report\",\"disposition\":\"report\",\"sourceFile\":\"http://127.0.0.1:19110/report_only/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":5,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/report_only/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self'; img-src 'none'; report-uri /report_only/report\",\"disposition\":\"report\",\"sourceFile\":\"http://127.0.0.1:19110/report_only/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":25}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/report_only/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/report_only/pixel.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"script-src 'self'; img-src 'none'; report-uri /report_only/report\",\"disposition\":\"report\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nimg load 1\nend",
+  "console": [
+   "info Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-GGYnolcguDFeCZYEsAV91x0KU9SelJSWpDyvMdxAx6Y='), or a nonce ('nonce-...') is required to enable inline execution. The policy is report-only, so the violation has been logged but no further action has been taken.",
+   "info Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: \"script-src 'self'\".\n The policy is report-only, so the violation has been logged but no further action has been taken.",
+   "info Loading the image 'http://127.0.0.1:19110/report_only/pixel.png' violates the following Content Security Policy directive: \"img-src 'none'\". The policy is report-only, so the violation has been logged but no further action has been taken."
+  ],
+  "requests": [
+   "GET /report_only/",
+   "GET /report_only/main.js",
+   "POST /report_only/report application/csp-report {\"csp-report\":{\"document-uri\":\"http://127.0.0.1:19110/report_only/\",\"referrer\":\"\",\"violated-directive\":\"script-src-elem\",\"effective-directive\":\"script-src-elem\",\"original-policy\":\"script-src 'self'; img-src 'none'; report-uri /report_only/report\",\"disposition\":\"report\",\"blocked-uri\":\"inline\",\"line-number\":5,\"source-file\":\"http://127.0.0.1:19110/report_only/\",\"status-code\":200,\"script-sample\":\"\"}}",
+   "POST /report_only/report application/csp-report {\"csp-report\":{\"document-uri\":\"http://127.0.0.1:19110/report_only/\",\"referrer\":\"\",\"violated-directive\":\"script-src\",\"effective-directive\":\"script-src\",\"original-policy\":\"script-src 'self'; img-src 'none'; report-uri /report_only/report\",\"disposition\":\"report\",\"blocked-uri\":\"eval\",\"line-number\":1,\"column-number\":25,\"source-file\":\"http://127.0.0.1:19110/report_only/main.js\",\"status-code\":200,\"script-sample\":\"\"}}",
+   "POST /report_only/report application/csp-report {\"csp-report\":{\"document-uri\":\"http://127.0.0.1:19110/report_only/\",\"referrer\":\"\",\"violated-directive\":\"img-src\",\"effective-directive\":\"img-src\",\"original-policy\":\"script-src 'self'; img-src 'none'; report-uri /report_only/report\",\"disposition\":\"report\",\"blocked-uri\":\"http://127.0.0.1:19110/report_only/pixel.png\",\"status-code\":200,\"script-sample\":\"\"}}",
+   "GET /report_only/pixel.png"
+  ]
+ },
+ "report_uri": {
+  "log": "violation #document {\"documentURI\":\"http://127.0.0.1:19110/report_uri/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/report_uri/pixel.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'none'; report-uri /report_uri/report\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/report_uri/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":0}\nend",
+  "console": [
+   "error Loading the image 'http://127.0.0.1:19110/report_uri/pixel.png' violates the following Content Security Policy directive: \"img-src 'none'\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /report_uri/",
+   "GET /report_uri/main.js",
+   "POST /report_uri/report application/csp-report {\"csp-report\":{\"document-uri\":\"http://127.0.0.1:19110/report_uri/\",\"referrer\":\"\",\"violated-directive\":\"img-src\",\"effective-directive\":\"img-src\",\"original-policy\":\"img-src 'none'; report-uri /report_uri/report\",\"disposition\":\"enforce\",\"blocked-uri\":\"http://127.0.0.1:19110/report_uri/pixel.png\",\"line-number\":6,\"source-file\":\"http://127.0.0.1:19110/report_uri/\",\"status-code\":200,\"script-sample\":\"\"}}"
+  ]
+ },
+ "sandbox": {
+  "log": "origin: null\nlocalStorage threw [object DOMException] SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.\ncookie threw [object DOMException] SecurityError: Failed to read the 'cookie' property from 'Document': The document is sandboxed and lacks the 'allow-same-origin' flag.\nend",
+  "console": [],
+  "requests": [
+   "GET /sandbox/",
+   "GET /sandbox/main.js"
+  ]
+ },
+ "script_src_header": {
+  "log": "load script\nok.js ran\nload script\nerror script#x\nload script\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/script_src_header/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/script_src_header/x.js\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation script#inl {\"documentURI\":\"http://127.0.0.1:19110/script_src_header/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/script_src_header/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":8,\"columnNumber\":0}\nend",
+  "console": [
+   "error Loading the script 'http://localhost:19110/script_src_header/x.js' violates the following Content Security Policy directive: \"script-src 'self'\". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-GGYnolcguDFeCZYEsAV91x0KU9SelJSWpDyvMdxAx6Y='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked."
+  ],
+  "requests": [
+   "GET /script_src_header/",
+   "GET /script_src_header/main.js",
+   "GET /script_src_header/ok.js",
+   "GET /script_src_header/end.js"
+  ]
+ },
+ "source_matching": {
+  "log": "violation #document {\"documentURI\":\"http://127.0.0.1:19110/source_matching/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/source_matching/dir\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/source_matching/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/source_matching/other.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/source_matching/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/source_matching/file2.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/source_matching/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:1/x.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/source_matching/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:1/x.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/source_matching/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/source_matching/dir/redirect?to=http%3A%2F%2Flocalhost%3A1%2Ffar.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nend",
+  "console": [
+   "error Loading the image 'http://127.0.0.1:19110/source_matching/dir' violates the following Content Security Policy directive: \"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\". The action has been blocked.",
+   "error Loading the image 'http://127.0.0.1:19110/source_matching/other.png' violates the following Content Security Policy directive: \"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\". The action has been blocked.",
+   "error Loading the image 'http://localhost:19110/source_matching/file2.png' violates the following Content Security Policy directive: \"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\". The action has been blocked.",
+   "error Loading the image 'http://localhost:1/x.png' violates the following Content Security Policy directive: \"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\". The action has been blocked.",
+   "error Loading the image 'http://127.0.0.1:1/x.png' violates the following Content Security Policy directive: \"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\". The action has been blocked.",
+   "error Loading the image 'http://localhost:1/far.png' violates the following Content Security Policy directive: \"img-src 127.0.0.1:19110/source_matching/dir/ http://localhost:19110/source_matching/file.png *.localhost:* https://127.0.0.1:19110 data:\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /source_matching/",
+   "GET /source_matching/main.js",
+   "GET /source_matching/dir/a.png",
+   "GET /source_matching/dir/redirect?to=http%3A%2F%2F127.0.0.1%3A19110%2Fsource_matching%2Fafter.png",
+   "GET /source_matching/file.png",
+   "GET /source_matching/file.png?q=1",
+   "GET /source_matching/dir/redirect?to=http%3A%2F%2Flocalhost%3A1%2Ffar.png",
+   "GET /source_matching/after.png"
+  ]
+ },
+ "strict_dynamic": {
+  "log": "dynamic inline ran\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/strict_dynamic/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/strict_dynamic/ok.js\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'nonce-n1' 'strict-dynamic' 'self' 'unsafe-inline' http://localhost:*\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nviolation script {\"documentURI\":\"http://127.0.0.1:19110/strict_dynamic/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'nonce-n1' 'strict-dynamic' 'self' 'unsafe-inline' http://localhost:*\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/strict_dynamic/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/strict_dynamic/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/strict_dynamic/w.js\",\"violatedDirective\":\"script-src-elem\",\"effectiveDirective\":\"script-src-elem\",\"originalPolicy\":\"script-src 'nonce-n1' 'strict-dynamic' 'self' 'unsafe-inline' http://localhost:*\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/strict_dynamic/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":10,\"columnNumber\":10}\nx.js ran\nx load\nend",
+  "console": [
+   "error Loading the script 'http://127.0.0.1:19110/strict_dynamic/ok.js' violates the following Content Security Policy directive: \"script-src 'nonce-n1' 'strict-dynamic' 'self' 'unsafe-inline' http://localhost:*\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.",
+   "error Executing inline script violates the following Content Security Policy directive 'script-src 'nonce-n1' 'strict-dynamic' 'self' 'unsafe-inline' http://localhost:*'. Note that 'unsafe-inline' is ignored if either a hash or nonce value is present in the source list. The action has been blocked.",
+   "error Loading the script 'http://127.0.0.1:19110/strict_dynamic/w.js' violates the following Content Security Policy directive: \"script-src 'nonce-n1' 'strict-dynamic' 'self' 'unsafe-inline' http://localhost:*\". Note that 'strict-dynamic' is present, so host-based allowlisting is disabled. Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked."
+  ],
+  "requests": [
+   "GET /strict_dynamic/",
+   "GET /strict_dynamic/x.js"
+  ]
+ },
+ "style_src": {
+  "log": "violation style {\"documentURI\":\"http://127.0.0.1:19110/style_src/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"style-src-elem\",\"effectiveDirective\":\"style-src-elem\",\"originalPolicy\":\"style-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/style_src/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":4,\"columnNumber\":0}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/style_src/\",\"referrer\":\"\",\"blockedURI\":\"http://localhost:19110/style_src/x.css\",\"violatedDirective\":\"style-src-elem\",\"effectiveDirective\":\"style-src-elem\",\"originalPolicy\":\"style-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/style_src/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":6,\"columnNumber\":0}\nviolation div#b {\"documentURI\":\"http://127.0.0.1:19110/style_src/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"style-src-attr\",\"effectiveDirective\":\"style-src-attr\",\"originalPolicy\":\"style-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/style_src/\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":8,\"columnNumber\":0}\na rgb(0, 0, 0) b rgb(0, 0, 0) c rgb(4, 5, 6) d rgb(0, 0, 0)\ncssom rgb(20, 21, 22)\nsetAttribute rgb(20, 21, 22)\nsheets 2\nviolation div#c {\"documentURI\":\"http://127.0.0.1:19110/style_src/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"style-src-attr\",\"effectiveDirective\":\"style-src-attr\",\"originalPolicy\":\"style-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/style_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":5,\"columnNumber\":3}\nend",
+  "console": [
+   "error Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-iiaNq+bNocP4rwcNJ47J1+UeQUwgbx3Dl8ijXaojRo4='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked.",
+   "error Loading the stylesheet 'http://localhost:19110/style_src/x.css' violates the following Content Security Policy directive: \"style-src 'self'\". Note that 'style-src-elem' was not explicitly set, so 'style-src' is used as a fallback. The action has been blocked.",
+   "error Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-rtnnut5LpdAWybXNnlQ52GEmC/dbwF0ZHOAE6vguopQ='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.",
+   "error Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-k3t3+BMsJe4TWR7Zy2y/+XyUWe8p8AzRfGhtkd8W/Qw='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked."
+  ],
+  "requests": [
+   "GET /style_src/",
+   "GET /style_src/ok.css",
+   "GET /style_src/main.js"
+  ]
+ },
+ "unsafe_eval": {
+  "log": "eval: 2\nnew Function: 2\nvalidate: true\nnew Module: 1\nstring timer ran\nend",
+  "console": [],
+  "requests": [
+   "GET /unsafe_eval/",
+   "GET /unsafe_eval/main.js"
+  ]
+ },
+ "unsafe_hashes": {
+  "log": "hashed handler ran\nviolation button#b2 {\"documentURI\":\"http://127.0.0.1:19110/unsafe_hashes/\",\"referrer\":\"\",\"blockedURI\":\"inline\",\"violatedDirective\":\"script-src-attr\",\"effectiveDirective\":\"script-src-attr\",\"originalPolicy\":\"script-src 'self' 'unsafe-hashes' 'sha256-YlUWpaXirJPTdibKU2oPkrqa/svWvvi4ittfHUAGoWI='\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/unsafe_hashes/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":31}\nend",
+  "console": [
+   "error Executing inline event handler violates the following Content Security Policy directive 'script-src 'self' 'unsafe-hashes' 'sha256-YlUWpaXirJPTdibKU2oPkrqa/svWvvi4ittfHUAGoWI=''. Either the 'unsafe-inline' keyword, a hash ('sha256-...'), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked."
+  ],
+  "requests": [
+   "GET /unsafe_hashes/",
+   "GET /unsafe_hashes/main.js"
+  ]
+ },
+ "upgrade_insecure": {
+  "log": "img load\nend",
+  "console": [],
+  "requests": [
+   "GET /upgrade_insecure/",
+   "GET /upgrade_insecure/main.js",
+   "GET /upgrade_insecure/pixel.png"
+  ]
+ },
+ "violation_event": {
+  "log": "ctor no init: \nctor: a b c report 7 u 3 0 \"\" true\nctor init flags: true false true\nproto: documentURI,referrer,blockedURI,violatedDirective,effectiveDirective,originalPolicy,disposition,sourceFile,statusCode,lineNumber,columnNumber,sample,constructor\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/violation_event/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/violation_event/pixel.png\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'none'; script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nevent SecurityPolicyViolationEvent securitypolicyviolation true true false true 2 #document #document\ndocument handler\nwindow saw #document\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/violation_event/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/violation_event/pixel.png?2\",\"violatedDirective\":\"img-src\",\"effectiveDirective\":\"img-src\",\"originalPolicy\":\"img-src 'none'; script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":0,\"columnNumber\":0}\nevent SecurityPolicyViolationEvent securitypolicyviolation true true false true 2 #document #document\ndocument handler\nwindow saw #document\nend",
+  "console": [
+   "error Loading the image 'http://127.0.0.1:19110/violation_event/pixel.png' violates the following Content Security Policy directive: \"img-src 'none'\". The action has been blocked.",
+   "error Loading the image 'http://127.0.0.1:19110/violation_event/pixel.png?2' violates the following Content Security Policy directive: \"img-src 'none'\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /violation_event/",
+   "GET /violation_event/main.js"
+  ]
+ },
+ "wasm_blocked": {
+  "log": "validate: true\nnew Module threw [object Error] CompileError: WebAssembly.Module(): Compiling or instantiating WebAssembly module violates the following Content Security policy directive because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: \"script-src 'self'\".\ncompile rejected [object Error] CompileError: WebAssembly.compile(): Compiling or instantiating WebAssembly module violates the following Content Security policy directive because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: \"script-src 'self'\".\ninstantiate rejected [object Error] CompileError: WebAssembly.instantiate(): Compiling or instantiating WebAssembly module violates the following Content Security policy directive because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: \"script-src 'self'\".\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/wasm_blocked/\",\"referrer\":\"\",\"blockedURI\":\"wasm-eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/wasm_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":3,\"columnNumber\":63}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/wasm_blocked/\",\"referrer\":\"\",\"blockedURI\":\"wasm-eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/wasm_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":4,\"columnNumber\":47}\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/wasm_blocked/\",\"referrer\":\"\",\"blockedURI\":\"wasm-eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"script-src 'self'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/wasm_blocked/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":5,\"columnNumber\":78}\nend",
+  "console": [],
+  "requests": [
+   "GET /wasm_blocked/",
+   "GET /wasm_blocked/main.js"
+  ]
+ },
+ "wasm_unsafe_eval": {
+  "log": "eval threw [object Error] EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: default-src 'self' 'wasm-unsafe-eval'\".\n\nvalidate: true\nnew Module: 1\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/wasm_unsafe_eval/\",\"referrer\":\"\",\"blockedURI\":\"eval\",\"violatedDirective\":\"script-src\",\"effectiveDirective\":\"script-src\",\"originalPolicy\":\"default-src 'self' 'wasm-unsafe-eval'\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/wasm_unsafe_eval/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":25}\nend",
+  "console": [],
+  "requests": [
+   "GET /wasm_unsafe_eval/",
+   "GET /wasm_unsafe_eval/main.js"
+  ]
+ },
+ "worker_policy": {
+  "log": "blob: EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' blob:\".\n\nw: EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self'\".\n\nblob: violation eval script-src\nw: fetch TypeError: Failed to fetch\nw: violation eval script-src enforce\nw: violation http://127.0.0.1:19110/worker_policy/x.txt connect-src enforce\nend",
+  "console": [
+   "error Connecting to 'http://127.0.0.1:19110/worker_policy/x.txt' violates the following Content Security Policy directive: \"connect-src 'none'\". The action has been blocked.",
+   "error Fetch API cannot load http://127.0.0.1:19110/worker_policy/x.txt. Refused to connect because it violates the document's Content Security Policy."
+  ],
+  "requests": [
+   "GET /worker_policy/",
+   "GET /worker_policy/main.js",
+   "GET /worker_policy/w.js"
+  ]
+ },
+ "worker_src": {
+  "log": "worker: made\nshared: made\nblob worker: made\nsw rejected [object DOMException] SecurityError: Failed to register a ServiceWorker: The provided scriptURL ('http://127.0.0.1:19110/worker_src/sw.js') violates the Content Security Policy.\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/worker_src/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/worker_src/w.js\",\"violatedDirective\":\"worker-src\",\"effectiveDirective\":\"worker-src\",\"originalPolicy\":\"worker-src blob:\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/worker_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":1,\"columnNumber\":35}\nworker error event\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/worker_src/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/worker_src/w.js\",\"violatedDirective\":\"worker-src\",\"effectiveDirective\":\"worker-src\",\"originalPolicy\":\"worker-src blob:\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/worker_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":2,\"columnNumber\":35}\nshared error event\nviolation #document {\"documentURI\":\"http://127.0.0.1:19110/worker_src/\",\"referrer\":\"\",\"blockedURI\":\"http://127.0.0.1:19110/worker_src/sw.js\",\"violatedDirective\":\"worker-src\",\"effectiveDirective\":\"worker-src\",\"originalPolicy\":\"worker-src blob:\",\"disposition\":\"enforce\",\"sourceFile\":\"http://127.0.0.1:19110/worker_src/main.js\",\"sample\":\"\",\"statusCode\":200,\"lineNumber\":4,\"columnNumber\":54}\nblob worker said blob hi\nend",
+  "console": [
+   "error Creating a worker from 'http://127.0.0.1:19110/worker_src/w.js' violates the following Content Security Policy directive: \"worker-src blob:\". The action has been blocked.",
+   "error Creating a worker from 'http://127.0.0.1:19110/worker_src/w.js' violates the following Content Security Policy directive: \"worker-src blob:\". The action has been blocked.",
+   "error Creating a worker from 'http://127.0.0.1:19110/worker_src/sw.js' violates the following Content Security Policy directive: \"worker-src blob:\". The action has been blocked."
+  ],
+  "requests": [
+   "GET /worker_src/",
+   "GET /worker_src/main.js"
+  ]
+ },
+ "rebrowser_bypass@bypass": {
+  "log": "appended\next ran\nload\nend",
+  "console": [],
+  "requests": [
+   "GET /rebrowser_bypass/",
+   "GET /rebrowser_bypass/ext.js"
+  ]
+ },
+ "script_src_header@bypass": {
+  "log": "load script\nok.js ran\nload script\nx.js ran\nload script#x\ninline ran\nload script\nend",
+  "console": [],
+  "requests": [
+   "GET /script_src_header/",
+   "GET /script_src_header/main.js",
+   "GET /script_src_header/ok.js",
+   "GET /script_src_header/end.js",
+   "GET /script_src_header/x.js"
+  ]
+ },
+ "frame_ancestors": {
+  "log": "none load no document\ncross load no document\nself load self\nlisted load no document\nend",
+  "console": [
+   "error Framing 'http://127.0.0.1:19110/' violates the following Content Security Policy directive: \"frame-ancestors 'none'\". The request has been blocked.\n",
+   "error Framing 'http://localhost:19110/' violates the following Content Security Policy directive: \"frame-ancestors 'self'\". The request has been blocked.\n"
+  ],
+  "requests": [
+   "GET /frame_ancestors/",
+   "GET /frame_ancestors/main.js",
+   "GET /frame_ancestors/none.html",
+   "GET /frame_ancestors/self.html",
+   "GET /frame_ancestors/self.html",
+   "GET /frame_ancestors/listed.html"
+  ]
+ }
+}

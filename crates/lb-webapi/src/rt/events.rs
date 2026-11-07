@@ -79,6 +79,18 @@ pub enum EventExtra {
         reason: String,
         was_clean: bool,
     },
+    /// `StorageEvent` (ADR 0037): `key` (`None` for `clear()`), old and
+    /// new value, the writer's URL, and the receiving window's `Storage`
+    /// object id.
+    Storage {
+        key: Option<String>,
+        old: Option<String>,
+        new: Option<String>,
+        url: String,
+        area: Option<u32>,
+    },
+    /// `SecurityPolicyViolationEvent` (ADR 0036).
+    Csp(Box<super::csp::ViolationInit>),
 }
 
 /// One event object.
@@ -672,6 +684,12 @@ fn handler_function(js: &mut dyn Js, w: &Rc<Window>, t: HostRef, name: &str) -> 
     } else {
         "event"
     };
+    // Content Security Policy (`script-src-attr`): a blocked handler is
+    // dropped, so it is null and reports once.
+    if !w.csp_handler(js, t, name, &src) {
+        w.handlers.borrow_mut().remove(&key);
+        return None;
+    }
     let code = format!("(function {name}({params}) {{\n{src}\n}})");
     let url = w.url().to_string();
     match js.eval_handle(&code, lb_js::ScriptOrigin::new(&url)) {
@@ -992,7 +1010,17 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             .or_default()
             .push(l.clone());
         if let Some(sig) = o.signal {
-            super::net::signal_on_abort(w, sig, super::net::AbortAlgo::RemoveListener(t, l));
+            super::net::signal_on_abort(
+                w,
+                sig,
+                super::net::AbortAlgo::RemoveListener(t, l.clone()),
+            );
+        }
+        // A `storage` listener makes the window's storage areas, so it
+        // receives other windows' changes (Blink's
+        // `DOMWindowStorageController`).
+        if t == WINDOW_REF && l.type_ == "storage" {
+            super::partition::watch_storage_areas(w);
         }
         Ok(())
     });
@@ -1412,6 +1440,30 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         EventExtra::Progress { total, .. } => total,
         _ => 0.0,
     }));
+    for (name, which) in [("key", 0), ("oldValue", 1), ("newValue", 2)] {
+        getter(reg, rt, "StorageEvent", name, move |cx, w| {
+            let id = this_event(cx, w)?;
+            let v = with_ev(w, id, |e| match &e.extra {
+                EventExtra::Storage { key, old, new, .. } => [key, old, new][which].clone(),
+                _ => None,
+            })
+            .flatten();
+            cx.ret(v.map_or(Arg::Null, Arg::String))
+        });
+    }
+    extra_get!("StorageEvent", "url", |cx, x| cx.ret(match x {
+        EventExtra::Storage { url, .. } => url,
+        _ => String::new(),
+    }));
+    getter(reg, rt, "StorageEvent", "storageArea", |cx, w| {
+        let id = this_event(cx, w)?;
+        let area = with_ev(w, id, |e| match &e.extra {
+            EventExtra::Storage { area, .. } => *area,
+            _ => None,
+        })
+        .flatten();
+        cx.ret(area.map_or(Arg::Null, |a| w.obj_arg(a)))
+    });
     extra_get!("HashChangeEvent", "oldURL", |cx, x| cx.ret(match x {
         EventExtra::HashChange { old, .. } => old,
         _ => String::new(),
@@ -1549,6 +1601,9 @@ fn register_handlers(reg: &mut Registry, rt: &Runtime) {
                     }
                     _ => None,
                 };
+                if t == WINDOW_REF && name == "onstorage" && v.is_some() {
+                    super::partition::watch_storage_areas(w);
+                }
                 set_handler(w, t, name, v);
                 Ok(())
             });

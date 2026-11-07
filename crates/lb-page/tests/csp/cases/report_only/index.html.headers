@@ -1,0 +1,1 @@
+Content-Security-Policy-Report-Only: script-src 'self'; img-src 'none'; report-uri /report_only/report

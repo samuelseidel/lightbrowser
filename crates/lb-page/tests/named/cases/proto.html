@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script src="prelude.js"></script></head>
+<body>
+<div id="d1"></div>
+<script>
+// The named properties object itself.
+log('WP is not EventTarget.prototype', WP !== EventTarget.prototype);
+note('WP tag', Object.prototype.toString.call(WP));
+note('String(WP)', String(WP));
+log('WP proto is EventTarget.prototype', Object.getPrototypeOf(WP) === EventTarget.prototype);
+note('WP own names', JSON.stringify(Object.getOwnPropertyNames(WP)));
+note('WP own symbols', Object.getOwnPropertySymbols(WP).map(String).join());
+note('WP toStringTag', desc(Object.getOwnPropertyDescriptor(WP, Symbol.toStringTag)));
+log('Window proto is EventTarget', Object.getPrototypeOf(Window) === EventTarget);
+note('typeof WindowProperties', typeof WindowProperties);
+log('WP.constructor is EventTarget', WP.constructor === EventTarget);
+log('WP has own constructor', WP.hasOwnProperty('constructor'));
+log('Window.prototype.constructor', Window.prototype.constructor === Window);
+log('extensible', Object.isExtensible(WP));
+log('window instanceof EventTarget', window instanceof EventTarget);
+log('window proto is Window.prototype', Object.getPrototypeOf(window) === Window.prototype);
+note('Window.prototype own names', JSON.stringify(Object.getOwnPropertyNames(Window.prototype)));
+log('WP.d1', WP.d1);
+log('Reflect.get(WP, d1, {})', Reflect.get(WP, 'd1', {}));
+log('WP has d1', 'd1' in WP);
+note('WP desc d1', desc(Object.getOwnPropertyDescriptor(WP, 'd1')));
+note('WP own names with d1', JSON.stringify(Object.getOwnPropertyNames(WP)));
+note('WP keys', JSON.stringify(Object.keys(WP)));
+log('WP.hasOwnProperty(d1)', WP.hasOwnProperty('d1'));
+log('WP.propertyIsEnumerable(d1)', WP.propertyIsEnumerable('d1'));
+const forIn = []; for (const k in WP) if (k === 'd1') forIn.push(k);
+note('for-in WP', JSON.stringify(forIn));
+note('WP desc addEventListener', desc(Object.getOwnPropertyDescriptor(WP, 'addEventListener')));
+note('WP desc missing', desc(Object.getOwnPropertyDescriptor(WP, 'nothingHere')));
+log('WP.nothingHere', WP.nothingHere);
+L.push('end');
+</script>
+</body></html>

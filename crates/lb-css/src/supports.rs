@@ -1,14 +1,12 @@
 //! `CSS.supports()` and `@supports` conditions as in Chrome 153 (CSS
 //! Conditional 3/4 and Blink's parser).
 //!
-//! - Declarations: the property must be one Chrome knows
-//!   ([`supports_data::PROPERTIES`], recorded from Chrome 153 by
-//!   `tools/css_supports/record.py`); custom properties take any value.
-//!   A value is supported when lb-css parses it for the property, or when
-//!   every top-level component (keyword, number, length, color, function,
-//!   ...) is of a kind Chrome accepts for that property (an approximation:
-//!   the parts are checked one by one, not their order or count). CSS-wide
-//!   keywords alone and any value with `var()` / `env()` pass.
+//! - Declarations: the property must be one Chrome knows and the value
+//!   must match its grammar (`supports.grammar`, matched by
+//!   [`crate::supports_value`]); custom properties take any well-formed
+//!   value. CSS-wide keywords alone pass; a value with an arbitrary
+//!   substitution function (`var()`, `env()`, `attr()`, `if()`) passes when
+//!   those functions are well formed, as Chrome defers the rest.
 //! - Conditions: `not`, `and`, `or` (not mixed), nesting,
 //!   `selector()` (one complex selector; pseudo-classes and elements as
 //!   Chrome lists them; no nested `:has()`, no pseudo-elements inside
@@ -18,7 +16,7 @@
 
 use cssparser::{ParseError, Parser, Token};
 
-use crate::supports_data::{CLASSES, COLOR_BIT, FN_SETS, FUNCS, KEYWORDS, KW_SETS, PROPERTIES};
+use crate::supports_value::{Comp, Cv, components, grammar, matches_property, matches_type};
 use crate::values::{PResult, bad};
 
 /// `CSS.supports(property, value)`.
@@ -86,7 +84,7 @@ fn in_parens(p: &mut Parser<'_>) -> PResult<bool> {
             p.parse_nested_block(|p| {
                 let r = match f.as_str() {
                     "selector" => p
-                        .try_parse(|p| p.parse_entirely(|p| complex(p, false, false)))
+                        .try_parse(|p| p.parse_entirely(|p| complex(p, false, Sx::default())))
                         .is_ok(),
                     "font-tech" => one_ident(p).is_some_and(|i| FONT_TECH.contains(&i.as_str())),
                     "font-format" => {
@@ -177,6 +175,23 @@ const AT_RULES: &[&str] = &[
     "swash",
     "ornaments",
     "annotation",
+    // `@page` margin boxes.
+    "top-left-corner",
+    "top-left",
+    "top-center",
+    "top-right",
+    "top-right-corner",
+    "bottom-left-corner",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+    "bottom-right-corner",
+    "left-top",
+    "left-middle",
+    "left-bottom",
+    "right-top",
+    "right-middle",
+    "right-bottom",
 ];
 
 /// Every token is well formed (no bad strings or URLs, no unmatched
@@ -213,119 +228,255 @@ fn well_formed(p: &mut Parser<'_>) -> bool {
 // Declarations
 // ---------------------------------------------------------------------------
 
-fn declaration(name: &str, value: &str, allow_important: bool) -> bool {
-    // `!important`: allowed in a condition, never in the two-argument form.
-    let (value, important) = crate::props::split_important(value);
-    // Chrome takes `initial !important` in both forms, `red !important`
-    // only in a condition.
+fn declaration(name: &str, raw: &str, allow_important: bool) -> bool {
+    // `!important`: allowed in a condition, never in the two-argument form
+    // (except after a CSS-wide keyword or with a substitution function).
+    let (value, important) = crate::props::split_important(raw);
     let wide = WIDE.iter().any(|w| value.eq_ignore_ascii_case(w));
-    if important && !allow_important && !wide {
+    let comps = components(value);
+    let subst = comps.as_deref().and_then(substitution);
+    if important && !allow_important && !wide && subst.is_none() {
         return false;
     }
     if let Some(custom) = name.strip_prefix("--") {
-        if custom.is_empty() {
+        if custom.is_empty() || (important && !allow_important) {
             return false;
         }
-        if value.is_empty() && !allow_important {
+        // A value of only white space is valid, an empty one is not.
+        if raw.is_empty() && !allow_important {
             return false;
         }
-        return !has_bang(value) && well_formed(&mut Parser::new(value));
+        return !has_bang(value) && well_formed(&mut Parser::new(value)) && subst != Some(false);
     }
     let lower = name.to_ascii_lowercase();
-    let Ok(i) = PROPERTIES.binary_search_by(|r| r.0.cmp(lower.as_str())) else {
+    if !grammar().has_property(&lower) || has_bang(value) {
         return false;
-    };
-    if value.is_empty() || has_bang(value) {
-        return false;
+    }
+    // Only white space or comments: valid where the grammar takes an empty
+    // value (Chrome 153: `timeline-trigger`), never for `""` in the
+    // two-argument form.
+    if comps.as_ref().is_some_and(|c| c.is_empty()) {
+        return (allow_important || !raw.is_empty()) && matches_property(&lower, &[]);
     }
     if wide {
         return true;
     }
-    if !generic_value(PROPERTIES[i], value) {
-        // The per-component check misses combinations in shorthands
-        // (`font: 12px/1.5 Arial`); lb-css's parser knows its shorthands.
-        let n = crate::props::normalize_name(&lower);
-        return crate::props::shorthand_longhands(&n).is_some()
-            && !has_unknown_function(value)
-            && crate::props::is_valid_declaration(&lower, value);
+    let Some(comps) = comps else {
+        return false;
+    };
+    if let Some(ok) = subst {
+        return ok;
     }
-    // For the properties lb-css implements, its parser also decides values
-    // made only of numbers and lengths (it counts them, which the check
-    // above does not: `margin: 1px 2px 3px 4px 5px`). Keywords and
-    // functions it may not know are left to the check above.
-    lb_css_unknown(&lower)
-        || !only_numeric(value)
-        || crate::props::is_valid_declaration(&lower, value)
+    matches_property(&lower, &comps)
+        && (!matches!(
+            lower.as_str(),
+            "grid-template-areas" | "grid-template" | "grid"
+        ) || grid_areas_ok(&comps))
 }
 
-fn lb_css_unknown(name: &str) -> bool {
-    let n = crate::props::normalize_name(name);
-    crate::props::LonghandId::from_name(&n).is_none()
-        && crate::props::shorthand_longhands(&n).is_none()
-}
-
-/// Only numbers, percentages and the length units lb-css parses.
-fn only_numeric(value: &str) -> bool {
-    let mut p = Parser::new(value);
-    while let Ok(t) = p.next() {
-        match t {
-            Token::Number { .. } | Token::Percentage { .. } => {}
-            Token::Dimension { unit, .. } => {
-                let u = unit.to_ascii_lowercase();
-                if !matches!(
-                    u.as_str(),
-                    "px" | "em"
-                        | "rem"
-                        | "ex"
-                        | "ch"
-                        | "vw"
-                        | "vh"
-                        | "vmin"
-                        | "vmax"
-                        | "cm"
-                        | "mm"
-                        | "q"
-                        | "in"
-                        | "pt"
-                        | "pc"
-                ) {
-                    return false;
+/// The strings of `grid-template-areas` (and the `grid` shorthands): rows
+/// of the same number of cells, each named area a rectangle.
+fn grid_areas_ok(comps: &[Comp]) -> bool {
+    let mut rows: Vec<Vec<Option<String>>> = Vec::new();
+    for c in comps {
+        let Cv::Str(s) = &c.cv else { continue };
+        let mut row = Vec::new();
+        let mut chars = s.chars().peekable();
+        while let Some(&ch) = chars.peek() {
+            if ch.is_whitespace() {
+                chars.next();
+            } else if ch == '.' {
+                while chars.peek() == Some(&'.') {
+                    chars.next();
                 }
+                row.push(None);
+            } else if ch.is_alphanumeric() || ch == '-' || ch == '_' || !ch.is_ascii() {
+                let mut name = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_alphanumeric() || c == '-' || c == '_' || !c.is_ascii() {
+                        name.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                row.push(Some(name));
+            } else {
+                return false;
             }
-            _ => return false,
         }
+        if row.is_empty() || rows.first().is_some_and(|r| r.len() != row.len()) {
+            return false;
+        }
+        rows.push(row);
     }
-    true
+    // Each name: its cells fill their bounding box.
+    let mut names: Vec<&str> = rows
+        .iter()
+        .flatten()
+        .flatten()
+        .map(|s| s.as_str())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names.iter().all(|n| {
+        let cells: Vec<(usize, usize)> = rows
+            .iter()
+            .enumerate()
+            .flat_map(|(r, row)| {
+                row.iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.as_deref() == Some(*n))
+                    .map(move |(col, _)| (r, col))
+            })
+            .collect();
+        let (r0, r1) = (
+            cells.iter().map(|c| c.0).min(),
+            cells.iter().map(|c| c.0).max(),
+        );
+        let (c0, c1) = (
+            cells.iter().map(|c| c.1).min(),
+            cells.iter().map(|c| c.1).max(),
+        );
+        let (Some(r0), Some(r1), Some(c0), Some(c1)) = (r0, r1, c0, c1) else {
+            return false;
+        };
+        cells.len() == (r1 - r0 + 1) * (c1 - c0 + 1)
+    })
 }
 
-/// A function no property takes (`transform: foo(1)`).
-fn has_unknown_function(value: &str) -> bool {
-    let mut p = Parser::new(value);
-    let mut unknown = false;
-    while let Ok(t) = p.next() {
-        let name = match t {
-            Token::Function(f) => f.to_ascii_lowercase(),
-            Token::ParenthesisBlock | Token::SquareBracketBlock | Token::CurlyBracketBlock => {
-                String::new()
-            }
-            _ => continue,
+/// Arbitrary substitution functions (`var()`, `env()`, `attr()`, `if()`,
+/// custom functions `--name()`): a value with one is valid when all of
+/// them are well formed, Chrome checks the rest after substitution.
+/// `None` when the value has none.
+fn substitution(c: &[Comp]) -> Option<bool> {
+    let mut found: Option<bool> = None;
+    for x in c {
+        let r = match &x.cv {
+            Cv::Func(f, args) if is_substitution(f) => Some(substitution_ok(f, args)),
+            Cv::Func(_, args) | Cv::Block(_, args) => substitution(args),
+            _ => None,
         };
-        if !name.is_empty() {
-            let n = name.as_str();
-            unknown |= !(MATH.contains(&n)
-                || COLOR_FNS.contains(&n)
-                || GRADIENTS.contains(&n)
-                || FUNCS.binary_search(&n).is_ok());
+        if let Some(r) = r {
+            found = Some(found.unwrap_or(true) && r);
         }
-        unknown |= p
-            .parse_nested_block(|p| {
-                let start = p.position();
-                while p.next().is_ok() {}
-                Ok::<_, ParseError<()>>(has_unknown_function(p.slice_from(start)))
-            })
-            .unwrap_or(false);
     }
-    unknown
+    found
+}
+
+fn is_substitution(f: &str) -> bool {
+    matches!(f, "var" | "env" | "attr" | "if" | "inherit") || (f.starts_with("--") && f.len() > 2)
+}
+
+fn ident_is(c: Option<&Comp>, k: &str) -> bool {
+    matches!(c, Some(Comp { cv: Cv::Ident(i), .. }) if i == k)
+}
+
+/// Any tokens without a top-level `;` or `!`, nested substitution
+/// functions valid (a fallback, a custom function's arguments).
+fn any_value(c: &[Comp]) -> bool {
+    !c.iter()
+        .any(|x| matches!(x.cv, Cv::Semicolon | Cv::Delim('!')))
+        && substitution(c) != Some(false)
+}
+
+/// Splits at the first top-level comma: before, and the fallback after it.
+fn fallback(args: &[Comp]) -> (&[Comp], Option<&[Comp]>) {
+    match args.iter().position(|c| matches!(c.cv, Cv::Comma)) {
+        Some(i) => (&args[..i], Some(&args[i + 1..])),
+        None => (args, None),
+    }
+}
+
+fn substitution_ok(f: &str, args: &[Comp]) -> bool {
+    if f.starts_with("--") {
+        return any_value(args);
+    }
+    if f == "if" {
+        return if_ok(args);
+    }
+    // Chrome 153 rejects `inherit()` everywhere.
+    if f == "inherit" {
+        return false;
+    }
+    let (head, fb) = fallback(args);
+    if fb.is_some_and(|fb| !any_value(fb)) {
+        return false;
+    }
+    let ident = |c: &Comp| matches!(c.cv, Cv::Ident(_));
+    match f {
+        "var" => {
+            matches!(head, [Comp { cv: Cv::Ident(i), .. }] if i.starts_with("--") && i.len() > 2)
+        }
+        "env" => {
+            head.first().is_some_and(ident)
+                && head[1..]
+                    .iter()
+                    .all(|c| matches!(c.cv, Cv::Num(v, true) if v >= 0.0))
+        }
+        // `attr( <attr-name> <attr-type>? , <fallback>? )`, no namespaces.
+        _ => match head {
+            [n] => ident(n),
+            [n, t] => {
+                ident(n)
+                    && match &t.cv {
+                        Cv::Ident(_) | Cv::Delim('%') => true,
+                        Cv::Func(f, s) if f == "type" => matches_type("syntax", s),
+                        _ => false,
+                    }
+            }
+            _ => false,
+        },
+    }
+}
+
+/// `if( [ <if-branch> ; ]* <if-branch> ;? )`, a branch
+/// `<if-condition> : <declaration-value>?`.
+fn if_ok(args: &[Comp]) -> bool {
+    let mut parts: Vec<&[Comp]> = args.split(|c| matches!(c.cv, Cv::Semicolon)).collect();
+    if parts.last().is_some_and(|p| p.is_empty()) && parts.len() > 1 {
+        parts.pop();
+    }
+    parts.iter().all(|b| {
+        let Some(i) = b.iter().position(|c| matches!(c.cv, Cv::Colon)) else {
+            return false;
+        };
+        let (cond, value) = (&b[..i], &b[i + 1..]);
+        let cond_ok = match cond {
+            [c] if ident_is(Some(c), "else") => true,
+            _ => if_condition(cond),
+        };
+        cond_ok && any_value(value)
+    })
+}
+
+/// A boolean expression of `style()`, `media()`, `supports()` tests
+/// (other functions and blocks are unknown tests, still valid).
+fn if_condition(c: &[Comp]) -> bool {
+    let test = |x: &Comp| match &x.cv {
+        Cv::Func(..) => true,
+        Cv::Block('(', inner) => if_condition(inner) || !inner.is_empty(),
+        _ => false,
+    };
+    match c {
+        [] => false,
+        [n, rest @ ..] if ident_is(Some(n), "not") => matches!(rest, [t] if test(t)),
+        [first, rest @ ..] => {
+            if !test(first) || rest.len() % 2 != 0 {
+                return false;
+            }
+            let op = match rest.first() {
+                Some(Comp {
+                    cv: Cv::Ident(i), ..
+                }) => i.as_str(),
+                _ => return rest.is_empty(),
+            };
+            (op == "and" || op == "or")
+                && rest
+                    .chunks(2)
+                    .all(|p| ident_is(p.first(), op) && test(&p[1]))
+        }
+    }
 }
 
 /// A top-level `!` (or `;`): never part of a valid value.
@@ -339,272 +490,7 @@ fn has_bang(value: &str) -> bool {
     false
 }
 
-fn has_var(p: &mut Parser<'_>) -> bool {
-    let mut found = false;
-    while let Ok(t) = p.next() {
-        match t.clone() {
-            Token::Function(f)
-                if f.eq_ignore_ascii_case("var") || f.eq_ignore_ascii_case("env") =>
-            {
-                found = true;
-                let _ = p.parse_nested_block(|p| {
-                    while p.next().is_ok() {}
-                    Ok::<_, ParseError<()>>(())
-                });
-            }
-            Token::Function(_)
-            | Token::ParenthesisBlock
-            | Token::SquareBracketBlock
-            | Token::CurlyBracketBlock => {
-                let inner = p
-                    .parse_nested_block(|p| Ok::<_, ParseError<()>>(has_var(p)))
-                    .unwrap_or(false);
-                found |= inner;
-            }
-            _ => {}
-        }
-    }
-    found
-}
-
 const WIDE: &[&str] = &["inherit", "initial", "unset", "revert", "revert-layer"];
-
-const MATH: &[&str] = &[
-    "calc",
-    "-webkit-calc",
-    "min",
-    "max",
-    "clamp",
-    "round",
-    "mod",
-    "rem",
-    "abs",
-    "sign",
-    "sin",
-    "cos",
-    "tan",
-    "asin",
-    "acos",
-    "atan",
-    "atan2",
-    "pow",
-    "sqrt",
-    "hypot",
-    "log",
-    "exp",
-    "sibling-index",
-    "sibling-count",
-    "progress",
-];
-
-const COLOR_FNS: &[&str] = &[
-    "rgb",
-    "rgba",
-    "hsl",
-    "hsla",
-    "hwb",
-    "lab",
-    "lch",
-    "oklab",
-    "oklch",
-    "color",
-    "color-mix",
-    "light-dark",
-    "contrast-color",
-];
-
-const GRADIENTS: &[&str] = &[
-    "linear-gradient",
-    "radial-gradient",
-    "conic-gradient",
-    "repeating-linear-gradient",
-    "repeating-radial-gradient",
-    "repeating-conic-gradient",
-    "-webkit-linear-gradient",
-    "-webkit-radial-gradient",
-    "-webkit-repeating-linear-gradient",
-    "-webkit-repeating-radial-gradient",
-];
-
-const SYSTEM_COLORS: &[&str] = &[
-    "accentcolor",
-    "accentcolortext",
-    "activeborder",
-    "activecaption",
-    "activetext",
-    "appworkspace",
-    "background",
-    "buttonborder",
-    "buttonface",
-    "buttonhighlight",
-    "buttonshadow",
-    "buttontext",
-    "canvas",
-    "canvastext",
-    "captiontext",
-    "currentcolor",
-    "field",
-    "fieldtext",
-    "graytext",
-    "highlight",
-    "highlighttext",
-    "inactiveborder",
-    "inactivecaption",
-    "inactivecaptiontext",
-    "infobackground",
-    "infotext",
-    "linktext",
-    "mark",
-    "marktext",
-    "menu",
-    "menutext",
-    "scrollbar",
-    "selecteditem",
-    "selecteditemtext",
-    "threeddarkshadow",
-    "threedface",
-    "threedhighlight",
-    "threedlightshadow",
-    "threedshadow",
-    "transparent",
-    "visitedtext",
-    "window",
-    "windowframe",
-    "windowtext",
-    "-webkit-link",
-    "-webkit-text",
-    "-webkit-activelink",
-];
-
-const LENGTH_UNITS: &[&str] = &[
-    "px", "em", "rem", "ex", "rex", "ch", "rch", "ic", "ric", "cap", "rcap", "lh", "rlh", "vw",
-    "vh", "vi", "vb", "vmin", "vmax", "svw", "svh", "svi", "svb", "svmin", "svmax", "lvw", "lvh",
-    "lvi", "lvb", "lvmin", "lvmax", "dvw", "dvh", "dvi", "dvb", "dvmin", "dvmax", "cqw", "cqh",
-    "cqi", "cqb", "cqmin", "cqmax", "cm", "mm", "q", "in", "pt", "pc",
-];
-
-fn class(mask: u32, name: &str) -> bool {
-    CLASSES
-        .iter()
-        .position(|c| *c == name)
-        .is_some_and(|i| mask & (1 << i) != 0)
-}
-
-fn has_fn(set: u16, name: &str) -> bool {
-    let Ok(i) = FUNCS.binary_search(&name) else {
-        return false;
-    };
-    FN_SETS[set as usize].contains(&(i as u8))
-}
-
-fn ident_ok((_, mask, kw, _): (&str, u32, u16, u16), ident: &str) -> bool {
-    let lower = ident.to_ascii_lowercase();
-    if lower.starts_with("--") {
-        return class(mask, "--a");
-    }
-    if class(mask, "foo") {
-        return true;
-    }
-    if mask & (1 << COLOR_BIT) != 0
-        && (cssparser::color::parse_named_color(&lower).is_ok()
-            || SYSTEM_COLORS.contains(&lower.as_str()))
-    {
-        return true;
-    }
-    KEYWORDS
-        .binary_search(&lower.as_str())
-        .is_ok_and(|i| KW_SETS[kw as usize].binary_search(&(i as u16)).is_ok())
-}
-
-fn function_ok((_, _, _, fns): (&str, u32, u16, u16), name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    let n = name.as_str();
-    if MATH.contains(&n) {
-        return ["math", "mathn", "mathp", "matht", "matha"]
-            .iter()
-            .any(|m| has_fn(fns, m));
-    }
-    if COLOR_FNS.contains(&n) {
-        return has_fn(fns, "color");
-    }
-    if GRADIENTS.contains(&n) {
-        return has_fn(fns, "gradient");
-    }
-    has_fn(fns, n)
-}
-
-/// The component-by-component check of a value (see the module docs).
-fn generic_value(row: (&str, u32, u16, u16), value: &str) -> bool {
-    if !well_formed(&mut Parser::new(value)) {
-        return false;
-    }
-    if has_var(&mut Parser::new(value)) {
-        return true;
-    }
-    let mask = row.1;
-    let mut p = Parser::new(value);
-    let mut count = 0;
-    let mut wide = false;
-    while let Ok(t) = p.next() {
-        let t = t.clone();
-        let ok = match &t {
-            Token::Ident(i) if WIDE.iter().any(|w| i.eq_ignore_ascii_case(w)) => {
-                wide = true;
-                true
-            }
-            Token::Ident(i) => ident_ok(row, i),
-            Token::Number { value, .. } if *value == 0.0 => {
-                class(mask, "0") || class(mask, "1") || class(mask, "1px")
-            }
-            Token::Number { .. } => class(mask, "1"),
-            Token::Percentage { .. } => class(mask, "50%"),
-            Token::Dimension { unit, .. } => {
-                let u = unit.to_ascii_lowercase();
-                let u = u.as_str();
-                if LENGTH_UNITS.contains(&u) {
-                    class(mask, "1px")
-                } else if matches!(u, "s" | "ms") {
-                    class(mask, "1s")
-                } else if matches!(u, "deg" | "rad" | "grad" | "turn") {
-                    class(mask, "45deg")
-                } else if u == "fr" {
-                    class(mask, "1fr")
-                } else if matches!(u, "dpi" | "dpcm" | "dppx" | "x") {
-                    class(mask, "2dppx")
-                } else if matches!(u, "hz" | "khz") {
-                    class(mask, "10hz")
-                } else {
-                    false
-                }
-            }
-            Token::Hash(h) | Token::IDHash(h) => {
-                class(mask, "#f00") && cssparser::color::parse_hash_color(h.as_bytes()).is_ok()
-            }
-            Token::QuotedString(_) => class(mask, "\"abcd\""),
-            Token::UnquotedUrl(_) => function_ok(row, "url"),
-            Token::Function(f) => function_ok(row, f),
-            Token::SquareBracketBlock => class(mask, "[a]"),
-            Token::Comma | Token::Delim('/') => {
-                continue;
-            }
-            _ => false,
-        };
-        if !ok {
-            return false;
-        }
-        if matches!(
-            t,
-            Token::Function(_) | Token::SquareBracketBlock | Token::ParenthesisBlock
-        ) {
-            let _ = p.parse_nested_block(|p| {
-                while p.next().is_ok() {}
-                Ok::<_, ParseError<()>>(())
-            });
-        }
-        count += 1;
-    }
-    count > 0 && !(wide && count > 1)
-}
 
 // ---------------------------------------------------------------------------
 // selector()
@@ -640,6 +526,8 @@ const PSEUDO_CLASSES: &[&str] = &[
     "in-range",
     "increment",
     "indeterminate",
+    "interest-source",
+    "interest-target",
     "invalid",
     "last-child",
     "last-of-type",
@@ -663,6 +551,8 @@ const PSEUDO_CLASSES: &[&str] = &[
     "single-button",
     "start",
     "target",
+    "target-after",
+    "target-before",
     "target-current",
     "user-invalid",
     "user-valid",
@@ -747,9 +637,19 @@ const PSEUDO_ELEMENTS: &[&str] = &[
     "-webkit-textfield-decoration-container",
 ];
 
+/// Where a selector is parsed: inside `:has()` (no nested `:has()`, no
+/// pseudo-elements), inside `:is()` / `:where()` / `:not()` (no
+/// pseudo-elements), inside `:host()` (no `:has()`).
+#[derive(Clone, Copy, Default)]
+struct Sx {
+    in_has: bool,
+    no_pe: bool,
+    no_has: bool,
+}
+
 /// One complex selector (`rel`: may start with a combinator, as in
-/// `:has()`). `in_has`: inside `:has()`.
-fn complex(p: &mut Parser<'_>, rel: bool, in_has: bool) -> PResult<()> {
+/// `:has()`). Nothing may follow a compound with a pseudo-element.
+fn complex(p: &mut Parser<'_>, rel: bool, sx: Sx) -> PResult<()> {
     p.skip_whitespace();
     if rel {
         let _ = p.try_parse(|p| match p.next()? {
@@ -758,7 +658,7 @@ fn complex(p: &mut Parser<'_>, rel: bool, in_has: bool) -> PResult<()> {
         });
         p.skip_whitespace();
     }
-    compound(p, in_has)?;
+    let mut elem = compound(p, sx)?;
     loop {
         let mut space = false;
         loop {
@@ -772,6 +672,9 @@ fn complex(p: &mut Parser<'_>, rel: bool, in_has: bool) -> PResult<()> {
                 Err(_) => return Ok(()),
             }
         }
+        if elem.is_some() {
+            return bad(p);
+        }
         let st = p.state();
         match p.next_including_whitespace()?.clone() {
             Token::Delim('>' | '+' | '~') => {
@@ -780,17 +683,17 @@ fn complex(p: &mut Parser<'_>, rel: bool, in_has: bool) -> PResult<()> {
             _ if space => p.reset(&st),
             _ => return bad(p),
         }
-        compound(p, in_has)?;
+        elem = compound(p, sx)?;
     }
 }
 
 /// A selector list (`:is()`, `:not()`, ...): one or more, comma separated.
-fn list(p: &mut Parser<'_>, rel: bool, in_has: bool) -> PResult<()> {
-    p.parse_comma_separated(|p| complex(p, rel, in_has))
-        .map(|_| ())
+fn list(p: &mut Parser<'_>, rel: bool, sx: Sx) -> PResult<()> {
+    p.parse_comma_separated(|p| complex(p, rel, sx)).map(|_| ())
 }
 
-fn compound(p: &mut Parser<'_>, in_has: bool) -> PResult<()> {
+/// A compound selector; the pseudo-element it ends in, if any.
+fn compound(p: &mut Parser<'_>, sx: Sx) -> PResult<Option<String>> {
     // Type selector with an optional namespace: `*|a` and `|a`; no
     // namespace is declared, so `ns|a` fails.
     let mut any = false;
@@ -818,11 +721,11 @@ fn compound(p: &mut Parser<'_>, in_has: bool) -> PResult<()> {
         Token::Delim('&') => any = true,
         _ => p.reset(&st),
     }
-    rest_of_compound(p, in_has, any)
+    rest_of_compound(p, sx, any)
 }
 
-fn rest_of_compound(p: &mut Parser<'_>, in_has: bool, mut any: bool) -> PResult<()> {
-    let mut after_element = false;
+fn rest_of_compound(p: &mut Parser<'_>, sx: Sx, mut any: bool) -> PResult<Option<String>> {
+    let mut elem: Option<String> = None;
     loop {
         let st = p.state();
         let t = match p.next_including_whitespace() {
@@ -830,18 +733,30 @@ fn rest_of_compound(p: &mut Parser<'_>, in_has: bool, mut any: bool) -> PResult<
             Err(_) => break,
         };
         match t {
-            Token::IDHash(_) if !after_element => {}
-            Token::Delim('.') if !after_element => match p.next_including_whitespace()? {
+            Token::IDHash(_) if elem.is_none() => {}
+            Token::Delim('.') if elem.is_none() => match p.next_including_whitespace()? {
                 Token::Ident(_) => {}
                 _ => return bad(p),
             },
-            Token::Delim('&') if !after_element => {}
-            Token::SquareBracketBlock if !after_element => p.parse_nested_block(attribute)?,
-            Token::Colon => {
-                if pseudo(p, in_has)? {
-                    after_element = true;
+            Token::Delim('&') if elem.is_none() => {}
+            Token::SquareBracketBlock if elem.is_none() => p.parse_nested_block(attribute)?,
+            Token::Colon => match pseudo(p, sx)? {
+                Simple::Element(e) => {
+                    if let Some(prev) = &elem
+                        && !element_after_element(&e, prev)
+                    {
+                        return bad(p);
+                    }
+                    elem = Some(e);
                 }
-            }
+                Simple::Class(c) => {
+                    if let Some(prev) = &elem
+                        && !class_after_element(&c, prev)
+                    {
+                        return bad(p);
+                    }
+                }
+            },
             _ => {
                 p.reset(&st);
                 break;
@@ -849,7 +764,103 @@ fn rest_of_compound(p: &mut Parser<'_>, in_has: bool, mut any: bool) -> PResult<
         }
         any = true;
     }
-    if any { Ok(()) } else { bad(p) }
+    if any { Ok(elem) } else { bad(p) }
+}
+
+const SCROLLBAR_ELEMENTS: &[&str] = &[
+    "-webkit-resizer",
+    "-webkit-scrollbar",
+    "-webkit-scrollbar-corner",
+    "-webkit-scrollbar-button",
+    "-webkit-scrollbar-thumb",
+    "-webkit-scrollbar-track",
+    "-webkit-scrollbar-track-piece",
+];
+
+const SCROLLBAR_CLASSES: &[&str] = &[
+    "enabled",
+    "disabled",
+    "hover",
+    "active",
+    "horizontal",
+    "vertical",
+    "decrement",
+    "increment",
+    "start",
+    "end",
+    "double-button",
+    "single-button",
+    "no-button",
+    "corner-present",
+    "window-inactive",
+];
+
+const USER_ACTION: &[&str] = &["hover", "focus", "focus-visible", "focus-within", "active"];
+
+/// Pseudo-classes that depend on the tree, not allowed after `::part()`.
+const STRUCTURAL: &[&str] = &[
+    "first-child",
+    "last-child",
+    "only-child",
+    "first-of-type",
+    "last-of-type",
+    "only-of-type",
+    "nth-child",
+    "nth-last-child",
+    "nth-of-type",
+    "nth-last-of-type",
+    "empty",
+    "root",
+    "has",
+    "host",
+    "host-context",
+    "scope",
+];
+
+/// A pseudo-class after pseudo-element `e` (Blink's
+/// `IsPseudoClassValidAfterPseudoElement`).
+fn class_after_element(c: &str, e: &str) -> bool {
+    if matches!(c, "is" | "where" | "not") {
+        return true;
+    }
+    match e {
+        "part" => !STRUCTURAL.contains(&c),
+        _ if SCROLLBAR_ELEMENTS.contains(&e) => SCROLLBAR_CLASSES.contains(&c),
+        "selection" => c == "window-inactive",
+        "file-selector-button" => USER_ACTION.contains(&c),
+        _ if e.starts_with("-webkit-") => USER_ACTION.contains(&c),
+        "view-transition-group"
+        | "view-transition-image-pair"
+        | "view-transition-old"
+        | "view-transition-new" => c == "only-child",
+        "search-text" => c == "current",
+        "scroll-marker-group" => matches!(c, "focus-within" | "hover"),
+        "scroll-marker" => {
+            matches!(c, "target-current" | "target-before" | "target-after")
+                || USER_ACTION.contains(&c)
+        }
+        "scroll-button" => matches!(c, "disabled" | "enabled") || USER_ACTION.contains(&c),
+        _ => false,
+    }
+}
+
+/// A pseudo-element after pseudo-element `e`.
+fn element_after_element(s: &str, e: &str) -> bool {
+    match e {
+        "column" => s == "scroll-marker",
+        "before" | "after" => s == "marker",
+        "slotted" => matches!(
+            s,
+            "before"
+                | "after"
+                | "marker"
+                | "placeholder"
+                | "file-selector-button"
+                | "details-content"
+        ),
+        "part" => !matches!(s, "part" | "slotted"),
+        _ => false,
+    }
 }
 
 fn attribute(p: &mut Parser<'_>) -> PResult<()> {
@@ -891,25 +902,32 @@ fn attribute(p: &mut Parser<'_>) -> PResult<()> {
     if p.is_exhausted() {
         return Ok(());
     }
+    // Chrome 153 has the `i` flag, not `s`.
     match p.next()? {
-        Token::Ident(i) if i.eq_ignore_ascii_case("i") || i.eq_ignore_ascii_case("s") => {}
+        Token::Ident(i) if i.eq_ignore_ascii_case("i") => {}
         _ => return bad(p),
     }
     p.expect_exhausted().map_err(ParseError::from)
 }
 
-/// After `:`. True for a pseudo-element.
-fn pseudo(p: &mut Parser<'_>, in_has: bool) -> PResult<bool> {
+enum Simple {
+    Class(String),
+    Element(String),
+}
+
+/// After `:`: a pseudo-class or pseudo-element, by name.
+fn pseudo(p: &mut Parser<'_>, sx: Sx) -> PResult<Simple> {
+    let no_pe = sx.in_has || sx.no_pe;
     match p.next_including_whitespace()?.clone() {
         Token::Colon => {
-            if in_has {
+            if no_pe {
                 return bad(p);
             }
             match p.next_including_whitespace()?.clone() {
                 Token::Ident(n) => {
                     let n = n.to_ascii_lowercase();
                     if PSEUDO_ELEMENTS.contains(&n.as_str()) {
-                        Ok(true)
+                        Ok(Simple::Element(n))
                     } else {
                         bad(p)
                     }
@@ -918,8 +936,11 @@ fn pseudo(p: &mut Parser<'_>, in_has: bool) -> PResult<bool> {
                     let n = n.to_ascii_lowercase();
                     p.parse_nested_block(|p| {
                         match n.as_str() {
-                            "highlight" | "picker" => {
+                            "highlight" => {
                                 p.expect_ident()?;
+                            }
+                            "picker" => {
+                                p.expect_ident_matching("select")?;
                             }
                             "part" => {
                                 p.expect_ident()?;
@@ -927,23 +948,34 @@ fn pseudo(p: &mut Parser<'_>, in_has: bool) -> PResult<bool> {
                             }
                             "slotted" => {
                                 p.skip_whitespace();
-                                compound(p, false)?;
+                                compound(p, Sx::default())?;
                                 p.skip_whitespace();
                             }
-                            "cue" => list(p, false, false)?,
+                            "cue" => list(p, false, Sx::default())?,
                             "view-transition-group"
                             | "view-transition-image-pair"
                             | "view-transition-old"
-                            | "view-transition-new"
-                            | "scroll-button" => match p.next()? {
-                                Token::Ident(_) | Token::Delim('*') => {}
+                            | "view-transition-new" => view_transition_arg(p)?,
+                            "scroll-button" => match p.next()? {
+                                Token::Delim('*') => {}
+                                Token::Ident(i)
+                                    if matches!(
+                                        i.to_ascii_lowercase().as_str(),
+                                        "up" | "down"
+                                            | "left"
+                                            | "right"
+                                            | "block-start"
+                                            | "block-end"
+                                            | "inline-start"
+                                            | "inline-end"
+                                    ) => {}
                                 _ => return bad(p),
                             },
                             _ => return bad(p),
                         }
                         p.expect_exhausted().map_err(ParseError::from)
                     })?;
-                    Ok(true)
+                    Ok(Simple::Element(n))
                 }
                 _ => bad(p),
             }
@@ -951,50 +983,50 @@ fn pseudo(p: &mut Parser<'_>, in_has: bool) -> PResult<bool> {
         Token::Ident(n) => {
             let n = n.to_ascii_lowercase();
             if PSEUDO_CLASSES.contains(&n.as_str()) {
-                Ok(false)
+                Ok(Simple::Class(n))
             } else if matches!(
                 n.as_str(),
                 "before" | "after" | "first-letter" | "first-line"
             ) {
-                if in_has { bad(p) } else { Ok(true) }
+                if no_pe {
+                    bad(p)
+                } else {
+                    Ok(Simple::Element(n))
+                }
             } else {
                 bad(p)
             }
         }
         Token::Function(n) => {
             let n = n.to_ascii_lowercase();
+            if n == "has" && (sx.in_has || sx.no_has) {
+                return bad(p);
+            }
             p.parse_nested_block(|p| {
                 match n.as_str() {
-                    "is" | "where" | "not" => list(p, false, in_has)?,
+                    "is" | "where" | "not" => list(p, false, Sx { no_pe: true, ..sx })?,
                     "-webkit-any" => p
                         .parse_comma_separated(|p| {
                             p.skip_whitespace();
-                            compound(p, in_has)?;
+                            compound(p, Sx { no_pe: true, ..sx })?;
                             p.skip_whitespace();
                             Ok(())
                         })
                         .map(|_| ())?,
-                    "has" if !in_has => list(p, true, true)?,
+                    "has" => list(p, true, Sx { in_has: true, ..sx })?,
                     "nth-child" | "nth-last-child" => {
                         cssparser::parse_nth(p)?;
                         p.skip_whitespace();
                         if !p.is_exhausted() {
                             p.expect_ident_matching("of")?;
-                            list(p, false, in_has)?;
+                            list(p, false, Sx { no_pe: true, ..sx })?;
                         }
                     }
                     "nth-of-type" | "nth-last-of-type" => {
                         cssparser::parse_nth(p)?;
                     }
-                    "dir" | "state" => {
+                    "dir" | "state" | "lang" => {
                         p.expect_ident()?;
-                    }
-                    "lang" => {
-                        p.parse_comma_separated(|p| {
-                            p.expect_ident_or_string()
-                                .map(|_| ())
-                                .map_err(ParseError::<()>::from)
-                        })?;
                     }
                     "active-view-transition-type" => {
                         p.parse_comma_separated(|p| {
@@ -1003,17 +1035,50 @@ fn pseudo(p: &mut Parser<'_>, in_has: bool) -> PResult<bool> {
                     }
                     "host" | "host-context" => {
                         p.skip_whitespace();
-                        compound(p, in_has)?;
+                        compound(
+                            p,
+                            Sx {
+                                no_has: true,
+                                no_pe: true,
+                                ..sx
+                            },
+                        )?;
                         p.skip_whitespace();
                     }
                     _ => return bad(p),
                 }
                 p.expect_exhausted().map_err(ParseError::from)
             })?;
-            Ok(false)
+            Ok(Simple::Class(n))
         }
         _ => bad(p),
     }
+}
+
+/// `::view-transition-group()` and the others: `*`, a name, or a name
+/// and classes (`a.b`, `.b`, `*.b`).
+fn view_transition_arg(p: &mut Parser<'_>) -> PResult<()> {
+    let mut any = false;
+    let st = p.state();
+    match p.next()? {
+        Token::Ident(_) | Token::Delim('*') => any = true,
+        _ => p.reset(&st),
+    }
+    loop {
+        let st = p.state();
+        match p.next_including_whitespace() {
+            Ok(Token::Delim('.')) => match p.next_including_whitespace()? {
+                Token::Ident(_) => any = true,
+                _ => return bad(p),
+            },
+            _ => {
+                p.reset(&st);
+                break;
+            }
+        }
+    }
+    p.skip_whitespace();
+    if any { Ok(()) } else { bad(p) }
 }
 
 #[cfg(test)]
@@ -1044,6 +1109,58 @@ mod tests {
         assert!(!supports_condition("selector(a, b)"));
         assert!(supports_condition("font-tech(color-COLRv1)"));
         assert!(supports_condition("at-rule(@container)"));
+    }
+
+    // Chrome 153's answers, recorded on loopback pages.
+    #[test]
+    fn grammar_details() {
+        let t = |p, v| supports_declaration(p, v);
+        // Typed arithmetic, whitespace around `+`, percentages in mixes.
+        assert!(t("width", "calc(1px / 1px * 1px)"));
+        assert!(!t("width", "calc(1px+1px)"));
+        assert!(!t("width", "calc(1px + 1)"));
+        assert!(t("width", "min(1px, 2%)"));
+        assert!(!t("width", "round(1.5px)"));
+        assert!(t("z-index", "calc(1.5)"));
+        assert!(!t("z-index", "1e1"));
+        assert!(t("width", "calc-size(auto, size * 2 + 1px)"));
+        assert!(!t("max-width", "calc-size(auto, size)"));
+        // Shorthands need their required parts.
+        assert!(!t("font", "bold"));
+        assert!(!t("text-shadow", "red"));
+        assert!(t("font", "italic bold 12px/1.5 Arial, sans-serif"));
+        // Substitution functions defer the check, even with `!important`.
+        assert!(t("width", "var(--x) !important"));
+        assert!(!t("width", "1px !important"));
+        assert!(!t("width", "var(x)"));
+        assert!(t("width", "attr(x type(<length>), 1px)"));
+        assert!(!t("width", "if(foo: 1px)"));
+        assert!(t("width", "--foo(1px, 2px)"));
+        assert!(t("--x", " "));
+        assert!(!t("--x", "var(--y, var(z))"));
+        // Strings Chrome checks.
+        assert!(t("d", "path(\"M0 0 A1 1 0 112 2\")"));
+        assert!(!t("d", "path(\"M0 0 L\")"));
+        assert!(!t("grid-template-areas", "\"a b\" \"b a\""));
+        assert!(t("grid-template-areas", "\"a a\" \"b b\""));
+        assert!(!t("font-feature-settings", "\"lig\""));
+        assert!(t("font-family", "initial a"));
+        assert!(!t("font-family", "serif a"));
+        // Colors.
+        assert!(t("color", "rgb(from red calc(r + 1) g b / alpha)"));
+        assert!(!t("color", "rgb(1, none, 3)"));
+        assert!(!t("color", "color-mix(in srgb, red 0%, blue 0%)"));
+        assert!(!t("color", "device-cmyk(0 0 0 1)"));
+        // Blink's parser quirks: commas in `border`, `first` dropped.
+        assert!(t("border-inline", "groove, 1q red"));
+        assert!(t("align-content", "first end"));
+        assert!(t("timeline-trigger", " ") && !t("timeline-trigger", ""));
+        assert!(supports_condition("(timeline-trigger:)"));
+        assert!(t("transition-timing-function", "linear(1 2 50%, 1)"));
+        assert!(!t("transition-timing-function", "linear(1 2, 1)"));
+        assert!(t("width", "calc-size(1px, size size)"));
+        assert!(!t("width", "calc-size(1px, size + 1s)"));
+        assert!(!t("align-content", "last baseline"));
     }
 
     #[test]

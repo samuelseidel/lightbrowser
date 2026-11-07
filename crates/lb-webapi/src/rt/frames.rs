@@ -73,6 +73,12 @@ pub struct FrameState {
     detached: Cell<bool>,
     /// Top-level window only: removed frames kept usable, oldest first.
     gone: RefCell<Vec<Rc<Window>>>,
+    /// Storage key (ADR 0037), fixed when the window is linked or set by
+    /// the page layer; `None`: first-party of its origin.
+    pub(crate) storage_key: RefCell<Option<super::partition::StorageKey>>,
+    /// Ids this window watches its local and session storage areas with
+    /// (0: not yet), see `partition::watch_storage`.
+    pub(crate) storage_watch: (Cell<u64>, Cell<u64>),
 }
 
 /// Removed frames a page keeps usable (realm alive) at most; past that the
@@ -172,6 +178,37 @@ pub fn child_for(w: &Window, element: NodeId) -> Option<Child> {
         .cloned()
 }
 
+/// Frame window `w` as an interceptor returns it to `accessor`'s realm:
+/// the restricted stand-in when one exists for a cross-origin accessor,
+/// else its global (V8 checks access to that across origins).
+pub(crate) fn child_global(w: &Window, accessor: lb_js::RealmId) -> Option<Arg> {
+    if let Some(from) = w.rt.window(accessor)
+        && !same_origin(&from, w)
+        && let Some((_, h)) = w
+            .frames
+            .remote
+            .borrow()
+            .iter()
+            .find(|(r, _)| *r == from.realm())
+    {
+        return Some(Arg::Handle(*h));
+    }
+    w.frames.global.get().map(Arg::Handle)
+}
+
+/// The first child frame whose browsing context name is `name` (Blink's
+/// `FrameTree::ScopedChild`), for `window[name]` (ADR 0040).
+pub(crate) fn child_by_name(w: &Window, name: &str, accessor: lb_js::RealmId) -> Option<Arg> {
+    let child = w
+        .frames
+        .children
+        .borrow()
+        .iter()
+        .find(|c| *c.window.window_name.borrow() == name)
+        .cloned()?;
+    child_global(&child.window, accessor)
+}
+
 /// Every frame window below `w`, parents before children.
 pub fn descendants(w: &Window) -> Vec<Rc<Window>> {
     let mut out = Vec::new();
@@ -262,6 +299,11 @@ pub fn commit_child(
     *new.window_name.borrow_mut() = old.window.window_name.borrow().clone();
     new.create_realm(ops, &bindings)?;
     let _ = global_handle(ops, new);
+    // The parent's stand-in for a cross-origin frame exists from the start,
+    // so `window[name]` and `contentWindow` give the same object (ADR 0040).
+    if !same_origin(parent, new) {
+        let _ = remote_window(ops, parent, new);
+    }
     for c in parent.frames.children.borrow_mut().iter_mut() {
         if c.id == frame {
             c.window = new.clone();
@@ -316,6 +358,7 @@ fn link(child: &Rc<Window>, parent: &Rc<Window>, element: NodeId, id: u64, creat
     child.frames.id.set(id);
     *child.frames.hooks.borrow_mut() = hooks(parent);
     *child.frames.creator.borrow_mut() = creator;
+    child.set_storage_key(super::partition::frame_key(parent, child));
 }
 
 fn next_frame_id(w: &Rc<Window>) -> u64 {
@@ -401,7 +444,7 @@ pub(crate) fn on_mutations(js: &mut dyn super::Js, w: &Rc<Window>, batch: &[(u32
     }
     for el in renav {
         if let Some(c) = child_for(w, el) {
-            match navigation_for(w, el) {
+            match navigation_for(w, el).map(|n| csp_frame(js, w, n)) {
                 Some(nav) => {
                     if let Some(h) = hooks(w) {
                         h.navigate(&c.window, nav);
@@ -413,6 +456,27 @@ pub(crate) fn on_mutations(js: &mut dyn super::Js, w: &Rc<Window>, batch: &[(u32
             }
         }
     }
+}
+
+/// The URL a frame whose navigation the parent's Content Security Policy
+/// blocked (`frame-src`) shows instead: Chrome's error page, an opaque
+/// origin.
+pub const CSP_BLOCKED_FRAME: &str = "chrome-error://chromewebdata/";
+
+/// Check a frame navigation against the parent's `frame-src` (where the
+/// script that asked for it runs); a blocked one loads the error page.
+fn csp_frame(js: &mut dyn super::Js, w: &Rc<Window>, mut nav: FrameNavigation) -> FrameNavigation {
+    if nav.srcdoc.is_some() || nav.url.scheme() == "about" {
+        return nav;
+    }
+    let loc = w.csp_here(Some(js));
+    if !w.csp_navigation(super::csp::Dir::FrameSrc, &nav.url, loc)
+        && let Ok(u) = Url::parse(CSP_BLOCKED_FRAME)
+    {
+        nav.url = u;
+        nav.post = None;
+    }
+    nav
 }
 
 /// What an iframe element should load: `srcdoc` wins over `src`; `None`
@@ -456,6 +520,9 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
     let id = next_frame_id(parent);
     let blank = Url::parse("about:blank").expect("about:blank parses");
     let child = Window::new(&parent.rt, child_window_init(parent, blank));
+    // The initial `about:blank` document inherits the parent's Content
+    // Security Policy (ADR 0036).
+    child.csp_inherit(parent);
     child.set_worker_host(parent.worker_host());
     child.set_sw_host(parent.sw_host());
     child.set_idb_backend(parent.idb_backend());
@@ -469,6 +536,7 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
         return;
     }
     let _ = global_handle(ops, &child);
+    child.csp_apply_codegen(ops);
     // The initial empty document: <html><head></head><body></body></html>.
     child.start_parser();
     child.parser_end();
@@ -488,7 +556,7 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
     if let Some(h) = hooks(parent) {
         h.committed(ops, &child, true);
     }
-    match navigation_for(parent, el) {
+    match navigation_for(parent, el).map(|n| csp_frame(js, parent, n)) {
         Some(nav) => {
             if let Some(h) = hooks(parent) {
                 h.navigate(&child, nav);
@@ -603,7 +671,7 @@ const CROSS_ORIGIN_OK: &[&str] = &[
 /// `Proxy` whose traps forward the allowed members and throw Chrome's
 /// `SecurityError` for everything else. Built once per pair.
 fn remote_window(
-    cx: &mut CallCtx<'_, '_, '_>,
+    cx: &mut dyn RealmOps,
     from: &Rc<Window>,
     w: &Rc<Window>,
 ) -> Result<Arg, HostError> {
@@ -625,6 +693,10 @@ fn remote_window(
     let weak = Rc::downgrade(w);
     let rt = w.rt.clone();
     let b = blocked.clone();
+    // Methods (`postMessage`, `close`, `focus`, `blur`) bound to the
+    // target's global, made once: called on the stand-in they act on the
+    // target window, and each read gives the same function, as in Chrome.
+    let methods: Rc<RefCell<Vec<(String, Handle)>>> = Rc::default();
     let get = lb_js::host_fn(move |cx| {
         let key = cx.arg_string(1).unwrap_or_default();
         let Some(w) = weak.upgrade() else {
@@ -639,6 +711,21 @@ fn remote_window(
             "closed" => cx.ret(w.is_closed()),
             "length" => cx.ret(w.frames.children.borrow().len() as u32),
             "location" => Err(b(&rt, "location")),
+            "postMessage" | "close" | "focus" | "blur" => {
+                if let Some((_, h)) = methods.borrow().iter().find(|(k, _)| *k == key) {
+                    return cx.ret(Arg::Handle(*h));
+                }
+                let realm = w.realm();
+                let f = RealmOps::get_property(cx, realm, g, &key).map_err(js_err)?;
+                let bind = RealmOps::get_property(cx, realm, f, "bind").map_err(js_err)?;
+                let bound =
+                    RealmOps::call_handle(cx, realm, bind, Arg::Handle(f), &[Arg::Handle(g)])
+                        .map_err(js_err)?;
+                RealmOps::release(cx, f);
+                RealmOps::release(cx, bind);
+                methods.borrow_mut().push((key, bound));
+                cx.ret(Arg::Handle(bound))
+            }
             _ => {
                 let v = RealmOps::get_property(cx, w.realm(), g, &key).map_err(js_err)?;
                 cx.ret(Arg::Handle(v))

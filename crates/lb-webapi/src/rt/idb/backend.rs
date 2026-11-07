@@ -1,5 +1,5 @@
 //! The IndexedDB backend of one browser context (ADR 0028): databases per
-//! origin in memory (nothing on disk), connections, the open/delete
+//! storage key (ADR 0037; the `origin` arguments are serialized keys) in memory (nothing on disk), connections, the open/delete
 //! queue with `versionchange`/`blocked`, transaction scheduling and the
 //! data operations. Shared by every window and worker of the context
 //! (`Send`; one lock). Results reach a window through its [`Sink`] as

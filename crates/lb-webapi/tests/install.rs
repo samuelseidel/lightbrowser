@@ -116,7 +116,11 @@ fn prototype_chain() {
         "Object.getPrototypeOf(EventTarget.prototype) === Object.prototype",
         "Object.getPrototypeOf(HTMLDivElement) === HTMLElement",
         "Object.getPrototypeOf(EventTarget) === Function.prototype",
-        "Object.getPrototypeOf(Window.prototype) === EventTarget.prototype",
+        // The named properties object sits between them (ADR 0040).
+        "Object.getPrototypeOf(Object.getPrototypeOf(Window.prototype)) === EventTarget.prototype",
+        "Object.prototype.toString.call(Object.getPrototypeOf(Window.prototype)) === '[object WindowProperties]'",
+        "!Object.getPrototypeOf(Window.prototype).hasOwnProperty('constructor')",
+        "Object.getPrototypeOf(Window) === EventTarget",
         "Object.getPrototypeOf(globalThis) === Window.prototype",
         "window.Window === Window && Window.prototype.constructor === Window",
         "Object.getPrototypeOf(DOMException.prototype) === Error.prototype",

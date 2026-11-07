@@ -287,6 +287,8 @@ pub(crate) fn process_mutations(js: &mut dyn Js, w: &Rc<Window>) {
         }
         super::frames::on_mutations(js, w, &batch);
         super::shadow::on_mutations(js, w, &batch);
+        super::csp::on_mutations(js, w, &batch);
+        super::named::on_mutations(js, w, &batch);
         let batch_copy = if super::custom::active(w) {
             batch.clone()
         } else {
@@ -451,6 +453,7 @@ fn content_handler(w: &Window, n: NodeId, name: &str, value: Option<String>) {
     } else {
         w.node_ref(0, n)
     };
+    w.csp_note_handler(target, name);
     set_handler(w, target, name, value.map(HandlerValue::Uncompiled));
 }
 

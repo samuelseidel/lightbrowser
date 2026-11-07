@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script src="prelude.js"></script></head>
+<body>
+<div id="d1"></div>
+<div id="dup"></div><span id="dup"></span>
+<p id="alert"></p><p id="addEventListener"></p><p id="toString"></p><p id="hasOwnProperty"></p>
+<p id="__proto__"></p><p id="location"></p><p id="name"></p><p id="onload"></p><p id="document"></p>
+<p id="constructor"></p><p id="WindowProperties"></p><p id="Window"></p><p id="EventTarget"></p>
+<p id="valueOf"></p><p id="__lookupGetter__"></p><p id="isPrototypeOf"></p><p id="then"></p>
+<p id="123"></p><p id="0"></p><p id="-1"></p><p id="1.5"></p><p id="4294967295"></p>
+<p id=""></p>
+<p id="vx"></p><p id="lx"></p><p id="fx"></p><p id="cx"></p>
+<p id="d2"></p><p id="d3"></p><p id="d4"></p><p id="d5"></p>
+<svg id="svgid"><circle id="circleid"></circle></svg><math id="mathid"></math>
+<template><p id="intpl"></p></template>
+<div id="host"></div>
+<p id="Ünïcode"></p><p id="with space"></p>
+<script>var vx; let lx = 'let'; function fx() {} const cx = 'const';</script>
+<script>
+log('window.d1', window.d1);
+log('bare d1', d1);
+log('self.d1 === getElementById', self.d1 === document.getElementById('d1'));
+log('globalThis.d1', globalThis.d1);
+log('typeof d1', typeof d1);
+log("'d1' in window", 'd1' in window);
+log('hasOwnProperty d1', window.hasOwnProperty('d1'));
+note('window desc d1', desc(Object.getOwnPropertyDescriptor(window, 'd1')));
+note('WP desc d1', desc(Object.getOwnPropertyDescriptor(WP, 'd1')));
+log('keys has d1', Object.keys(window).includes('d1'));
+log('own names has d1', Object.getOwnPropertyNames(window).includes('d1'));
+let inForIn = false; for (const k in window) if (k === 'd1') inForIn = true;
+log('for-in has d1', inForIn);
+log('window.dup', window.dup);
+log('dup same object', window.dup === window.dup);
+log('dup instanceof HTMLCollection', window.dup instanceof HTMLCollection);
+log('dup.namedItem', window.dup.namedItem('dup'));
+const dup = window.dup;
+const third = document.createElement('b'); third.id = 'dup'; document.body.append(third);
+log('dup live length', dup.length);
+log('dup still same', window.dup === dup);
+third.remove();
+log('dup length after remove', dup.length);
+document.querySelector('span#dup').remove();
+log('dup with one left', window.dup);
+log('old dup collection', dup);
+for (const n of ['alert', 'addEventListener', 'toString', 'hasOwnProperty', '__proto__', 'location',
+                 'name', 'onload', 'document', 'constructor', 'WindowProperties', 'Window', 'EventTarget',
+                 'valueOf', '__lookupGetter__', 'isPrototypeOf', 'then'])
+  log('window.' + n, window[n]);
+note('WP desc alert', desc(Object.getOwnPropertyDescriptor(WP, 'alert')));
+note('WP desc addEventListener', desc(Object.getOwnPropertyDescriptor(WP, 'addEventListener')));
+note('WP desc toString', desc(Object.getOwnPropertyDescriptor(WP, 'toString')));
+note('WP desc then', desc(Object.getOwnPropertyDescriptor(WP, 'then')));
+log('window[123]', window[123]);
+log("window['123']", window['123']);
+log('window[0]', window[0]);
+log("window['-1']", window['-1']);
+log("window['1.5']", window['1.5']);
+log("window['4294967295']", window['4294967295']);
+log("'123' in window", '123' in window);
+log("'0' in window", '0' in window);
+note('WP desc 123', desc(Object.getOwnPropertyDescriptor(WP, '123')));
+log("window['']", window['']);
+log("'' in window", '' in window);
+log('typeof vx', typeof vx);
+log('window.vx', window.vx);
+log('lx', lx);
+log('window.lx', window.lx);
+log('typeof fx', typeof fx);
+log('window.cx', window.cx);
+log('window.svgid', window.svgid);
+log('window.circleid', window.circleid);
+log('window.mathid', window.mathid);
+log('window.intpl', window.intpl);
+host.attachShadow({ mode: 'open' }).innerHTML = '<p id="inshadow"></p><img name="shadowimg">';
+log('window.inshadow', window.inshadow);
+log('window.shadowimg', window.shadowimg);
+log('window.Ünïcode', window['Ünïcode']);
+log("window['with space']", window['with space']);
+const det = document.createElement('p'); det.id = 'det';
+log('detached', window.det);
+document.body.append(det);
+log('appended', window.det);
+det.id = 'det2';
+log('renamed old', window.det);
+log('renamed new', window.det2);
+det.removeAttribute('id');
+log('id removed', window.det2);
+det.setAttribute('id', 'det3');
+log('setAttribute', window.det3);
+det.remove();
+log('removed', window.det3);
+const frag = document.createElement('div'); frag.innerHTML = '<i id="deep"></i>';
+log('in detached subtree', window.deep);
+document.body.append(frag);
+log('subtree appended', window.deep);
+window.d2 = 5;
+log('assigned d2', window.d2);
+log('assigned d2 own', window.hasOwnProperty('d2'));
+log('delete d2', delete window.d2);
+log('d2 after delete', window.d2);
+d3 = 6;
+log('bare assign d3', window.d3);
+attempt('strict bare assign d4', () => { 'use strict'; d4 = 7; return window.d4; });
+log('d4 after', window.d4);
+attempt('strict define d5', () => { 'use strict'; Object.defineProperty(window, 'd5', { value: 8, configurable: true }); return window.d5; });
+log('typeof missing global', typeof notDefinedAnywhere);
+attempt('bare missing', () => notDefinedAnywhere);
+const late = document.createElement('p'); late.id = 'late'; document.body.append(late);
+attempt('bare late', () => late === window.late);
+L.push('end');
+</script>
+</body></html>

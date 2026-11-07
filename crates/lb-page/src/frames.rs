@@ -6,10 +6,11 @@
 //! for a page:
 //!
 //! - `navigate`: load the frame's document (network, `srcdoc`), build its
-//!   window with the frame's origin and storage, swap it in, then parse it
-//!   with the same loader as top-level documents (`nav::load`). The
-//!   parent's `load` waits for the frame; the `<iframe>` gets `load` (also
-//!   after a network error, as in Chrome).
+//!   window with the frame's origin and storage (by its storage key: the
+//!   page's top-level site and the ancestor chain bit, ADR 0037), swap it
+//!   in, then parse it with the same loader as top-level documents
+//!   (`nav::load`). The parent's `load` waits for the frame; the
+//!   `<iframe>` gets `load` (also after a network error, as in Chrome).
 //! - `committed` / `detached`: report frames and their execution contexts
 //!   to the CDP agent (frameAttached, frameNavigated, contexts per world,
 //!   lifecycle, frameDetached).
@@ -20,6 +21,7 @@
 use std::rc::{Rc, Weak};
 
 use lb_js::RealmOps;
+use lb_webapi::host::StorageKey;
 use lb_webapi::host::{Destination, NetResponse, decode_text};
 use lb_webapi::rt::frames::{self as wf, FrameHooks, FrameNavigation};
 use lb_webapi::rt::{TaskSource, Window, fire_event};
@@ -110,10 +112,14 @@ async fn navigate_frame(
         a.frame_started_loading(id);
     }
     let parent_url = wf::effective_url(&parent);
+    // The frame's storage key (ADR 0037): the parent's top-level site and
+    // ancestor chain bit, and the new document's origin.
+    let parent_key = parent.storage_key();
     // A service worker controlling the frame's URL sees the navigation
-    // first (ADR 0022).
+    // first (ADR 0022), the one registered in the frame's partition.
     let sw = if nav.srcdoc.is_none() {
-        crate::sw::navigation_controller(&page.ctx, &nav.url)
+        let key = StorageKey::for_frame(&parent_key, &nav.url);
+        crate::sw::navigation_controller(&page.ctx, &nav.url, &key)
     } else {
         None
     };
@@ -130,6 +136,18 @@ async fn navigate_frame(
             }),
             Some(parent_url.clone()),
         ),
+        // `frame-src` blocked it (ADR 0036): Chrome's error page.
+        None if nav.url.as_str() == lb_webapi::rt::frames::CSP_BLOCKED_FRAME => (
+            Ok(NetResponse {
+                status: 200,
+                status_text: "OK".into(),
+                headers: vec![("content-type".into(), "text/html".into())],
+                body: bytes::Bytes::new(),
+                url: nav.url.clone(),
+                redirected: false,
+            }),
+            None,
+        ),
         None if nav.url.scheme() == "about" => (
             Ok(NetResponse {
                 status: 200,
@@ -142,13 +160,15 @@ async fn navigate_frame(
             Some(parent_url.clone()),
         ),
         None => {
-            let req = crate::nav::document_request(
+            let mut req = crate::nav::document_request(
                 nav.url.clone(),
                 Destination::Iframe,
                 nav.initiator.clone(),
                 nav.post.clone(),
                 nav.user_activated,
             );
+            // Cookies of a frame navigation: the parent's site for cookies.
+            req.storage_key = Some(parent_key.clone());
             parent.in_flight.set(parent.in_flight.get() + 1);
             let r =
                 crate::nav::sw_or_network(&page, req, sw.as_ref(), String::new(), &reserved, false)
@@ -167,7 +187,7 @@ async fn navigate_frame(
         done.cancel();
         return;
     }
-    let resp = match resp {
+    let mut resp = match resp {
         Ok(r) => r,
         Err(e) => {
             old.warn(format!("Failed to load frame {}: {e}", nav.url));
@@ -178,6 +198,21 @@ async fn navigate_frame(
             return;
         }
     };
+    // The document's `frame-ancestors` (ADR 0036): refused, Chrome shows
+    // its error page.
+    if creator.is_none()
+        && !lb_webapi::rt::csp::frame_ancestors_allow(&parent, &resp.headers, &resp.url)
+        && let Ok(u) = url::Url::parse(lb_webapi::rt::frames::CSP_BLOCKED_FRAME)
+    {
+        resp = NetResponse {
+            status: 200,
+            status_text: "OK".into(),
+            headers: vec![("content-type".into(), "text/html".into())],
+            body: bytes::Bytes::new(),
+            url: u,
+            redirected: false,
+        };
+    }
     let Some((rt, _)) = ws.runtime() else {
         done.cancel();
         return;
@@ -190,10 +225,10 @@ async fn navigate_frame(
     let (text, charset) = decode_text(&resp.body, Some(&ct), html);
     let text = if html { text } else { text_document(&text) };
     let mut init = wf::child_window_init(&parent, resp.url.clone());
+    let key = StorageKey::for_frame(&parent_key, creator.as_ref().unwrap_or(&resp.url));
     if creator.is_none() {
-        let origin = resp.url.origin().ascii_serialization();
-        init.local_storage = page.ctx.local_storage().area(&origin);
-        init.session_storage = page.session_area(&resp.url);
+        init.local_storage = page.ctx.local_storage().area(&key.serialize());
+        init.session_storage = page.session_area(&key);
     }
     init.charset = charset;
     init.referrer = nav
@@ -202,8 +237,19 @@ async fn navigate_frame(
         .map(|u| u.to_string())
         .unwrap_or_default();
     let w = Window::new(&rt, init);
+    // Content Security Policy (ADR 0036): `srcdoc` and `about:` documents
+    // inherit the parent's policies, others take their response's.
+    if creator.is_some() {
+        w.csp_inherit(&parent);
+    } else {
+        w.set_csp_bypass(parent.csp_bypass());
+        if resp.url.as_str() != lb_webapi::rt::frames::CSP_BLOCKED_FRAME {
+            w.csp_deliver(&resp.headers, resp.status);
+        }
+    }
+    w.set_storage_key(key.clone());
     w.set_worker_host(parent.worker_host());
-    w.set_sw_host(parent.sw_host());
+    w.set_sw_host(Some(crate::sw::host(&page.ctx, &key)));
     w.set_idb_backend(parent.idb_backend());
     let controller = sw.map(|(v, _)| v);
     w.init_sw_client(Some(reserved), true, controller.clone());
@@ -223,6 +269,7 @@ async fn navigate_frame(
             return;
         }
     }
+    ws.with_engine(|e| w.csp_apply_codegen(e));
     w.start_parser();
     if let Some(a) = page.agent() {
         a.frame_lifecycle(id, "init");

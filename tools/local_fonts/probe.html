@@ -1,0 +1,17 @@
+<!doctype html><meta charset=utf-8><body><script>
+// Loads FontFace local("<name>") for every name in ?list= (JSON {names: [...]})
+// and leaves the names that loaded in window.R. Served on loopback by
+// record.mjs.
+window.R = null;
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const names = (await (await fetch(q.get('list'))).json()).names;
+  const ok = [];
+  for (let i = 0; i < names.length; i += 300) {
+    const chunk = names.slice(i, i + 300);
+    const res = await Promise.allSettled(chunk.map((n) => new FontFace('p' + i, `local("${n.replace(/["\\]/g, '\\$&')}")`).load()));
+    res.forEach((r, j) => { if (r.status === 'fulfilled') ok.push(chunk[j]); });
+  }
+  window.R = ok;
+})();
+</script></body>

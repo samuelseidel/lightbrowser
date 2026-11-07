@@ -13,12 +13,12 @@ use lb_persona::{Persona, PersonaProfile};
 use lb_webapi::host::{Destination, NetRequest, NetResponse, StoragePartition};
 use url::Url;
 
-/// Running shared workers of a context by (script URL, name): their
-/// inbox and control (ADR 0021).
+/// Running shared workers of a context by (script URL, name, serialized
+/// storage key of the creator): their inbox and control (ADR 0021, 0037).
 #[cfg(feature = "chrome")]
 pub(crate) type SharedWorkers = Mutex<
     std::collections::HashMap<
-        (String, String),
+        (String, String, String),
         (lb_webapi::rt::Inbox, Arc<lb_webapi::rt::WorkerControl>),
     >,
 >;
@@ -89,6 +89,17 @@ struct Shared {
     /// belongs to `serve`; worker threads announce themselves to it.
     #[cfg(feature = "chrome")]
     inspector: std::sync::OnceLock<Arc<crate::cdp::workers::Inspector>>,
+    /// CDP time zone and locale overrides (ADR 0039).
+    locale: Mutex<LocaleOverride>,
+}
+
+/// `Emulation.setTimezoneOverride` / `setLocaleOverride` of a context and
+/// the persona they make (ADR 0039).
+#[derive(Default)]
+struct LocaleOverride {
+    time_zone: Option<String>,
+    locale: Option<String>,
+    profile: Option<Arc<PersonaProfile>>,
 }
 
 #[cfg(feature = "chrome")]
@@ -197,6 +208,7 @@ impl BrowserContext {
             service_workers: Arc::default(),
             #[cfg(feature = "chrome")]
             inspector: std::sync::OnceLock::new(),
+            locale: Mutex::default(),
         }));
         ctx.put_back(probe);
         Ok(ctx)
@@ -212,6 +224,67 @@ impl BrowserContext {
 
     pub fn profile(&self) -> Option<&Arc<PersonaProfile>> {
         self.0.opts.profile.as_ref()
+    }
+
+    /// The persona the context's new realms use (windows, frames, workers,
+    /// service workers): [`profile`](Self::profile) with the CDP time zone
+    /// and ICU locale overrides in effect (ADR 0039).
+    pub fn effective_profile(&self) -> Option<Arc<PersonaProfile>> {
+        let o = self.0.locale.lock().unwrap_or_else(|e| e.into_inner());
+        o.profile.clone().or_else(|| self.profile().cloned())
+    }
+
+    /// Run `f` with ICU's zone and locale for the context's realms: the
+    /// CDP overrides in effect, else the persona's (ADR 0039). It runs
+    /// under the context's lock, so isolates told one after another end
+    /// with the newest values even when overrides change meanwhile.
+    /// `None`: the context has no full persona.
+    pub fn with_intl<R>(&self, f: impl FnOnce(&str, &str) -> R) -> Option<R> {
+        let o = self.0.locale.lock().unwrap_or_else(|e| e.into_inner());
+        let p = o.profile.as_ref().or(self.profile())?;
+        Some(f(&p.locale.timezone, &p.locale.language))
+    }
+
+    /// Set (`Some`) or clear the context's time zone override; returns
+    /// the zone now in effect (the persona's once cleared).
+    pub fn set_time_zone_override(&self, zone: Option<&str>) -> Option<String> {
+        let mut o = self.0.locale.lock().unwrap_or_else(|e| e.into_inner());
+        o.time_zone = zone.map(str::to_owned);
+        self.remake(&mut o);
+        o.profile
+            .as_ref()
+            .or(self.profile())
+            .map(|p| p.locale.timezone.clone())
+    }
+
+    /// Set (`Some`) or clear the context's ICU locale override; returns
+    /// the locale now in effect (the persona's once cleared).
+    pub fn set_locale_override(&self, locale: Option<&str>) -> Option<String> {
+        let mut o = self.0.locale.lock().unwrap_or_else(|e| e.into_inner());
+        o.locale = locale.map(str::to_owned);
+        self.remake(&mut o);
+        o.profile
+            .as_ref()
+            .or(self.profile())
+            .map(|p| p.locale.language.clone())
+    }
+
+    fn remake(&self, o: &mut LocaleOverride) {
+        o.profile = match (self.profile(), &o.time_zone, &o.locale) {
+            (Some(base), tz, loc) if tz.is_some() || loc.is_some() => {
+                let mut p = PersonaProfile::clone(base);
+                if let Some(tz) = tz {
+                    p.locale.timezone = tz.clone();
+                    // Derived from the zone; the zone answers it now.
+                    p.locale.timezone_offset = None;
+                }
+                if let Some(loc) = loc {
+                    p.locale.language = loc.clone();
+                }
+                Some(Arc::new(p))
+            }
+            _ => None,
+        };
     }
 
     /// The context's cookie jar (shared; changes are visible to pages).
@@ -298,7 +371,8 @@ impl BrowserContext {
         &self.0.connections
     }
 
-    /// `localStorage` areas of this context.
+    /// `localStorage` areas of this context, by serialized storage key
+    /// (ADR 0037).
     pub fn local_storage(&self) -> &StoragePartition {
         &self.0.local_storage
     }
@@ -494,7 +568,20 @@ fn request_meta(req: &NetRequest, kind: Option<RequestKind>) -> RequestMeta {
     meta.user_activated |= req.user_activated;
     meta.form_post = matches!(kind, RequestKind::Document | RequestKind::Iframe)
         && req.method.eq_ignore_ascii_case("POST");
+    meta.cookie_scope = req.storage_key.as_ref().map(cookie_scope);
+    meta.redirect_check = req
+        .redirect_check
+        .as_ref()
+        .map(|c| lb_net::header_profile::RedirectCheck(c.0.clone()));
     meta
+}
+
+/// The cookie scope of a context with storage key `k` (ADR 0037).
+pub(crate) fn cookie_scope(k: &lb_webapi::host::StorageKey) -> lb_net::cookies::CookieScope {
+    lb_net::cookies::CookieScope {
+        top_site: k.top_site.clone(),
+        cross_site: k.cross_site,
+    }
 }
 
 /// `Sec-Fetch-Site` for a request made by `initiator`.
@@ -513,11 +600,15 @@ pub(crate) fn open_websocket(
     use lb_net::websocket::{WsCommand as NC, WsConnect, WsEvent as NE};
     use lb_webapi::host::{WsChannels, WsCommand, WsEvent};
     let mut net = ctx.take_net().ok()?;
-    let (tx, mut rx) = net.websocket(WsConnect {
-        url: open.url,
-        protocols: open.protocols,
-        origin: open.origin,
-    });
+    let scope = open.storage_key.as_ref().map(cookie_scope);
+    let (tx, mut rx) = net.websocket_in(
+        WsConnect {
+            url: open.url,
+            protocols: open.protocols,
+            origin: open.origin,
+        },
+        scope,
+    );
     ctx.put_back(net);
     let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel::<WsCommand>();
     let (etx, erx) = tokio::sync::mpsc::unbounded_channel::<WsEvent>();

@@ -37,6 +37,86 @@ impl Destination {
     }
 }
 
+/// Storage key of a window or worker (ADR 0037; the partitioning itself is
+/// in `rt::partition`): Chrome's `blink::StorageKey` without a nonce
+/// (credentialless and fenced frames are not supported).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StorageKey {
+    /// Serialized origin (`null` when opaque).
+    pub origin: String,
+    /// Schemeful top-level site (`null` when opaque).
+    pub top_site: String,
+    /// The context or one of its ancestors is cross-site with the
+    /// top-level site (Chrome's `kCrossSite` ancestor chain bit).
+    pub cross_site: bool,
+}
+
+/// Schemeful site of `url`: scheme and the last two labels of a domain,
+/// or the whole IP literal (the rule `Sec-Fetch-Site` and the connection
+/// pool use; no public-suffix list). `null` for opaque origins.
+pub fn site(url: &Url) -> String {
+    let origin = url.origin();
+    if !origin.is_tuple() {
+        return "null".into();
+    }
+    let host = match url.host() {
+        Some(url::Host::Domain(d)) => {
+            let labels: Vec<&str> = d.split('.').collect();
+            labels[labels.len().saturating_sub(2)..].join(".")
+        }
+        Some(h) => h.to_string(),
+        None => String::new(),
+    };
+    format!("{}://{host}", url.scheme())
+}
+
+impl StorageKey {
+    /// The key of a top-level document (or worker) at `url`.
+    pub fn first_party(url: &Url) -> StorageKey {
+        StorageKey {
+            origin: url.origin().ascii_serialization(),
+            top_site: site(url),
+            cross_site: !url.origin().is_tuple(),
+        }
+    }
+
+    /// The key of a frame document at `url` (its creator's URL for
+    /// `about:blank` / `about:srcdoc`) whose parent has key `parent`.
+    pub fn for_frame(parent: &StorageKey, url: &Url) -> StorageKey {
+        let s = site(url);
+        StorageKey {
+            origin: url.origin().ascii_serialization(),
+            cross_site: parent.cross_site || s == "null" || s != parent.top_site,
+            top_site: parent.top_site.clone(),
+        }
+    }
+
+    /// First-party: same-site with the top-level site, no cross-site
+    /// ancestor.
+    pub fn is_first_party(&self) -> bool {
+        !self.cross_site
+    }
+
+    /// Chrome's serialization (`StorageKey::Serialize`): `origin/`
+    /// first-party, `origin/^0site` for a third-party origin,
+    /// `origin/^31` for a same-site origin below a cross-site ancestor.
+    /// Storage tables are keyed by it.
+    pub fn serialize(&self) -> String {
+        let base = format!("{}/", self.origin);
+        if !self.cross_site {
+            return base;
+        }
+        let own = Url::parse(&self.origin)
+            .map(|u| site(&u))
+            .unwrap_or_else(|_| "null".into());
+        if own != "null" && own == self.top_site {
+            format!("{base}^31")
+        } else {
+            format!("{base}^0{}", self.top_site)
+        }
+    }
+}
+
 /// A request from the page (subresource, `fetch`, XHR, navigation).
 #[derive(Debug, Clone)]
 pub struct NetRequest {
@@ -53,6 +133,31 @@ pub struct NetRequest {
     pub mode: &'static str,
     /// A navigation started by trusted user input (`Sec-Fetch-User: ?1`).
     pub user_activated: bool,
+    /// Storage key of the document or worker that makes the request (for a
+    /// frame navigation: the parent document's), ADR 0037: its cookie
+    /// partition and site for cookies. `None`: a top-level navigation, or
+    /// first-party of the initiator.
+    pub storage_key: Option<StorageKey>,
+    /// Content Security Policy (ADR 0036): may the request follow a
+    /// redirect to this URL? A refused hop fails the request with
+    /// [`CSP_BLOCKED`] and the URL. `None`: every redirect is followed.
+    pub redirect_check: Option<RedirectCheck>,
+}
+
+/// The error text of a request whose redirect [`NetRequest::redirect_check`]
+/// refused, followed by a space and the refused URL (Chrome's
+/// `net::ERR_BLOCKED_BY_CSP`).
+pub const CSP_BLOCKED: &str = "net::ERR_BLOCKED_BY_CSP";
+
+/// A redirect check (see [`NetRequest::redirect_check`]); it may run on
+/// the network thread.
+#[derive(Clone)]
+pub struct RedirectCheck(pub std::sync::Arc<dyn Fn(&Url) -> bool + Send + Sync>);
+
+impl std::fmt::Debug for RedirectCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RedirectCheck")
+    }
 }
 
 impl NetRequest {
@@ -70,6 +175,8 @@ impl NetRequest {
                 _ => "no-cors",
             },
             user_activated: false,
+            storage_key: None,
+            redirect_check: None,
         }
     }
 }
@@ -109,6 +216,17 @@ pub trait NetHost {
     fn cookie_string(&self, url: &Url) -> String;
     /// `document.cookie` setter.
     fn set_cookie_string(&self, url: &Url, cookie: &str);
+    /// `document.cookie` getter of a document with storage key `key`
+    /// (ADR 0037): its site for cookies and cookie partition (CHIPS).
+    fn cookie_string_in(&self, url: &Url, key: &StorageKey) -> String {
+        let _ = key;
+        self.cookie_string(url)
+    }
+    /// `document.cookie` setter of a document with storage key `key`.
+    fn set_cookie_string_in(&self, url: &Url, cookie: &str, key: &StorageKey) {
+        let _ = key;
+        self.set_cookie_string(url, cookie)
+    }
     /// Open a WebSocket connection (ADR 0025). `None`: this host has no
     /// network for it (the page fails the connection).
     fn websocket(&self, open: WsOpen) -> Option<WsChannels> {
@@ -120,6 +238,49 @@ pub trait NetHost {
     fn sw_answered(&self, req: &NetRequest, r: &Result<NetResponse, String>) {
         let _ = (req, r);
     }
+    /// Run `f` with ICU's time zone and default locale for the realms of
+    /// this window's browser context (ADR 0039: the CDP overrides, else
+    /// the persona's), under the context's lock so that changes reach the
+    /// isolates in order. False: the host does not know them (the
+    /// window's persona decides).
+    fn with_intl(&self, f: &mut dyn FnMut(&str, &str)) -> bool {
+        let _ = f;
+        false
+    }
+    /// The window's `navigator.languages` under a CDP `acceptLanguage`
+    /// override (ADR 0039); `None`: the persona's. Workers have none
+    /// (Chrome keeps theirs).
+    fn languages_override(&self) -> Option<Vec<String>> {
+        None
+    }
+    /// What `navigator.geolocation` reports once permitted (ADR 0039):
+    /// `None` when nothing overrides the position (there is no location
+    /// provider, so requests wait for their timeout).
+    fn geolocation(&self) -> Option<GeoAnswer> {
+        None
+    }
+}
+
+/// A geolocation answer (CDP `Emulation.setGeolocationOverride`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeoAnswer {
+    Position(GeoCoords),
+    /// `POSITION_UNAVAILABLE`.
+    Unavailable,
+}
+
+/// `GeolocationPosition` values; `None` members are `null`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeoCoords {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub accuracy: f64,
+    pub altitude: Option<f64>,
+    pub altitude_accuracy: Option<f64>,
+    pub heading: Option<f64>,
+    pub speed: Option<f64>,
+    /// `timestamp`: wall-clock ms since the epoch.
+    pub timestamp: f64,
 }
 
 /// A WebSocket the page opens.
@@ -129,6 +290,8 @@ pub struct WsOpen {
     pub protocols: Vec<String>,
     /// `Origin` header: the document's origin.
     pub origin: String,
+    /// The document's storage key (its cookie scope, ADR 0037).
+    pub storage_key: Option<StorageKey>,
 }
 
 /// From the page to a WebSocket connection.
@@ -166,9 +329,41 @@ pub struct WsChannels {
 }
 
 /// One `localStorage` / `sessionStorage` area: insertion-ordered pairs,
-/// shared by every window of the same origin (and context). In memory only.
-#[derive(Debug, Clone, Default)]
-pub struct StorageArea(Arc<Mutex<Vec<(String, String)>>>);
+/// shared by every window with the same storage key (and context, and for
+/// `sessionStorage` page). In memory only. Windows holding its `Storage`
+/// object watch it for `storage` events (ADR 0037).
+#[derive(Clone, Default)]
+pub struct StorageArea {
+    items: Arc<Mutex<Vec<(String, String)>>>,
+    watchers: Arc<Mutex<Vec<StorageWatcher>>>,
+}
+
+impl std::fmt::Debug for StorageArea {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorageArea")
+            .field("len", &self.len())
+            .finish()
+    }
+}
+
+/// A change to a storage area, for the `storage` events of the other
+/// windows using it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StorageChange {
+    /// `None`: `clear()`.
+    pub key: Option<String>,
+    pub old: Option<String>,
+    pub new: Option<String>,
+    /// The URL of the document that made the change.
+    pub url: String,
+}
+
+/// A window watching a storage area: its id and how to reach it (`false`
+/// once it is gone).
+struct StorageWatcher {
+    id: u64,
+    notify: Box<dyn Fn(&StorageChange) -> bool + Send>,
+}
 
 impl StorageArea {
     pub fn new() -> Self {
@@ -176,7 +371,7 @@ impl StorageArea {
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut Vec<(String, String)>) -> R) -> R {
-        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = self.items.lock().unwrap_or_else(|e| e.into_inner());
         f(&mut g)
     }
 
@@ -195,22 +390,47 @@ impl StorageArea {
     pub fn keys(&self) -> Vec<String> {
         self.with(|v| v.iter().map(|(k, _)| k.clone()).collect())
     }
-    pub fn set(&self, key: &str, value: &str) {
+    /// Returns the previous value.
+    pub fn set(&self, key: &str, value: &str) -> Option<String> {
         self.with(|v| match v.iter_mut().find(|(k, _)| k == key) {
-            Some(e) => e.1 = value.to_owned(),
-            None => v.push((key.to_owned(), value.to_owned())),
+            Some(e) => Some(std::mem::replace(&mut e.1, value.to_owned())),
+            None => {
+                v.push((key.to_owned(), value.to_owned()));
+                None
+            }
         })
     }
     /// Returns whether the key existed.
     pub fn remove(&self, key: &str) -> bool {
+        self.take(key).is_some()
+    }
+    /// Remove `key`, returning its value.
+    pub fn take(&self, key: &str) -> Option<String> {
         self.with(|v| {
-            let n = v.len();
-            v.retain(|(k, _)| k != key);
-            v.len() != n
+            let i = v.iter().position(|(k, _)| k == key)?;
+            Some(v.remove(i).1)
         })
     }
-    pub fn clear(&self) {
-        self.with(|v| v.clear())
+    /// Returns whether anything was removed.
+    pub fn clear(&self) -> bool {
+        self.with(|v| {
+            let had = !v.is_empty();
+            v.clear();
+            had
+        })
+    }
+
+    /// Watch this area as window `id` (once per window).
+    pub fn watch(&self, id: u64, notify: Box<dyn Fn(&StorageChange) -> bool + Send>) {
+        let mut g = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
+        g.retain(|w| w.id != id);
+        g.push(StorageWatcher { id, notify });
+    }
+
+    /// Tell every watcher but `from` about `change`.
+    pub fn notify(&self, from: u64, change: &StorageChange) {
+        let mut g = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
+        g.retain(|w| w.id == from || (w.notify)(change));
     }
 }
 

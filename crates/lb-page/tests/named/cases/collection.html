@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><script src="prelude.js"></script></head>
+<body>
+<div id="x1" name="n1"></div><span name="n2"></span><div id="length"></div><div id="item"></div>
+<div id="namedItem"></div><div id="0x"></div><div id="__lookupGetter__"></div><div id="valueOf"></div>
+<div id="7"></div><svg><g id="svgg" name="svgname"></g></svg>
+<script>
+const c = document.getElementsByTagName('*');
+for (const n of ['x1', 'n1', 'n2', 'length', 'item', 'namedItem', '0x', '__lookupGetter__', 'valueOf',
+                 'svgg', 'svgname', 'nothing'])
+  log('c.' + n, c[n]);
+log('c[7]', c[7]);
+log("c['7']", c['7']);
+log("'x1' in c", 'x1' in c);
+log('hasOwnProperty x1', c.hasOwnProperty('x1'));
+note('desc x1', desc(Object.getOwnPropertyDescriptor(c, 'x1')));
+note('desc 0', desc(Object.getOwnPropertyDescriptor(c, '0')));
+note('desc length', desc(Object.getOwnPropertyDescriptor(c, 'length')));
+const divs = document.getElementsByTagName('div');
+note('divs own names', JSON.stringify(Object.getOwnPropertyNames(divs)));
+note('divs keys', JSON.stringify(Object.keys(divs)));
+const forIn = []; for (const k in divs) forIn.push(k);
+note('divs for-in', JSON.stringify(forIn));
+c.x1 = 5;
+log('assigned x1', c.x1);
+log('assigned x1 own', c.hasOwnProperty('x1'));
+attempt('strict assign x1', () => { 'use strict'; c.x1 = 5; return c.x1; });
+attempt('defineProperty x1', () => { Object.defineProperty(c, 'x1', { value: 1 }); return c.x1; });
+attempt('delete x1', () => delete c.x1);
+attempt('strict delete x1', () => { 'use strict'; return delete c.x1; });
+c.fresh = 1;
+log('assigned fresh', c.fresh);
+log('children.x1', document.body.children.x1);
+log('getElementsByClassName named', document.getElementsByClassName('none').x1);
+const nd = document.createElement('div'); nd.id = 'later'; document.body.append(nd);
+log('live later', divs.later);
+log('all.n2', document.all.n2);
+log('all.svgg', document.all.svgg);
+log('all.svgname', document.all.svgname);
+L.push('end');
+</script>
+</body></html>

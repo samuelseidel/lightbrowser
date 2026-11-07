@@ -4,13 +4,19 @@
 //! value that contradicts it is rejected with an error that says which
 //! persona field it contradicts. A viewport smaller than the persona's
 //! screen is allowed (windows can be resized) and is passed to the host.
+//!
+//! Time zone, locale, `acceptLanguage` and geolocation are not checked
+//! against the persona (ADR 0039): they follow a proxy's exit, as Chrome
+//! takes any valid value. This module parses them as Chrome's bindings do
+//! and holds Chrome's rules for them (locale validity, the
+//! `Accept-Language` q-values, `navigator.languages` parsing).
 
 use lb_css::MediaEnv;
 use lb_persona::{BrowserFamily, PersonaProfile};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::host::ViewportOverride;
+use crate::host::{GeoPosition, GeolocationOverride, ViewportOverride};
 use crate::protocol::CdpError;
 
 fn reject(method: &str, what: String) -> CdpError {
@@ -172,16 +178,6 @@ pub fn ua_family(ua: &str) -> Option<BrowserFamily> {
     }
 }
 
-fn first_language(list: &str) -> &str {
-    list.split(',')
-        .next()
-        .unwrap_or("")
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-}
-
 pub fn check_user_agent(p: &PersonaProfile, o: &UserAgentOverride) -> Result<(), CdpError> {
     const M: &str = "Emulation.setUserAgentOverride";
     if !o.user_agent.is_empty() && o.user_agent != p.browser.user_agent {
@@ -195,9 +191,6 @@ pub fn check_user_agent(p: &PersonaProfile, o: &UserAgentOverride) -> Result<(),
             ),
         };
         return Err(reject(M, what));
-    }
-    if let Some(al) = o.accept_language.as_deref().filter(|s| !s.is_empty()) {
-        check_language(M, p, first_language(al))?;
     }
     if let Some(pl) = o.platform.as_deref().filter(|s| !s.is_empty())
         && pl != p.os.platform
@@ -303,41 +296,133 @@ fn check_ua_metadata(p: &PersonaProfile, meta: &Value) -> Result<(), CdpError> {
     Ok(())
 }
 
-fn check_language(method: &str, p: &PersonaProfile, tag: &str) -> Result<(), CdpError> {
-    if !tag.eq_ignore_ascii_case(&p.locale.language) {
-        return Err(reject(
-            method,
-            format!(
-                "locale {tag:?} differs from the persona's {:?}",
-                p.locale.language
-            ),
-        ));
-    }
-    Ok(())
-}
-
-/// `Emulation.setLocaleOverride`: empty clears, otherwise must be the
-/// persona's language.
-pub fn check_locale(p: &PersonaProfile, locale: Option<&str>) -> Result<(), CdpError> {
-    match locale.filter(|l| !l.is_empty()) {
-        None => Ok(()),
-        Some(l) => check_language("Emulation.setLocaleOverride", p, l),
+/// A string param as Chrome's protocol bindings read it: `Ok(None)` when
+/// absent, `-32602` for another type.
+pub fn opt_string<'a>(p: &'a Value, key: &str) -> Result<Option<&'a str>, CdpError> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(_) => Err(CdpError::invalid_params(format!(
+            "Failed to deserialize params.{key} - BINDINGS: string value expected"
+        ))),
     }
 }
 
-/// `Emulation.setTimezoneOverride`: empty clears, otherwise must be the
-/// persona's IANA zone.
-pub fn check_timezone(p: &PersonaProfile, tz: &str) -> Result<(), CdpError> {
-    if tz.is_empty() || tz == p.locale.timezone {
-        return Ok(());
+/// A mandatory string param (Chrome's bindings errors).
+pub fn req_string<'a>(p: &'a Value, key: &str) -> Result<&'a str, CdpError> {
+    opt_string(p, key)?.ok_or_else(|| {
+        CdpError::invalid_params(format!(
+            "Failed to deserialize params.{key} - BINDINGS: mandatory field missing"
+        ))
+    })
+}
+
+/// An optional number param (`null`, a string ... are `-32602`).
+pub fn opt_double(p: &Value, key: &str) -> Result<Option<f64>, CdpError> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(v) => v.as_f64().map(Some).ok_or_else(|| {
+            CdpError::invalid_params(format!(
+                "Failed to deserialize params.{key} - BINDINGS: double value expected"
+            ))
+        }),
     }
-    Err(reject(
-        "Emulation.setTimezoneOverride",
-        format!(
-            "timezone {tz:?} differs from the persona's {:?}",
-            p.locale.timezone
-        ),
-    ))
+}
+
+/// The locale string as Blink hands it to ICU (`String::Ascii()`: other
+/// characters become `?`).
+pub fn icu_locale_tag(locale: &str) -> String {
+    locale
+        .chars()
+        .map(|c| if c.is_ascii() { c } else { '?' })
+        .collect()
+}
+
+/// Whether Blink's `LocaleController` takes `locale` for
+/// `Emulation.setLocaleOverride`: ICU's locale id parser finds a language
+/// subtag (the text before the first `-`, `_`, `@` or `.`, at most 11
+/// characters, its buffer; an `i-` prefix belongs to it, an `x-` prefix
+/// leaves none; `root` is ICU's root locale, without one). Otherwise
+/// Chrome answers "Invalid locale name". Recorded in local Chrome 153
+/// (`tests/emulation/chrome.json`).
+pub fn locale_is_valid(locale: &str) -> bool {
+    let tag = icu_locale_tag(locale);
+    let b = tag.as_bytes();
+    let prefix = b.len() >= 2 && matches!(b[1], b'-' | b'_');
+    if prefix && b[0] | 0x20 == b'x' {
+        return false;
+    }
+    let skip = if prefix && b[0] | 0x20 == b'i' { 2 } else { 0 };
+    let lang_len = tag[skip..]
+        .find(['-', '_', '@', '.'])
+        .unwrap_or(tag.len() - skip)
+        + skip;
+    let lang = &tag[..lang_len];
+    (1..=11).contains(&lang.len()) && !lang.eq_ignore_ascii_case("root")
+}
+
+/// Chrome's `Accept-Language` for an `acceptLanguage` override
+/// (`net::HttpUtil::GenerateAcceptLanguageHeader`): the comma-separated
+/// entries as given (not trimmed), the first without a q-value, then
+/// `;q=0.9`, `;q=0.8` ... down to `;q=0.1`. `de-DE, en ,fr_FR` gives
+/// `de-DE, en ;q=0.9,fr_FR;q=0.8` (recorded).
+pub fn accept_language_header(list: &str) -> String {
+    let entries: Vec<&str> = list.split(',').collect();
+    lb_persona::locale::accept_language_header(&entries)
+}
+
+/// `navigator.languages` under an `acceptLanguage` override (Blink's
+/// `NavigatorLanguage` `ParseAndSanitize`): split at commas, trimmed, `_`
+/// at index 2 becomes `-`; q-values stay (recorded:
+/// `fr-CH,fr;q=0.9` gives `["fr-CH", "fr;q=0.9"]`).
+pub fn navigator_languages(list: &str) -> Vec<String> {
+    let mut out: Vec<String> = list
+        .split(',')
+        .map(|t| {
+            let mut t = t.trim().to_owned();
+            if t.len() >= 3 && t.as_bytes()[2] == b'_' {
+                t.replace_range(2..3, "-");
+            }
+            t
+        })
+        .collect();
+    if out.is_empty() {
+        out.push("en-US".into());
+    }
+    out
+}
+
+/// `Emulation.setGeolocationOverride` params as Chrome reads them: a
+/// position when latitude, longitude and accuracy are all given (checked
+/// as `device::ValidateGeoposition`: "Invalid geolocation"), else
+/// position unavailable. `now_ms` stamps the position.
+pub fn geolocation(p: &Value, now_ms: f64) -> Result<GeolocationOverride, CdpError> {
+    let lat = opt_double(p, "latitude")?;
+    let lng = opt_double(p, "longitude")?;
+    let acc = opt_double(p, "accuracy")?;
+    let altitude = opt_double(p, "altitude")?;
+    let altitude_accuracy = opt_double(p, "altitudeAccuracy")?;
+    let heading = opt_double(p, "heading")?;
+    let speed = opt_double(p, "speed")?;
+    let (Some(latitude), Some(longitude), Some(accuracy)) = (lat, lng, acc) else {
+        return Ok(GeolocationOverride::Unavailable);
+    };
+    if !((-90.0..=90.0).contains(&latitude)
+        && (-180.0..=180.0).contains(&longitude)
+        && accuracy >= 0.0)
+    {
+        return Err(CdpError::server("Invalid geolocation"));
+    }
+    Ok(GeolocationOverride::Position(GeoPosition {
+        latitude,
+        longitude,
+        accuracy,
+        altitude,
+        altitude_accuracy: altitude_accuracy.filter(|v| *v >= 0.0),
+        heading: heading.filter(|v| (0.0..=360.0).contains(v)),
+        speed: speed.filter(|v| *v >= 0.0),
+        timestamp: now_ms,
+    }))
 }
 
 /// `Emulation.setEmulatedMedia` params.
@@ -489,9 +574,6 @@ mod tests {
         let e = check_user_agent(&p, &ua(json!({"userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"}))).unwrap_err();
         assert!(e.message.contains("claims firefox"), "{}", e.message);
         assert!(
-            check_user_agent(&p, &ua(json!({"userAgent": "", "acceptLanguage": "de-DE"}))).is_err()
-        );
-        assert!(
             check_user_agent(&p, &ua(json!({"userAgent": "", "platform": "MacIntel"}))).is_err()
         );
         assert!(
@@ -518,11 +600,8 @@ mod tests {
             .is_err()
         );
 
-        check_locale(&p, Some("en-US")).unwrap();
-        check_locale(&p, Some("")).unwrap();
-        assert!(check_locale(&p, Some("fr-FR")).is_err());
-        check_timezone(&p, "America/New_York").unwrap();
-        assert!(check_timezone(&p, "Europe/Berlin").is_err());
+        // Accept-Language follows a proxy now (ADR 0039).
+        check_user_agent(&p, &ua(json!({"userAgent": "", "acceptLanguage": "de-DE"}))).unwrap();
 
         let media = |v: Value| -> EmulatedMedia { serde_json::from_value(v).unwrap() };
         check_emulated_media(&p, &media(json!({"media": "", "features": [{"name": "prefers-color-scheme", "value": "light"}, {"name": "prefers-reduced-motion", "value": ""}]}))).unwrap();
@@ -534,5 +613,83 @@ mod tests {
             .is_err()
         );
         assert!(check_emulated_media(&p, &media(json!({"media": "print"}))).is_err());
+    }
+
+    // Values recorded in local Chrome 153 (tests/emulation/chrome.json).
+    #[test]
+    fn chrome_locale_rules() {
+        for ok in [
+            "xx",
+            "xx-YY",
+            "de_DE",
+            "EN-gb",
+            "zh-Hant-TW",
+            "iw",
+            "en-US-u-ca-buddhist",
+            "C",
+            "\u{e9}",
+            "abcdefghijk",
+            "ab cd",
+            "i-klingon",
+            "x",
+            "de@calendar=x",
+            "de.UTF-8",
+        ] {
+            assert!(locale_is_valid(ok), "{ok}");
+        }
+        for bad in [
+            "not a locale",
+            "root",
+            "ROOT",
+            "abcdefghijkl",
+            "x-foo",
+            "X-foo",
+            "@x",
+            ".x",
+            "-de",
+            "_DE",
+        ] {
+            assert!(!locale_is_valid(bad), "{bad}");
+        }
+        assert_eq!(accept_language_header("de-DE"), "de-DE");
+        assert_eq!(
+            accept_language_header("fr-CH,fr;q=0.9,en;q=0.5"),
+            "fr-CH,fr;q=0.9;q=0.9,en;q=0.5;q=0.8"
+        );
+        assert_eq!(
+            accept_language_header("de-DE, en ,fr_FR"),
+            "de-DE, en ;q=0.9,fr_FR;q=0.8"
+        );
+        assert_eq!(
+            navigator_languages("de-DE, en ,fr_FR"),
+            ["de-DE", "en", "fr-FR"]
+        );
+        assert_eq!(
+            navigator_languages("fr-CH,fr;q=0.9,en;q=0.5"),
+            ["fr-CH", "fr;q=0.9", "en;q=0.5"]
+        );
+        let g = |v: Value| geolocation(&v, 5.0);
+        assert_eq!(g(json!({})).unwrap(), GeolocationOverride::Unavailable);
+        assert_eq!(
+            g(json!({"latitude": 1, "longitude": 2})).unwrap(),
+            GeolocationOverride::Unavailable
+        );
+        for bad in [
+            json!({"latitude": 91, "longitude": 0, "accuracy": 1}),
+            json!({"latitude": 0, "longitude": 181, "accuracy": 1}),
+            json!({"latitude": 1, "longitude": 2, "accuracy": -1}),
+        ] {
+            assert_eq!(g(bad).unwrap_err().message, "Invalid geolocation");
+        }
+        assert_eq!(g(json!({"latitude": "x"})).unwrap_err().code, -32602);
+        let GeolocationOverride::Position(p) = g(json!({"latitude": 90, "longitude": -180,
+            "accuracy": 0, "heading": 400, "speed": -1, "altitudeAccuracy": -1}))
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            (p.altitude, p.altitude_accuracy, p.heading, p.speed),
+            (None, None, None, None)
+        );
     }
 }

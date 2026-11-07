@@ -1,14 +1,41 @@
 //! `Selection` (`getSelection()`): state, the methods that change it,
-//! error texts, `containsNode`, `toString` and `selectionchange`, checked
-//! in a real page. Expected values were recorded in Chrome 156 on the
-//! same markup.
+//! error texts, `containsNode`, `toString`, `selectionchange` and `modify`,
+//! checked in a real page. The first tests' expected values were recorded
+//! in Chrome 156 on macOS on the same markup (so they run with a macOS
+//! persona: Blink's editing behavior differs per OS). `selection/` holds
+//! two pages run in Chrome 153's headless shell on macOS (`*.mac.json`) and
+//! on Ubuntu 24.04 (`*.linux.json`) by `selection/record.mjs`:
+//! `modify.html` (every `Selection.modify` alteration, direction and
+//! granularity from every caret position and some ranges) and `api.html`
+//! (edge cases of the other members, frames, shadow roots, text controls,
+//! event timing).
 #![cfg(feature = "chrome")]
 
 mod common;
 
-use common::{Resource, browser, context, open, serve};
+use std::sync::Arc;
+
+use common::{Resource, browser, open, serve};
 use lb_js::JsValue;
-use lb_page::WaitUntil;
+use lb_page::{BrowserContext, WaitUntil, context_options_for};
+use lb_persona::PersonaProfile;
+use serde_json::Value;
+
+const MAC: &str = "chrome153_macos26_apple_m4_1512x982.json";
+const LINUX: &str = "chrome153_ubuntu24_intel_uhd630_x11_1080p.json";
+
+fn context_for(persona: &str) -> BrowserContext {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../profiles");
+    let p = Arc::new(
+        PersonaProfile::from_path_checked(format!("{dir}/reference/chrome/{persona}")).unwrap(),
+    );
+    let tls = std::path::PathBuf::from(format!("{dir}/tls"));
+    BrowserContext::new(context_options_for(&p, &tls, false, true).unwrap()).unwrap()
+}
+
+fn context(_virtual_time: bool) -> BrowserContext {
+    context_for(MAC)
+}
 
 /// Runs `script` (which fills `fails`) on a sample page and returns the
 /// failures.
@@ -208,4 +235,211 @@ async fn selectionchange_fires_once_per_task() {
         events,
         Some(JsValue::String("false,false,true,Event".into()))
     );
+}
+
+/// Loads `page` from `selection/` with `persona` and returns its `window.R`.
+async fn run_page(page: &str, persona: &str) -> Value {
+    let s = serve(vec![
+        (
+            "/modify.html",
+            Resource::html(include_str!("selection/modify.html")),
+        ),
+        (
+            "/modify.js",
+            Resource::js(include_str!("selection/modify.js")),
+        ),
+        (
+            "/api.html",
+            Resource::html(include_str!("selection/api.html")),
+        ),
+    ])
+    .await;
+    let (br, ctx) = (browser(), context_for(persona));
+    let page = open(&br, &ctx, &s.url(&format!("/{page}")), WaitUntil::Load).await;
+    for _ in 0..3000 {
+        if let JsValue::String(t) = page.evaluate("document.title").await.unwrap()
+            && t == "done"
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    match page.evaluate("JSON.stringify(window.R)").await.unwrap() {
+        JsValue::String(s) => serde_json::from_str(&s).unwrap(),
+        v => panic!("page did not finish: {v:?}"),
+    }
+}
+
+/// A recorded state ("A-Fd": anchor and focus indices into `table`, one
+/// index for a caret, and the direction's first letter) as positions.
+fn state(r: &Value, v: &Value) -> String {
+    let s = v.as_str().unwrap();
+    let (pos, dir) = s.split_at(s.len() - 1);
+    let name = |i: &str| {
+        let i: i64 = i.parse().unwrap();
+        if i < 0 {
+            "null".to_string()
+        } else {
+            r["table"][i as usize].as_str().unwrap().to_string()
+        }
+    };
+    let (a, f) = match pos[1..].find('-').map(|i| i + 1) {
+        Some(i) => (name(&pos[..i]), name(&pos[i + 1..])),
+        None => (name(pos), name(pos)),
+    };
+    format!("{a} {f} {dir}")
+}
+
+/// Every mismatch between the Chrome recording and LightBrowser's run.
+fn modify_mismatches(want: &Value, got: &Value) -> Vec<String> {
+    const G: [&str; 9] = [
+        "character",
+        "word",
+        "sentence",
+        "line",
+        "paragraph",
+        "lineboundary",
+        "sentenceboundary",
+        "paragraphboundary",
+        "documentboundary",
+    ];
+    const D: [&str; 4] = ["forward", "backward", "left", "right"];
+    let case = |col: usize| {
+        format!(
+            "{} {} {}",
+            if col < 36 { "move" } else { "extend" },
+            D[(col / 9) % 4],
+            G[col % 9]
+        )
+    };
+    let mut out = Vec::new();
+    let mut cmp = |what: String, a: &Value, b: &Value| {
+        let (a, b) = (state(want, a), state(got, b));
+        if a != b {
+            out.push(format!("{what}: chrome {a} | lightbrowser {b}"));
+        }
+    };
+    let starts = want["starts"].as_array().unwrap();
+    for (i, s) in starts.iter().enumerate() {
+        let at = want["table"][s.as_u64().unwrap() as usize]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            got["table"][got["starts"][i].as_u64().unwrap() as usize].as_str(),
+            Some(at)
+        );
+        cmp(
+            format!("canonical {at}"),
+            &want["canon"][i],
+            &got["canon"][i],
+        );
+        for col in 0..72 {
+            cmp(
+                format!("{at} {}", case(col)),
+                &want["res"][i][col],
+                &got["res"][i][col],
+            );
+        }
+    }
+    for (j, r) in want["ranges"].as_array().unwrap().iter().enumerate() {
+        for col in 0..72 {
+            cmp(
+                format!("range {j} {}", case(col)),
+                &r[2 + col],
+                &got["ranges"][j][2 + col],
+            );
+        }
+    }
+    for (j, w) in want["walks"].as_array().unwrap().iter().enumerate() {
+        let a: Vec<String> = w
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| state(want, x))
+            .collect();
+        let b: Vec<String> = got["walks"][j]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| state(got, x))
+            .collect();
+        if a != b {
+            out.push(format!(
+                "walk {} {}: chrome {a:?} | lightbrowser {b:?}",
+                G[j / 2],
+                if j % 2 == 0 { "forward" } else { "backward" }
+            ));
+        }
+    }
+    out
+}
+
+async fn modify_matches(persona: &str, recording: &str) {
+    let want: Value = serde_json::from_str(recording).unwrap();
+    let got = run_page("modify.html", persona).await;
+    let bad = modify_mismatches(&want, &got);
+    assert!(
+        bad.is_empty(),
+        "{} mismatches:\n{}",
+        bad.len(),
+        bad[..bad.len().min(40)].join("\n")
+    );
+}
+
+/// `Selection.modify` with Blink's macOS editing behavior (ranges grow to
+/// boundaries, no crossing the anchor by word or line, carets have no
+/// direction).
+#[tokio::test]
+async fn modify_matches_chrome_macos() {
+    modify_matches(MAC, include_str!("selection/modify.mac.json")).await;
+}
+
+/// `Selection.modify` with Blink's Linux editing behavior (directional
+/// selections, extension from the focus).
+#[tokio::test]
+async fn modify_matches_chrome_linux() {
+    modify_matches(LINUX, include_str!("selection/modify.linux.json")).await;
+}
+
+/// `api.html` cases LightBrowser does not match yet: `text-transform` and
+/// `user-select` are not in lb-css (Chrome's selection text upper-cases
+/// and skips `user-select: none` text), and `document.execCommand` is not
+/// implemented (`selectAll` fires `selectstart` at the body).
+const API_OPEN: &[&str] = &[
+    "ts_q",
+    "ts_us",
+    "ts_body",
+    "sbe_shadow_cross",
+    "ev_exec_selectall",
+];
+
+async fn api_matches(persona: &str, recording: &str) {
+    let want: Value = serde_json::from_str(recording).unwrap();
+    let got = run_page("api.html", persona).await;
+    let mut bad = Vec::new();
+    for (k, v) in want.as_object().unwrap() {
+        if API_OPEN.contains(&k.as_str()) {
+            continue;
+        }
+        if got.get(k) != Some(v) {
+            bad.push(format!(
+                "{k}:\n  chrome       {v}\n  lightbrowser {}",
+                got.get(k).unwrap_or(&Value::Null)
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// The other `Selection` members, frames, shadow roots, text controls and
+/// `selectionchange`/`selectstart` timing, as on macOS.
+#[tokio::test]
+async fn api_matches_chrome_macos() {
+    api_matches(MAC, include_str!("selection/api.mac.json")).await;
+}
+
+/// The same on Linux.
+#[tokio::test]
+async fn api_matches_chrome_linux() {
+    api_matches(LINUX, include_str!("selection/api.linux.json")).await;
 }

@@ -24,8 +24,11 @@ pub(crate) struct Sink {
     /// `<template shadowrootmode>` attaches shadow roots (document parser
     /// and `setHTMLUnsafe`).
     pub(crate) allow_shadow: bool,
-    line: Cell<u64>,
+    pub(crate) line: Cell<u64>,
     pub(crate) script_lines: RefCell<HashMap<NodeId, u64>>,
+    /// Source lines of `<base>` elements and of elements with a `style`
+    /// attribute (Content Security Policy reports them).
+    pub(crate) element_lines: RefCell<HashMap<NodeId, u64>>,
     pub(crate) errors: Cell<u32>,
     /// Last HTML `<link>` / `<style>` element created (for style sheet
     /// pauses, see [`crate::ParserOptions::pause_at_style_sheets`]).
@@ -50,6 +53,7 @@ impl Sink {
             allow_shadow: document_parser,
             line: Cell::new(1),
             script_lines: RefCell::new(HashMap::new()),
+            element_lines: RefCell::new(HashMap::new()),
             errors: Cell::new(0),
             last_link: Cell::new(None),
             last_style: Cell::new(None),
@@ -89,6 +93,11 @@ impl TreeSink for Sink {
     fn create_element(&self, name: QualName, attrs: Vec<Attribute>, flags: ElementFlags) -> NodeId {
         let is_script = name.ns == ns!(html) && name.local == local_name!("script");
         let html = name.ns == ns!(html);
+        let note_line = self.document_parser
+            && ((html && name.local == local_name!("base"))
+                || attrs
+                    .iter()
+                    .any(|a| a.name.ns == ns!() && a.name.local == local_name!("style")));
         let (is_link, is_style) = (
             html && name.local == local_name!("link"),
             html && name.local == local_name!("style"),
@@ -108,6 +117,9 @@ impl TreeSink for Sink {
             doc.set_flags(id, NodeFlags::PARSER_INSERTED, true);
             if is_script {
                 self.script_lines.borrow_mut().insert(id, self.line.get());
+            }
+            if note_line {
+                self.element_lines.borrow_mut().insert(id, self.line.get());
             }
         }
         if is_link {

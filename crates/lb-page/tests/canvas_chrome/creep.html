@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>creep canvas</title>
+<body>
+<script>
+// Reconstructed from CreepJS (github.com/abrahamjuliot/creepjs, MIT):
+// src/lies/index.ts (queryLies, searchLies) restricted to the canvas and
+// WebGL interfaces, src/canvas/index.ts (getCanvas2d: getPixelMods,
+// the blank-canvas and low-entropy checks, measureText float lie) and
+// src/webgl/index.ts (draw + readPixels). Math.random in getPixelMods is
+// replaced by a fixed LCG so runs are comparable. Logs to L; ends 'end'.
+const L = [];
+const log = (k, v) => L.push(k + ': ' + (typeof v === 'string' ? v : JSON.stringify(v)));
+function fnv(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16); }
+const IS_BLINK = true;
+const isTypeError = (err) => err.constructor.name == 'TypeError';
+function failsTypeError({ spawnErr, withStack, final }) {
+  try { spawnErr(); throw Error(); } catch (err) { if (!isTypeError(err)) return true; return withStack ? withStack(err) : false; } finally { final && final(); }
+}
+function hasKnownToString(name) {
+  return { [`function ${name}() { [native code] }`]: true, [`function get ${name}() { [native code] }`]: true, [`function () { [native code] }`]: true };
+}
+const hasValidStack = (err, reg, i = 1) => i === 0 ? reg.test(err.message) : reg.test(err.stack.split('\n')[i]);
+const AT_FUNCTION = /at Function\.toString /, AT_OBJECT = /at Object\.toString/;
+function queryLies(apiFunction, proto, obj) {
+  if (typeof apiFunction != 'function') return [];
+  const name = apiFunction.name.replace(/get\s/, '');
+  const nativeProto = Object.getPrototypeOf(apiFunction);
+  const lies = {
+    'failed illegal error': !!obj && failsTypeError({ spawnErr: () => obj.prototype[name] }),
+    'failed call interface error': failsTypeError({ spawnErr: () => { new apiFunction(); apiFunction.call(proto); } }),
+    'failed apply interface error': failsTypeError({ spawnErr: () => { new apiFunction(); apiFunction.apply(proto); } }),
+    'failed new instance error': failsTypeError({ spawnErr: () => new apiFunction() }),
+    'failed class extends error': failsTypeError({ spawnErr: () => { class Fake extends apiFunction { } } }),
+    'failed null conversion error': failsTypeError({ spawnErr: () => Object.setPrototypeOf(apiFunction, null).toString(), final: () => Object.setPrototypeOf(apiFunction, nativeProto) }),
+    'failed toString': !hasKnownToString(name)[Function.prototype.toString.call(apiFunction)] || !hasKnownToString('toString')[Function.prototype.toString.call(apiFunction.toString)],
+    'failed "prototype" in function': 'prototype' in apiFunction,
+    'failed descriptor': !!(Object.getOwnPropertyDescriptor(apiFunction, 'arguments') || Object.getOwnPropertyDescriptor(apiFunction, 'caller') || Object.getOwnPropertyDescriptor(apiFunction, 'prototype') || Object.getOwnPropertyDescriptor(apiFunction, 'toString')),
+    'failed own property': !!(apiFunction.hasOwnProperty('arguments') || apiFunction.hasOwnProperty('caller') || apiFunction.hasOwnProperty('prototype') || apiFunction.hasOwnProperty('toString')),
+    'failed descriptor keys': Object.keys(Object.getOwnPropertyDescriptors(apiFunction)).sort().toString() != 'length,name',
+    'failed own property names': Object.getOwnPropertyNames(apiFunction).sort().toString() != 'length,name',
+    'failed own keys names': Reflect.ownKeys(apiFunction).sort().toString() != 'length,name',
+    'failed object toString error': failsTypeError({ spawnErr: () => Object.create(apiFunction).toString(), withStack: (err) => IS_BLINK && !hasValidStack(err, AT_FUNCTION) }) || failsTypeError({ spawnErr: () => Object.create(new Proxy(apiFunction, {})).toString(), withStack: (err) => IS_BLINK && !hasValidStack(err, AT_OBJECT) }),
+    'failed at incompatible proxy error': failsTypeError({ spawnErr: () => { apiFunction.arguments; apiFunction.caller; } }),
+    'failed at toString incompatible proxy error': failsTypeError({ spawnErr: () => { apiFunction.toString.arguments; apiFunction.toString.caller; } }),
+    'failed at too much recursion error': failsTypeError({ spawnErr: () => { Object.setPrototypeOf(apiFunction, Object.create(apiFunction)).toString(); }, final: () => Object.setPrototypeOf(apiFunction, nativeProto) }),
+  };
+  return Object.keys(lies).filter((k) => !!lies[k]);
+}
+const lieProps = {};
+function searchLies(fn, target) {
+  let obj; try { obj = fn(); if (!obj) return; } catch (e) { return; }
+  const io = obj.prototype ? obj.prototype : obj;
+  [...new Set([...Object.getOwnPropertyNames(io), ...Object.keys(io)])].sort().forEach((name) => {
+    if (name == 'constructor' || (target && !target.includes(name))) return;
+    const apiName = `${obj.name}.${name}`;
+    try {
+      const proto = obj.prototype ? obj.prototype : obj;
+      try {
+        const f = proto[name];
+        if (typeof f == 'function') { const r = queryLies(f, proto, null); if (r.length) lieProps[apiName] = r; return; }
+        if (name != 'name' && name != 'length' && name[0] !== name[0].toUpperCase()) { lieProps[apiName] = ['failed descriptor.value undefined']; return; }
+      } catch (e) { }
+      const g = Object.getOwnPropertyDescriptor(proto, name).get;
+      const r = queryLies(g, proto, obj); if (r.length) lieProps[apiName] = r;
+    } catch (e) { lieProps[apiName] = ['failed prototype test execution']; }
+  });
+}
+searchLies(() => CanvasRenderingContext2D, ['getImageData', 'getLineDash', 'isPointInPath', 'isPointInStroke', 'measureText', 'quadraticCurveTo', 'fillText', 'strokeText', 'font']);
+searchLies(() => HTMLCanvasElement);
+searchLies(() => OffscreenCanvas, ['convertToBlob', 'getContext']);
+searchLies(() => OffscreenCanvasRenderingContext2D, ['getImageData', 'getLineDash', 'isPointInPath', 'isPointInStroke', 'measureText', 'quadraticCurveTo', 'font']);
+searchLies(() => TextMetrics);
+searchLies(() => WebGLRenderingContext, ['bufferData', 'getParameter', 'readPixels', 'getExtension', 'getSupportedExtensions', 'getShaderPrecisionFormat']);
+searchLies(() => WebGL2RenderingContext, ['bufferData', 'getParameter', 'readPixels', 'getExtension', 'getSupportedExtensions', 'getShaderPrecisionFormat']);
+log('lies', Object.keys(lieProps).map((k) => k + '=' + lieProps[k].join('/')).join(' ') || 'none');
+
+// --- getPixelMods ---
+let seed = 1; const rand = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed / 4294967296; };
+const getPixelMods = () => {
+  const pattern1 = [], pattern2 = []; const len = 8, alpha = 255;
+  const options = { willReadFrequently: true, desynchronized: true };
+  const canvas1 = document.createElement('canvas'), canvas2 = document.createElement('canvas');
+  const context1 = canvas1.getContext('2d', options), context2 = canvas2.getContext('2d', options);
+  canvas1.width = canvas1.height = canvas2.width = canvas2.height = len;
+  [...Array(len)].forEach((e, x) => [...Array(len)].forEach((e, y) => {
+    const colors = `${~~(rand() * 256)}, ${~~(rand() * 256)}, ${~~(rand() * 256)}, ${alpha}`;
+    context1.fillStyle = `rgba(${colors})`; context1.fillRect(x, y, 1, 1); pattern1.push(colors);
+  }));
+  [...Array(len)].forEach((e, x) => [...Array(len)].forEach((e, y) => {
+    const { data: [red, green, blue, alpha] } = context1.getImageData(x, y, 1, 1) || {};
+    const colors = `${red}, ${green}, ${blue}, ${alpha}`;
+    context2.fillStyle = `rgba(${colors})`; context2.fillRect(x, y, 1, 1);
+    pattern2.push(colors);
+  }));
+  const patternDiffs = [], rgbaChannels = new Set();
+  pattern1.forEach((p, i) => {
+    if (p != pattern2[i]) {
+      const a = p.split(','), b = pattern2[i].split(',');
+      const colors = [a[0] != b[0] ? 'r' : '', a[1] != b[1] ? 'g' : '', a[2] != b[2] ? 'b' : '', a[3] != b[3] ? 'a' : ''].join('');
+      rgbaChannels.add(colors); patternDiffs.push([i, colors]);
+    }
+  });
+  const rgba = rgbaChannels.size ? [...rgbaChannels].sort().join(', ') : undefined;
+  const pixels = patternDiffs.length || undefined;
+  return { rgba, pixels };
+};
+// --- picasso paint (paintCanvas) ---
+const paintCanvas = ({ canvas, context, strokeText = false, cssFontFamily = '', area = { width: 50, height: 50 }, rounds = 10, maxShadowBlur = 50, seed = 500, offset = 2001000001, multiplier = 15000 }) => {
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.width = area.width; canvas.height = area.height;
+  let current = Number(seed) % Number(offset);
+  const getNextSeed = () => { current = (Number(multiplier) * current) % Number(offset); return current; };
+  const patchSeed = (current, offset, maxBound, computeFloat) => { const result = (((current - 1) / offset) * (maxBound || 1)) || 0; return computeFloat ? result : Math.floor(result); };
+  const colors = ['#FF6633', '#FFB399', '#FF33FF', '#FFFF99', '#00B3E6', '#E6B333', '#3366E6', '#999966', '#99FF99', '#B34D4D', '#80B300', '#809900', '#E6B3B3', '#6680B3', '#66991A', '#FF99E6', '#CCFF1A', '#FF1A66', '#E6331A', '#33FFCC', '#66994D', '#B366CC', '#4D8000', '#B33300', '#CC80CC', '#66664D', '#991AFF', '#E666FF', '#4DB3FF', '#1AB399', '#E666B3', '#33991A', '#CC9999', '#B3B31A', '#00E680', '#4D8066', '#809980', '#E6FF80', '#1AFF33', '#999933', '#FF3380', '#CCCC00', '#66E64D', '#4D80CC', '#9900B3', '#E64D66', '#4DB380', '#FF4D4D', '#99E6E6', '#6666FF'];
+  const { width, height } = area;
+  const addGradient = () => {
+    const g = context.createRadialGradient(patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, width));
+    g.addColorStop(0, colors[patchSeed(getNextSeed(), offset, colors.length)]);
+    g.addColorStop(1, colors[patchSeed(getNextSeed(), offset, colors.length)]);
+    context.fillStyle = g;
+  };
+  const methods = [
+    () => { context.beginPath(); context.arc(patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, Math.min(width, height)), patchSeed(getNextSeed(), offset, 2 * Math.PI, true), patchSeed(getNextSeed(), offset, 2 * Math.PI, true)); context.stroke(); },
+    () => { context.beginPath(); context.moveTo(patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height)); context.bezierCurveTo(patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height)); context.stroke(); },
+    () => { context.beginPath(); context.moveTo(patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height)); context.quadraticCurveTo(patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height)); context.stroke(); },
+    () => { context.beginPath(); context.ellipse(patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, Math.floor(width / 2)), patchSeed(getNextSeed(), offset, Math.floor(height / 2)), patchSeed(getNextSeed(), offset, 2 * Math.PI, true), patchSeed(getNextSeed(), offset, 2 * Math.PI, true), patchSeed(getNextSeed(), offset, 2 * Math.PI, true)); context.stroke(); },
+  ];
+  if (strokeText) methods.push(() => { context.font = `${height / 2.99}px ${cssFontFamily}`; context.strokeText('👾A', patchSeed(getNextSeed(), offset, width), patchSeed(getNextSeed(), offset, height), patchSeed(getNextSeed(), offset, width)); });
+  [...Array(rounds)].forEach(() => {
+    addGradient();
+    context.shadowBlur = patchSeed(getNextSeed(), offset, maxShadowBlur, true);
+    context.shadowColor = colors[patchSeed(getNextSeed(), offset, colors.length)];
+    methods[patchSeed(getNextSeed(), offset, methods.length)]();
+    context.fill();
+  });
+};
+const CSS_FONT_FAMILY = `'Segoe Fluent Icons','Ink Free','Bahnschrift','Segoe MDL2 Assets','HoloLens MDL2 Assets','Leelawadee UI','Javanese Text','Segoe UI Emoji','Aldhabi','Gadugi','Myanmar Text','Nirmala UI','Lucida Console','Cambria Math','Chakra Petch','Kodchasan','Galvji','MuktaMahee Regular','InaiMathi Bold','American Typewriter Semibold','Futura Bold','SignPainter-HouseScript Semibold','PingFang HK Light','Kohinoor Devanagari Medium','Luminari','Geneva','Helvetica Neue','Droid Sans Mono','Dancing Script','Roboto','Ubuntu','Liberation Mono','Source Code Pro','DejaVu Sans','OpenSymbol','Chilanka','Cousine','Arimo','Jomolhari','MONO','Noto Color Emoji',sans-serif !important`;
+(async () => {
+  const canvas = document.createElement('canvas'); const context = canvas.getContext('2d');
+  paintCanvas({ canvas, context, strokeText: true, cssFontFamily: CSS_FONT_FAMILY.replace(/!important/gm, ''), area: { width: 75, height: 75 }, rounds: 10 });
+  const dataURI = canvas.toDataURL();
+  log('combined_stable', dataURI === canvas.toDataURL());
+  const mods = getPixelMods();
+  log('rendering', mods.rgba ? `${Math.round((mods.pixels / 400) * 100)}% rgba noise ${mods.rgba}` : '');
+  paintCanvas({ canvas, context, area: { width: 75, height: 75 } });
+  const paintURI = canvas.toDataURL();
+  const canvasCPU = document.createElement('canvas'); const contextCPU = canvasCPU.getContext('2d', { desynchronized: true, willReadFrequently: true });
+  paintCanvas({ canvas: canvasCPU, context: contextCPU, area: { width: 75, height: 75 } });
+  log('paint_gpu_equals_cpu', paintURI === canvasCPU.toDataURL());
+  context.restore(); context.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.width = 50; canvas.height = 50; context.font = `50px ${CSS_FONT_FAMILY.replace(/!important/gm, '')}`; context.fillText('A', 7, 37);
+  const textURI = canvas.toDataURL();
+  context.restore(); context.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.width = 50; canvas.height = 50; context.font = `35px ${CSS_FONT_FAMILY.replace(/!important/gm, '')}`; context.fillText('👾', 0, 37);
+  const emojiURI = canvas.toDataURL();
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  let modified = (mods && mods.pixels) || !!Math.max(...context.getImageData(0, 0, 8, 8).data);
+  log('pixel_data_modified', !!modified);
+  canvas.width = 2; canvas.height = 2;
+  context.fillStyle = '#000'; context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#fff'; context.fillRect(2, 2, 1, 1);
+  context.beginPath(); context.arc(0, 0, 2, 0, 1, true); context.closePath(); context.fill();
+  const low = context.getImageData(0, 0, 2, 2).data.join('');
+  const BLINK = ['255255255255178178178255246246246255555555255', '255255255255192192192255240240240255484848255', '255255255255177177177255246246246255535353255', '255255255255128128128255191191191255646464255', '255255255255178178178255247247247255565656255', '255255255255174174174255242242242255474747255', '255255255255229229229255127127127255686868255', '255255255255192192192255244244244255535353255'];
+  log('suspicious_pixel_data', !BLINK.includes(low));
+  const m = context.measureText('');
+  log('metric_noise', [m.actualBoundingBoxAscent, m.actualBoundingBoxDescent, m.actualBoundingBoxLeft, m.actualBoundingBoxRight, m.fontBoundingBoxAscent, m.fontBoundingBoxDescent].some((x) => (x || 0) % 1 !== 0));
+  log('hashes', [dataURI, paintURI, textURI, emojiURI].map(fnv).join(' '));
+  // --- WebGL (src/webgl/index.ts draw + getWebGLData) ---
+  const draw = (gl) => {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const vertexPosBuffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vertexPosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.9, -0.7, 0, 0.8, -0.7, 0, 0, 0.5, 0]), gl.STATIC_DRAW);
+    const program = gl.createProgram();
+    const vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, `attribute vec2 attrVertex; varying vec2 varyinTexCoordinate; uniform vec2 uniformOffset; void main(){ varyinTexCoordinate = attrVertex + uniformOffset; gl_Position = vec4(attrVertex, 0, 1); }`); gl.compileShader(vs); gl.attachShader(program, vs);
+    const fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, `precision mediump float; varying vec2 varyinTexCoordinate; void main() { gl_FragColor = vec4(varyinTexCoordinate, 1, 1); }`); gl.compileShader(fs); gl.attachShader(program, fs);
+    gl.linkProgram(program); gl.useProgram(program);
+    program.vertexPosAttrib = gl.getAttribLocation(program, 'attrVertex'); program.offsetUniform = gl.getUniformLocation(program, 'uniformOffset');
+    gl.enableVertexAttribArray(program.vertexPosArray); gl.vertexAttribPointer(program.vertexPosAttrib, 3, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(program.offsetUniform, 1, 1);
+    gl.drawArrays(gl.LINE_LOOP, 0, 3);
+  };
+  for (const type of ['webgl', 'webgl2']) {
+    const oc = new OffscreenCanvas(256, 256); const gl = oc.getContext(type);
+    draw(gl);
+    const c = document.createElement('canvas'); draw(c.getContext(type)); const uri = c.toDataURL();
+    const w = gl.drawingBufferWidth / 15, h = gl.drawingBufferHeight / 6;
+    const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const px2 = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px2);
+    log(type + '_readpixels_stable', px.every((v, i) => v === px2[i]));
+    log(type + '_dataurl_stable', uri === c.toDataURL());
+    log(type + '_hashes', fnv(uri) + ' ' + fnv(px.join()));
+  }
+  L.push('end');
+})().catch((e) => { L.push('error: ' + e + ' ' + e.stack); L.push('end'); });
+</script>
+</body>

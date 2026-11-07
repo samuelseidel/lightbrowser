@@ -269,6 +269,16 @@ pub(crate) async fn page_fetch(
             req.headers.push((k, v));
         }
     }
+    // A CDP `acceptLanguage` override replaces the persona's value in
+    // place (ADR 0039).
+    if let Some(al) = agent.accept_language_header()
+        && !req
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("accept-language"))
+    {
+        req.headers.push(("Accept-Language".into(), al));
+    }
     let fetch_api = req.mode != "navigate" && req.destination == Destination::Empty;
     let rtype = resource_type(&req, fetch_api);
     let id = request_id.clone().unwrap_or_else(|| {

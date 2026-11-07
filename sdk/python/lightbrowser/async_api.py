@@ -141,10 +141,18 @@ class AsyncBrowser:
         startup_timeout: float = 60.0,
         validate: bool = True,
         playwright: Playwright | None = None,
+        timezone: str | None = None,
+        locale: str | None = None,
+        languages: Sequence[str] | None = None,
     ) -> None:
+        # `timezone`/`locale`/`languages`: the persona's, overridden for the
+        # whole process (`serve --timezone ...`, ADR 0039), e.g. to match a
+        # proxy exit. Playwright's `new_context(timezone_id=..., locale=...)`
+        # works too, per context.
         self._plan: LaunchPlan | None = plan_launch(
             persona=persona, executable_path=executable_path, port=port, insecure=insecure,
             profiles_dir=profiles_dir, workers=workers, extra_args=extra_args, validate=validate,
+            timezone=timezone, locale=locale, languages=languages,
         )
         self.persona: Persona | None = self._plan.persona
         self._startup_timeout = startup_timeout

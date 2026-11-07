@@ -1,0 +1,101 @@
+<!doctype html><meta charset=utf-8><body><script>
+// CreepJS src/fonts/index.ts (master, 2026-11): FONT_LIST, getFontFaceLoadFonts
+// and getPlatformVersion, unchanged. `fonts`/`platformVersion` are what
+// CreepJS computes; `byName`/`byNameVersion` repeat it with the names that
+// loaded (not FontFace.family, which Chrome serializes with quotes), the
+// OS version its per-version lists give.
+const WindowsFonts = {
+  '7': ['Cambria Math', 'Lucida Console'],
+  '8': ['Aldhabi', 'Gadugi', 'Myanmar Text', 'Nirmala UI'],
+  '8.1': ['Leelawadee UI', 'Javanese Text', 'Segoe UI Emoji'],
+  '10': ['HoloLens MDL2 Assets', 'Segoe MDL2 Assets', 'Bahnschrift', 'Ink Free'],
+  '11': ['Segoe Fluent Icons'],
+};
+const MacOSFonts = {
+  '10.9': ['Helvetica Neue', 'Geneva'],
+  '10.10': ['Kohinoor Devanagari Medium', 'Luminari'],
+  '10.11': ['PingFang HK Light'],
+  '10.12': ['American Typewriter Semibold', 'Futura Bold', 'SignPainter-HouseScript Semibold'],
+  '10.13-10.14': ['InaiMathi Bold'],
+  '10.15-11': ['Galvji', 'MuktaMahee Regular'],
+  '12': ['Noto Sans Gunjala Gondi Regular', 'Noto Sans Masaram Gondi Regular', 'Noto Serif Yezidi Regular'],
+  '13': ['Apple SD Gothic Neo ExtraBold', 'STIX Two Math Regular', 'STIX Two Text Regular', 'Noto Sans Canadian Aboriginal Regular'],
+};
+const DesktopAppFonts = {
+  'Microsoft Outlook': ['MS Outlook'],
+  'Adobe Acrobat': ['ZWAdobeF'],
+  'LibreOffice': ['Amiri', 'KACSTOffice', 'Liberation Mono', 'Source Code Pro'],
+  'OpenOffice': ['DejaVu Sans', 'Gentium Book Basic', 'OpenSymbol'],
+};
+const flat = (o) => Object.keys(o).map((k) => o[k]).flat();
+const LINUX_FONTS = ['Arimo', 'Chilanka', 'Cousine', 'Jomolhari', 'MONO', 'Noto Color Emoji', 'Ubuntu'];
+const ANDROID_FONTS = ['Dancing Script', 'Droid Sans Mono', 'Roboto'];
+const FONT_LIST = [...flat(MacOSFonts), ...flat(WindowsFonts), ...LINUX_FONTS, ...ANDROID_FONTS, ...flat(DesktopAppFonts)].sort();
+const getFontFaceLoadFonts = async (fontList, byName) => {
+  let fontsChecked = [];
+  if (!document.fonts.check(`0px "${Math.random()}"`)) {
+    fontsChecked = fontList.reduce((acc, font) => { if (document.fonts.check(`0px "${font}"`)) acc.push(font); return acc; }, []);
+  }
+  const fontFaceList = fontList.map((font) => new FontFace(font, `local("${font}")`));
+  const responseCollection = await Promise.allSettled(fontFaceList.map((font) => font.load()));
+  const fontsLoaded = responseCollection.reduce((acc, font, i) => {
+    if (font.status == 'fulfilled') acc.push(byName ? fontList[i] : font.value.family);
+    return acc;
+  }, []);
+  return [...new Set([...fontsChecked, ...fontsLoaded])].sort();
+};
+const getPlatformVersion = (fonts) => {
+  const getWindows = ({ fonts, fontMap }) => {
+    const fontVersion = {
+      ['11']: fontMap['11'].find((x) => fonts.includes(x)),
+      ['10']: fontMap['10'].find((x) => fonts.includes(x)),
+      ['8.1']: fontMap['8.1'].find((x) => fonts.includes(x)),
+      ['8']: fontMap['8'].find((x) => fonts.includes(x)),
+      ['7']: fontMap['7'].filter((x) => fonts.includes(x)).length == fontMap['7'].length,
+    };
+    const hash = '' + Object.keys(fontVersion).sort().filter((key) => !!fontVersion[key]);
+    const hashMap = {
+      '10,11,7,8,8.1': '11', '10,7,8,8.1': '10', '7,8,8.1': '8.1', '11,7,8,8.1': '8.1', '7,8': '8', '10,7,8': '8',
+      '10,11,7,8': '8', '7': '7', '7,8.1': '7', '10,7,8.1': '7', '10,11,7,8.1': '7',
+    };
+    const version = hashMap[hash];
+    return version ? `Windows ${version}` : undefined;
+  };
+  const getMacOS = ({ fonts, fontMap }) => {
+    const fontVersion = {
+      ['13']: fontMap['13'].find((x) => fonts.includes(x)),
+      ['12']: fontMap['12'].find((x) => fonts.includes(x)),
+      ['10.15-11']: fontMap['10.15-11'].find((x) => fonts.includes(x)),
+      ['10.13-10.14']: fontMap['10.13-10.14'].find((x) => fonts.includes(x)),
+      ['10.12']: fontMap['10.12'].find((x) => fonts.includes(x)),
+      ['10.11']: fontMap['10.11'].find((x) => fonts.includes(x)),
+      ['10.10']: fontMap['10.10'].find((x) => fonts.includes(x)),
+      ['10.9']: fontMap['10.9'].filter((x) => fonts.includes(x)).length == fontMap['10.9'].length,
+    };
+    const hash = '' + Object.keys(fontVersion).sort().filter((key) => !!fontVersion[key]);
+    const hashMap = {
+      '10.10,10.11,10.12,10.13-10.14,10.15-11,10.9,12,13': 'Ventura',
+      '10.10,10.11,10.12,10.13-10.14,10.15-11,10.9,12': 'Monterey',
+      '10.10,10.11,10.12,10.13-10.14,10.15-11,10.9': '10.15-11',
+      '10.10,10.11,10.12,10.13-10.14,10.9': '10.13-10.14',
+      '10.10,10.11,10.12,10.9': 'Sierra',
+      '10.10,10.11,10.9': 'El Capitan',
+      '10.10,10.9': 'Yosemite',
+      '10.9': 'Mavericks',
+    };
+    const version = hashMap[hash];
+    return version ? `macOS ${version}` : undefined;
+  };
+  return getWindows({ fonts, fontMap: WindowsFonts }) || getMacOS({ fonts, fontMap: MacOSFonts });
+};
+window.R = null;
+(async () => {
+  const fonts = await getFontFaceLoadFonts(FONT_LIST, false);
+  const byName = await getFontFaceLoadFonts(FONT_LIST, true);
+  window.R = JSON.stringify({
+    total: FONT_LIST.length,
+    fonts, platformVersion: getPlatformVersion(fonts) ?? null,
+    byName, byNameVersion: getPlatformVersion(byName) ?? null,
+  });
+})();
+</script></body>

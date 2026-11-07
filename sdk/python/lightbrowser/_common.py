@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from .launcher import build_serve_args, find_binary
+from .launcher import build_serve_args, find_binary, locale_args
 from .persona import Persona
 
 
@@ -44,19 +44,25 @@ def plan_launch(
     workers: int | None,
     extra_args: Sequence[str],
     validate: bool,
+    timezone: str | None = None,
+    locale: str | None = None,
+    languages: Sequence[str] | None = None,
 ) -> LaunchPlan:
     """Resolve binary and persona and build the `serve` command line.
 
     A persona given as a dict is written to a private temp dir that
     `LaunchPlan.cleanup()` removes. With `validate=True` the persona goes
     through `lightbrowser validate` first, so a bad file fails here with
-    the rule text instead of as a bare startup error.
+    the rule text instead of as a bare startup error. `timezone`, `locale`
+    and `languages` override the persona's (ADR 0039: match a proxy exit);
+    validation checks the persona with them.
     """
     p = as_persona(persona)
     family = p.family if p is not None else "chrome"
     exe = find_binary(executable_path, family=family)
+    overrides = locale_args(timezone=timezone, locale=locale, languages=languages)
     if p is not None and validate:
-        p.validate(exe)
+        p.validate(exe, timezone=timezone, locale=locale, languages=languages)
     tmpdir: tempfile.TemporaryDirectory[str] | None = None
     path: Path | None = None
     if p is not None:
@@ -67,7 +73,7 @@ def plan_launch(
             path = p.write_to(tmpdir.name)
     cmd = build_serve_args(
         exe, persona_path=path, port=port, insecure=insecure, profiles_dir=profiles_dir,
-        workers=workers, extra_args=extra_args,
+        workers=workers, extra_args=[*overrides, *extra_args],
     )
     return LaunchPlan(cmd=cmd, persona=p, tmpdir=tmpdir)
 

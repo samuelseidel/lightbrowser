@@ -77,7 +77,25 @@ struct MockState {
     resumed: Vec<String>,
     /// Session counts the server reported per worker.
     worker_sessions: HashMap<String, usize>,
+    /// Locale overrides the server applied (ADR 0039): time zone and
+    /// locale by context, `acceptLanguage` and geolocation by page.
+    time_zones: HashMap<String, String>,
+    locales: HashMap<String, String>,
+    accept_languages: HashMap<String, String>,
+    geolocations: HashMap<String, crate::host::GeolocationOverride>,
 }
+
+/// The zones the mock knows (the real host asks ICU).
+const MOCK_ZONES: &[&str] = &[
+    "UTC",
+    "America/New_York",
+    "America/Los_Angeles",
+    "America/Sao_Paulo",
+    "Asia/Tokyo",
+    "Europe/Berlin",
+    "Europe/London",
+    "Europe/Paris",
+];
 
 /// See the module docs.
 pub struct MockHost {
@@ -260,6 +278,26 @@ impl MockHost {
     /// Workers the server let run, in order.
     pub fn resumed_workers(&self) -> Vec<String> {
         self.state.borrow().resumed.clone()
+    }
+
+    /// The time zone override in effect in `context`.
+    pub fn time_zone_override(&self, context: &str) -> Option<String> {
+        self.state.borrow().time_zones.get(context).cloned()
+    }
+
+    /// The locale override in effect in `context`.
+    pub fn locale_override(&self, context: &str) -> Option<String> {
+        self.state.borrow().locales.get(context).cloned()
+    }
+
+    /// The `acceptLanguage` override of page `target`.
+    pub fn accept_language_override(&self, target: &str) -> Option<String> {
+        self.state.borrow().accept_languages.get(target).cloned()
+    }
+
+    /// The geolocation override of page `target`.
+    pub fn geolocation_override(&self, target: &str) -> Option<crate::host::GeolocationOverride> {
+        self.state.borrow().geolocations.get(target).cloned()
     }
 
     /// The last session count the server reported for worker `id`.
@@ -1501,6 +1539,61 @@ impl PageHost for MockHost {
             p.layout.set_viewport(w as f32, h as f32);
             Ok(())
         })
+    }
+
+    fn set_time_zone_override(
+        &self,
+        context: &str,
+        _target_id: &str,
+        zone: Option<&str>,
+    ) -> HostResult<bool> {
+        let mut st = self.state.borrow_mut();
+        match zone {
+            Some(z) if !MOCK_ZONES.contains(&z) => return Ok(false),
+            Some(z) => st.time_zones.insert(context.into(), z.into()),
+            None => st.time_zones.remove(context),
+        };
+        Ok(true)
+    }
+
+    fn set_locale_override(
+        &self,
+        context: &str,
+        _target_id: &str,
+        locale: Option<&str>,
+    ) -> HostResult<()> {
+        let mut st = self.state.borrow_mut();
+        match locale {
+            Some(l) => st.locales.insert(context.into(), l.into()),
+            None => st.locales.remove(context),
+        };
+        Ok(())
+    }
+
+    fn set_accept_language_override(
+        &self,
+        target_id: &str,
+        languages: Option<&str>,
+    ) -> HostResult<()> {
+        let mut st = self.state.borrow_mut();
+        match languages {
+            Some(l) => st.accept_languages.insert(target_id.into(), l.into()),
+            None => st.accept_languages.remove(target_id),
+        };
+        Ok(())
+    }
+
+    fn set_geolocation_override(
+        &self,
+        target_id: &str,
+        geo: Option<crate::host::GeolocationOverride>,
+    ) -> HostResult<()> {
+        let mut st = self.state.borrow_mut();
+        match geo {
+            Some(g) => st.geolocations.insert(target_id.into(), g),
+            None => st.geolocations.remove(target_id),
+        };
+        Ok(())
     }
 
     fn ax_tree(&self, target_id: &str) -> HostResult<Vec<AxNode>> {

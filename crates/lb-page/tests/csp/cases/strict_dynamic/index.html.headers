@@ -1,0 +1,1 @@
+Content-Security-Policy: script-src 'nonce-n1' 'strict-dynamic' 'self' 'unsafe-inline' http://localhost:*

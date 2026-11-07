@@ -10,6 +10,8 @@
 //! navigates); image buttons add no coordinates; file inputs send an empty
 //! file.
 
+use std::rc::Rc;
+
 use lb_dom::{Document, NodeFlags, NodeId, local_name};
 
 use super::{FormBody, NavRequest, Window};
@@ -45,10 +47,11 @@ impl Enctype {
 /// Submit `form` (after its `submit` event, if any). `submitter` is the
 /// button that submitted it; `user_activated` is set for trusted input.
 pub(crate) fn submit_form(
-    w: &Window,
+    w: &Rc<Window>,
     form: NodeId,
     submitter: Option<NodeId>,
     user_activated: bool,
+    loc: Option<super::csp::SourceLoc>,
 ) {
     let (action, method, enctype, entries) = w.with_doc(|d| {
         // A submitter's own attribute wins (only on submit buttons).
@@ -71,6 +74,10 @@ pub(crate) fn submit_form(
         None => Some(w.url()),
     };
     let Some(mut url) = url else { return };
+    // Content Security Policy (`form-action`, ADR 0036): not sent.
+    if !w.csp_navigation(super::csp::Dir::FormAction, &url, loc) {
+        return;
+    }
     let mut nav = NavRequest::get(url.clone(), false);
     nav.user_activated = user_activated;
     if method == "post" {

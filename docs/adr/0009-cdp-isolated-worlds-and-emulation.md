@@ -1,6 +1,8 @@
 # ADR 0009: CDP bindings only in isolated worlds; Emulation must match the persona
 
-Status: Accepted (2026-11-03)
+Status: Accepted (2026-11-03). Revised 2026-11-07 by ADR 0039: time
+zone, locale, `acceptLanguage` and geolocation overrides are no longer
+checked against the persona; they follow a proxy, as Chrome takes them.
 
 ## Context
 
@@ -55,12 +57,14 @@ isolated worlds (`BindingScope`: `AllIsolatedWorlds`, `World(name)` or one
   unset); `screenWidth` / `screenHeight` must equal the persona screen;
   `screenOrientation` must match the screen; `positionX/Y` must be 0. A UA
   override must equal the persona's UA string (a different family gets a
-  specific message); `acceptLanguage` must start with the persona's
-  language, `platform` must equal `os.platform`, and `userAgentMetadata`
-  (platform, version, architecture, bitness, model, mobile, brands) must
-  equal the persona's client hints. Locale and timezone overrides must equal
-  the persona's, an empty value clears; `setEmulatedMedia` accepts `screen`
-  only and features equal to what the persona's media environment answers.
+  specific message); `platform` must equal `os.platform`, and
+  `userAgentMetadata` (platform, version, architecture, bitness, model,
+  mobile, brands) must equal the persona's client hints;
+  `setEmulatedMedia` accepts `screen` only and features equal to what the
+  persona's media environment answers. (Until ADR 0039, `acceptLanguage`
+  had to start with the persona's language and locale and timezone
+  overrides had to equal the persona's; they now take any value Chrome
+  takes, with Chrome's errors.)
 - **Viewport.** A viewport (`width` x `height`) is accepted when it fits in
   the persona screen (no larger than the available or full screen, whichever
   is bigger), and passed to the host as a `ViewportOverride`. If it equals the
@@ -90,9 +94,10 @@ isolated worlds (`BindingScope`: `AllIsolatedWorlds`, `World(name)` or one
 - Playwright features that rely on main-world bindings (for example
   `page.exposeFunction` in the main world) behave as Playwright does in other
   browsers: it uses the binding through an isolated-world proxy.
-- Open: only the overrides listed above are checked. Others (geolocation,
-  touch, CPU throttling) fall back to the host's default, which is
-  "unsupported" until the page host implements them.
+- Open: only the overrides listed above are checked. Others (CPU
+  throttling, ...) fall back to the host's default, which is
+  "unsupported" until the page host implements them. Geolocation is
+  implemented by ADR 0039.
 - Open: the real page host (`lb_page::CdpHost`) must keep the rule for
   `Page.addScriptToEvaluateOnNewDocument` without a world name: it runs in
   the main world by protocol, so only clients that ask for it get it.

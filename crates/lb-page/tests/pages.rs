@@ -4,9 +4,13 @@
 mod apis;
 mod common;
 mod console;
+mod csp;
+mod fonts;
 mod frames;
 mod idb;
 mod images;
+mod named;
+mod partition;
 mod public_bench;
 mod report;
 mod service_workers;
