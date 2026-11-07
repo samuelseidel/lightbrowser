@@ -334,7 +334,12 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
         }
         if let Some(nav) = w.take_nav_request() {
             let (ws2, p2) = (ws.clone(), page.clone());
-            let target = crate::nav::Target::from_script(nav.clone(), w.url());
+            let mut target = crate::nav::Target::from_script(nav.clone(), w.url());
+            if nav.reload {
+                // `location.reload()`: a reload of the current entry.
+                target.kind = crate::session::NavKind::Reload;
+                target.transition = "reload".into();
+            }
             let go = true;
             if go {
                 if nav.reload {

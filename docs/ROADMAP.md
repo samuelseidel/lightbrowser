@@ -3457,8 +3457,13 @@ rounds of verification; the verifiers still listed open low and medium
 items per package (their reports are in the branches' ADRs under "Open
 items"). Integration changes: the MCP server's own URL filter was replaced by
 the egress policy; the timeline package's session history was dropped in
-favour of the CDP coverage package's. Full workspace checks of the merged
-tree are recorded below once run.
+favour of the CDP coverage package's. Checks of the merged tree on rtx-dev (2026-11-07, `integrate/borrow`):
+`cargo fmt --check`, clippy for both families, the whole workspace test
+suite, the Firefox-family tests, the detect-bench unit tests and the
+Playwright suite all pass, except that `perf::worker_shared` (entry order in
+a shared worker's timeline) failed once under parallel load and passes alone
+five times out of five. Not run on the merged tree: the WPT subset, T-010
+over the eight reference personas, the crawl bench.
 
 Findings about our own code, for the owners:
 - The detector's `cdp_runtime` probe tests a getter path V8 closed in
