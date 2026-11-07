@@ -84,10 +84,12 @@ pub(super) fn hook(rt: Weak<RtInner>) -> DynamicImportHook {
                     "Failed to resolve module specifier '{spec}'"
                 ));
             };
-            // A module's own URL; a classic script resolves against the
-            // document's base URL.
+            // The calling script's URL: an external module or classic
+            // script resolves against its own URL, as in Chrome. Inline
+            // scripts run with the document's URL and CDP evaluations
+            // with none; both use the document's base URL.
             let base = match Url::parse(referrer) {
-                Ok(u) if w.module_map.borrow().contains_key(u.as_str()) => u,
+                Ok(u) if u != w.url() => u,
                 _ => w.base_url(),
             };
             let Ok(url) = resolve_specifier(spec, &base) else {

@@ -1,0 +1,9 @@
+<html><body><pre id=o></pre><script>
+const r=[];const T=(n,f)=>{try{r.push(n+'='+f())}catch(e){r.push(n+'!'+e.name+':'+e.message)}};
+const l=document.createElement('link'),a=document.createElement('a'),ar=document.createElement('area'),f=document.createElement('iframe'),d=document.createElement('div'),o=document.createElement('output');
+for(const t of ['modulepreload','MODULEPRELOAD','stylesheet','preload','prefetch','prerender','dns-prefetch','preconnect','icon','manifest','canonical','alternate','next','apple-touch-icon','apple-touch-icon-precomposed','compression-dictionary','expect','noopener','author','bogus','privacy-policy','terms-of-service','payment','search','pingback']) T('link.'+t,()=>l.relList.supports(t));
+for(const t of ['noopener','noreferrer','opener','nofollow','stylesheet']) {T('a.'+t,()=>a.relList.supports(t));T('area.'+t,()=>ar.relList.supports(t));}
+for(const t of ['allow-scripts','ALLOW-SCRIPTS','allow-same-origin','allow-forms','allow-modals','allow-popups','allow-popups-to-escape-sandbox','allow-presentation','allow-orientation-lock','allow-pointer-lock','allow-top-navigation','allow-top-navigation-by-user-activation','allow-top-navigation-to-custom-protocols','allow-downloads','allow-storage-access-by-user-activation','allow-bogus']) T('sb.'+t,()=>f.sandbox.supports(t));
+T('class',()=>d.classList.supports('a'));T('for',()=>o.htmlFor.supports('a'));T('sizes',()=>l.sizes.supports('a'));T('noarg',()=>l.relList.supports());
+document.getElementById('o').textContent=r.join('\n');
+</script></body></html>

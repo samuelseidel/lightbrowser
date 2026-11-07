@@ -68,7 +68,7 @@ fn start(ws: &Rc<WorkerState>, page: &Rc<PageState>, child: &Rc<Window>, nav: Fr
     parent.pending_loads.set(parent.pending_loads.get() + 1);
     let (ws, page, child) = (ws.clone(), page.clone(), child.clone());
     tokio::task::spawn_local(async move {
-        navigate_frame(ws, page, child, nav).await;
+        navigate_frame(ws, page, parent, child, nav).await;
     });
 }
 
@@ -94,14 +94,14 @@ pub(crate) fn tree(top: &Rc<Window>) -> Vec<Rc<Window>> {
 async fn navigate_frame(
     ws: Rc<WorkerState>,
     page: Rc<PageState>,
+    parent: Rc<Window>,
     old: Rc<Window>,
     nav: FrameNavigation,
 ) {
-    let Some(parent) = wf::parent(&old) else {
-        return;
-    };
+    // `start` counted this navigation in the parent's `pending_loads`. The
+    // parent comes from `start`: a frame removed before this task runs has
+    // no parent link any more, and its count must still be settled.
     let id = wf::frame_id(&old);
-    // `start` counted this navigation in the parent's `pending_loads`.
     let done = FrameLoad {
         parent: parent.clone(),
         id,

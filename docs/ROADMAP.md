@@ -3209,6 +3209,76 @@ The three failures above are fixed:
   checked-in file. `stubs_name_archive_symbols` skips `WasmRevecPhase` off
   x86_64, since V8 builds the revectorizer only for x64.
 
+## Public bot-detection pages (2026-11-07)
+
+At the user's request (ADR 0035), a release build with
+`chrome153_macos26_apple_m4_1512x982` was driven over CDP (Playwright
+`connectOverCDP`) against public community test pages: sannysoft,
+rebrowser bot-detector, CreepJS, deviceandbrowserinfo, incolumitas,
+browserscan, browserleaks and tls.peet.ws. Vendor challenge pages
+(Cloudflare, Turnstile, reCAPTCHA, BotD) were left out for their terms;
+pixelscan is blocked by the local DNS filter. Every finding was reproduced
+on loopback and compared with local Chrome (153 headless shell, 156).
+
+First run:
+- **Passed:** network (tls.peet.ws JA4 `t13d1517h2_8daaf6152771_344585cda68d`
+  equals the capture, H2 as captured, incolumitas TCP "Mac OS"),
+  `webdriver`, CDP and init-script leaks, worker consistency, UA and
+  client hints, deviceandbrowserinfo "human".
+- **Failed:**
+  - A UTF-8 panic in the module import scan took the worker down
+    (browserscan).
+  - An iframe removed before its navigation ran blocked `load` (sannysoft,
+    incolumitas).
+  - `relList.supports` threw, so browserscan's Vite app did not render.
+  - History updates were not rate-limited (rebrowser
+    `ipcFloodingProtection`).
+  - Host errors ("unknown realm") reached the page.
+  - CreepJS read macOS "Mavericks" from `local()` fonts, and its svg,
+    rects, worker and headless sections failed on missing SVG geometry,
+    `Range`, `Selection` and `CSS.supports`.
+  - `BroadcastChannel` was an illegal constructor (incolumitas).
+
+All are fixed (ADR 0035). The second run found and fixed two more:
+- `import()` inside a top-level module resolved against the document's
+  directory (browserscan's lazy pages came from `/` instead of `/dist/`).
+- The legacy `navigator.getUserMedia` threw `NotSupportedError` (sannysoft).
+
+Second run (release 45.03 MB on macOS arm64):
+- Every page reaches `load`.
+- browserscan reports "Normal" on every check.
+- CreepJS: 0 % headless, like-headless and stealth.
+- deviceandbrowserinfo: "You are human!".
+- rebrowser: green except two checks.
+- sannysoft's remaining errors are its own zero-argument probes, which get
+  Chrome's messages.
+- incolumitas' remaining error comes from its classifier host
+  (`abs.incolumitas.com` returns 502).
+
+Checks:
+- fmt and clippy are clean (`chunks_exact_to_as_chunks`, new in clippy
+  1.99, fires only in untouched lb-gl and lb-fptest code).
+- Workspace tests pass except two `lb-js` `v8` archive tests, which read
+  GNU `ar` and fail on macOS's BSD archive (fixed on the merged branch).
+- `pages` 110/110, including `public_bench` (7 cases) and the report gate.
+- WPT gate passes (11768/12465 when last counted, after the Range, SVG
+  and CSS work).
+- Firefox tests and clippy pass.
+
+Open:
+- No Content Security Policy is enforced (rebrowser `bypassCsp`: a script
+  that `script-src` forbids loads).
+- Third-party storage is not partitioned (rebrowser `storagePartitioning`:
+  an A→B→A frame reads the top page's `localStorage`).
+- CreepJS flags the canvas readback noise ("rgba noise").
+- `local()` face lists exist for macOS 26 only.
+- `CSS.supports` accepts `font: bold` and `text-shadow: red`, which Chrome
+  rejects.
+- `BroadcastChannel` is not partitioned.
+- The persona timezone is not checked against the IP's location.
+- The hot-symbol order was not regenerated (valgrind is not available on
+  macOS).
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from

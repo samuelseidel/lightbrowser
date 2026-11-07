@@ -289,7 +289,7 @@ impl Walker<'_> {
 }
 
 /// Where a line sits in its box: 0 = left, 0.5 = centered, 1 = right.
-fn align_factor(a: TextAlign, dir: Direction) -> f32 {
+pub(crate) fn align_factor(a: TextAlign, dir: Direction) -> f32 {
     let rtl = dir == Direction::Rtl;
     match a {
         TextAlign::Center | TextAlign::WebkitCenter | TextAlign::InternalCenter => 0.5,

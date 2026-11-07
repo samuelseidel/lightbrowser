@@ -755,6 +755,9 @@ fn is_stylesheet_link(doc: &Document, n: NodeId) -> bool {
 /// `align`, `bgcolor`, `border` on tables and images, `hidden`.
 fn presentational_hints(doc: &Document, id: NodeId) -> Option<DeclarationBlock> {
     let el = doc.element(id)?;
+    if el.name.ns == ns!(svg) {
+        return svg_presentation_attributes(el);
+    }
     if el.name.ns != ns!(html) {
         return None;
     }
@@ -837,6 +840,49 @@ fn presentational_hints(doc: &Document, id: NodeId) -> Option<DeclarationBlock> 
             "border-style",
             if name == "table" { "outset" } else { "solid" },
         );
+    }
+    if b.decls.is_empty() { None } else { Some(b) }
+}
+
+/// SVG presentation attributes for the properties we compute (author
+/// level, specificity 0, as in Blink's `SVGElement::
+/// CollectStyleForPresentationAttribute`); unitless lengths are px.
+fn svg_presentation_attributes(el: &lb_dom::ElementData) -> Option<DeclarationBlock> {
+    let mut b = DeclarationBlock::default();
+    let px = |v: &str| -> String {
+        let t = v.trim();
+        if !t.is_empty() && t.parse::<f32>().is_ok() {
+            format!("{t}px")
+        } else {
+            t.to_string()
+        }
+    };
+    for name in [
+        "font-family",
+        "font-size",
+        "font-weight",
+        "font-style",
+        "letter-spacing",
+        "word-spacing",
+        "display",
+        "visibility",
+        "opacity",
+    ] {
+        if let Some(v) = el.attr(name) {
+            let v = if matches!(name, "font-size" | "letter-spacing" | "word-spacing") {
+                px(v)
+            } else {
+                v.trim().to_string()
+            };
+            b.push_text(name, &v);
+        }
+    }
+    if &*el.name.local == "svg" {
+        for name in ["width", "height"] {
+            if let Some(v) = el.attr(name) {
+                b.push_text(name, &px(v));
+            }
+        }
     }
     if b.decls.is_empty() { None } else { Some(b) }
 }

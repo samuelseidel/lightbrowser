@@ -34,24 +34,83 @@ pub(crate) fn node_interface(doc: &Document, id: NodeId, _slot: u32) -> &'static
             if name.ns == ns!(html) {
                 html_interface(&name.local)
             } else if name.ns == ns!(svg) {
-                match &*name.local {
-                    "svg" => "SVGSVGElement",
-                    "g" => "SVGGElement",
-                    "path" => "SVGPathElement",
-                    "rect" => "SVGRectElement",
-                    "circle" => "SVGCircleElement",
-                    "text" => "SVGTextElement",
-                    "script" => "SVGScriptElement",
-                    "style" => "SVGStyleElement",
-                    "title" => "SVGTitleElement",
-                    _ => "SVGElement",
-                }
+                svg_interface(&name.local)
             } else if name.ns == ns!(mathml) {
                 "MathMLElement"
             } else {
                 "Element"
             }
         }
+    }
+}
+
+/// SVG element interface by local name (Chrome 153's SVG element set).
+pub(crate) fn svg_interface(local: &str) -> &'static str {
+    match local {
+        "a" => "SVGAElement",
+        "animate" => "SVGAnimateElement",
+        "animateMotion" => "SVGAnimateMotionElement",
+        "animateTransform" => "SVGAnimateTransformElement",
+        "circle" => "SVGCircleElement",
+        "clipPath" => "SVGClipPathElement",
+        "defs" => "SVGDefsElement",
+        "desc" => "SVGDescElement",
+        "ellipse" => "SVGEllipseElement",
+        "feBlend" => "SVGFEBlendElement",
+        "feColorMatrix" => "SVGFEColorMatrixElement",
+        "feComponentTransfer" => "SVGFEComponentTransferElement",
+        "feComposite" => "SVGFECompositeElement",
+        "feConvolveMatrix" => "SVGFEConvolveMatrixElement",
+        "feDiffuseLighting" => "SVGFEDiffuseLightingElement",
+        "feDisplacementMap" => "SVGFEDisplacementMapElement",
+        "feDistantLight" => "SVGFEDistantLightElement",
+        "feDropShadow" => "SVGFEDropShadowElement",
+        "feFlood" => "SVGFEFloodElement",
+        "feFuncA" => "SVGFEFuncAElement",
+        "feFuncB" => "SVGFEFuncBElement",
+        "feFuncG" => "SVGFEFuncGElement",
+        "feFuncR" => "SVGFEFuncRElement",
+        "feGaussianBlur" => "SVGFEGaussianBlurElement",
+        "feImage" => "SVGFEImageElement",
+        "feMerge" => "SVGFEMergeElement",
+        "feMergeNode" => "SVGFEMergeNodeElement",
+        "feMorphology" => "SVGFEMorphologyElement",
+        "feOffset" => "SVGFEOffsetElement",
+        "fePointLight" => "SVGFEPointLightElement",
+        "feSpecularLighting" => "SVGFESpecularLightingElement",
+        "feSpotLight" => "SVGFESpotLightElement",
+        "feTile" => "SVGFETileElement",
+        "feTurbulence" => "SVGFETurbulenceElement",
+        "filter" => "SVGFilterElement",
+        "foreignObject" => "SVGForeignObjectElement",
+        "g" => "SVGGElement",
+        "image" => "SVGImageElement",
+        "line" => "SVGLineElement",
+        "linearGradient" => "SVGLinearGradientElement",
+        "marker" => "SVGMarkerElement",
+        "mask" => "SVGMaskElement",
+        "metadata" => "SVGMetadataElement",
+        "mpath" => "SVGMPathElement",
+        "path" => "SVGPathElement",
+        "pattern" => "SVGPatternElement",
+        "polygon" => "SVGPolygonElement",
+        "polyline" => "SVGPolylineElement",
+        "radialGradient" => "SVGRadialGradientElement",
+        "rect" => "SVGRectElement",
+        "script" => "SVGScriptElement",
+        "set" => "SVGSetElement",
+        "stop" => "SVGStopElement",
+        "style" => "SVGStyleElement",
+        "svg" => "SVGSVGElement",
+        "switch" => "SVGSwitchElement",
+        "symbol" => "SVGSymbolElement",
+        "text" => "SVGTextElement",
+        "textPath" => "SVGTextPathElement",
+        "title" => "SVGTitleElement",
+        "tspan" => "SVGTSpanElement",
+        "use" => "SVGUseElement",
+        "view" => "SVGViewElement",
+        _ => "SVGElement",
     }
 }
 

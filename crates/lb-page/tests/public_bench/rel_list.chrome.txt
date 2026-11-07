@@ -1,0 +1,55 @@
+link.modulepreload=true
+link.MODULEPRELOAD=true
+link.stylesheet=true
+link.preload=true
+link.prefetch=true
+link.prerender=true
+link.dns-prefetch=true
+link.preconnect=true
+link.icon=true
+link.manifest=true
+link.canonical=true
+link.alternate=true
+link.next=true
+link.apple-touch-icon=true
+link.apple-touch-icon-precomposed=true
+link.compression-dictionary=true
+link.expect=false
+link.noopener=false
+link.author=false
+link.bogus=false
+link.privacy-policy=false
+link.terms-of-service=false
+link.payment=false
+link.search=false
+link.pingback=false
+a.noopener=true
+area.noopener=true
+a.noreferrer=true
+area.noreferrer=true
+a.opener=true
+area.opener=true
+a.nofollow=false
+area.nofollow=false
+a.stylesheet=false
+area.stylesheet=false
+sb.allow-scripts=true
+sb.ALLOW-SCRIPTS=true
+sb.allow-same-origin=true
+sb.allow-forms=true
+sb.allow-modals=true
+sb.allow-popups=true
+sb.allow-popups-to-escape-sandbox=true
+sb.allow-presentation=true
+sb.allow-orientation-lock=true
+sb.allow-pointer-lock=true
+sb.allow-top-navigation=true
+sb.allow-top-navigation-by-user-activation=true
+sb.allow-top-navigation-to-custom-protocols=false
+sb.allow-downloads=true
+sb.allow-storage-access-by-user-activation=true
+sb.allow-bogus=false
+class!TypeError:Failed to execute 'supports' on 'DOMTokenList': DOMTokenList has no supported tokens.
+for!TypeError:Failed to execute 'supports' on 'DOMTokenList': DOMTokenList has no supported tokens.
+sizes!TypeError:Failed to execute 'supports' on 'DOMTokenList': DOMTokenList has no supported tokens.
+noarg!TypeError:Failed to execute 'supports' on 'DOMTokenList': 1 argument required, but only 0 present.

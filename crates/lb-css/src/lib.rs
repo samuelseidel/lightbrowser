@@ -28,6 +28,8 @@ mod media;
 mod props;
 mod serialize;
 mod sheet;
+mod supports;
+mod supports_data;
 mod ua;
 mod values;
 
@@ -40,6 +42,7 @@ pub use props::{
 };
 pub use serialize::{computed_property_names, computed_value, longhand_value};
 pub use sheet::{ImportRule, Origin, StyleRule, Stylesheet};
+pub use supports::{supports_condition, supports_declaration};
 pub use ua::ua_stylesheet;
 pub use values::{
     Align, BorderStyle, BoxSizing, Calc, Clear, Color, ColorValue, Direction, Display,

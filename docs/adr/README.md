@@ -40,6 +40,7 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0032](0032-whole-connection-tcp-shaping.md) | Shape the whole connection, not only the SYN | Accepted (2026-11-03) |
 | [0033](0033-public-data-source-of-truth.md) | Public data is the source of truth for TCP profiles | Accepted (2026-11-03) |
 | [0034](0034-console-side-effects.md) | Console calls run the page code Chrome runs, and no other | Accepted (2026-11-07) |
+| [0035](0035-public-bench-api-fidelity.md) | Gaps found by public bot-detection pages: frame-removal `load` fix, host errors kept from the page, navigation rate limit, `DOMTokenList.supports`, Range/Selection, SVG geometry, `CSS.supports` from recorded Chrome data, process-wide `BroadcastChannel`, `import()` base URL, legacy `getUserMedia`, `local()` faces per OS release | Accepted (2026-11-07) |
 
 ## Adding an ADR
 

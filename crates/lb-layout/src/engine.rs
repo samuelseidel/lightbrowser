@@ -378,6 +378,107 @@ impl LayoutEngine {
         }
     }
 
+    /// Rects of the characters `start..end` (UTF-16 offsets into the
+    /// node's data) of a text node, one per line they fall on, as
+    /// `Range.getClientRects()` gives them: the line's text box from the
+    /// first to the last selected glyph, as high as the line for
+    /// `line-height: normal` and else as the font (rounded ascent plus
+    /// descent, Blink's half leading), placed where the text is painted. A collapsed range gives
+    /// one zero-width rect. Empty for text without a box.
+    pub fn text_rects(
+        &mut self,
+        doc: &Document,
+        node: NodeId,
+        start: usize,
+        end: usize,
+    ) -> Vec<Rect> {
+        let Some(b) = self.box_of(doc, node) else {
+            return Vec::new();
+        };
+        let raw = doc.character_data(node).unwrap_or("");
+        let st = self.state(doc);
+        let lb = &st.built.tree.boxes[b];
+        let (BoxKind::Text(run), Some(css)) = (&lb.kind, &lb.css) else {
+            return vec![st.geo[b].rect];
+        };
+        let Some(font) = run.font() else {
+            return vec![st.geo[b].rect];
+        };
+        let rect = st.geo[b].rect;
+        // Raw UTF-16 offset -> char index in the collapsed text.
+        let ws = css.white_space;
+        let total = run.text.chars().count();
+        let strip = ws.collapses_spaces()
+            && raw.starts_with([' ', '\t', '\n', '\r', '\x0c'])
+            && !run.text.starts_with(' ');
+        let map = |off: usize| {
+            let mut units = 0;
+            let mut end = raw.len();
+            for (i, c) in raw.char_indices() {
+                if units >= off {
+                    end = i;
+                    break;
+                }
+                units += c.len_utf16();
+            }
+            crate::text::collapse(&raw[..end], ws, strip)
+                .chars()
+                .count()
+                .min(total)
+        };
+        let (a, z) = (map(start), map(end.max(start)));
+        let lm = font.line_metrics();
+        let lh = run.line_height;
+        // Blink rounds ascent and descent and floors the half leading.
+        // With `line-height: normal` the line box is the font's height
+        // here, so the text takes it all (as inline element boxes do).
+        let height = if css.line_height == lb_css::LineHeight::Normal {
+            lh
+        } else {
+            lm.ascent.round() + lm.descent.round()
+        };
+        let half_leading = ((lh - height) / 2.0).floor();
+        let factor = crate::display::align_factor(css.text_align, css.direction);
+        let chars: Vec<char> = run.text.chars().collect();
+        let mut out = Vec::new();
+        let mut cursor = 0;
+        let lines = run.lines(Some(rect.width));
+        let last = lines.len().saturating_sub(1);
+        for (n, (text, width)) in lines.into_iter().enumerate() {
+            let len = text.chars().count();
+            let (l0, l1) = (cursor, cursor + len);
+            // A line takes the selection if it overlaps it; a collapsed
+            // selection takes the first line it touches.
+            let hit = if a == z {
+                out.is_empty() && (l0..=l1).contains(&a)
+            } else {
+                a < l1 && z > l0
+            };
+            if hit {
+                let s = a.clamp(l0, l1) - l0;
+                let e = z.clamp(l0, l1) - l0;
+                let pre: String = chars[l0..l0 + s].iter().collect();
+                let sel: String = chars[l0 + s..l0 + e].iter().collect();
+                let x = rect.x + (rect.width - width).max(0.0) * factor + font.measure(&pre);
+                out.push(Rect::new(
+                    x,
+                    rect.y + n as f32 * lh + half_leading,
+                    font.measure(&sel),
+                    height,
+                ));
+            }
+            cursor = l1;
+            // Spaces dropped at a soft break, then a forced break.
+            while chars.get(cursor) == Some(&' ') && n != last {
+                cursor += 1;
+            }
+            if chars.get(cursor) == Some(&'\n') {
+                cursor += 1;
+            }
+        }
+        out
+    }
+
     /// Content, padding, border and margin boxes (CDP `DOM.getBoxModel`).
     pub fn box_model(&mut self, doc: &Document, node: NodeId) -> Option<BoxModel> {
         let b = self.box_of(doc, node)?;

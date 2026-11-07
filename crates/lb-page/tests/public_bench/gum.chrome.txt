@@ -1,0 +1,9 @@
+len 3 3 same false name getUserMedia/webkitGetUserMedia
+empty throw TypeError: Failed to execute 'getUserMedia' on 'Navigator': At least one of audio and video must be requested
+nocons throw TypeError: Failed to execute 'getUserMedia' on 'Navigator': At least one of audio and video must be requested
+num throw TypeError: Failed to execute 'getUserMedia' on 'Navigator': The provided value is not of type 'MediaStreamConstraints'.
+badok throw TypeError: Failed to execute 'getUserMedia' on 'Navigator': parameter 2 is not of type 'Function'.
+baderr throw TypeError: Failed to execute 'getUserMedia' on 'Navigator': parameter 3 is not of type 'Function'.
+two throw TypeError: Failed to execute 'getUserMedia' on 'Navigator': 3 arguments required, but only 2 present.
+wk2 throw TypeError: Failed to execute 'webkitGetUserMedia' on 'Navigator': parameter 3 is not of type 'Function'.
+this throw TypeError: Illegal invocation
