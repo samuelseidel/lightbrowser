@@ -5,14 +5,18 @@
  },
  "playwright_goto": "page.goto: net::ERR_BLOCKED_BY_CLIENT at http://blocked.test:8099/",
  "probes": {
-  "ws": "error, close 1006 clean=false",
+  "module_defer": "error",
+  "module_async": "error",
   "fetch": "TypeError: Failed to fetch",
   "xhr": "error status=0 readyState=4",
   "img": "error",
+  "ws": "error, close 1006 clean=false",
   "script": "error",
   "worker": "TypeError: Failed to fetch"
  },
  "console": [
+  "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+  "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
   "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
   "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
   "error: Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",

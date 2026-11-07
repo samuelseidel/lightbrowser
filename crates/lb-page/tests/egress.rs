@@ -227,3 +227,41 @@ async fn a_service_worker_fetch_is_refused() {
     );
     assert!(calls.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn an_allowed_name_rebound_to_a_public_address_is_blocked_for_a_page() {
+    // `*.lab.test` is allowed, so its name is looked up; the override stands
+    // in for an answer that moved to a public address (rebinding) or to the
+    // cloud metadata address. The navigation fails as blocked and nothing is
+    // connected (the addresses are not reachable here, so a connect would
+    // run into the goto timeout instead).
+    let ctx = context(false);
+    ctx.set_egress(Arc::new(
+        EgressPolicy::new(lb_net::EgressMode::Loopback, &["*.lab.test"]).unwrap(),
+    ));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let c2 = calls.clone();
+    ctx.set_resolve_hook(Some(Arc::new(move |host: &str| {
+        c2.lock().unwrap().push(host.to_owned());
+        match host {
+            "pub.lab.test" => Some(vec!["203.0.113.9".parse().unwrap()]),
+            "meta.lab.test" => Some(vec!["169.254.169.254".parse().unwrap()]),
+            _ => None,
+        }
+    })));
+    let b = browser();
+    let page = b.new_page(&ctx).await.unwrap();
+    for url in ["http://pub.lab.test/", "http://meta.lab.test/latest/"] {
+        match page
+            .goto(url, WaitUntil::Load, Duration::from_secs(20))
+            .await
+        {
+            Err(PageError::Net(e)) => assert!(e.starts_with("net::ERR_BLOCKED_BY_CLIENT"), "{url}: {e}"),
+            other => panic!("{url}: {other:?}"),
+        }
+    }
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec!["pub.lab.test".to_owned(), "meta.lab.test".to_owned()]
+    );
+}

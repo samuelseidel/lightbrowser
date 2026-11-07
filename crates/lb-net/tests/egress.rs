@@ -825,6 +825,14 @@ async fn websocket_connections_are_refused_too() {
         via(&mut c, &format!("127.0.0.1:{}", p.http));
         assert_eq!(ws_failure(&mut c, "ws://example.test/").await, want);
         assert!(p.entries().is_empty());
+        // A `localhost` name is not vouched for when the proxy would resolve
+        // it (`<-loopback>` sends loopback to the proxy too): refused by the
+        // tunnel itself, not by the fetch hop or the pool.
+        via_all(&mut c, &format!("127.0.0.1:{}", p.http));
+        assert_eq!(ws_failure(&mut c, "ws://a.localhost:9/").await, want);
+        via_all(&mut c, &format!("socks5://127.0.0.1:{}", p.socks));
+        assert_eq!(ws_failure(&mut c, "wss://a.localhost:9/").await, want);
+        assert!(p.entries().is_empty(), "the proxy saw {:?}", p.entries());
     }
     assert!(l.untouched());
 }

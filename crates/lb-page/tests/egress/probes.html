@@ -6,7 +6,7 @@
 // in window.R as text; R.done is set when all have settled.
 var U = 'http://blocked.test:8099/x';
 var R = {};
-var N = 6;
+var N = 8;
 window.R = R;
 function done(k, v) {
   R[k] = v;
@@ -37,4 +37,10 @@ var w = new Worker(URL.createObjectURL(new Blob([
 ])));
 w.onmessage = function (e) { done('worker', e.data); };
 </script>
+<!-- Module scripts the parser inserts: async ones run when fetched, the
+     others after parsing; a failed fetch fires error either way. -->
+<script type="module" async src="http://blocked.test:8099/m-async.js"
+  onerror="done('module_async', 'error')" onload="done('module_async', 'load')"></script>
+<script type="module" src="http://blocked.test:8099/m-defer.js"
+  onerror="done('module_defer', 'error')" onload="done('module_defer', 'load')"></script>
 </body></html>

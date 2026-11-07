@@ -913,8 +913,16 @@ async fn parser_script(
                         Source::Fetch(h) => ok_body(&join(h).await)
                             .map(|r| script::script_source(&r.body, r.header("content-type"))),
                     };
-                    if let Some(s) = s {
-                        run_module(&ws2, &p2, &w2, node, &url, s).await;
+                    match s {
+                        Some(s) => run_module(&ws2, &p2, &w2, node, &url, s).await,
+                        // A module script whose fetch failed (a refused
+                        // request included) fires `error`, as the deferred
+                        // path above does.
+                        None => {
+                            if let Some(n) = node {
+                                with_js(&ws2, &w2, |js| script::fire_error(js, &w2, n));
+                            }
+                        }
                     }
                     w2.pending_loads
                         .set(w2.pending_loads.get().saturating_sub(1));
