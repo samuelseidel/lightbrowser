@@ -326,8 +326,7 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
         let path = tcp_dir.join(format!("{id}.json"));
         let tcp = lb_net::tcpfp::TcpProfile::load(&path)
             .map_err(|e| format!("loading {}: {e}", path.display()))?;
-        ctx.set_tcp_profile(Arc::new(tcp))
-            .map_err(|e| e.to_string())?;
+        ctx.set_tcp_profile(Arc::new(tcp)).map_err(|e| e.to_string())?;
     }
 
     // The page and its network run on the browser's worker thread; this

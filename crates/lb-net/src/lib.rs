@@ -36,8 +36,8 @@ pub mod header_profile;
 pub mod headers;
 pub mod pool;
 pub mod profile;
-pub mod tcpfp;
 pub mod proxy;
+pub mod tcpfp;
 pub mod tls;
 pub mod websocket;
 

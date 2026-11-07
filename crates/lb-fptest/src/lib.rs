@@ -16,6 +16,6 @@ pub mod fingerprint;
 pub mod h2;
 pub mod profile;
 pub mod server;
+pub mod site;
 #[cfg(target_os = "linux")]
 pub mod tcp;
-pub mod site;
