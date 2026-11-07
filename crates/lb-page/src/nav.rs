@@ -265,6 +265,12 @@ pub(crate) async fn navigate_committed(
         };
         a.nav_started(seq, &url, nav_type)
     });
+    let tl_type = match &kind {
+        NavKind::Reload | NavKind::ReloadBypassingCache => "reload",
+        NavKind::History(_) => "back_forward",
+        NavKind::New => "navigate",
+    };
+    let nav_start = std::time::Instant::now();
     // The service worker controlling the URL (ADR 0022) and the new
     // document's client id (`resultingClientId`).
     let bypass_sw = agent.as_ref().is_some_and(|a| a.st.borrow().bypass_sw);
@@ -284,6 +290,7 @@ pub(crate) async fn navigate_committed(
             body: bytes::Bytes::new(),
             url: url.clone(),
             redirected: false,
+            timing: None,
         })
     } else {
         let mut req = document_request(
@@ -386,7 +393,18 @@ pub(crate) async fn navigate_committed(
         .unwrap_or("text/html")
         .trim()
         .to_ascii_lowercase();
-    let w = Window::new(
+    let timeline = lb_webapi::rt::NavInfo {
+        timing: resp.timing.clone(),
+        nav_type: tl_type,
+        status: resp.status,
+        headers: resp.headers.clone(),
+        encoded: resp
+            .timing
+            .as_ref()
+            .map_or(resp.body.len() as u64, |t| t.encoded_body_size),
+        decoded: resp.body.len() as u64,
+    };
+    let w = Window::new_at(
         &rt,
         WindowInit {
             url: resp.url.clone(),
@@ -417,8 +435,10 @@ pub(crate) async fn navigate_committed(
             charset,
             history_len: 0,
         },
+        Some(resp.timing.as_ref().map_or(nav_start, |t| t.start)),
     );
     w.set_session_host(Some(crate::session::host(&page)));
+    w.set_nav_info(timeline);
     w.set_console_sink(Some(page.console_sink()));
     w.set_opened_parser_end(Some(opened_parser_end(&ws, &page, Doc::Main(seq))));
     w.set_dialog_host(Some(page.dialog_host()));
@@ -519,9 +539,13 @@ fn spawn_fetch(
     w: &Rc<Window>,
     url: Url,
     dest: Destination,
+    // Resource Timing: render-blocking, CORS-enabled.
+    (blocking, cors): (bool, bool),
 ) -> JoinHandle<Result<NetResponse, String>> {
     let page = page.clone();
-    let req = NetRequest::get(url, dest, Some(w.url()));
+    let mut req = NetRequest::get(url, dest, Some(w.url()));
+    req.render_blocking = blocking;
+    req.timing_cors = cors;
     w.in_flight.set(w.in_flight.get() + 1);
     let w2 = Rc::downgrade(w);
     let fut = w.net_fetch(req);
@@ -793,6 +817,7 @@ pub(crate) async fn load(
             }
         }
     }
+    w.nav_mark(lb_webapi::rt::NavMark::DomContentLoadedStart);
     with_js(ws, w, |js| {
         fire_event(
             js,
@@ -803,6 +828,7 @@ pub(crate) async fn load(
             false,
         )
     });
+    w.nav_mark(lb_webapi::rt::NavMark::DomContentLoadedEnd);
     doc_event(page, doc, "DOMContentLoaded");
     w.sw_enable_messages();
     w.set_script_waiting_for_sheets(false);
@@ -832,7 +858,9 @@ pub(crate) async fn load(
             false,
             false,
         );
+        w.nav_mark(lb_webapi::rt::NavMark::LoadStart);
         fire_event(js, w, WINDOW_REF, "load", false, false);
+        w.nav_mark(lb_webapi::rt::NavMark::LoadEnd);
         lb_webapi::rt::fire_event_with(
             js,
             w,
@@ -968,7 +996,10 @@ async fn parser_script(
             );
         }
         (ScriptKind::Classic, Some(Some(url))) => {
-            let h = spawn_fetch(page, w, url, Destination::Script);
+            // A script that stops the parser in the head blocks rendering.
+            let blocking = !is_async && !is_defer && w.with_doc(|d| d.body().is_none());
+            let cors = w.with_doc(|d| d.has_attribute(n, "crossorigin"));
+            let h = spawn_fetch(page, w, url, Destination::Script, (blocking, cors));
             if is_async {
                 w.pending_loads.set(w.pending_loads.get() + 1);
                 let w2 = w.clone();
@@ -1001,7 +1032,7 @@ async fn parser_script(
                 None => (doc_url, Source::Inline(script::inline_text(w, n))),
                 Some(Some(u)) => (
                     u.clone(),
-                    Source::Fetch(spawn_fetch(page, w, u, Destination::Script)),
+                    Source::Fetch(spawn_fetch(page, w, u, Destination::Script, (false, true))),
                 ),
                 Some(None) => unreachable!(),
             };
@@ -1066,7 +1097,14 @@ async fn run_module(
                 continue;
             }
             fetched += 1;
-            let r = join(spawn_fetch(page, w, dep.clone(), Destination::Script)).await;
+            let r = join(spawn_fetch(
+                page,
+                w,
+                dep.clone(),
+                Destination::Script,
+                (false, true),
+            ))
+            .await;
             if let Some(resp) = ok_body(&r) {
                 let s = script::script_source(&resp.body, resp.header("content-type"));
                 w.module_map.borrow_mut().insert(dep.to_string(), s.clone());

@@ -131,7 +131,8 @@ fn start(w: &Rc<Window>, key: String, url: Url) {
         );
         return;
     }
-    let req = NetRequest::get(url, Destination::Image, Some(w.url()));
+    let mut req = NetRequest::get(url, Destination::Image, Some(w.url()));
+    req.initiator_type = "css";
     super::net::start_request(
         w,
         req,

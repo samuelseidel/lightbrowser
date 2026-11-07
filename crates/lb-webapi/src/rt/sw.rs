@@ -442,15 +442,21 @@ impl Window {
     /// subresources); not controlled, or not http(s): the network.
     pub fn net_fetch(self: &Rc<Self>, req: NetRequest) -> LocalFuture<Result<NetResponse, String>> {
         let ctrl = self.sw.controller.borrow().as_ref().map(|v| v.id);
-        match (ctrl, self.sw_host()) {
-            (Some(v), Some(host))
-                if matches!(req.url.scheme(), "http" | "https") && !self.is_worker() =>
-            {
-                let w = self.clone();
-                Box::pin(intercept(w, host, v, req))
-            }
-            _ => self.net.fetch(req),
-        }
+        let (fut, pending): (LocalFuture<Result<NetResponse, String>>, _) =
+            match (ctrl, self.sw_host()) {
+                (Some(v), Some(host))
+                    if matches!(req.url.scheme(), "http" | "https") && !self.is_worker() =>
+                {
+                    let w = self.clone();
+                    let p = super::perf::Pending::of(&req, true);
+                    (Box::pin(intercept(w, host, v, req)), p)
+                }
+                _ => {
+                    let p = super::perf::Pending::of(&req, false);
+                    (self.net.fetch(req), p)
+                }
+            };
+        super::perf::track(self, pending, fut)
     }
 
     /// The window or scope goes away.
@@ -1000,6 +1006,7 @@ fn response_of(
         body: body.unwrap_or_default().into(),
         url: Url::parse(&url).unwrap_or_else(|_| req_url.clone()),
         redirected,
+        timing: None,
     })
 }
 

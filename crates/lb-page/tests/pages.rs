@@ -7,6 +7,7 @@ mod console;
 mod frames;
 mod idb;
 mod images;
+mod perf;
 mod report;
 mod service_workers;
 mod shadow;

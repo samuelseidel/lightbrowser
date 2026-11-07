@@ -118,6 +118,7 @@ async fn navigate_frame(
         None
     };
     let reserved = lb_webapi::rt::sw::uuid4();
+    let started = std::time::Instant::now();
     let (resp, creator) = match &nav.srcdoc {
         Some(doc) => (
             Ok(NetResponse {
@@ -127,6 +128,7 @@ async fn navigate_frame(
                 body: doc.clone().into_bytes().into(),
                 url: nav.url.clone(),
                 redirected: false,
+                timing: None,
             }),
             Some(parent_url.clone()),
         ),
@@ -138,6 +140,7 @@ async fn navigate_frame(
                 body: bytes::Bytes::new(),
                 url: nav.url.clone(),
                 redirected: false,
+                timing: None,
             }),
             Some(parent_url.clone()),
         ),
@@ -201,7 +204,18 @@ async fn navigate_frame(
         .as_ref()
         .map(|u| u.to_string())
         .unwrap_or_default();
-    let w = Window::new(&rt, init);
+    let w = Window::new_at(&rt, init, resp.timing.as_ref().map(|t| t.start));
+    w.set_nav_info(lb_webapi::rt::NavInfo {
+        timing: resp.timing.clone(),
+        nav_type: "navigate",
+        status: resp.status,
+        headers: resp.headers.clone(),
+        encoded: resp
+            .timing
+            .as_ref()
+            .map_or(resp.body.len() as u64, |t| t.encoded_body_size),
+        decoded: resp.body.len() as u64,
+    });
     w.set_worker_host(parent.worker_host());
     w.set_sw_host(parent.sw_host());
     w.set_idb_backend(parent.idb_backend());
@@ -210,6 +224,7 @@ async fn navigate_frame(
     if let (Some(v), Some(h)) = (&controller, w.sw_host()) {
         h.schedule_update(v.id);
     }
+    let network_frame = creator.is_none();
     let r = ws.with_engine(|e| wf::commit_child(e, &parent, id, &w, creator));
     match r {
         Some(Ok(())) => {}
@@ -238,6 +253,10 @@ async fn navigate_frame(
         a.frame_lifecycle(id, "commit");
     }
     let _ = crate::nav::load(&ws, &page, &w, crate::nav::Doc::Frame(id), &text).await;
+    // The parent's timeline gets an `iframe` entry for the document.
+    if network_frame && !parent.is_closed() {
+        parent.perf_iframe(nav.url.clone(), started, &resp);
+    }
     page.notify.notify_one();
     if !w.is_closed() {
         done.finish();

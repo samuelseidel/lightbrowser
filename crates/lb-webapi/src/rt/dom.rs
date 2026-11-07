@@ -2501,6 +2501,16 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
             None => cx.ret(Arg::Null),
         }
     });
+    setter(reg, rt, "HTMLScriptElement", "crossOrigin", |cx, w| {
+        let (slot, n) = this_elem(cx, w)?;
+        if cx.arg_kind(0) == lb_js::ValueKind::Null {
+            w.doc_slot_mut(slot, |d| d.remove_attribute(n, "crossorigin"));
+        } else {
+            let v = cx.arg_string(0)?;
+            let _ = w.doc_slot_mut(slot, |d| d.set_attribute(n, "crossorigin", &v));
+        }
+        Ok(())
+    });
     // <template>
     getter(reg, rt, "HTMLTemplateElement", "content", |cx, w| {
         let (slot, n) = this_elem(cx, w)?;

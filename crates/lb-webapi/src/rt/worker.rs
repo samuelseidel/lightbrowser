@@ -1435,7 +1435,11 @@ fn import_scripts(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), Ho
         } else {
             let mut req = NetRequest::get(u.clone(), Destination::Script, Some(w.url()));
             req.mode = "no-cors";
-            let resp = host.fetch_sync(req).map_err(|_| failed())?;
+            let tl = req.clone();
+            let started = std::time::Instant::now();
+            let r = host.fetch_sync(req);
+            w.perf_import(&tl, started, r.as_ref());
+            let resp = r.map_err(|_| failed())?;
             if !(200..300).contains(&resp.status) {
                 return Err(failed());
             }

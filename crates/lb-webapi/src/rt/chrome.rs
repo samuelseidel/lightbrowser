@@ -37,6 +37,8 @@ pub struct LoadInfo {
     /// Page clock ms of `DOMContentLoaded` and of the `load` event.
     pub dcl_ms: Option<f64>,
     pub load_ms: Option<f64>,
+    /// Page clock ms of the first paint entry.
+    pub first_paint_ms: Option<f64>,
 }
 
 /// Set up a new main-world realm: ICU defaults from the persona, then
@@ -159,9 +161,8 @@ fn load_times(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(), HostError>
     // earlier. Without the page layer's numbers, put commit a third of
     // the way to DOMContentLoaded.
     let commit = secs(dcl.map_or(0.0, |d| (d / 3.0).min(50.0)));
-    let first_paint = match (load, dcl) {
-        (Some(l), _) => secs(l + 12.0),
-        (None, Some(d)) => secs(d + 12.0),
+    let first_paint = match (li.first_paint_ms, load, dcl) {
+        (Some(p), _, _) => secs(p),
         _ => 0.0,
     };
     let proto = protocol(w, &li);

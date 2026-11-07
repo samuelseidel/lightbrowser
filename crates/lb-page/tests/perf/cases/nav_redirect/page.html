@@ -1,0 +1,14 @@
+<!doctype html><html><head><title>redirected</title></head><body>
+<!--LOG-->
+<script>
+addEventListener('load',async function(){
+  await sleep(30);
+  var e=performance.getEntriesByType('navigation')[0], tm=performance.timing;
+  log('url '+short(location.pathname)+' '+short(e.name)+' '+(e.name===location.href));
+  log('count '+e.redirectCount+' '+performance.navigation.redirectCount+' type='+e.type);
+  log('redirect '+[e.startTime,e.redirectStart>=e.startTime,e.redirectEnd>0,e.fetchStart>=e.redirectEnd,e.redirectEnd>=e.redirectStart,e.domainLookupStart>=e.fetchStart,chain(e)].join());
+  log('timing '+[tm.redirectStart>0,tm.redirectEnd>=tm.redirectStart,tm.fetchStart>=tm.redirectEnd,tm.navigationStart<=tm.redirectStart,Math.abs(tm.redirectStart-tm.navigationStart)<=2].join());
+  log('status '+e.responseStatus+' '+(e.transferSize-e.encodedBodySize));
+  end();
+});
+</script></body></html>

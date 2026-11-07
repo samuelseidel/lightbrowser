@@ -41,6 +41,7 @@ pub mod pool;
 pub mod profile;
 pub mod proxy;
 pub mod tcpfp;
+pub mod timing;
 pub mod tls;
 pub mod websocket;
 
@@ -52,6 +53,7 @@ pub use header_profile::{HeaderProfile, RequestKind, RequestMeta};
 pub use pool::ConnectionPool;
 pub use profile::ClientHelloProfile;
 pub use proxy::{Credentials, Proxy, ProxyChallenge, ProxyKind};
+pub use timing::{ConnTiming, FetchTiming, RedirectTiming};
 
 /// Which HTTP version a connection negotiated (via ALPN).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

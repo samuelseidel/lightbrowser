@@ -414,6 +414,7 @@ pub(crate) async fn page_fetch(
                     body: body.into(),
                     url: req.url.clone(),
                     redirected: false,
+                    timing: None,
                 });
             }
         }
@@ -473,6 +474,7 @@ pub(crate) async fn page_fetch(
                         body: bytes::Bytes::new(),
                         url: h.url.clone(),
                         redirected: false,
+                        timing: None,
                     })),
                     resource_type: rtype.into(),
                     frame_id: Some(frame.clone()),

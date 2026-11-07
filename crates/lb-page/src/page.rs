@@ -323,12 +323,27 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             }
             did = true;
         }
+        // The first frame after content exists: first paint entries
+        // (ADR 0046).
+        for x in wins
+            .iter()
+            .filter(|x| x.paint_due().is_some_and(|d| d <= x.clock.now()))
+        {
+            x.run_paint();
+            did = true;
+        }
         if let Some(nav) = w.take_nav_request() {
             let (ws2, p2) = (ws.clone(), page.clone());
-            let target = crate::nav::Target::from_script(nav, w.url());
-            tokio::task::spawn_local(async move {
-                let _ = crate::nav::navigate(ws2, p2, target).await;
-            });
+            let target = crate::nav::Target::from_script(nav.clone(), w.url());
+            let go = true;
+            if go {
+                if nav.reload {
+                    page.reloading.set(true);
+                }
+                tokio::task::spawn_local(async move {
+                    let _ = crate::nav::navigate(ws2, p2, target).await;
+                });
+            }
             did = true;
         }
         if let Some(delta) = w.take_traversal() {
@@ -362,6 +377,12 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
         }
         if wins.iter().any(|x| x.has_animation_frames()) {
             deadline = Some(deadline.map_or(next_frame, |d| d.min(next_frame)));
+        }
+        for x in &wins {
+            if let Some(d) = x.paint_due() {
+                let at = now + (d - x.clock.now()).max(0.0);
+                deadline = Some(deadline.map_or(at, |y: f64| y.min(at)));
+            }
         }
         if let Some(d) = idle_deadline {
             deadline = Some(deadline.map_or(d, |x| x.min(d)));

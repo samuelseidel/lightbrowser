@@ -1561,27 +1561,9 @@ const TIMING_FIELDS: [&str; 21] = [
 ];
 
 /// Legacy `performance.timing` value of `field` (ms since the epoch, 0
-/// when not reached). The window starts at commit; the fetch before it
-/// is placed in the first few milliseconds (a fast local load).
+/// when not reached): the navigation entry's values (`perf.rs`).
 fn timing_value(w: &Window, field: &str) -> f64 {
-    let nav = w.clock.time_origin.floor();
-    let li = w.load_info.borrow().clone();
-    let at = |ms: Option<f64>| ms.map_or(0.0, |m| (w.clock.time_origin + m).floor());
-    let https = w.url().scheme() == "https";
-    match field {
-        "navigationStart" => nav,
-        "fetchStart" | "domainLookupStart" | "domainLookupEnd" | "connectStart" => nav + 1.0,
-        "connectEnd" => nav + 1.0,
-        "secureConnectionStart" if https => nav + 1.0,
-        "requestStart" => nav + 2.0,
-        "responseStart" => nav + 3.0,
-        "responseEnd" | "domLoading" => nav + 4.0,
-        "domInteractive" | "domContentLoadedEventStart" | "domContentLoadedEventEnd" => {
-            at(li.dcl_ms)
-        }
-        "domComplete" | "loadEventStart" | "loadEventEnd" => at(li.load_ms),
-        _ => 0.0,
-    }
+    super::perf::legacy_timing(w, field)
 }
 
 fn register_timing(reg: &mut Registry, rt: &Runtime) {
@@ -1607,16 +1589,9 @@ fn register_timing(reg: &mut Registry, rt: &Runtime) {
             .collect();
         cx.ret(Arg::Json(format!("{{{}}}", body.join(","))))
     });
-    let nav_type = |w: &Window| -> u32 {
-        match w.load_info.borrow().navigation_type.as_deref() {
-            Some("Reload") => 1,
-            Some("BackForward") => 2,
-            _ => 0,
-        }
-    };
     getter(reg, rt, "PerformanceNavigation", "type", move |cx, w| {
         this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
-        cx.ret(nav_type(w))
+        cx.ret(super::perf::legacy_navigation(w).0)
     });
     getter(
         reg,
@@ -1625,14 +1600,14 @@ fn register_timing(reg: &mut Registry, rt: &Runtime) {
         "redirectCount",
         |cx, w| {
             this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
-            cx.ret(0)
+            cx.ret(super::perf::legacy_navigation(w).1)
         },
     );
     method(reg, rt, "PerformanceNavigation", "toJSON", move |cx, w| {
         this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
+        let (t, rc) = super::perf::legacy_navigation(w);
         cx.ret(Arg::Json(format!(
-            "{{\"type\":{},\"redirectCount\":0}}",
-            nav_type(w)
+            "{{\"type\":{t},\"redirectCount\":{rc}}}"
         )))
     });
 }

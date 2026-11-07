@@ -1,0 +1,34 @@
+<!doctype html><html><head><title>sizes</title></head><body>
+<!--LOG-->
+<script>
+async function go(label,url,init){
+  try{var r=await fetch(url,init);var b=await r.arrayBuffer();log(label+' -> status '+r.status+' bytes '+b.byteLength)}catch(e){log(label+' failed '+err(e))}
+}
+addEventListener('load',async function(){
+  await sleep(200);
+  var base=performance.getEntriesByType('resource').length;
+  await go('same plain','p.txt?size=100');
+  await go('same gzip','p.txt?size=2000&gz=1');
+  await go('same 404','p.txt?status=404&size=10');
+  await go('same 500','p.txt?status=500&size=10');
+  await go('same POST','p.txt?size=20',{method:'POST',body:'abc'});
+  await go('same st','p.txt?size=5&st=1');
+  await go('cross cors no tao',X+'/p.txt?size=100&cors=1');
+  await go('cross cors tao',X+'/p.txt?size=100&cors=1&tao=1');
+  await go('cross cors gzip tao',X+'/p.txt?size=2000&cors=1&tao=1&gz=1');
+  await new Promise(function(r){var i=new Image();i.onload=i.onerror=r;i.src=X+'/x.png?a=1'});
+  await new Promise(function(r){var i=new Image();i.onload=i.onerror=r;i.src=X+'/x.png?a=2&tao=1'});
+  await new Promise(function(r){var s=document.createElement('script');s.onload=s.onerror=r;s.src=X+'/x.js?size=10&ct=text/javascript';document.head.appendChild(s)});
+  await new Promise(function(r){var s=document.createElement('script');s.onload=s.onerror=r;s.crossOrigin='anonymous';s.src=X+'/y.js?size=10&ct=text/javascript&cors=1&tao=1';document.head.appendChild(s)});
+  await go('cross no cors header',X+'/p.txt?size=100');
+  await go('refused','http://127.0.0.1:1/p.txt');
+  await sleep(200);
+  var list=performance.getEntriesByType('resource').slice(base);
+  log('added '+list.length);
+  for(var i=0;i<list.length;i++){var e=list[i];log(res(e)+' st='+J(e.serverTiming)+' keys='+Object.keys(e.toJSON()).length)}
+  log('first full: '+J(Object.keys(list[0].toJSON())));
+  var st=list[5].serverTiming;
+  log('servertiming '+st.length+' '+(st[0]instanceof PerformanceServerTiming)+' '+Object.prototype.toString.call(st[0])+' '+J(st[0].toJSON())+' same='+(list[5].serverTiming===list[5].serverTiming)+' '+Array.isArray(st)+' '+Object.isFrozen(st));
+  end();
+});
+</script></body></html>

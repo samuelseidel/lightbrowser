@@ -181,7 +181,8 @@ pub(crate) fn prepare_dynamic(js: &mut dyn Js, w: &Rc<Window>, n: NodeId) {
         }
         Some(Some(url)) => {
             w.pending_loads.set(w.pending_loads.get() + 1);
-            let req = NetRequest::get(url.clone(), Destination::Script, Some(w.url()));
+            let mut req = NetRequest::get(url.clone(), Destination::Script, Some(w.url()));
+            req.timing_cors = w.with_doc(|d| d.get_attribute(n, "crossorigin").is_some());
             super::net::start_request(
                 w,
                 req,

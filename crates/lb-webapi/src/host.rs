@@ -5,6 +5,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use url::Url;
 
@@ -56,6 +57,14 @@ pub struct NetRequest {
     /// The referrer a browser-initiated navigation was given (CDP
     /// `Page.navigate`): the URL and its policy (`None`: the default).
     pub referrer: Option<(Url, Option<String>)>,
+    /// Resource Timing `initiatorType` of the request (`""`: taken from
+    /// `destination`).
+    pub initiator_type: &'static str,
+    /// The request blocks rendering (`renderBlockingStatus`).
+    pub render_blocking: bool,
+    /// A CORS-enabled load (`crossorigin` on a script or image): its
+    /// Resource Timing entry exposes the response like a `cors` request's.
+    pub timing_cors: bool,
 }
 
 impl NetRequest {
@@ -74,6 +83,9 @@ impl NetRequest {
             },
             user_activated: false,
             referrer: None,
+            initiator_type: "",
+            render_blocking: false,
+            timing_cors: false,
         }
     }
 }
@@ -90,6 +102,47 @@ pub struct NetResponse {
     /// URL after redirects.
     pub url: Url,
     pub redirected: bool,
+    /// What the network layer measured (Resource and Navigation Timing,
+    /// ADR 0046). `None` for responses that did not come from the network
+    /// stack: `data:`, `blob:`, a service worker's, CDP `Fetch.fulfillRequest`.
+    pub timing: Option<Box<NetTiming>>,
+}
+
+/// Setup of the connection a request used when it was opened for it.
+#[derive(Debug, Clone, Copy)]
+pub struct NetConnTiming {
+    pub dns_start: Instant,
+    pub dns_end: Instant,
+    pub connect_start: Instant,
+    /// Start of the TLS handshake (https).
+    pub secure_start: Option<Instant>,
+    /// End of the TCP connect, or of the TLS handshake for https.
+    pub connect_end: Instant,
+}
+
+/// The measurements of one fetch, as `lb_net::FetchTiming` reports them
+/// (this crate does not depend on lb-net).
+#[derive(Debug, Clone)]
+pub struct NetTiming {
+    /// The fetch began (first hop).
+    pub start: Instant,
+    /// With redirects: first hop start and end of the last redirect
+    /// response.
+    pub redirect: Option<(Instant, Instant)>,
+    /// Redirect responses: URL and the values of their
+    /// `Timing-Allow-Origin` headers.
+    pub redirects: Vec<(Url, Vec<String>)>,
+    /// The final hop began.
+    pub fetch_start: Instant,
+    /// `None`: a reused connection or session.
+    pub conn: Option<NetConnTiming>,
+    pub request_start: Instant,
+    pub response_start: Instant,
+    pub response_end: Instant,
+    pub encoded_body_size: u64,
+    pub decoded_body_size: u64,
+    /// ALPN id of the connection: `h2` or `http/1.1`.
+    pub protocol: &'static str,
 }
 
 impl NetResponse {

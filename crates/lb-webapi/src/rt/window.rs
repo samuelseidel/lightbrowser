@@ -1139,7 +1139,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Location", "reload", |_cx, w| {
-        w.request_navigation(NavRequest::get(w.url(), true));
+        w.request_navigation(NavRequest {
+            reload: true,
+            ..NavRequest::get(w.url(), true)
+        });
         Ok(())
     });
     method(reg, rt, "Location", "toString", |cx, w| {
@@ -1233,7 +1236,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 let t = h.index as i64 + i64::from(delta);
                 (t >= 0 && (t as usize) < h.entries.len()).then_some(t as usize)
             };
-            let Some(t) = target else { return Ok(()) };
+            let Some(t) = target else {
+                return Ok(());
+            };
             w.queue_task(
                 TaskSource::DomManipulation,
                 Box::new(move |js, w| {
@@ -1376,25 +1381,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Performance", "timeOrigin", |cx, w| {
         cx.ret((w.clock.time_origin * 10.0).floor() / 10.0)
     });
-    method(reg, rt, "Performance", "toJSON", |cx, w| {
-        cx.ret(Arg::Json(
-            serde_json::json!({ "timeOrigin": (w.clock.time_origin * 10.0).floor() / 10.0 })
-                .to_string(),
-        ))
-    });
-    for name in ["getEntries", "getEntriesByType", "getEntriesByName"] {
-        method(reg, rt, "Performance", name, |cx, _w| {
-            cx.ret(Arg::Array(Vec::new()))
-        });
-    }
-    for name in [
-        "clearMarks",
-        "clearMeasures",
-        "clearResourceTimings",
-        "setResourceTimingBufferSize",
-    ] {
-        method(reg, rt, "Performance", name, |_cx, _w| Ok(()));
-    }
 
     // Screen
     macro_rules! scr {

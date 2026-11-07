@@ -1,0 +1,40 @@
+<!doctype html><html><head><title>nav</title></head><body>
+<!--LOG-->
+<script>
+var early=performance.getEntriesByType('navigation')[0];
+t('early', function(){return early.domComplete+' '+early.loadEventStart+' '+early.loadEventEnd+' '+early.domInteractive+' '+early.duration});
+addEventListener('load',async function(){
+  await sleep(50);
+  var n=performance.getEntriesByType('navigation');
+  log('count '+n.length+' same='+(n[0]===performance.getEntriesByType('navigation')[0])+' sameAsEarly='+(n[0]===early));
+  var e=n[0];
+  log('proto '+(Object.getPrototypeOf(e)===PerformanceNavigationTiming.prototype));
+  log('chain '+[e instanceof PerformanceNavigationTiming,e instanceof PerformanceResourceTiming,e instanceof PerformanceEntry].join());
+  log('tag '+Object.prototype.toString.call(e));
+  log('keys '+keys(e));
+  log('own '+Object.getOwnPropertyNames(e).join());
+  log('json '+Object.keys(e.toJSON()).join());
+  log('serialized '+(J(e)===J(e.toJSON()))+' '+(J(e).length>1000));
+  log('basic '+[short(e.name),e.name===location.href,e.entryType,e.startTime,e.initiatorType,e.type,e.redirectCount,e.nextHopProtocol,'['+e.deliveryType+']',
+    e.workerStart,e.redirectStart,e.redirectEnd,e.secureConnectionStart,e.unloadEventStart,e.unloadEventEnd,e.responseStatus,e.contentType,'['+e.contentEncoding+']',e.activationStart,e.criticalCHRestart,
+    J(e.serverTiming),e.renderBlockingStatus,e.notRestoredReasons,e.firstInterimResponseStart,e.workerRouterEvaluationStart,e.workerCacheLookupStart,'['+e.workerMatchedSourceType+']','['+e.workerFinalSourceType+']'].join(' '));
+  log('chain '+chain(e)+' dur '+(e.duration===e.loadEventEnd)+' '+(e.duration>0));
+  log('order '+[e.fetchStart>=0,e.responseEnd>=e.responseStart,e.domInteractive>=e.responseEnd,e.domContentLoadedEventStart>=e.domInteractive,e.domContentLoadedEventEnd>=e.domContentLoadedEventStart,
+    e.domComplete>=e.domContentLoadedEventEnd,e.loadEventStart>=e.domComplete,e.loadEventEnd>=e.loadEventStart].join());
+  var body=await (await fetch(location.href)).text();
+  var bytes=new Blob([body]).size;
+  log('sizes '+(e.encodedBodySize===bytes)+' '+(e.decodedBodySize===bytes)+' '+(e.transferSize-e.encodedBodySize)+' '+(e.finalResponseHeadersStart===e.responseStart));
+  log('conn '+[e.domainLookupStart===e.fetchStart,e.domainLookupEnd>=e.domainLookupStart,e.connectStart>=e.domainLookupEnd,e.connectEnd>=e.connectStart,e.requestStart>=e.connectEnd,e.responseStart>=e.requestStart].join());
+  // performance.timing and chrome.loadTimes() agree with the entry (ms since the epoch, floored).
+  var tm=performance.timing, o=performance.timeOrigin, near=function(a,b){return Math.abs(a-b)<=2};
+  log('timing '+[tm.navigationStart===Math.floor(o),near(tm.fetchStart,o+e.fetchStart),near(tm.responseStart,o+e.responseStart),near(tm.responseEnd,o+e.responseEnd),
+    near(tm.domInteractive,o+e.domInteractive),near(tm.domContentLoadedEventStart,o+e.domContentLoadedEventStart),near(tm.domComplete,o+e.domComplete),near(tm.loadEventStart,o+e.loadEventStart),near(tm.loadEventEnd,o+e.loadEventEnd)].join());
+  log('timing chain '+[tm.fetchStart>=tm.navigationStart,tm.requestStart>=tm.fetchStart,tm.responseStart>=tm.requestStart,tm.responseEnd>=tm.responseStart,tm.domLoading>=tm.responseStart,tm.domInteractive>=tm.domLoading,tm.loadEventEnd>=tm.loadEventStart].join());
+  var lt=chrome.loadTimes();
+  log('loadTimes '+[near(lt.requestTime*1000,o),near(lt.finishDocumentLoadTime*1000,o+e.domContentLoadedEventEnd),near(lt.finishLoadTime*1000,o+e.loadEventStart),lt.commitLoadTime>=lt.requestTime,lt.navigationType,lt.connectionInfo,lt.npnNegotiatedProtocol,lt.wasFetchedViaSpdy].join());
+  log('perf '+[performance.timeOrigin>1e12,performance.now()>e.loadEventEnd,Object.keys(performance.toJSON()).join(),Object.keys(performance.toJSON().timing).length].join());
+  log('byname '+performance.getEntriesByName(location.href).map(function(x){return x.entryType}).join());
+  log('byname-type '+performance.getEntriesByName(location.href,'navigation').length+' '+performance.getEntriesByName(location.href,'resource').length);
+  end();
+});
+</script></body></html>
