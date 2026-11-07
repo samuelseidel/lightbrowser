@@ -35,8 +35,10 @@ USAGE:
                                             JSON (exit 1 on any mismatch)
 
 FETCH OPTIONS:
-  --dump html|text       print the DOM after scripts ran (html) or its text;
-                         default: none
+  --dump MODE            print the DOM after scripts ran as html, its text,
+                         markdown, its links (URL<TAB>text per line) or a json
+                         summary (url, status, title, headings, links, text,
+                         markdown); default: none
   --wait-until W         load (default) | networkidle | domcontentloaded |
                          commit | <ms> (load, then that many ms more)
   --timeout SECS         give up waiting after SECS (default 30)
@@ -122,6 +124,16 @@ enum Dump {
     None,
     Html,
     Text,
+    Markdown,
+    Links,
+    Json,
+}
+
+impl Dump {
+    /// The modes made by `lb_page::extract`.
+    fn extracts(self) -> bool {
+        matches!(self, Dump::Markdown | Dump::Links | Dump::Json)
+    }
 }
 
 #[derive(Debug)]
@@ -174,7 +186,14 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
                 out.dump = match value("--dump")?.as_str() {
                     "html" => Dump::Html,
                     "text" => Dump::Text,
-                    other => return Err(format!("--dump must be html or text, got {other:?}")),
+                    "markdown" => Dump::Markdown,
+                    "links" => Dump::Links,
+                    "json" => Dump::Json,
+                    other => {
+                        return Err(format!(
+                            "--dump must be one of html, text, markdown, links, json, got {other:?}"
+                        ));
+                    }
                 }
             }
             "--persona" => out.persona = Some(value("--persona")?),
@@ -395,6 +414,7 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
         .enable_all()
         .build()
         .map_err(|e| format!("starting runtime: {e}"))?;
+    let requested = url.to_string();
     let loaded = rt.block_on(load_page(&ctx, url, args))?;
     // One page per process: the process ends right after the output, so
     // the runtime is not shut down (nothing is pending; no disk state).
@@ -421,6 +441,17 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
         Dump::Text => stdout
             .write_all(loaded.text.as_bytes())
             .and_then(|()| stdout.write_all(b"\n")),
+        Dump::Markdown | Dump::Links | Dump::Json => match &loaded.extracted {
+            Some(e) => stdout.write_all(
+                match args.dump {
+                    Dump::Markdown => e.markdown.clone(),
+                    Dump::Links => lb_page::extract::links_dump(e),
+                    _ => lb_page::extract::json_dump(e, &requested, &loaded.url, loaded.status),
+                }
+                .as_bytes(),
+            ),
+            None => return Err("nothing was extracted".into()),
+        },
     };
     // A closed pipe (`| head`) is not an error for us.
     if let Err(e) = written.and_then(|()| stdout.flush())
@@ -440,6 +471,8 @@ struct Loaded {
     headers: Vec<(String, String)>,
     html: String,
     text: String,
+    /// Set for the `--dump markdown | links | json` modes.
+    extracted: Option<lb_page::extract::Extracted>,
 }
 
 /// Load the page and run its scripts (chrome build).
@@ -479,6 +512,11 @@ async fn load_page(
     }
     let html = page.content().await.map_err(|e| e.to_string())?;
     let text = page.text().await.map_err(|e| e.to_string())?;
+    let extracted = if args.dump.extracts() {
+        Some(page.extract().await.map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     for m in page.console_messages().await.unwrap_or_default() {
         if args.verbose || m.level == "error" {
             eprintln!("console.{}: {}", m.level, m.text);
@@ -494,6 +532,7 @@ async fn load_page(
         headers: nav.headers,
         html,
         text,
+        extracted,
     })
 }
 
@@ -503,17 +542,24 @@ async fn load_page(
 async fn load_page(
     ctx: &lb_page::BrowserContext,
     url: url::Url,
-    _args: &FetchArgs,
+    args: &FetchArgs,
 ) -> Result<Loaded, String> {
     let (resp, doc) = lb_page::load_document(ctx, url)
         .await
         .map_err(|e| e.to_string())?;
+    let text = lb_webapi::text::document_text(&doc);
+    // No style engine here: only `hidden` and inline styles hide content.
+    let extracted = args
+        .dump
+        .extracts()
+        .then(|| lb_page::extract::extract_document(&doc, &resp.url, text.clone()));
     Ok(Loaded {
         status: resp.status,
         url: resp.url.to_string(),
         headers: resp.headers,
         html: doc.to_html(),
-        text: lb_webapi::text::document_text(&doc),
+        text,
+        extracted,
     })
 }
 

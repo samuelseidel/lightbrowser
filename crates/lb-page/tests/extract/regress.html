@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<title>Regressions</title>
+<meta name="description" content="">
+<meta name="description" content="second description">
+<h2>Adjacent lists</h2>
+<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul><ul><li>d</li></ul>
+<p>x</p>
+<ol><li>o1</li></ol><ol><li>o2</li></ol><ol><li>o3</li></ol>
+<h2>Empty items</h2>
+<ul style="visibility:hidden"><li>h1</li><li>h2</li></ul>
+<ul><li><svg width="4"></svg></li><li><a href="/tw"><i class="ic"></i></a></li><li>real</li></ul>
+<ul><li><ul></ul></li></ul>
+<h2>Nested start</h2>
+<ol><li>a</li><li>b<ol start="5"><li>c</li><li value="2">d</li></ol></li><li>e</li></ol>
+<ul><li>outer<ol start="3"><li>x</li></ol></li></ul>
+<h2>Control characters</h2>
+<p>X<code>p&#2;q</code>Y <code>r&#1;s</code></p>
+<pre>pre&#1;x&#2;y</pre>
+<a href="/card"><h3>Card title</h3><p>card body</p></a>
+<h2>Flanking</h2>
+<ul><li><strong>Note:</strong>text</li><li><em>"q"</em>word</li><li>a<b>(b)</b></li></ul>

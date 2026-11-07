@@ -38,6 +38,7 @@
 //! and parse without running scripts) until SpiderMonkey lands (M4b).
 
 mod context;
+pub mod extract;
 
 #[cfg(feature = "chrome")]
 mod browser;

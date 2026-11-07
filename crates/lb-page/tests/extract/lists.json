@@ -1,0 +1,18 @@
+{
+  "url": "http://{HOST}/lists.html",
+  "final_url": "http://{HOST}/lists.html",
+  "status": 200,
+  "title": "Lists",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Lists"
+    }
+  ],
+  "links": [],
+  "text": "Lists\nApples\nBananas\nCavendish\nPlantain\nGreen\nRipe\nCherries\nThree\nTen\nEleven\nnested one\nBetween\nFirst list\nSecond list, adjacent\nLoose one\nLoose para one\nLoose para two\nShown item",
+  "markdown": "# Lists\n\n- Apples\n- Bananas\n  - Cavendish\n  - Plantain\n    1. Green\n    2. Ripe\n- Cherries\n\n3) Three\n10) Ten\n11) Eleven\n    1. nested one\n\nBetween\n\n- First list\n\n* Second list, adjacent\n\n1. Loose one\n\n2. Loose para one\n\n   Loose para two\n\n* Shown item\n"
+}
