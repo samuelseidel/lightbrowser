@@ -659,8 +659,14 @@ impl Agent {
     }
 
     /// Console messages and uncaught exceptions of the page.
-    pub(crate) fn console(&self, _page: &PageState, m: &ConsoleMessage) {
-        let ctx = self.main_ctx().unwrap_or(0);
+    pub(crate) fn console(&self, realm: RealmId, m: &ConsoleMessage) {
+        let ctx = self
+            .st
+            .borrow()
+            .worlds
+            .iter()
+            .find(|w| w.realm == Some(realm))
+            .map_or(0, |w| w.id);
         self.emit(console_event(m, ctx));
     }
 

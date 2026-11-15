@@ -320,7 +320,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
     )));
     if let Some(a) = &agent {
         let a = a.clone();
-        w.set_console_sink(Some(Rc::new(move |m| a.console(m))));
+        w.set_console_sink(Some(Rc::new(move |_, m| a.console(m))));
     }
     w.set_sw_host(Some(crate::sw::host(&ctx)));
     w.set_idb_backend(Some(ctx.idb().clone()));

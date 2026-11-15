@@ -819,6 +819,9 @@ pub(crate) struct Helpers {
     pub languages: Option<Handle>,
 }
 
+/// Receives a console message with the realm that produced it.
+pub type ConsoleSink = Rc<dyn Fn(RealmId, &ConsoleMessage)>;
+
 /// One frame's document state. See the module docs.
 pub struct Window {
     pub(crate) rt: Runtime,
@@ -852,7 +855,7 @@ pub struct Window {
     pub(crate) raf: RefCell<Vec<(u32, Handle)>>,
     next_raf: Cell<u32>,
     pub(crate) console: RefCell<Vec<ConsoleMessage>>,
-    console_sink: RefCell<Option<Rc<dyn Fn(&ConsoleMessage)>>>,
+    console_sink: RefCell<Option<ConsoleSink>>,
     pub clock: Clock,
     pub(crate) layout: RefCell<Option<lb_layout::LayoutEngine>>,
     /// Style sheets: loads, blocking counters, CSSOM (`sheets.rs`).
@@ -1358,7 +1361,7 @@ impl Window {
     }
 
     /// Forward console messages (and uncaught exceptions) to `sink`.
-    pub fn set_console_sink(&self, sink: Option<Rc<dyn Fn(&ConsoleMessage)>>) {
+    pub fn set_console_sink(&self, sink: Option<ConsoleSink>) {
         *self.console_sink.borrow_mut() = sink;
     }
 
@@ -1368,9 +1371,13 @@ impl Window {
     }
 
     pub(crate) fn log(&self, msg: ConsoleMessage) {
+        self.log_from(self.realm(), msg);
+    }
+
+    pub(crate) fn log_from(&self, realm: RealmId, msg: ConsoleMessage) {
         let sink = self.console_sink.borrow().clone();
         if let Some(s) = sink {
-            s(&msg);
+            s(realm, &msg);
         }
         self.console.borrow_mut().push(msg);
     }
