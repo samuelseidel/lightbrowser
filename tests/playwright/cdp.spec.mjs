@@ -82,6 +82,34 @@ test('CDP reports script-driven same-document navigations', { timeout: 10_000 },
   }
 });
 
+test('CDP fragment navigation preserves the document and loader', { timeout: 10_000 }, async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  try {
+    const url = `${base}/same-document`;
+    await page.goto(url);
+    const session = await context.newCDPSession(page);
+    const before = (await session.send('Page.getFrameTree')).frameTree.frame;
+    await page.evaluate(() => {
+      window.fragmentChanges = [];
+      addEventListener('hashchange', (event) => fragmentChanges.push(event.newURL));
+    });
+    const result = await session.send('Page.navigate', { url: `${url}#raw` });
+    assert.equal(result.loaderId, undefined);
+    assert.equal(await page.goto(`${url}#playwright`), null);
+    assert.equal(await page.goto(`${url}#playwright`), null);
+    await page.waitForFunction(() => window.fragmentChanges?.length === 2);
+    assert.deepEqual(await page.evaluate(() => fragmentChanges), [
+      `${url}#raw`, `${url}#playwright`,
+    ]);
+    const after = (await session.send('Page.getFrameTree')).frameTree.frame;
+    assert.equal(after.loaderId, before.loaderId);
+    assert.equal(after.url + (after.urlFragment ?? ''), `${url}#playwright`);
+  } finally {
+    await context.close();
+  }
+});
+
 test('DOM and Accessibility domains on the real document', async () => {
   const { base } = await env();
   const { context, page } = await newPage();

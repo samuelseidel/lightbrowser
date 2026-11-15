@@ -967,7 +967,7 @@ fn default_action(
     });
     if let Some(href) = link {
         if let Some(u) = w.resolve_url(&href) {
-            super::window::navigate_to(js, w, u, false);
+            super::window::navigate_to(w, u, false);
         }
         return;
     }
