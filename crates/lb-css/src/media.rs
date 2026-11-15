@@ -424,27 +424,54 @@ fn env_number(name: &str, env: &MediaEnv) -> Option<f32> {
 }
 
 /// Value of a discrete feature as a keyword.
+impl MediaEnv {
+    /// The keyword for a preference media feature this environment supports.
+    pub fn preference_keyword(&self, name: &str) -> Option<&'static str> {
+        Some(match name {
+            "prefers-color-scheme" => {
+                if self.prefers_dark {
+                    "dark"
+                } else {
+                    "light"
+                }
+            }
+            "prefers-reduced-motion" => {
+                if self.prefers_reduced_motion {
+                    "reduce"
+                } else {
+                    "no-preference"
+                }
+            }
+            "forced-colors" => {
+                if self.forced_colors {
+                    "active"
+                } else {
+                    "none"
+                }
+            }
+            "prefers-contrast" => self.prefers_contrast,
+            "prefers-reduced-transparency" => {
+                if self.prefers_reduced_transparency {
+                    "reduce"
+                } else {
+                    "no-preference"
+                }
+            }
+            _ => return None,
+        })
+    }
+}
+
 fn env_ident(name: &str, env: &MediaEnv) -> Option<&'static str> {
+    if let Some(value) = env.preference_keyword(name) {
+        return Some(value);
+    }
     Some(match name {
         "orientation" => {
             if env.viewport_height >= env.viewport_width {
                 "portrait"
             } else {
                 "landscape"
-            }
-        }
-        "prefers-color-scheme" => {
-            if env.prefers_dark {
-                "dark"
-            } else {
-                "light"
-            }
-        }
-        "prefers-reduced-motion" => {
-            if env.prefers_reduced_motion {
-                "reduce"
-            } else {
-                "no-preference"
             }
         }
         "hover" | "any-hover" => {
@@ -460,23 +487,6 @@ fn env_ident(name: &str, env: &MediaEnv) -> Option<&'static str> {
             PointerKind::Fine => "fine",
         },
         "display-mode" => "browser",
-        "forced-colors" => {
-            if env.forced_colors {
-                "active"
-            } else {
-                "none"
-            }
-        }
-        // Chrome 153 does not support `inverted-colors`,
-        // `prefers-reduced-data` or `video-dynamic-range` (never match).
-        "prefers-contrast" => env.prefers_contrast,
-        "prefers-reduced-transparency" => {
-            if env.prefers_reduced_transparency {
-                "reduce"
-            } else {
-                "no-preference"
-            }
-        }
         "scripting" => "enabled",
         "update" => "fast",
         "overflow-block" => "scroll",
