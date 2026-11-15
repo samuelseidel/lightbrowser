@@ -419,6 +419,16 @@ impl BrowserContext {
         let r = lb_net::fetch(&mut net, wire).await;
         self.put_back(net);
         let resp = r.map_err(Ok)?;
+        let final_origin = resp.final_url.origin();
+        let navigation_redirect_count = if resp
+            .redirects
+            .iter()
+            .all(|hop| hop.url.origin() == final_origin)
+        {
+            resp.redirects.len() as u32
+        } else {
+            0
+        };
         let trace = FetchTrace {
             redirects: resp.redirects,
             method: resp.method.to_string(),
@@ -432,6 +442,7 @@ impl BrowserContext {
                 headers: resp.headers,
                 body: resp.body,
                 redirected: resp.final_url != url,
+                navigation_redirect_count,
                 protocol: Some(match resp.version {
                     lb_net::HttpVersion::Http1 => "http/1.1",
                     lb_net::HttpVersion::Http2 => "h2",

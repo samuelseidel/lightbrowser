@@ -150,6 +150,7 @@ async fn navigate_frame(
                 url: nav.url.clone(),
                 redirected: false,
                 protocol: None,
+                navigation_redirect_count: 0,
             }),
             Some(parent_url.clone()),
         ),
@@ -162,6 +163,7 @@ async fn navigate_frame(
                 url: nav.url.clone(),
                 redirected: false,
                 protocol: None,
+                navigation_redirect_count: 0,
             }),
             Some(parent_url.clone()),
         ),
@@ -237,6 +239,7 @@ async fn navigate_frame(
         let mut info = w.load_info.borrow_mut();
         info.connection_info = resp.protocol.map(str::to_owned);
         info.response_end_ms = Some(response_end_ms);
+        info.redirect_count = resp.navigation_redirect_count;
         info.commit_ms = Some(w.clock.now());
     }
     if nav.reload {

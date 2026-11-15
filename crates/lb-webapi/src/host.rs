@@ -88,6 +88,8 @@ pub struct NetResponse {
     pub redirected: bool,
     /// HTTP protocol of the final network response, when available.
     pub protocol: Option<&'static str>,
+    /// Redirect count exposed to the document. Cross-origin chains report zero.
+    pub navigation_redirect_count: u32,
 }
 
 impl NetResponse {

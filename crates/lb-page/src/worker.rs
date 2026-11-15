@@ -223,6 +223,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
                 url: url.clone(),
                 redirected: false,
                 protocol: None,
+                navigation_redirect_count: 0,
             });
             (url.clone(), s, resp)
         }

@@ -1001,6 +1001,7 @@ fn response_of(
         url: Url::parse(&url).unwrap_or_else(|_| req_url.clone()),
         redirected,
         protocol: None,
+        navigation_redirect_count: 0,
     })
 }
 

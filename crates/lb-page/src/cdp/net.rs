@@ -394,6 +394,7 @@ pub(crate) async fn page_fetch(
                     url: req.url.clone(),
                     redirected: false,
                     protocol: None,
+                    navigation_redirect_count: 0,
                 });
             }
         }

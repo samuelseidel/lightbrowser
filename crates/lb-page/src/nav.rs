@@ -206,6 +206,7 @@ pub(crate) async fn navigate_committed(
             url: url.clone(),
             redirected: false,
             protocol: None,
+            navigation_redirect_count: 0,
         })
     } else {
         let req = document_request(
@@ -318,6 +319,7 @@ pub(crate) async fn navigate_committed(
         let mut info = w.load_info.borrow_mut();
         info.connection_info = resp.protocol.map(str::to_owned);
         info.response_end_ms = Some(response_end_ms);
+        info.redirect_count = resp.navigation_redirect_count;
         info.commit_ms = Some(w.clock.now());
     }
     if reload {
