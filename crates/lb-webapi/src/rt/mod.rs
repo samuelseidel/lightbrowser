@@ -1405,6 +1405,7 @@ impl Window {
             text: text.into(),
             url: None,
             line: None,
+            arguments: None,
             from_worker: false,
         });
     }

@@ -774,6 +774,7 @@ pub(crate) fn report_error_value(js: &mut dyn Js, w: &Rc<Window>, message: &str,
             text: message,
             url: None,
             line: None,
+            arguments: None,
             from_worker: false,
         });
     }
@@ -786,6 +787,7 @@ pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
             text: e.message.clone(),
             url: e.url.clone(),
             line: e.line,
+            arguments: None,
             from_worker: false,
         });
         return;
@@ -827,6 +829,7 @@ pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
                 text,
                 url: e.url.clone(),
                 line: e.line,
+                arguments: None,
                 from_worker: false,
             });
             super::worker::forward_error(w, &message, e);
@@ -837,6 +840,7 @@ pub(crate) fn report_exception(js: &mut dyn Js, w: &Rc<Window>, e: &JsError) {
             text,
             url: e.url.clone(),
             line: e.line,
+            arguments: None,
             from_worker: false,
         });
     }

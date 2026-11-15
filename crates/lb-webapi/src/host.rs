@@ -240,6 +240,8 @@ pub struct ConsoleMessage {
     /// uncaught exceptions).
     pub level: String,
     pub text: String,
+    /// Unformatted primitive console arguments, when available.
+    pub arguments: Option<Vec<lb_js::JsValue>>,
     /// Script URL and 1-based line, for exceptions.
     pub url: Option<String>,
     pub line: Option<u32>,

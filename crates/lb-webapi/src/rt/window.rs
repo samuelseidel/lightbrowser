@@ -69,6 +69,23 @@ fn console_call(
     for i in start..cx.len() {
         parts.push(format_arg(cx, i));
     }
+    let arguments = if level != "assert"
+        && !(cx.arg_kind(start) == ValueKind::String
+            && parts.first().is_some_and(|text| text.contains('%')))
+        && (start..cx.len()).all(|i| {
+            matches!(
+                cx.arg_kind(i),
+                ValueKind::Undefined
+                    | ValueKind::Null
+                    | ValueKind::Bool
+                    | ValueKind::Number
+                    | ValueKind::String
+            )
+        }) {
+        Some((start..cx.len()).map(|i| cx.arg_value(i)).collect())
+    } else {
+        None
+    };
     // printf-style substitutions in a leading string.
     let text = if let Some(first) = parts
         .first()
@@ -138,6 +155,7 @@ fn console_call(
             text,
             url: None,
             line: None,
+            arguments,
             from_worker: false,
         },
     );
