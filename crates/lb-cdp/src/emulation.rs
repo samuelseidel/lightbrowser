@@ -373,32 +373,9 @@ pub fn check_emulated_media(p: &PersonaProfile, m: &EmulatedMedia) -> Result<(),
         if f.value.is_empty() {
             continue;
         }
-        let want = match f.name.as_str() {
-            "prefers-color-scheme" => {
-                if env.prefers_dark {
-                    "dark"
-                } else {
-                    "light"
-                }
-            }
-            "prefers-reduced-motion" => {
-                if env.prefers_reduced_motion {
-                    "reduce"
-                } else {
-                    "no-preference"
-                }
-            }
-            "forced-colors" => "none",
-            "prefers-contrast" => "no-preference",
-            "prefers-reduced-transparency" => "no-preference",
-            "prefers-reduced-data" => "no-preference",
-            other => {
-                return Err(reject(
-                    M,
-                    format!("media feature {other:?} is not supported"),
-                ));
-            }
-        };
+        let want = env
+            .preference_keyword(&f.name)
+            .ok_or_else(|| reject(M, format!("media feature {:?} is not supported", f.name)))?;
         if f.value != want {
             return Err(reject(
                 M,
@@ -427,6 +404,43 @@ mod tests {
 
     fn metrics(v: Value) -> DeviceMetrics {
         serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn media_preference_keywords_agree_with_css() {
+        let mut p = persona();
+        let preferences = p.preferences.get_or_insert_with(Default::default);
+        preferences.forced_colors = true;
+        preferences.contrast = "more".into();
+        preferences.reduced_transparency = true;
+
+        for (name, value, conflicting) in [
+            ("forced-colors", "active", "none"),
+            ("prefers-contrast", "more", "no-preference"),
+            ("prefers-reduced-transparency", "reduce", "no-preference"),
+        ] {
+            let media = |value: &str| EmulatedMedia {
+                media: None,
+                features: Some(vec![MediaFeature {
+                    name: name.into(),
+                    value: value.into(),
+                }]),
+            };
+            check_emulated_media(&p, &media(value)).unwrap();
+            assert!(check_emulated_media(&p, &media(conflicting)).is_err());
+            assert!(
+                lb_css::match_media(&format!("({name}: {value})"), &MediaEnv::from_persona(&p))
+                    .matches
+            );
+        }
+        let unsupported = EmulatedMedia {
+            media: None,
+            features: Some(vec![MediaFeature {
+                name: "prefers-reduced-data".into(),
+                value: "no-preference".into(),
+            }]),
+        };
+        assert!(check_emulated_media(&p, &unsupported).is_err());
     }
 
     #[test]

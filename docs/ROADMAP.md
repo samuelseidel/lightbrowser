@@ -284,10 +284,8 @@ Open (CDP and page host):
   trace.
 - `Runtime.addBinding` registers a native function per world for the
   engine's lifetime.
-- `lb-cdp`'s media-feature check in `Emulation.setEmulatedMedia` compares
-  `forced-colors`, `prefers-contrast`, `prefers-reduced-transparency` and
-  `prefers-reduced-data` with fixed values instead of the persona's
-  `preferences`.
+- `Emulation.setEmulatedMedia` validates preference keywords against the
+  same persona environment as CSS. `prefers-reduced-data` remains unsupported.
 - Input: contenteditable editing appends at the end (no caret, Range or
   Selection). Number inputs sanitize script-visible and submitted values.
   The editor filters keyboard and inserted text while preserving partial
