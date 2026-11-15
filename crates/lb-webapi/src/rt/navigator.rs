@@ -1615,14 +1615,15 @@ fn register_timing(reg: &mut Registry, rt: &Runtime) {
         "redirectCount",
         |cx, w| {
             this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
-            cx.ret(0)
+            cx.ret(w.load_info.borrow().redirect_count)
         },
     );
     method(reg, rt, "PerformanceNavigation", "toJSON", move |cx, w| {
         this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
         cx.ret(Arg::Json(format!(
-            "{{\"type\":{},\"redirectCount\":0}}",
-            nav_type(w)
+            "{{\"type\":{},\"redirectCount\":{}}}",
+            nav_type(w),
+            w.load_info.borrow().redirect_count
         )))
     });
 }

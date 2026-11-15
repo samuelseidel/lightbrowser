@@ -149,3 +149,36 @@ test('scrolling starts a deferred lazy image request', { timeout: 15_000 }, asyn
     });
   }
 });
+
+pages['/navigation-redirect'] = (_req, res) => {
+  res.writeHead(302, { location: '/navigation-redirect-second' });
+  res.end();
+};
+pages['/navigation-redirect-second'] = (_req, res) => {
+  res.writeHead(302, { location: '/navigation-redirect-end' });
+  res.end();
+};
+pages['/navigation-redirect-cross'] = (req, res) => {
+  const url = new URL('/navigation-redirect-second', `http://${req.headers.host}`);
+  url.hostname = 'localhost';
+  res.writeHead(302, { location: url.href });
+  res.end();
+};
+pages['/navigation-redirect-end'] = html('Redirect destination', '');
+
+test('navigation redirect counts exclude cross-origin chains', async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  try {
+    for (const [path, count] of [['/navigation-redirect', 2], ['/navigation-redirect-cross', 0]]) {
+      await page.goto(base + path);
+      assert.ok(page.url().endsWith('/navigation-redirect-end'));
+      assert.deepEqual(await page.evaluate(() => [
+        performance.navigation.redirectCount,
+        performance.navigation.toJSON().redirectCount,
+      ]), [count, count]);
+    }
+  } finally {
+    await context.close();
+  }
+});

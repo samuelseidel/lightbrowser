@@ -648,6 +648,7 @@ fn load_sheet(
             url: url.clone(),
             redirected: false,
             protocol: None,
+            navigation_redirect_count: 0,
         });
         let w = w.clone();
         let w2 = w.clone();

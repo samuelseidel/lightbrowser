@@ -297,7 +297,8 @@ Open (CDP and page host):
 - Reloads set the navigation type before document scripts run. Network
   responses expose their negotiated protocol. The document clock starts
   before fetching, and the loader records response completion and document
-  commit. Individual transport phases and first paint remain estimates.
+  commit. Legacy navigation redirect counts include same-origin chains.
+  Individual transport phases and first paint remain estimates.
 - The page layer does not call `Engine::set_time_zone` when a worker switches
   personas.
 

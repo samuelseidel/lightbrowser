@@ -31,6 +31,7 @@ use crate::registry::host_fn;
 pub struct LoadInfo {
     /// ALPN / `connectionInfo`: `h2`, `http/1.1`, `h3`.
     pub connection_info: Option<String>,
+    pub redirect_count: u32,
     /// Chrome's `loadTimes().navigationType`: `Other`, `LinkClicked`,
     /// `FormSubmitted`, `BackForward`, `Reload`.
     pub navigation_type: Option<String>,
