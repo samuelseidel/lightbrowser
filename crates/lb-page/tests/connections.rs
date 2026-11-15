@@ -159,3 +159,32 @@ async fn page_load_over_one_h2_connection() {
     assert_eq!(recs[0].alpn.as_deref(), Some("h2"));
     assert!(recs[0].requests.len() >= 25, "{}", recs[0].requests.len());
 }
+
+#[tokio::test]
+async fn document_reports_negotiated_protocol_for_https() {
+    use lb_fptest::site::{SiteConfig, SiteServer};
+    let b = browser();
+    let mut opts = context(false).options().clone();
+    opts.accept_invalid_certs = true;
+    let ctx = lb_page::BrowserContext::new(opts).unwrap();
+    for protocol in ["http/1.1", "h2"] {
+        let mut config = SiteConfig::subresource_page(true, 0, 0, 0, Duration::ZERO);
+        config.alpn = vec![protocol.as_bytes().to_vec()];
+        let srv = SiteServer::bind("127.0.0.1:0", config).await.unwrap();
+        let page = b.new_page(&ctx).await.unwrap();
+        page.goto(
+            &format!("https://localhost:{}/", srv.local_addr().port()),
+            WaitUntil::Load,
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            page.evaluate("chrome.loadTimes().connectionInfo")
+                .await
+                .unwrap(),
+            lb_js::JsValue::String(protocol.into())
+        );
+        assert_eq!(srv.records()[0].alpn.as_deref(), Some(protocol));
+    }
+}

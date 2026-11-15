@@ -204,6 +204,7 @@ pub(crate) async fn navigate_committed(
             body: bytes::Bytes::new(),
             url: url.clone(),
             redirected: false,
+            protocol: None,
         })
     } else {
         let req = document_request(
@@ -310,6 +311,7 @@ pub(crate) async fn navigate_committed(
             history_len: page.history_len(),
         },
     );
+    w.load_info.borrow_mut().connection_info = resp.protocol.map(str::to_owned);
     if reload {
         w.load_info.borrow_mut().navigation_type = Some("Reload".into());
     }

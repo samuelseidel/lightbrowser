@@ -294,8 +294,9 @@ Open (CDP and page host):
 - Layout has no real line boxes, shaping, bidi or table layout, and
   `clientWidth` ignores scrollbars (the persona's
   `preferences.scrollbar_width` is not used by `lb-layout` yet).
-- Reloads set the navigation type before document scripts run. Other
-  navigation types and connection details still use defaults.
+- Reloads set the navigation type before document scripts run. Network
+  responses expose their negotiated protocol. Other navigation types,
+  timing phases, and synthesized responses still use defaults.
 - The page layer does not call `Engine::set_time_zone` when a worker switches
   personas.
 
@@ -560,9 +561,9 @@ local Chromium 153 on a loopback page (same expressions in both).
 Open: `chrome.app.isInstalled` accepts assignment (Chrome ignores it);
 `MediaDevices.getUserMedia` never resolves with a stream; the macOS voice
 list is approximate; no `navigatedWithinDocument`-style updates of
-`loadTimes` for same-document navigations; `connectionInfo` is guessed
-from the scheme unless the page layer fills `Window::load_info`; workers
-have no navigator yet.
+`loadTimes` for same-document navigations. `connectionInfo` uses the
+final network response protocol when available and falls back to the URL
+scheme for synthesized responses.
 
 ## M4 status: WebGL, Web Audio and fonts (2026-11-03)
 

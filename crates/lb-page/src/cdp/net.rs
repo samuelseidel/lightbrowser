@@ -232,7 +232,7 @@ fn cdp_response(resp: &NetResponse) -> types::NetResponse {
             .host_str()
             .map(|h| h.trim_matches(['[', ']']).to_string()),
         remote_port: resp.url.port_or_known_default().map(i64::from),
-        protocol: Some("http/1.1".into()),
+        protocol: Some(resp.protocol.unwrap_or("http/1.1").into()),
         security_state: if resp.url.scheme() == "https" {
             "secure"
         } else {
@@ -393,6 +393,7 @@ pub(crate) async fn page_fetch(
                     body: body.into(),
                     url: req.url.clone(),
                     redirected: false,
+                    protocol: None,
                 });
             }
         }
