@@ -131,13 +131,16 @@ fn console_call(
         "dir" | "dirxml" | "table" | "trace" => "log",
         l => l,
     };
-    w.log(ConsoleMessage {
-        level: level.into(),
-        text,
-        url: None,
-        line: None,
-        from_worker: false,
-    });
+    w.log_from(
+        cx.realm(),
+        ConsoleMessage {
+            level: level.into(),
+            text,
+            url: None,
+            line: None,
+            from_worker: false,
+        },
+    );
     Ok(())
 }
 

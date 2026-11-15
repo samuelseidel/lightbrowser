@@ -14,6 +14,29 @@ pages['/cdp'] = html(
   <script>console.log('hello', 42); setTimeout(() => { throw new Error('late failure'); }, 50);</script>`,
 );
 
+test('console events identify the isolated world that logged them', { timeout: 10_000 }, async () => {
+  const { context, page } = await newPage();
+  try {
+    const session = await context.newCDPSession(page);
+    await session.send('Runtime.enable');
+    const { frameTree } = await session.send('Page.getFrameTree');
+    const { executionContextId } = await session.send('Page.createIsolatedWorld', {
+      frameId: frameTree.frame.id,
+      worldName: 'console-test',
+    });
+    const event = new Promise((resolve) => session.once('Runtime.consoleAPICalled', resolve));
+    await session.send('Runtime.evaluate', {
+      expression: 'console.log("isolated world")',
+      contextId: executionContextId,
+    });
+    const message = await event;
+    assert.equal(message.args[0].value, 'isolated world');
+    assert.equal(message.executionContextId, executionContextId);
+  } finally {
+    await context.close();
+  }
+});
+
 test('DOM and Accessibility domains on the real document', async () => {
   const { base } = await env();
   const { context, page } = await newPage();
