@@ -105,6 +105,7 @@ pub(crate) struct Target {
     pub initiator: Option<Url>,
     /// Replace the current history entry.
     pub replace: bool,
+    pub reload: bool,
     /// Form POST body; `None` is a GET.
     pub post: Option<FormBody>,
     /// Started by trusted user input (`Sec-Fetch-User`).
@@ -118,6 +119,7 @@ impl Target {
             url,
             initiator: None,
             replace: false,
+            reload: false,
             post: None,
             user_activated: false,
         }
@@ -129,6 +131,7 @@ impl Target {
             url: nav.url,
             initiator: Some(initiator),
             replace: nav.replace,
+            reload: nav.reload,
             post: nav.post,
             user_activated: nav.user_activated,
         }
@@ -178,6 +181,7 @@ pub(crate) async fn navigate_committed(
         url,
         initiator,
         replace,
+        reload,
         post,
         user_activated,
     } = target;
@@ -186,7 +190,6 @@ pub(crate) async fn navigate_committed(
     page.loading.set(true);
     let agent = page.agent();
     let loader = agent.as_ref().map(|a| a.nav_started(seq));
-    let reload = page.reloading.replace(false);
     // The service worker controlling the URL (ADR 0022) and the new
     // document's client id (`resultingClientId`).
     let sw = crate::sw::navigation_controller(&page.ctx, &url);
@@ -263,9 +266,7 @@ pub(crate) async fn navigate_committed(
     // Commit: the old document and realm go away in one step.
     let history = page.window().map_or(0, |w| w.history_entry_count());
     page.drop_window(&ws);
-    if !replace {
-        page.add_history(history);
-    }
+    page.add_history(history.saturating_sub(u32::from(replace)));
     let Some((rt, bindings)) = ws.runtime() else {
         let _ = committed.send(Err(PageError::Closed));
         return Err(PageError::Closed);
@@ -309,6 +310,9 @@ pub(crate) async fn navigate_committed(
             history_len: page.history_len(),
         },
     );
+    if reload {
+        w.load_info.borrow_mut().navigation_type = Some("Reload".into());
+    }
     w.set_console_sink(Some(page.console_sink()));
     w.set_worker_host(Some(crate::worker::Workers::host(
         &page.ctx,

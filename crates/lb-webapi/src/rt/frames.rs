@@ -93,6 +93,8 @@ pub struct Child {
 /// A navigation the page layer should perform in a frame.
 #[derive(Debug, Clone)]
 pub struct FrameNavigation {
+    /// Reload the current frame document.
+    pub reload: bool,
     /// Target URL (`about:srcdoc` for `srcdoc`).
     pub url: Url,
     /// Document text of an `srcdoc` iframe.
@@ -439,6 +441,7 @@ fn navigation_for(w: &Window, el: NodeId) -> Option<FrameNavigation> {
     if let Some(doc) = srcdoc {
         return Some(FrameNavigation {
             url: Url::parse("about:srcdoc").ok()?,
+            reload: false,
             srcdoc: Some(doc),
             initiator,
             post: None,
@@ -452,6 +455,7 @@ fn navigation_for(w: &Window, el: NodeId) -> Option<FrameNavigation> {
     }
     Some(FrameNavigation {
         url,
+        reload: false,
         srcdoc: None,
         initiator,
         post: None,

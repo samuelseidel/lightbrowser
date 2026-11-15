@@ -171,9 +171,15 @@ async fn navigate_frame(
                 nav.user_activated,
             );
             parent.in_flight.set(parent.in_flight.get() + 1);
-            let r =
-                crate::nav::sw_or_network(&page, req, sw.as_ref(), String::new(), &reserved, false)
-                    .await;
+            let r = crate::nav::sw_or_network(
+                &page,
+                req,
+                sw.as_ref(),
+                String::new(),
+                &reserved,
+                nav.reload,
+            )
+            .await;
             parent
                 .in_flight
                 .set(parent.in_flight.get().saturating_sub(1));
@@ -223,6 +229,9 @@ async fn navigate_frame(
         .map(|u| u.to_string())
         .unwrap_or_default();
     let w = Window::new(&rt, init);
+    if nav.reload {
+        w.load_info.borrow_mut().navigation_type = Some("Reload".into());
+    }
     w.set_worker_host(parent.worker_host());
     w.set_sw_host(parent.sw_host());
     w.set_idb_backend(parent.idb_backend());
@@ -307,6 +316,7 @@ pub(crate) fn navigate_from_script(
 ) {
     let nav = FrameNavigation {
         url: req.url,
+        reload: req.reload,
         srcdoc: None,
         initiator: Some(w.url()),
         post: req.post,
