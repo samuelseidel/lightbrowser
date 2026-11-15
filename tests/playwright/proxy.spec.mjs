@@ -1,8 +1,10 @@
 // Proxies per browser context (ADR 0027): Playwright's newContext({ proxy })
 // sends Target.createBrowserContext { proxyServer, proxyBypassList:
-// '<-loopback>' }, and httpCredentials answer the proxy's 407 through
-// Fetch.authRequired / Fetch.continueWithAuth. The proxies are
-// crates/lb-net/tests/proxy/proxy.py on loopback.
+// '<-loopback>' }, and the credentials answer the proxy's 407 through
+// Fetch.authRequired / Fetch.continueWithAuth. Playwright 1.65 and later
+// answer a challenge with source "Proxy" from proxy.username/password;
+// older versions use httpCredentials, so the test passes both. The proxies
+// are crates/lb-net/tests/proxy/proxy.py on loopback.
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,7 +58,7 @@ test('context proxies: HTTP with credentials via Fetch.authRequired, SOCKS5, byp
   const authed = await startProxy('u1:p1');
   const ctx = await browser.newContext({
     viewport: null,
-    proxy: { server: `http://127.0.0.1:${authed.http}` },
+    proxy: { server: `http://127.0.0.1:${authed.http}`, username: 'u1', password: 'p1' },
     httpCredentials: { username: 'u1', password: 'p1' },
   });
   const page = await ctx.newPage();
