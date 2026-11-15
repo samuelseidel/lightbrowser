@@ -123,16 +123,15 @@ pub(crate) fn sync_frame_viewport(w: &Window) {
     });
 }
 
-/// Backend node ids: the navigation sequence in the high bits, so ids of
-/// an old document never resolve in a new one.
+/// Backend node IDs encode the document realm and the node slot.
 const NODE_BITS: u32 = 24;
 
-pub(crate) fn backend_id(seq: u64, n: NodeId) -> BackendNodeId {
-    ((seq as i64) << NODE_BITS) | (i64::from(n.0) + 1)
+fn backend_id(realm: RealmId, n: NodeId) -> BackendNodeId {
+    (i64::from(realm.0) << NODE_BITS) | (i64::from(n.0) + 1)
 }
 
-fn node_of(seq: u64, id: BackendNodeId) -> Option<NodeId> {
-    if id <= 0 || (id >> NODE_BITS) as u64 != seq {
+fn node_of(realm: RealmId, id: BackendNodeId) -> Option<NodeId> {
+    if id <= 0 || (id >> NODE_BITS) != i64::from(realm.0) {
         return None;
     }
     let n = (id & ((1 << NODE_BITS) - 1)) - 1;
@@ -689,11 +688,15 @@ impl Agent {
     }
 
     pub(crate) fn main_ctx(&self) -> Option<ExecutionContextId> {
+        self.main_ctx_for_frame(0)
+    }
+
+    pub(crate) fn main_ctx_for_frame(&self, frame: u64) -> Option<ExecutionContextId> {
         self.st
             .borrow()
             .worlds
             .iter()
-            .find(|w| w.name.is_none() && w.frame == 0)
+            .find(|w| w.name.is_none() && w.frame == frame)
             .map(|w| w.id)
     }
 
@@ -714,10 +717,6 @@ impl Agent {
             .get(id)
             .cloned()
             .ok_or_else(|| HostError::new("Could not find object with given id"))
-    }
-
-    pub(crate) fn current_seq(&self) -> u64 {
-        self.st.borrow().seq
     }
 
     pub(crate) fn store_body(&self, request_id: &str, body: bytes::Bytes) {
@@ -899,15 +898,12 @@ pub(crate) fn exception_details(
 impl Agent {
     // ---- DOM ----
 
-    pub(crate) fn ids(&self) -> impl Fn(NodeId) -> BackendNodeId + use<> {
-        let seq = self.current_seq();
-        move |n| backend_id(seq, n)
+    pub(crate) fn ids(w: &Window) -> impl Fn(NodeId) -> BackendNodeId + use<> {
+        let realm = w.realm();
+        move |n| backend_id(realm, n)
     }
 
-    /// The window and main-document node behind a `NodeRef`. Object ids
-    /// from a child frame resolve to that frame's window (Playwright
-    /// `frameLocator` / `DOM.getContentQuads`); backend ids stay on the
-    /// top document.
+    /// The currently attached window and node behind a CDP reference.
     pub(crate) fn node(
         &self,
         ws: &WorkerState,
@@ -916,12 +912,20 @@ impl Agent {
     ) -> HostResult<(Rc<Window>, NodeId)> {
         match node {
             NodeRef::Backend(id) => {
-                let n = node_of(self.current_seq(), *id)
-                    .ok_or_else(|| HostError::new("No node with given id found"))?;
-                if n.0 as usize >= top.with_doc(|d| d.node_count()) {
-                    return Err(HostError::new("No node with given id found"));
+                let missing = || HostError::new("No node with given id found");
+                let realm = u32::try_from(id >> NODE_BITS).map_err(|_| missing())?;
+                let realm = RealmId(realm);
+                let n = node_of(realm, *id).ok_or_else(missing)?;
+                let w = top.runtime().window(realm).ok_or_else(missing)?;
+                if w.realm() != realm
+                    || !frames::find(top, frames::frame_id(&w))
+                        .is_some_and(|frame| Rc::ptr_eq(&frame, &w))
+                    || n.0 as usize >= w.with_doc(|d| d.node_count())
+                {
+                    return Err(missing());
                 }
-                Ok((top.clone(), n))
+                sync_frame_viewport(&w);
+                Ok((w, n))
             }
             NodeRef::Object(o) => {
                 let obj = self.object(o)?;
@@ -1312,11 +1316,12 @@ fn undefined_remote() -> RemoteObject {
 
 /// The document of a window as a `DOM.Node` tree.
 pub(crate) fn dom_node(agent: &Agent, w: &Window, n: NodeId, depth: i32, pierce: bool) -> DomNode {
-    let ids = agent.ids();
+    let ids = Agent::ids(w);
     let url = w.url().to_string();
+    let frame_id = agent.frame_str(frames::frame_id(w));
     let info = lb_cdp::convert::DocInfo {
         url: &url,
-        frame_id: &agent.target,
+        frame_id: &frame_id,
         pierce,
     };
     let mut node = w.with_doc(|d| lb_cdp::convert::dom_node(d, n, depth, &ids, &info));
@@ -1327,7 +1332,7 @@ pub(crate) fn dom_node(agent: &Agent, w: &Window, n: NodeId, depth: i32, pierce:
 /// Set `frameId` on `<iframe>` owners whose frame exists.
 fn mark_frame_owners(agent: &Agent, w: &Window, node: &mut DomNode) {
     if node.local_name == "iframe"
-        && let Some(n) = node_of(agent.current_seq(), node.backend_node_id)
+        && let Some(n) = node_of(w.realm(), node.backend_node_id)
         && let Some(c) = frames::child_for(w, n)
     {
         node.frame_id = Some(agent.frame_str(c.id));
