@@ -148,6 +148,7 @@ async fn navigate_frame(
                 body: doc.clone().into_bytes().into(),
                 url: nav.url.clone(),
                 redirected: false,
+                protocol: None,
             }),
             Some(parent_url.clone()),
         ),
@@ -159,6 +160,7 @@ async fn navigate_frame(
                 body: bytes::Bytes::new(),
                 url: nav.url.clone(),
                 redirected: false,
+                protocol: None,
             }),
             Some(parent_url.clone()),
         ),
@@ -229,6 +231,7 @@ async fn navigate_frame(
         .map(|u| u.to_string())
         .unwrap_or_default();
     let w = Window::new(&rt, init);
+    w.load_info.borrow_mut().connection_info = resp.protocol.map(str::to_owned);
     if nav.reload {
         w.load_info.borrow_mut().navigation_type = Some("Reload".into());
     }

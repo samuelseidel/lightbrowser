@@ -86,6 +86,8 @@ pub struct NetResponse {
     /// URL after redirects.
     pub url: Url,
     pub redirected: bool,
+    /// HTTP protocol of the final network response, when available.
+    pub protocol: Option<&'static str>,
 }
 
 impl NetResponse {

@@ -432,6 +432,10 @@ impl BrowserContext {
                 headers: resp.headers,
                 body: resp.body,
                 redirected: resp.final_url != url,
+                protocol: Some(match resp.version {
+                    lb_net::HttpVersion::Http1 => "http/1.1",
+                    lb_net::HttpVersion::Http2 => "h2",
+                }),
                 url: resp.final_url,
             },
             trace,

@@ -222,6 +222,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
                 body: bytes::Bytes::from(s.clone().into_bytes()),
                 url: url.clone(),
                 redirected: false,
+                protocol: None,
             });
             (url.clone(), s, resp)
         }
