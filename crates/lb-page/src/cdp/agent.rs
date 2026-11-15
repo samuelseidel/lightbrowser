@@ -105,6 +105,24 @@ pub(crate) struct Agent {
     pub st: RefCell<AgentState>,
 }
 
+/// Match a child frame's layout viewport to its `<iframe>` content box so
+/// quads and hit-testing use the same coordinates as Chrome / Playwright.
+pub(crate) fn sync_frame_viewport(w: &Window) {
+    let Some(parent) = frames::parent(w) else {
+        return;
+    };
+    let Some(el) = frames::frame_element(w) else {
+        return;
+    };
+    let Some(content) = parent.with_layout_engine(|l, d| l.box_model(d, el).map(|m| m.content))
+    else {
+        return;
+    };
+    w.with_layout_engine(|l, _| {
+        l.set_viewport(content.width.max(1.0), content.height.max(1.0));
+    });
+}
+
 /// Backend node ids: the navigation sequence in the high bits, so ids of
 /// an old document never resolve in a new one.
 const NODE_BITS: u32 = 24;
@@ -886,34 +904,39 @@ impl Agent {
         move |n| backend_id(seq, n)
     }
 
-    /// The main-document node behind a `NodeRef`.
-    pub(crate) fn node(&self, ws: &WorkerState, w: &Window, node: &NodeRef) -> HostResult<NodeId> {
+    /// The window and main-document node behind a `NodeRef`. Object ids
+    /// from a child frame resolve to that frame's window (Playwright
+    /// `frameLocator` / `DOM.getContentQuads`); backend ids stay on the
+    /// top document.
+    pub(crate) fn node(
+        &self,
+        ws: &WorkerState,
+        top: &Rc<Window>,
+        node: &NodeRef,
+    ) -> HostResult<(Rc<Window>, NodeId)> {
         match node {
             NodeRef::Backend(id) => {
                 let n = node_of(self.current_seq(), *id)
                     .ok_or_else(|| HostError::new("No node with given id found"))?;
-                if n.0 as usize >= w.with_doc(|d| d.node_count()) {
+                if n.0 as usize >= top.with_doc(|d| d.node_count()) {
                     return Err(HostError::new("No node with given id found"));
                 }
-                Ok(n)
+                Ok((top.clone(), n))
             }
             NodeRef::Object(o) => {
                 let obj = self.object(o)?;
-                // Nodes of child frames are not addressable through the
-                // DOM domain yet (their ids are relative to their window).
-                if let Some(owner) = w.runtime().window(obj.realm)
-                    && !std::ptr::eq(owner.as_ref(), w)
-                {
-                    return Err(HostError::new(
-                        "Node belongs to a child frame; DOM methods on frame nodes are not supported yet",
-                    ));
-                }
+                let owner = top.runtime().window(obj.realm).ok_or_else(|| {
+                    HostError::new("Node with given id does not belong to the document")
+                })?;
                 let host = ws
                     .with_engine(|e| e.unwrap_host(obj.realm, obj.handle))
                     .ok_or_else(|| HostError::new("Page is closed"))?
                     .map_err(|e| HostError::new(e.message))?;
-                match host.and_then(|h| w.decode_node(h)) {
-                    Some((0, n)) => Ok(n),
+                match host.and_then(|h| owner.decode_node(h)) {
+                    Some((0, n)) => {
+                        sync_frame_viewport(&owner);
+                        Ok((owner, n))
+                    }
                     _ => Err(HostError::new(
                         "Node with given id does not belong to the document",
                     )),

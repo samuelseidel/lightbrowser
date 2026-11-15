@@ -71,8 +71,9 @@ must also be unreachable from the parent, as in Chrome.
   build it inside the inserting callback.
 - Gaps: host refs were per window, so nodes of one frame passed to
   another frame's DOM methods were not supported (fixed by ADR 0017), and
-  `DOM.*`/`Input.*` on nodes inside frames (clicks into frames) are
-  refused for now; no named frame
+  Playwright click and fill work in direct child frames. `DOM.getFrameOwner`
+  returns the owner element in the main document and child content quads use
+  page coordinates. Nested frame owner lookup remains open. Other gaps include named frame
   access (`window.frameName`), `sandbox`, `<frame>`/`<object>` browsing
   contexts; `postMessage` clones through JSON; network events of frame
   requests are attributed to the main frame.

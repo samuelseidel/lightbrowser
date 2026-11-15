@@ -500,6 +500,10 @@ pub trait PageHost {
 
     // ---- DOM ----
 
+    fn get_frame_owner(&self, _target_id: &str, _frame_id: &str) -> HostResult<BackendNodeId> {
+        Err(HostError::unsupported("DOM.getFrameOwner"))
+    }
+
     /// The document node with `depth` levels of children (`-1` = all).
     fn get_document(&self, _target_id: &str, _depth: i32, _pierce: bool) -> HostResult<DomNode> {
         Err(HostError::unsupported("DOM.getDocument"))

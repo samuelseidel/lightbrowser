@@ -270,8 +270,8 @@ the frames spec).
 Open (CDP and page host):
 
 - No popups; workers (since "Workers") are not CDP targets. Screenshots landed in M6 (see "M6 status: screenshots").
-- `DOM.*` and `Input.*` on nodes inside child frames are refused (see
-  "M4 status: frames and fingerprint report").
+- Playwright can click and fill inside a direct child frame. Nested frame owners
+  still need backend node IDs that resolve in their parent frame.
 - Same-document navigations are not reported (`navigatedWithinDocument`).
 - Console arguments arrive as one string argument.
 - `Fetch` interception covers the request stage only. `Network.*` request
@@ -681,8 +681,7 @@ have landed for the Chrome build.
   `iframe_mismatch` and `extra_globals` pass. Still firing:
   `header_order`, `no_interaction`, `favicon_missing`.
 
-Open: `DOM.*` and `Input.*` on nodes inside frames (clicks into frames)
-are refused; no named frame access (`window.frameName`), `sandbox`, or
+Open: nested frame owner lookup; no named frame access (`window.frameName`), `sandbox`, or
 browsing contexts for `<frame>`/`<object>`/`<embed>`; nodes passed between
 frames' DOM methods are not supported; frame network events are
 attributed to the main frame; workers landed 2026-11-04 (see "Workers").
