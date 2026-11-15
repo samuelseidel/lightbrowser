@@ -383,5 +383,6 @@ process and is controlled over CDP.
 - Font metric tables and the UA stylesheet are parsed once per worker and OS (`lb_layout::LayoutBase`), not per document.
 - HTTP cache in memory, bounded LRU, partitioned per context. Nothing goes to disk unless `--cache-dir` is given.
 - Fonts: metric tables only (advance widths, ascent/descent) for persona fonts. Glyph outline packs (205 KB, compiled in) are parsed only when a canvas draws or measures text.
+- Lazy images are rechecked after scrolling or viewport emulation changes.
 - Images: `<img>` loads keep the encoded bytes and their size; pixels are decoded on first `drawImage`. Elements of a document share one request per URL and the loaded image (ADR 0024).
 - A worker that loaded a CDP page keeps one spare window realm (~0.4 MB of V8 heap) for the next page's `about:blank` (ADR 0023).

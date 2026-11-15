@@ -760,6 +760,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             _ => lb_layout::ScrollAlign::Start,
         };
         w.with_layout(slot, |l, d| l.scroll_into_view(d, n, align, false));
+        super::image::schedule_lazy_image_check(w);
         Ok(())
     });
     method(reg, rt, "Element", "scrollIntoViewIfNeeded", |cx, w| {
@@ -767,6 +768,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         w.with_layout(slot, |l, d| {
             l.scroll_into_view(d, n, lb_layout::ScrollAlign::Center, true)
         });
+        super::image::schedule_lazy_image_check(w);
         Ok(())
     });
     macro_rules! geo {
@@ -837,6 +839,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                     l.set_scroll_position(d, n, x, v)
                 }
             });
+            super::image::schedule_lazy_image_check(w);
             Ok(())
         });
     }

@@ -795,6 +795,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 let ny = y.map_or(cy0, |v| by + if v.is_finite() { v as f32 } else { 0.0 });
                 l.scroll_window_to(d, nx, ny)
             });
+            super::image::schedule_lazy_image_check(w);
             Ok(())
         });
     }

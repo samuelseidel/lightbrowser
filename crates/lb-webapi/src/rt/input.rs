@@ -809,6 +809,7 @@ fn mouse_wheel(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
             l.window_scroll(d) != (sx, sy)
         });
         if moved {
+            super::image::schedule_lazy_image_check(w);
             super::events::fire_event(
                 js,
                 w,

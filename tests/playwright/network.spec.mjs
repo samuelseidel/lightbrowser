@@ -112,3 +112,40 @@ test('two pages in a context and two isolated contexts', async () => {
   await a.close();
   await b.close();
 });
+
+pages['/lazy-images'] = html(
+  'Lazy images',
+  '<div style="height:6000px"></div><img id="lazy" loading="lazy" src="/lazy-image.svg" width="20" height="20">',
+);
+pages['/lazy-image.svg'] = (_req, res) => {
+  res.writeHead(200, { 'content-type': 'image/svg+xml' });
+  res.end('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"></svg>');
+};
+
+test('scrolling starts a deferred lazy image request', { timeout: 15_000 }, async (t) => {
+  const { base } = await env();
+  const actions = {
+    'window.scrollTo': (page) => page.evaluate(() => scrollTo(0, 6000)),
+    'element.scrollIntoView': (page) => page.locator('#lazy').evaluate((image) => image.scrollIntoView()),
+    'Playwright scrollIntoViewIfNeeded': (page) => page.locator('#lazy').scrollIntoViewIfNeeded(),
+    'wheel input': async (page) => {
+      await page.mouse.move(50, 50);
+      await page.mouse.wheel(0, 6000);
+    },
+  };
+  for (const [name, scroll] of Object.entries(actions)) {
+    await t.test(name, async () => {
+      const { context, page } = await newPage();
+      try {
+        await page.goto(`${base}/lazy-images`);
+        assert.equal(await page.locator('#lazy').evaluate((image) => image.complete), false);
+        const response = page.waitForResponse('**/lazy-image.svg', { timeout: 3000 });
+        const [loaded] = await Promise.all([response, scroll(page)]);
+        assert.equal(loaded.status(), 200);
+        await page.waitForFunction(() => document.querySelector('#lazy').naturalWidth === 20);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+});

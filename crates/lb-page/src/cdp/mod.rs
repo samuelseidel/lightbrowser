@@ -965,7 +965,9 @@ impl PageHost for CdpHost {
                 }
                 l.scroll_into_view(d, n, lb_layout::ScrollAlign::Center, true);
                 Ok(())
-            })
+            })?;
+            lb_webapi::rt::schedule_lazy_image_check(&w);
+            Ok(())
         })
     }
 
@@ -1219,6 +1221,7 @@ impl PageHost for CdpHost {
             a.st.borrow_mut().viewport = keep;
             if let Some(w) = p.window() {
                 w.with_layout_engine(|l, _| l.set_viewport(vw as f32, vh as f32));
+                lb_webapi::rt::schedule_lazy_image_check(&w);
             }
         })
     }
