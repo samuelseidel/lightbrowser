@@ -19,8 +19,8 @@ use lb_cdp::types::*;
 use lb_cdp::{BindingScope, HostError, HostResult, PageEvent};
 use lb_dom::{Document, NodeId};
 use lb_js::{
-    Arg, Caught, Engine, Handle, Inspected, JsErrorKind, PromiseOutcome, RealmId, RealmOps,
-    ScriptOrigin,
+    Arg, Caught, Engine, Handle, Inspected, JsErrorKind, JsValue, PromiseOutcome, RealmId,
+    RealmOps, ScriptOrigin,
 };
 use lb_webapi::host::ConsoleMessage;
 use lb_webapi::rt::frames;
@@ -1369,6 +1369,7 @@ pub(crate) fn console_event(m: &ConsoleMessage, ctx: ExecutionContextId) -> Page
         };
     }
     if m.level == "error"
+        && m.arguments.is_none()
         && let Some(rest) = m.text.strip_prefix("Uncaught ")
     {
         let class = rest.split(':').next().unwrap_or("Error").trim().to_string();
@@ -1410,13 +1411,28 @@ pub(crate) fn console_event(m: &ConsoleMessage, ctx: ExecutionContextId) -> Page
         "warn" => "warning",
         other => other,
     };
+    let args = m.arguments.as_ref().map_or_else(
+        || vec![CdpValue::String(m.text.clone())],
+        |args| {
+            args.iter()
+                .map(|arg| match arg {
+                    JsValue::Undefined => CdpValue::Undefined,
+                    JsValue::Null => CdpValue::Null,
+                    JsValue::Bool(value) => CdpValue::Bool(*value),
+                    JsValue::Number(value) => CdpValue::Number(*value),
+                    JsValue::String(value) | JsValue::Json(value) | JsValue::Opaque(value) => {
+                        CdpValue::String(value.clone())
+                    }
+                })
+                .collect()
+        },
+    );
     PageEvent::ConsoleApiCalled {
         kind: kind.to_string(),
-        args: vec![cdp_remote::remote_object(
-            &CdpValue::String(m.text.clone()),
-            None,
-            RemoteOptions::default(),
-        )],
+        args: args
+            .iter()
+            .map(|arg| cdp_remote::remote_object(arg, None, RemoteOptions::default()))
+            .collect(),
         context_id: ctx,
         timestamp: now_ms(),
         stack_trace: None,

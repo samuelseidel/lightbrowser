@@ -696,7 +696,7 @@ fn do_fetch(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostErro
                     js.resolve(r, a);
                 }
                 Ok(_) => {
-                    w.log(crate::host::ConsoleMessage { level: "error".into(), text: format!("Access to fetch at '{url}' from origin '{}' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.", origin.ascii_serialization()), url: None, line: None, from_worker: false });
+                    w.log(crate::host::ConsoleMessage { level: "error".into(), text: format!("Access to fetch at '{url}' from origin '{}' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.", origin.ascii_serialization()), url: None, line: None, arguments: None, from_worker: false });
                     js.reject(r, HostError::type_error("Failed to fetch"));
                 }
                 Err(_) => js.reject(r, HostError::type_error("Failed to fetch")),
@@ -1063,7 +1063,7 @@ fn xhr_complete(
         }
         other => {
             if other.is_ok() {
-                w.log(crate::host::ConsoleMessage { level: "error".into(), text: format!("Access to XMLHttpRequest from origin '{}' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.", origin.ascii_serialization()), url: None, line: None, from_worker: false });
+                w.log(crate::host::ConsoleMessage { level: "error".into(), text: format!("Access to XMLHttpRequest from origin '{}' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.", origin.ascii_serialization()), url: None, line: None, arguments: None, from_worker: false });
             }
             with_xhr(w, id, |x| {
                 x.ready_state = 4;
@@ -1968,6 +1968,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 text: format!("Refused to set unsafe header \"{k}\""),
                 url: None,
                 line: None,
+                arguments: None,
                 from_worker: false,
             });
             return Ok(());

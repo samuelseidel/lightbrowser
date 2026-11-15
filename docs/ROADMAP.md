@@ -275,7 +275,8 @@ Open (CDP and page host):
 - Script-driven history changes and fragment navigation report
   `navigatedWithinDocument`. Top-level `Page.navigate` to a fragment keeps
   the current document and omits the loader ID in its response.
-- Console arguments arrive as one string argument.
+- Unformatted primitive console arguments retain their types in CDP. Calls
+  with objects or format directives still use a single formatted string.
 - `Fetch` interception covers the request stage only. `Network.*` request
   headers are approximate (persona UA, `Accept-Language`, `sec-ch-ua`, the
   page's own headers, `Referer`); there are no `*ExtraInfo` events. The

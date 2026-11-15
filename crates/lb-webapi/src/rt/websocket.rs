@@ -305,6 +305,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 text: "WebSocket is already in CLOSING or CLOSED state.".into(),
                 url: None,
                 line: None,
+                arguments: None,
                 from_worker: false,
             });
             return Ok(());
@@ -364,6 +365,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                     ),
                     url: None,
                     line: None,
+                    arguments: None,
                     from_worker: false,
                 });
                 with_ws(w, id, |s| {
@@ -493,6 +495,7 @@ fn on_event(js: &mut dyn Js, w: &Rc<Window>, id: u32, ev: WsEvent) {
                 text: format!("WebSocket connection to '{url}' failed: {detail}"),
                 url: None,
                 line: None,
+                arguments: None,
                 from_worker: false,
             });
             // Chrome: `readyState` is CLOSED when `error` fires.

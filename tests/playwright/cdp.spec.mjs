@@ -168,6 +168,30 @@ test('navigation timing includes time spent waiting for the document', async () 
   }
 });
 
+test('CDP console events preserve primitive argument types', { timeout: 10_000 }, async () => {
+  const { context, page } = await newPage();
+  try {
+    const session = await context.newCDPSession(page);
+    await session.send('Runtime.enable');
+    const event = new Promise((resolve) => session.once('Runtime.consoleAPICalled', resolve));
+    await page.evaluate(() => console.log('message', 42, true, null, undefined, NaN, -0));
+    const { args } = await event;
+    assert.deepEqual(args.map(({ type, value, unserializableValue }) => [
+      type, value, unserializableValue,
+    ]), [
+      ['string', 'message', undefined],
+      ['number', 42, undefined],
+      ['boolean', true, undefined],
+      ['object', null, undefined],
+      ['undefined', undefined, undefined],
+      ['number', undefined, 'NaN'],
+      ['number', undefined, '-0'],
+    ]);
+  } finally {
+    await context.close();
+  }
+});
+
 test('DOM and Accessibility domains on the real document', async () => {
   const { base } = await env();
   const { context, page } = await newPage();
