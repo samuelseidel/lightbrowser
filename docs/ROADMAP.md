@@ -296,8 +296,7 @@ Open (CDP and page host):
   `preferences.scrollbar_width` is not used by `lb-layout` yet).
 - The page layer does not fill `Window::load_info` (so `chrome.loadTimes`
   and `performance.navigation` guess), does not call
-  `Engine::set_time_zone` when a worker switches personas, and does not
-  call `load_visible_lazy_images` on scroll.
+  `Engine::set_time_zone` when a worker switches personas.
 
 ## M4 status: summary (2026-11-03)
 
@@ -490,9 +489,8 @@ Canvas 2D (M4 task 3, canvas part) and image loading have landed.
 Open: no filters, no text shaping or kerning, no color emoji or CJK
 glyphs (they advance but draw nothing), shadows are approximate,
 `ImageBitmap`/`createImageBitmap`, `transferControlToOffscreen`, video
-frames and `<picture>` are missing, blob: image URLs fail, lazy images
-are re-checked only through `load_visible_lazy_images` (not yet called on
-scroll).
+frames and `<picture>` are missing, and blob: image URLs fail. Scrolling and
+CDP viewport changes now recheck deferred lazy images.
 
 ## M4 status: navigator and window surface (2026-11-03)
 

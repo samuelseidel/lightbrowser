@@ -87,6 +87,7 @@ pub(crate) struct PaintState {
     canvases: RefCell<HashMap<(u32, NodeId), CanvasCtx>>,
     /// Gradient/pattern `Rc` address → object id (`fillStyle` getter).
     ids: RefCell<HashMap<usize, u32>>,
+    pub(crate) lazy_image_check_queued: std::cell::Cell<bool>,
     pub(crate) images: RefCell<HashMap<(u32, NodeId), super::image::ImgState>>,
     /// Image requests in flight, by URL without fragment and CORS mode,
     /// with the elements waiting on each (`image::fetch`).

@@ -150,11 +150,7 @@ pub(crate) fn process(js: &mut dyn Js, w: &Rc<Window>, nodes: Vec<(NodeId, bool)
         );
     }
     if lazy_check {
-        let w2 = w.clone();
-        w.queue_task(
-            TaskSource::DomManipulation,
-            Box::new(move |_js, _w| load_visible_lazy_images(&w2)),
-        );
+        schedule_lazy_image_check(w);
     }
 }
 
@@ -376,6 +372,22 @@ fn reuse_available(w: &Rc<Window>, n: NodeId, url: &Url, seq: u32) -> bool {
         Box::new(move |js, _| settle(js, &w2, n, seq, true, true)),
     );
     true
+}
+
+/// Recheck deferred images after the current task finishes updating layout.
+pub fn schedule_lazy_image_check(w: &Window) {
+    let queued = &w.paint.lazy_image_check_queued;
+    if queued.get() || !w.paint.images.borrow().values().any(|image| image.lazy) {
+        return;
+    }
+    queued.set(true);
+    w.queue_task(
+        TaskSource::DomManipulation,
+        Box::new(|_, w| {
+            w.paint.lazy_image_check_queued.set(false);
+            load_visible_lazy_images(w);
+        }),
+    );
 }
 
 /// Starts lazy images that are now near the viewport (within 1250px).
