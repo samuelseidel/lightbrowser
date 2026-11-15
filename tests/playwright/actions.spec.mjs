@@ -213,3 +213,31 @@ test('number inputs sanitize exposed values and preserve in-progress exponents',
     await context.close();
   }
 });
+
+test('number input filters keystrokes and pasted text after beforeinput', async () => {
+  const { context, page } = await newPage();
+  try {
+    await page.evaluate(() => {
+      document.body.innerHTML = '<input type="number">';
+      const input = document.querySelector('input');
+      window.numberEvents = [];
+      for (const type of ['beforeinput', 'input']) {
+        input.addEventListener(type, (event) => numberEvents.push([type, event.data]));
+      }
+      input.focus();
+    });
+    const number = page.locator('input');
+    await page.keyboard.type('1x..2ee+-3');
+    assert.equal(await number.inputValue(), '1.2e+3');
+    assert.deepEqual(
+      (await page.evaluate(() => numberEvents)).filter(([type]) => type === 'input').map(([, data]) => data),
+      ['1', '.', '2', 'e', '+', '3'],
+    );
+    await number.evaluate((input) => { input.value = ''; numberEvents.length = 0; });
+    await page.keyboard.insertText('1abc2');
+    assert.equal(await number.inputValue(), '12');
+    assert.deepEqual(await page.evaluate(() => numberEvents), [['beforeinput', '1abc2'], ['input', '12']]);
+  } finally {
+    await context.close();
+  }
+});

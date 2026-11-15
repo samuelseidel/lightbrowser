@@ -1529,6 +1529,32 @@ fn edit_text(
     edit_range(js, w, n, kind, data, s.start, s.end, text);
 }
 
+/// Accept number-control input incrementally so incomplete exponents can
+/// remain in the editor while script still sees a sanitized value.
+fn filter_number_input(before: &str, after: &str, text: &str) -> String {
+    let mut accepted = String::new();
+    for ch in text.chars() {
+        let ch = if ch == ',' { '.' } else { ch };
+        let prefix = before.chars().chain(accepted.chars());
+        let has_exponent = prefix.clone().any(|c| matches!(c, 'e' | 'E'));
+        let keep = match ch {
+            '0'..='9' => true,
+            'e' | 'E' => !has_exponent && !after.contains(['e', 'E']),
+            '.' => !has_exponent && !prefix.clone().chain(after.chars()).any(|c| c == '.'),
+            '+' | '-' => {
+                !has_exponent
+                    || prefix.last().is_some_and(|c| matches!(c, 'e' | 'E'))
+                        && !after.starts_with(['+', '-'])
+            }
+            _ => false,
+        };
+        if keep {
+            accepted.push(ch);
+        }
+    }
+    accepted
+}
+
 #[allow(clippy::too_many_arguments)]
 fn edit_range(
     js: &mut dyn Js,
@@ -1557,11 +1583,22 @@ fn edit_range(
         return;
     }
     let value = control_value(w, 0, n);
+    let number = w.with_doc(|d| super::dom::input_type(d, n) == "number");
     let max = w.with_doc(|d| {
         d.get_attribute(n, "maxlength")
             .and_then(|m| m.trim().parse::<usize>().ok())
     });
-    let mut text = text.to_string();
+    let mut text = if number && !text.is_empty() {
+        let before = splice(&value, start, utf16(&value).len(), "");
+        let after = splice(&value, 0, end, "");
+        let accepted = filter_number_input(&before, &after, text);
+        if accepted.is_empty() {
+            return;
+        }
+        accepted
+    } else {
+        text.to_owned()
+    };
     if let Some(m) = max {
         let room = m.saturating_sub(utf16(&value).len() - (end - start));
         if utf16(&text).len() > room {
@@ -1580,7 +1617,20 @@ fn edit_range(
         "input",
         true,
         false,
-        input_extra(),
+        if number {
+            EventExtra::Input {
+                data: data.map(|original| {
+                    if original == "," {
+                        original.to_owned()
+                    } else {
+                        text
+                    }
+                }),
+                input_type: kind.to_owned(),
+            }
+        } else {
+            input_extra()
+        },
     );
 }
 
