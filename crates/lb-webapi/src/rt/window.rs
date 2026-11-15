@@ -464,57 +464,62 @@ pub(crate) fn form_entries(
 
 /// Navigate this window: fragment changes stay in the document, anything
 /// else goes to the page layer.
-pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bool) {
-    let cur = w.url();
-    let same_doc = url.fragment().is_some() && {
-        let (mut a, mut b) = (cur.clone(), url.clone());
-        a.set_fragment(None);
-        b.set_fragment(None);
-        a == b
-    };
-    if same_doc {
-        let old = cur.to_string();
-        let new = url.to_string();
+pub(crate) fn navigate_to(w: &Window, url: Url, replace: bool) {
+    if !w.navigate_fragment(&url, replace) {
+        w.request_navigation(NavRequest::get(url, replace));
+    }
+}
+
+impl Window {
+    /// Apply a fragment navigation to the current document and queue hashchange.
+    /// Returns false when the URL requires a document load.
+    pub fn navigate_fragment(&self, url: &Url, replace: bool) -> bool {
+        let cur = self.url();
+        if url.fragment().is_none()
+            || cur[..url::Position::AfterQuery] != url[..url::Position::AfterQuery]
         {
-            let mut h = w.history.borrow_mut();
+            return false;
+        }
+        if &cur == url {
+            super::frames::navigated_within_document(self, false);
+            return true;
+        }
+        {
+            let mut h = self.history.borrow_mut();
             let idx = h.index;
+            let entry = HistEntry {
+                url: url.clone(),
+                state: None,
+            };
             if replace {
-                h.entries[idx] = HistEntry {
-                    url: url.clone(),
-                    state: None,
-                };
+                h.entries[idx] = entry;
             } else {
                 h.entries.truncate(idx + 1);
-                h.entries.push(HistEntry {
-                    url: url.clone(),
-                    state: None,
-                });
+                h.entries.push(entry);
                 h.index += 1;
             }
         }
-        w.set_url(url);
-        if old != new {
-            super::frames::navigated_within_document(w, false);
-            w.queue_task(
-                TaskSource::DomManipulation,
-                Box::new(move |js, w| {
-                    fire_event_with(
-                        js,
-                        w,
-                        WINDOW_REF,
-                        "HashChangeEvent",
-                        "hashchange",
-                        false,
-                        false,
-                        EventExtra::HashChange { old, new },
-                    );
-                }),
-            );
-        }
-        let _ = js;
-        return;
+        self.set_url(url.clone());
+        super::frames::navigated_within_document(self, false);
+        let old = cur.to_string();
+        let new = url.to_string();
+        self.queue_task(
+            TaskSource::DomManipulation,
+            Box::new(move |js, w| {
+                fire_event_with(
+                    js,
+                    w,
+                    WINDOW_REF,
+                    "HashChangeEvent",
+                    "hashchange",
+                    false,
+                    false,
+                    EventExtra::HashChange { old, new },
+                );
+            }),
+        );
+        true
     }
-    w.request_navigation(NavRequest::get(url, replace));
 }
 
 /// `(screenX, screenY)`: the persona's `window_position()` (Wayland 0,0;
@@ -804,7 +809,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     setter(reg, rt, "Window", "location", |cx, w| {
         let v = cx.arg_string(0)?;
         if let Some(u) = w.resolve_url(&v) {
-            navigate_to(cx, w, u, false);
+            navigate_to(w, u, false);
         }
         Ok(())
     });
@@ -949,7 +954,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 };
                 match target {
                     Some(u) => {
-                        navigate_to(cx, w, u, false);
+                        if prop != "hash" || u != w.url() {
+                            navigate_to(w, u, false);
+                        }
                         Ok(())
                     }
                     None => Err(w.rt.err("SyntaxError", format!("Failed to set the 'href' property on 'Location': '{v}' is not a valid URL."))),
@@ -963,7 +970,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             let v = cx.arg_string(0)?;
             match w.resolve_url(&v) {
                 Some(u) => {
-                    navigate_to(cx, w, u, replace);
+                    navigate_to(w, u, replace);
                     Ok(())
                 }
                 None => Err(w.rt.err(

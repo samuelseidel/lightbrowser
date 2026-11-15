@@ -39,9 +39,14 @@ impl FrameHooks for Hooks {
         if let Some(page) = self.page.upgrade()
             && let Some(agent) = page.agent()
         {
+            let frame = wf::frame_id(window);
+            let url = window.url().to_string();
+            if frame == 0 {
+                agent.frame.lock().unwrap_or_else(|e| e.into_inner()).url = url.clone();
+            }
             agent.emit(lb_cdp::PageEvent::NavigatedWithinDocument {
-                frame_id: agent.frame_str(wf::frame_id(window)),
-                url: window.url().to_string(),
+                frame_id: agent.frame_str(frame),
+                url,
                 navigation_type: if history_api {
                     "historyApi"
                 } else {

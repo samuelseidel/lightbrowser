@@ -497,14 +497,22 @@ impl PageHost for CdpHost {
             return Err(HostError::new("No frame for given id found"));
         }
         let page = self.page(target_id)?;
-        if url::Url::parse(&req.url).is_err() {
-            return Err(HostError::new("Cannot navigate to invalid URL"));
-        }
+        let url = url::Url::parse(&req.url)
+            .map_err(|_| HostError::new("Cannot navigate to invalid URL"))?;
         let mut result = NavigateResult {
             frame_id: target_id.to_string(),
             loader_id: None,
             error_text: None,
         };
+        if url.fragment().is_some()
+            && self
+                .on_worker(target_id, move |_, p| async move {
+                    Ok(p.window().is_some_and(|w| w.navigate_fragment(&url, false)))
+                })
+                .await?
+        {
+            return Ok(result);
+        }
         match page.navigate(&req.url).await {
             Ok(nav) => result.loader_id = Some(agent::loader_id(page.id(), nav.loader_id)),
             Err(PageError::Net(e)) => result.error_text = Some(net::net_error_text(&e)),
