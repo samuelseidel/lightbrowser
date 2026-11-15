@@ -335,7 +335,7 @@ impl<H: PageHost + 'static> Shared<H> {
                     ts.info.url = url;
                     info_changed = true;
                 }
-                PageEvent::NavigatedWithinDocument { frame_id, url } if frame_id == t => {
+                PageEvent::NavigatedWithinDocument { frame_id, url, .. } if frame_id == t => {
                     st.target_mut(t).expect("target").info.url = url.clone();
                     info_changed = true;
                 }
@@ -826,10 +826,14 @@ fn translate(target: &str, ev: &PageEvent) -> Vec<(Gate, String, Value)> {
             "Page.frameNavigated",
             json!({ "frame": frame, "type": "Navigation" }),
         ),
-        PageEvent::NavigatedWithinDocument { frame_id, url } => one(
+        PageEvent::NavigatedWithinDocument {
+            frame_id,
+            url,
+            navigation_type,
+        } => one(
             "Page",
             "Page.navigatedWithinDocument",
-            json!({ "frameId": frame_id, "url": url, "navigationType": "fragment" }),
+            json!({ "frameId": frame_id, "url": url, "navigationType": navigation_type }),
         ),
         PageEvent::Lifecycle {
             frame_id,

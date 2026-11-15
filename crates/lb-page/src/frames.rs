@@ -35,6 +35,22 @@ struct Hooks {
 }
 
 impl FrameHooks for Hooks {
+    fn navigated_within_document(&self, window: &Window, history_api: bool) {
+        if let Some(page) = self.page.upgrade()
+            && let Some(agent) = page.agent()
+        {
+            agent.emit(lb_cdp::PageEvent::NavigatedWithinDocument {
+                frame_id: agent.frame_str(wf::frame_id(window)),
+                url: window.url().to_string(),
+                navigation_type: if history_api {
+                    "historyApi"
+                } else {
+                    "fragment"
+                },
+            });
+        }
+    }
+
     fn committed(&self, ops: &mut dyn RealmOps, child: &Rc<Window>, initial: bool) {
         if let Some(p) = self.page.upgrade()
             && let Some(a) = p.agent()

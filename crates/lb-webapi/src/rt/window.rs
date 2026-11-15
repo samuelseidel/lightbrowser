@@ -494,6 +494,7 @@ pub(crate) fn navigate_to(js: &mut dyn Js, w: &Rc<Window>, url: Url, replace: bo
         }
         w.set_url(url);
         if old != new {
+            super::frames::navigated_within_document(w, false);
             w.queue_task(
                 TaskSource::DomManipulation,
                 Box::new(move |js, w| {
@@ -1048,6 +1049,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 }
             }
             w.set_url(url);
+            super::frames::navigated_within_document(w, true);
             Ok(())
         });
     }
@@ -1080,6 +1082,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                         (old, h.entries[t].url.clone(), h.entries[t].state.clone())
                     };
                     w.set_url(url.clone());
+                    super::frames::navigated_within_document(w, false);
                     fire_event_with(
                         js,
                         w,

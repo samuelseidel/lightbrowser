@@ -108,6 +108,9 @@ pub struct FrameNavigation {
 /// What the page layer provides for frames. Calls may come from inside a
 /// running callback; `ops` can build or drop realms there.
 pub trait FrameHooks {
+    /// The current document's URL changed through history or a fragment navigation.
+    fn navigated_within_document(&self, _window: &Window, _history_api: bool) {}
+
     /// A frame's document committed: the initial `about:blank` window
     /// (`initial`) or a navigation's window installed by [`commit_child`].
     fn committed(&self, ops: &mut dyn RealmOps, child: &Rc<Window>, initial: bool);
@@ -127,6 +130,14 @@ pub trait FrameHooks {
 /// Install the page's frame hooks on its top-level window.
 pub fn set_hooks(w: &Window, hooks: Option<Rc<dyn FrameHooks>>) {
     *w.frames.hooks.borrow_mut() = hooks;
+}
+
+pub(crate) fn navigated_within_document(w: &Window, history_api: bool) {
+    if !is_detached(w)
+        && let Some(h) = hooks(w)
+    {
+        h.navigated_within_document(w, history_api);
+    }
 }
 
 fn hooks(w: &Window) -> Option<Rc<dyn FrameHooks>> {

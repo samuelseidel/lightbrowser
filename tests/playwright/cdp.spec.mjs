@@ -37,6 +37,51 @@ test('console events identify the isolated world that logged them', { timeout: 1
   }
 });
 
+pages['/same-document'] = html('History', '<iframe src="/same-document-child"></iframe>');
+pages['/same-document-child'] = html('Child history', '');
+
+test('CDP reports script-driven same-document navigations', { timeout: 10_000 }, async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  try {
+    await page.goto(`${base}/same-document`);
+    const session = await context.newCDPSession(page);
+    await session.send('Page.enable');
+    const { frameTree } = await session.send('Page.getFrameTree');
+    const events = [];
+    session.on('Page.navigatedWithinDocument', (event) => events.push(event));
+    await page.evaluate(() => {
+      window.navigationSentinel = 42;
+      history.pushState({}, '', '/push');
+      history.replaceState({}, '', '/replacement');
+      location.hash = 'fragment';
+    });
+    await page.evaluate(() => new Promise((resolve) => {
+      window.addEventListener('popstate', resolve, { once: true });
+      history.back();
+    }));
+    const child = page.frames().find((frame) => frame.parentFrame() === page.mainFrame());
+    await child.evaluate(() => history.pushState({}, '', '/child-push'));
+
+    assert.equal(await page.evaluate(() => window.navigationSentinel), 42);
+    assert.equal(page.url(), `${base}/replacement`);
+    assert.equal(child.url(), `${base}/child-push`);
+    const main = frameTree.frame.id;
+    const nested = frameTree.childFrames[0].frame.id;
+    assert.deepEqual(events.map(({ frameId, url, navigationType }) => [
+      frameId, new URL(url).pathname + new URL(url).hash, navigationType,
+    ]), [
+      [main, '/push', 'historyApi'],
+      [main, '/replacement', 'historyApi'],
+      [main, '/replacement#fragment', 'fragment'],
+      [main, '/replacement', 'fragment'],
+      [nested, '/child-push', 'historyApi'],
+    ]);
+  } finally {
+    await context.close();
+  }
+});
+
 test('DOM and Accessibility domains on the real document', async () => {
   const { base } = await env();
   const { context, page } = await newPage();
