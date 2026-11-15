@@ -1547,21 +1547,25 @@ const TIMING_FIELDS: [&str; 21] = [
 ];
 
 /// Legacy `performance.timing` value of `field` (ms since the epoch, 0
-/// when not reached). The window starts at commit; the fetch before it
-/// is placed in the first few milliseconds (a fast local load).
+/// when not reached). The document loader records response completion and
+/// commit. Unmeasured transport phases use estimates capped at response end.
 fn timing_value(w: &Window, field: &str) -> f64 {
     let nav = w.clock.time_origin.floor();
     let li = w.load_info.borrow().clone();
     let at = |ms: Option<f64>| ms.map_or(0.0, |m| (w.clock.time_origin + m).floor());
     let https = w.url().scheme() == "https";
+    let response_end = li.response_end_ms.map_or(nav + 4.0, |ms| at(Some(ms)));
+    let estimate = |offset: f64| (nav + offset).min(response_end);
     match field {
         "navigationStart" => nav,
-        "fetchStart" | "domainLookupStart" | "domainLookupEnd" | "connectStart" => nav + 1.0,
-        "connectEnd" => nav + 1.0,
-        "secureConnectionStart" if https => nav + 1.0,
-        "requestStart" => nav + 2.0,
-        "responseStart" => nav + 3.0,
-        "responseEnd" | "domLoading" => nav + 4.0,
+        "fetchStart" | "domainLookupStart" | "domainLookupEnd" | "connectStart" | "connectEnd" => {
+            estimate(1.0)
+        }
+        "secureConnectionStart" if https => estimate(1.0),
+        "requestStart" => estimate(2.0),
+        "responseStart" => estimate(3.0),
+        "responseEnd" => response_end,
+        "domLoading" => li.commit_ms.map_or(response_end, |ms| at(Some(ms))),
         "domInteractive" | "domContentLoadedEventStart" | "domContentLoadedEventEnd" => {
             at(li.dcl_ms)
         }

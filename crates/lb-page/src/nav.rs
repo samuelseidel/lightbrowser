@@ -185,6 +185,7 @@ pub(crate) async fn navigate_committed(
         post,
         user_activated,
     } = target;
+    let clock = lb_webapi::rt::Clock::new(page.ctx.options().virtual_time);
     let seq = page.nav_seq.get() + 1;
     page.nav_seq.set(seq);
     page.loading.set(true);
@@ -240,6 +241,7 @@ pub(crate) async fn navigate_committed(
             }
         }
     };
+    let response_end_ms = clock.now();
     if page.nav_seq.get() != seq || page.closed.get() {
         let _ = committed.send(Err(PageError::Aborted));
         return Err(PageError::Aborted);
@@ -285,7 +287,7 @@ pub(crate) async fn navigate_committed(
         .unwrap_or("text/html")
         .trim()
         .to_ascii_lowercase();
-    let w = Window::new(
+    let w = Window::new_with_clock(
         &rt,
         WindowInit {
             url: resp.url.clone(),
@@ -310,8 +312,14 @@ pub(crate) async fn navigate_committed(
             charset,
             history_len: page.history_len(),
         },
+        clock,
     );
-    w.load_info.borrow_mut().connection_info = resp.protocol.map(str::to_owned);
+    {
+        let mut info = w.load_info.borrow_mut();
+        info.connection_info = resp.protocol.map(str::to_owned);
+        info.response_end_ms = Some(response_end_ms);
+        info.commit_ms = Some(w.clock.now());
+    }
     if reload {
         w.load_info.borrow_mut().navigation_type = Some("Reload".into());
     }

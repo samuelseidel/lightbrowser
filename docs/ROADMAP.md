@@ -295,8 +295,9 @@ Open (CDP and page host):
   `clientWidth` ignores scrollbars (the persona's
   `preferences.scrollbar_width` is not used by `lb-layout` yet).
 - Reloads set the navigation type before document scripts run. Network
-  responses expose their negotiated protocol. Other navigation types,
-  timing phases, and synthesized responses still use defaults.
+  responses expose their negotiated protocol. The document clock starts
+  before fetching, and the loader records response completion and document
+  commit. Individual transport phases and first paint remain estimates.
 - The page layer does not call `Engine::set_time_zone` when a worker switches
   personas.
 

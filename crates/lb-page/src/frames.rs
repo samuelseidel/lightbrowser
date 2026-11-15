@@ -130,6 +130,7 @@ async fn navigate_frame(
     if let Some(a) = page.agent() {
         a.frame_started_loading(id);
     }
+    let clock = lb_webapi::rt::Clock::new(page.ctx.options().virtual_time);
     let parent_url = wf::effective_url(&parent);
     // A service worker controlling the frame's URL sees the navigation
     // first (ADR 0022).
@@ -188,6 +189,7 @@ async fn navigate_frame(
             (r, None)
         }
     };
+    let response_end_ms = clock.now();
     // Still this frame's current window?
     let current = wf::children(&parent)
         .iter()
@@ -230,8 +232,13 @@ async fn navigate_frame(
         .as_ref()
         .map(|u| u.to_string())
         .unwrap_or_default();
-    let w = Window::new(&rt, init);
-    w.load_info.borrow_mut().connection_info = resp.protocol.map(str::to_owned);
+    let w = Window::new_with_clock(&rt, init, clock);
+    {
+        let mut info = w.load_info.borrow_mut();
+        info.connection_info = resp.protocol.map(str::to_owned);
+        info.response_end_ms = Some(response_end_ms);
+        info.commit_ms = Some(w.clock.now());
+    }
     if nav.reload {
         w.load_info.borrow_mut().navigation_type = Some("Reload".into());
     }

@@ -944,6 +944,12 @@ impl std::fmt::Debug for Window {
 impl Window {
     /// A window for a new, empty document at `init.url`.
     pub fn new(rt: &Runtime, init: WindowInit) -> Rc<Window> {
+        let clock = Clock::new(init.virtual_time);
+        Self::new_with_clock(rt, init, clock)
+    }
+
+    /// Create a document with the clock started by its navigation.
+    pub fn new_with_clock(rt: &Runtime, init: WindowInit, clock: Clock) -> Rc<Window> {
         let mutations: Rc<RefCell<Vec<(u32, Mutation)>>> = Rc::new(RefCell::new(Vec::new()));
         let mut doc = Document::new();
         let sink = mutations.clone();
@@ -986,7 +992,7 @@ impl Window {
             next_raf: Cell::new(1),
             console: RefCell::new(Vec::new()),
             console_sink: RefCell::new(None),
-            clock: Clock::new(init.virtual_time),
+            clock,
             layout: RefCell::new(None),
             css: RefCell::new(sheets::CssState::default()),
             bg: RefCell::new(bgimage::BgImages::default()),

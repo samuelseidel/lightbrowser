@@ -137,6 +137,37 @@ test('reload sets navigation metadata before scripts and preserves history lengt
   }
 });
 
+pages['/delayed-document'] = (_req, res) => {
+  setTimeout(() => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(html('Delayed document', '<p>ready</p>'));
+  }, 100);
+};
+
+test('navigation timing includes time spent waiting for the document', async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  try {
+    await page.goto(`${base}/delayed-document`);
+    const timing = await page.evaluate(() => ({
+      origin: performance.timeOrigin,
+      elapsed: performance.now(),
+      legacy: performance.timing.toJSON(),
+      chrome: window.chrome.loadTimes(),
+    }));
+    const { navigationStart, responseEnd, domLoading, domContentLoadedEventStart } = timing.legacy;
+    assert.ok(responseEnd - navigationStart >= 75, JSON.stringify(timing));
+    assert.ok(responseEnd <= domLoading);
+    assert.ok(domLoading <= domContentLoadedEventStart);
+    assert.ok(Math.abs(timing.origin - navigationStart) <= 1);
+    assert.ok(timing.elapsed >= 75);
+    assert.ok(timing.chrome.commitLoadTime - timing.chrome.startLoadTime >= 0.075);
+    assert.ok(timing.chrome.commitLoadTime <= timing.chrome.finishDocumentLoadTime);
+  } finally {
+    await context.close();
+  }
+});
+
 test('DOM and Accessibility domains on the real document', async () => {
   const { base } = await env();
   const { context, page } = await newPage();
