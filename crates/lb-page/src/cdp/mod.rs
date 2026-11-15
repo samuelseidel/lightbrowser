@@ -794,6 +794,23 @@ impl PageHost for CdpHost {
 
     // ---- DOM ----
 
+    fn get_frame_owner(&self, target_id: &str, frame_id: &str) -> HostResult<BackendNodeId> {
+        use lb_webapi::rt::frames;
+
+        let frame_id = frame_id.to_owned();
+        self.blocking(target_id, move |_, a, top| {
+            let missing = || HostError::new("Frame with the given id was not found.");
+            let id = a.frame_of(&frame_id).ok_or_else(missing)?;
+            let child = frames::find(top, id).ok_or_else(missing)?;
+            let parent = frames::parent(&child).ok_or_else(missing)?;
+            if !Rc::ptr_eq(&parent, top) {
+                return Err(HostError::new("Frame owner is outside the main document"));
+            }
+            let node = frames::frame_element(&child).ok_or_else(missing)?;
+            Ok(agent::backend_id(a.current_seq(), node))
+        })
+    }
+
     fn get_document(&self, target_id: &str, depth: i32, pierce: bool) -> HostResult<DomNode> {
         self.blocking(target_id, move |_, a, w| {
             Ok(agent::dom_node(a, w, agent::DOCUMENT, depth, pierce))
@@ -808,9 +825,9 @@ impl PageHost for CdpHost {
         pierce: bool,
     ) -> HostResult<DomNode> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
-            Ok(agent::dom_node(a, w, n, depth, pierce))
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
+            Ok(agent::dom_node(a, &w, n, depth, pierce))
         })
     }
 
@@ -822,22 +839,28 @@ impl PageHost for CdpHost {
         object_group: Option<&str>,
     ) -> HostResult<RemoteObject> {
         let group = object_group.map(str::to_string);
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Backend(node))?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
             let ctx = match context {
                 Some(c) => c,
                 None => a
                     .main_ctx()
                     .ok_or_else(|| HostError::new("Cannot find default execution context"))?,
             };
-            a.node_object(ws, w, n, ctx, group.as_deref())
+            a.node_object(ws, &w, n, ctx, group.as_deref())
         })
     }
 
     fn request_node(&self, target_id: &str, object_id: &str) -> HostResult<BackendNodeId> {
         let oid = object_id.to_string();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Object(oid))?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Object(oid))?;
+            // Backend ids are scoped to the top document only.
+            if !std::rc::Rc::ptr_eq(&w, top) {
+                return Err(HostError::new(
+                    "Node belongs to a child frame; use the object id with DOM methods",
+                ));
+            }
             Ok(agent::backend_id(a.current_seq(), n))
         })
     }
@@ -849,8 +872,8 @@ impl PageHost for CdpHost {
         selector: &str,
     ) -> HostResult<Option<BackendNodeId>> {
         let sel = selector.to_string();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Backend(node))?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
             let seq = a.current_seq();
             w.with_doc(|d| d.query_selector(n, &sel))
                 .map(|r| r.map(|x| agent::backend_id(seq, x)))
@@ -865,8 +888,8 @@ impl PageHost for CdpHost {
         selector: &str,
     ) -> HostResult<Vec<BackendNodeId>> {
         let sel = selector.to_string();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Backend(node))?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
             let seq = a.current_seq();
             w.with_doc(|d| d.query_selector_all(n, &sel))
                 .map(|v| v.into_iter().map(|x| agent::backend_id(seq, x)).collect())
@@ -876,8 +899,8 @@ impl PageHost for CdpHost {
 
     fn outer_html(&self, target_id: &str, node: &NodeRef) -> HostResult<String> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             Ok(if n == agent::DOCUMENT {
                 w.content()
             } else {
@@ -888,8 +911,8 @@ impl PageHost for CdpHost {
 
     fn box_model(&self, target_id: &str, node: &NodeRef) -> HostResult<BoxModel> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             w.with_layout_engine(|l, d| l.box_model(d, n))
                 .map(|m| lb_cdp::convert::box_model(&m))
                 .ok_or_else(|| HostError::new("Could not compute box model."))
@@ -897,14 +920,31 @@ impl PageHost for CdpHost {
     }
 
     fn content_quads(&self, target_id: &str, node: &NodeRef) -> HostResult<Vec<Quad>> {
+        use lb_webapi::rt::frames;
+
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             let rects = w.with_layout_engine(|l, d| l.client_rects(d, n));
+            let (mut x, mut y) = (0.0, 0.0);
+            let mut frame = w;
+            while let Some(parent) = frames::parent(&frame) {
+                let content = frames::frame_element(&frame)
+                    .and_then(|el| parent.with_layout_engine(|l, d| l.box_model(d, el)))
+                    .ok_or_else(|| HostError::new("Frame owner has no layout box"))?
+                    .content;
+                x += content.x;
+                y += content.y;
+                frame = parent;
+            }
             Ok(rects
-                .iter()
+                .into_iter()
                 .filter(|r| r.width > 0.0 && r.height > 0.0)
-                .map(|r| lb_cdp::convert::rect(r).quad())
+                .map(|mut r| {
+                    r.x += x;
+                    r.y += y;
+                    lb_cdp::convert::rect(&r).quad()
+                })
                 .collect())
         })
     }
@@ -916,8 +956,8 @@ impl PageHost for CdpHost {
         _rect: Option<Rect>,
     ) -> HostResult<()> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             if !w.with_doc(|d| d.is_connected(n)) {
                 return Err(HostError::new("Node is detached from document"));
             }

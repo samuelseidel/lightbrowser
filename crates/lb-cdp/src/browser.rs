@@ -1744,6 +1744,12 @@ fn dom_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError>
     match c.method {
         "DOM.enable" => c.enable("DOM", true),
         "DOM.disable" => c.enable("DOM", false),
+        "DOM.getFrameOwner" => {
+            let id = host
+                .get_frame_owner(&t, str_param(c.p, "frameId")?)
+                .map_err(host_err)?;
+            Ok(json!({ "backendNodeId": id }))
+        }
         "DOM.getDocument" => {
             let pierce = c.p.get("pierce").and_then(Value::as_bool).unwrap_or(false);
             Ok(json!({ "root": host.get_document(&t, depth, pierce).map_err(host_err)? }))

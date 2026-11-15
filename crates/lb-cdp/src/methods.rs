@@ -77,6 +77,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "requestNode",
             "getBoxModel",
             "getContentQuads",
+            "getFrameOwner",
             "scrollIntoViewIfNeeded",
             "setFileInputFiles",
             "querySelector",

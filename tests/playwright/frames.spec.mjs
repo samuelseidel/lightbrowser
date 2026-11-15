@@ -11,6 +11,16 @@ pages['/frames'] = html(
    <iframe name="second" src="/frame-child"></iframe>`,
 );
 pages['/frame-child'] = html('Child', '<h1>child doc</h1>');
+pages['/frame-click'] = html(
+  'Frame click',
+  `<iframe id="f" src="/frame-click-child" width="400" height="200" style="border:0"></iframe>`,
+);
+pages['/frame-click-child'] = html(
+  'Frame click child',
+  `<button id="b">Go</button><input id="i"><script>
+     document.getElementById('b').onclick = () => { document.body.dataset.clicked = '1'; };
+   </script>`,
+);
 
 test('frameLocator reads a srcdoc iframe; frames and their contexts are reported', async () => {
   const { base } = await env();
@@ -44,6 +54,18 @@ test('frameLocator reads a srcdoc iframe; frames and their contexts are reported
   await page.evaluate(() => document.getElementById('dyn').remove());
   await detached;
   assert.equal(page.frames().length, 3);
+  await context.close();
+});
+
+test('frameLocator click and fill reach the iframe document', async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  await page.goto(`${base}/frame-click`);
+  const fl = page.frameLocator('#f');
+  await fl.locator('#b').click();
+  assert.equal(await fl.locator('body').getAttribute('data-clicked'), '1');
+  await fl.locator('#i').fill('hello');
+  assert.equal(await fl.locator('#i').inputValue(), 'hello');
   await context.close();
 });
 
