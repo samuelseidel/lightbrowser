@@ -349,7 +349,7 @@ Steps are in `tests/README.md`. Both modes use our own local server only.
 
 - **Browser:** getVersion, close, setDownloadBehavior
 - **Target:** setAutoAttach (flatten), createBrowserContext, disposeBrowserContext, createTarget, attachToTarget, closeTarget, getTargets, setDiscoverTargets
-- **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014)
+- **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, navigatedWithinDocument (script-driven), captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014)
 - **Runtime:** enable, evaluate, callFunctionOn, getProperties, releaseObject, executionContextCreated / Destroyed, consoleAPICalled
 - **DOM:** getDocument, describeNode, resolveNode, getBoxModel, getContentQuads, getFrameOwner, scrollIntoViewIfNeeded, setFileInputFiles
 - **Input:** dispatchMouseEvent, dispatchKeyEvent, insertText

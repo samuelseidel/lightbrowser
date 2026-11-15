@@ -200,6 +200,7 @@ pub enum PageEvent {
     NavigatedWithinDocument {
         frame_id: FrameId,
         url: String,
+        navigation_type: &'static str,
     },
     /// `init`, `DOMContentLoaded`, `load`, `networkAlmostIdle`,
     /// `networkIdle`, ... The server also sends

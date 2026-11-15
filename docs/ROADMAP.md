@@ -272,7 +272,8 @@ Open (CDP and page host):
 - No popups; workers (since "Workers") are not CDP targets. Screenshots landed in M6 (see "M6 status: screenshots").
 - Playwright can click and fill inside direct and nested child frames. Backend
   node IDs resolve in the document that owns the node.
-- Same-document navigations are not reported (`navigatedWithinDocument`).
+- Script-driven history and fragment changes report `navigatedWithinDocument`.
+  CDP-initiated fragment navigation still goes through the document loader.
 - Console arguments arrive as one string argument.
 - `Fetch` interception covers the request stage only. `Network.*` request
   headers are approximate (persona UA, `Accept-Language`, `sec-ch-ua`, the
