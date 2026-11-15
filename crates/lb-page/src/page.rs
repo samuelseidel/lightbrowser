@@ -69,9 +69,6 @@ pub(crate) struct PageState {
     pub turn: Rc<Notify>,
     /// The CDP agent of this page, when it is driven over CDP.
     pub cdp: RefCell<Option<Rc<crate::cdp::agent::Agent>>>,
-    /// The next navigation is a reload (service worker `FetchEvent`
-    /// request cache mode).
-    pub reloading: Cell<bool>,
 }
 
 impl PageState {
@@ -456,7 +453,6 @@ impl Page {
                     history_len: Cell::new(u32::from(skip_blank)),
                     turn: Rc::new(Notify::new()),
                     cdp: RefCell::new(None),
-                    reloading: Cell::new(false),
                 });
                 if let Some(setup) = setup {
                     setup(&page);
@@ -574,9 +570,12 @@ impl Page {
         let (tx, rx) = oneshot::channel();
         self.call(move |ws, page| async move {
             let url = page.window().map(|w| w.url()).ok_or(PageError::Closed)?;
-            page.reloading.set(true);
             tokio::task::spawn_local(async move {
-                let target = crate::nav::Target::typed(url);
+                let target = crate::nav::Target {
+                    reload: true,
+                    replace: true,
+                    ..crate::nav::Target::typed(url)
+                };
                 let r = crate::nav::navigate_committed(ws, page, target, tx).await;
                 let _ = r;
             });

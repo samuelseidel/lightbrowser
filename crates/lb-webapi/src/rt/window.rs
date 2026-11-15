@@ -982,7 +982,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Location", "reload", |_cx, w| {
-        w.request_navigation(NavRequest::get(w.url(), true));
+        w.request_navigation(NavRequest::reload(w.url()));
         Ok(())
     });
     method(reg, rt, "Location", "toString", |cx, w| {
@@ -1070,7 +1070,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             };
             if delta == 0 {
                 if name == "go" {
-                    w.request_navigation(NavRequest::get(w.url(), true));
+                    w.request_navigation(NavRequest::reload(w.url()));
                 }
                 return Ok(());
             }

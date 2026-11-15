@@ -294,9 +294,10 @@ Open (CDP and page host):
 - Layout has no real line boxes, shaping, bidi or table layout, and
   `clientWidth` ignores scrollbars (the persona's
   `preferences.scrollbar_width` is not used by `lb-layout` yet).
-- The page layer does not fill `Window::load_info` (so `chrome.loadTimes`
-  and `performance.navigation` guess), does not call
-  `Engine::set_time_zone` when a worker switches personas.
+- Reloads set the navigation type before document scripts run. Other
+  navigation types and connection details still use defaults.
+- The page layer does not call `Engine::set_time_zone` when a worker switches
+  personas.
 
 ## M4 status: summary (2026-11-03)
 

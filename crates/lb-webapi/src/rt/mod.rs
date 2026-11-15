@@ -740,6 +740,7 @@ impl Clock {
 pub struct NavRequest {
     pub url: Url,
     pub replace: bool,
+    pub reload: bool,
     /// Form POST body (`None`: GET).
     pub post: Option<FormBody>,
     /// Started by trusted user input (a click or Enter on a submit button):
@@ -748,11 +749,20 @@ pub struct NavRequest {
 }
 
 impl NavRequest {
+    /// Reload the current document.
+    pub fn reload(url: Url) -> Self {
+        Self {
+            reload: true,
+            ..Self::get(url, true)
+        }
+    }
+
     /// A GET navigation from script.
     pub fn get(url: Url, replace: bool) -> NavRequest {
         NavRequest {
             url,
             replace,
+            reload: false,
             post: None,
             user_activated: false,
         }

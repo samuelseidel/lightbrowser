@@ -110,6 +110,33 @@ test('CDP fragment navigation preserves the document and loader', { timeout: 10_
   }
 });
 
+pages['/reload-metadata'] = html(
+  'Reload',
+  '<script>window.initialNavigation = [performance.navigation.type, chrome.loadTimes().navigationType]</script>',
+);
+
+test('reload sets navigation metadata before scripts and preserves history length', { timeout: 10_000 }, async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  try {
+    await page.goto(`${base}/reload-metadata`);
+    assert.deepEqual(await page.evaluate(() => initialNavigation), [0, 'Other']);
+    const entries = await page.evaluate(() => {
+      history.pushState(null, '', '#entry');
+      return history.length;
+    });
+    await page.reload();
+    assert.deepEqual(await page.evaluate(() => [initialNavigation, history.length]), [[1, 'Reload'], entries]);
+    await Promise.all([
+      page.waitForNavigation(),
+      page.evaluate(() => { location.reload(); }),
+    ]);
+    assert.deepEqual(await page.evaluate(() => [initialNavigation, history.length]), [[1, 'Reload'], entries]);
+  } finally {
+    await context.close();
+  }
+});
+
 test('DOM and Accessibility domains on the real document', async () => {
   const { base } = await env();
   const { context, page } = await newPage();
