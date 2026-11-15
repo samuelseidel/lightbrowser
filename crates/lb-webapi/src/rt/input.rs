@@ -336,9 +336,14 @@ pub(crate) fn control_value(w: &Window, slot: u32, n: NodeId) -> String {
         if d.is_html_element_named(n, &local_name!("textarea")) {
             d.text_content(n).unwrap_or_default()
         } else {
-            d.get_attribute(n, "value")
-                .unwrap_or("")
-                .replace(['\r', '\n'], "")
+            let value = d.get_attribute(n, "value").unwrap_or("");
+            if super::dom::input_type(d, n) == "number" {
+                let mut value = value.to_owned();
+                super::dom::sanitize_number_input(&mut value);
+                value
+            } else {
+                value.replace(['\r', '\n'], "")
+            }
         }
     })
 }
