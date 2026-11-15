@@ -803,11 +803,8 @@ impl PageHost for CdpHost {
             let id = a.frame_of(&frame_id).ok_or_else(missing)?;
             let child = frames::find(top, id).ok_or_else(missing)?;
             let parent = frames::parent(&child).ok_or_else(missing)?;
-            if !Rc::ptr_eq(&parent, top) {
-                return Err(HostError::new("Frame owner is outside the main document"));
-            }
             let node = frames::frame_element(&child).ok_or_else(missing)?;
-            Ok(agent::backend_id(a.current_seq(), node))
+            Ok(Agent::ids(&parent)(node))
         })
     }
 
@@ -841,10 +838,12 @@ impl PageHost for CdpHost {
         let group = object_group.map(str::to_string);
         self.blocking(target_id, move |ws, a, top| {
             let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
+            let frame = lb_webapi::rt::frames::frame_id(&w);
             let ctx = match context {
-                Some(c) => c,
+                Some(c) if a.world(c)?.frame == frame => c,
+                Some(_) => return Err(HostError::new("Node is in a different document")),
                 None => a
-                    .main_ctx()
+                    .main_ctx_for_frame(frame)
                     .ok_or_else(|| HostError::new("Cannot find default execution context"))?,
             };
             a.node_object(ws, &w, n, ctx, group.as_deref())
@@ -855,13 +854,7 @@ impl PageHost for CdpHost {
         let oid = object_id.to_string();
         self.blocking(target_id, move |ws, a, top| {
             let (w, n) = a.node(ws, top, &NodeRef::Object(oid))?;
-            // Backend ids are scoped to the top document only.
-            if !std::rc::Rc::ptr_eq(&w, top) {
-                return Err(HostError::new(
-                    "Node belongs to a child frame; use the object id with DOM methods",
-                ));
-            }
-            Ok(agent::backend_id(a.current_seq(), n))
+            Ok(Agent::ids(&w)(n))
         })
     }
 
@@ -874,9 +867,8 @@ impl PageHost for CdpHost {
         let sel = selector.to_string();
         self.blocking(target_id, move |ws, a, top| {
             let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
-            let seq = a.current_seq();
             w.with_doc(|d| d.query_selector(n, &sel))
-                .map(|r| r.map(|x| agent::backend_id(seq, x)))
+                .map(|r| r.map(Agent::ids(&w)))
                 .map_err(|_| HostError::new("DOM Error while querying"))
         })
     }
@@ -890,9 +882,8 @@ impl PageHost for CdpHost {
         let sel = selector.to_string();
         self.blocking(target_id, move |ws, a, top| {
             let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
-            let seq = a.current_seq();
             w.with_doc(|d| d.query_selector_all(n, &sel))
-                .map(|v| v.into_iter().map(|x| agent::backend_id(seq, x)).collect())
+                .map(|v| v.into_iter().map(Agent::ids(&w)).collect())
                 .map_err(|_| HostError::new("DOM Error while querying"))
         })
     }
@@ -913,30 +904,29 @@ impl PageHost for CdpHost {
         let node = node.clone();
         self.blocking(target_id, move |ws, a, top| {
             let (w, n) = a.node(ws, top, &node)?;
-            w.with_layout_engine(|l, d| l.box_model(d, n))
-                .map(|m| lb_cdp::convert::box_model(&m))
-                .ok_or_else(|| HostError::new("Could not compute box model."))
+            let mut model = w
+                .with_layout_engine(|l, d| l.box_model(d, n))
+                .ok_or_else(|| HostError::new("Could not compute box model."))?;
+            let (x, y) = frame_offset(w)?;
+            for rect in [
+                &mut model.content,
+                &mut model.padding,
+                &mut model.border,
+                &mut model.margin,
+            ] {
+                rect.x += x;
+                rect.y += y;
+            }
+            Ok(lb_cdp::convert::box_model(&model))
         })
     }
 
     fn content_quads(&self, target_id: &str, node: &NodeRef) -> HostResult<Vec<Quad>> {
-        use lb_webapi::rt::frames;
-
         let node = node.clone();
         self.blocking(target_id, move |ws, a, top| {
             let (w, n) = a.node(ws, top, &node)?;
             let rects = w.with_layout_engine(|l, d| l.client_rects(d, n));
-            let (mut x, mut y) = (0.0, 0.0);
-            let mut frame = w;
-            while let Some(parent) = frames::parent(&frame) {
-                let content = frames::frame_element(&frame)
-                    .and_then(|el| parent.with_layout_engine(|l, d| l.box_model(d, el)))
-                    .ok_or_else(|| HostError::new("Frame owner has no layout box"))?
-                    .content;
-                x += content.x;
-                y += content.y;
-                frame = parent;
-            }
+            let (x, y) = frame_offset(w)?;
             Ok(rects
                 .into_iter()
                 .filter(|r| r.width > 0.0 && r.height > 0.0)
@@ -1268,7 +1258,7 @@ impl PageHost for CdpHost {
 
     fn ax_tree(&self, target_id: &str) -> HostResult<Vec<AxNode>> {
         self.blocking(target_id, move |_, a, w| {
-            let ids = a.ids();
+            let ids = Agent::ids(w);
             let tree = w.with_layout_engine(|l, d| l.accessibility_tree(d));
             Ok(lb_cdp::convert::ax_nodes(&tree, &ids, &a.target))
         })
@@ -1294,6 +1284,23 @@ impl CdpHost {
 }
 
 mod input;
+
+/// Offset from a frame's viewport to page viewport coordinates.
+fn frame_offset(mut frame: Rc<lb_webapi::rt::Window>) -> HostResult<(f32, f32)> {
+    use lb_webapi::rt::frames;
+
+    let (mut x, mut y) = (0.0, 0.0);
+    while let Some(parent) = frames::parent(&frame) {
+        let content = frames::frame_element(&frame)
+            .and_then(|el| parent.with_layout_engine(|l, d| l.box_model(d, el)))
+            .ok_or_else(|| HostError::new("Frame owner has no layout box"))?
+            .content;
+        x += content.x;
+        y += content.y;
+        frame = parent;
+    }
+    Ok((x, y))
+}
 
 /// Frame trees of the child frames of `w`.
 fn child_trees(a: &agent::Agent, w: &lb_webapi::rt::Window) -> Vec<FrameTree> {

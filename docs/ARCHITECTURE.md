@@ -351,7 +351,7 @@ Steps are in `tests/README.md`. Both modes use our own local server only.
 - **Target:** setAutoAttach (flatten), createBrowserContext, disposeBrowserContext, createTarget, attachToTarget, closeTarget, getTargets, setDiscoverTargets
 - **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014)
 - **Runtime:** enable, evaluate, callFunctionOn, getProperties, releaseObject, executionContextCreated / Destroyed, consoleAPICalled
-- **DOM:** getDocument, describeNode, resolveNode, getBoxModel, getContentQuads, getFrameOwner (direct child frames), scrollIntoViewIfNeeded, setFileInputFiles
+- **DOM:** getDocument, describeNode, resolveNode, getBoxModel, getContentQuads, getFrameOwner, scrollIntoViewIfNeeded, setFileInputFiles
 - **Input:** dispatchMouseEvent, dispatchKeyEvent, insertText
 - **Network / Fetch:** enable, setExtraHTTPHeaders, getCookies, setCookies, requestPaused, continueRequest, fulfillRequest
 - **Emulation:** setDeviceMetricsOverride, setUserAgentOverride, setTimezoneOverride, setLocaleOverride. These are checked against the persona, and conflicts are rejected. setDefaultBackgroundColorOverride only affects screenshots.

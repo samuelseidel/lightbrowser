@@ -69,6 +69,26 @@ test('frameLocator click and fill reach the iframe document', async () => {
   await context.close();
 });
 
+pages['/frame-nested'] = html(
+  'Nested frames',
+  '<iframe id="outer" src="/frame-click" width="500" height="300" style="margin:20px"></iframe>',
+);
+
+test('frameLocator clicks and fills through nested frame owners', { timeout: 10_000 }, async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  try {
+    await page.goto(`${base}/frame-nested`);
+    const inner = page.frameLocator('#outer').frameLocator('#f');
+    await inner.locator('#b').click({ timeout: 5_000 });
+    assert.equal(await inner.locator('body').getAttribute('data-clicked'), '1');
+    await inner.locator('#i').fill('nested');
+    assert.equal(await inner.locator('#i').inputValue(), 'nested');
+  } finally {
+    await context.close();
+  }
+});
+
 test('LightBrowser.fingerprintReport matches the persona and leaves no trace', async () => {
   const { base } = await env();
   const { context, page } = await newPage();
