@@ -290,7 +290,8 @@ Open (CDP and page host):
   `preferences`.
 - Input: contenteditable editing appends at the end (no caret, Range or
   Selection). Number inputs sanitize script-visible and submitted values.
-  The editing buffer still accepts characters Chrome filters out.
+  The editor filters keyboard and inserted text while preserving partial
+  numbers. Locale-specific number editing still needs broader coverage.
   (Form POST navigations landed, see "M4 status: form POST navigations".)
 - Layout has no real line boxes, shaping, bidi or table layout, and
   `clientWidth` ignores scrollbars (the persona's
