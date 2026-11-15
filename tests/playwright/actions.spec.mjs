@@ -186,3 +186,30 @@ test('link navigation, form submit and a second document', async () => {
   assert.equal(await page.title(), 'Done');
   await context.close();
 });
+
+test('number inputs sanitize exposed values and preserve in-progress exponents', async () => {
+  const { context, page } = await newPage();
+  try {
+    await page.evaluate(() => {
+      document.body.innerHTML = '<input id="number" type="number" value="+2">';
+    });
+    const number = page.locator('#number');
+    assert.equal(await number.inputValue(), '');
+    assert.deepEqual(await number.evaluate((input) => {
+      return ['+2', '1.', '1e', '1e309', ' 1', 'Infinity', '-.5', '1e+2'].map((value) => {
+        input.value = value;
+        return [input.value, Number.isNaN(input.valueAsNumber) ? null : input.valueAsNumber];
+      });
+    }), [
+      ['', null], ['', null], ['', null], ['', null], ['', null], ['', null],
+      ['-.5', -0.5], ['1e+2', 100],
+    ]);
+    await number.evaluate((input) => { input.value = ''; input.focus(); });
+    await page.keyboard.type('1e');
+    assert.equal(await number.inputValue(), '');
+    await page.keyboard.type('2');
+    assert.equal(await number.inputValue(), '1e2');
+  } finally {
+    await context.close();
+  }
+});

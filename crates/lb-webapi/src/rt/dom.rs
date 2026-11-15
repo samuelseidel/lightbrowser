@@ -194,6 +194,22 @@ fn utf16_sub(s: &str, offset: usize, count: usize) -> String {
     String::from_utf16_lossy(&units[offset.min(units.len())..end])
 }
 
+/// The Number state's floating-point syntax excludes leading plus signs
+/// and a decimal point without following digits.
+pub(crate) fn number_input_value(value: &str) -> Option<f64> {
+    let mantissa = value.split(['e', 'E']).next().unwrap_or_default();
+    if value.starts_with('+') || mantissa.ends_with('.') {
+        return None;
+    }
+    value.parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+pub(crate) fn sanitize_number_input(value: &mut String) {
+    if number_input_value(value).is_none() {
+        value.clear();
+    }
+}
+
 pub(crate) fn input_type(d: &Document, n: NodeId) -> String {
     const TYPES: &[&str] = &[
         "hidden",
@@ -2165,14 +2181,19 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
     for iface in ["HTMLInputElement", "HTMLTextAreaElement"] {
         getter(reg, rt, iface, "value", |cx, w| {
             let (slot, n) = this_elem(cx, w)?;
-            if let Some(v) = w.values.borrow().get(&(slot, n)) {
-                return cx.ret(v.clone());
-            }
+            let dirty = w.values.borrow().get(&(slot, n)).cloned();
             let v = w.doc_slot(slot, |d| {
-                if d.is_html_element_named(n, &local_name!("textarea")) {
+                let t = input_type(d, n);
+                if t == "number" && d.is_html_element_named(n, &local_name!("input")) {
+                    let mut value = dirty
+                        .unwrap_or_else(|| d.get_attribute(n, "value").unwrap_or("").to_owned());
+                    sanitize_number_input(&mut value);
+                    value
+                } else if let Some(value) = dirty {
+                    value
+                } else if d.is_html_element_named(n, &local_name!("textarea")) {
                     d.text_content(n).unwrap_or_default()
                 } else {
-                    let t = input_type(d, n);
                     let v = d.get_attribute(n, "value").map(str::to_owned);
                     match t.as_str() {
                         "checkbox" | "radio" => v.unwrap_or_else(|| "on".into()),
@@ -2184,11 +2205,16 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
         });
         setter(reg, rt, iface, "value", |cx, w| {
             let (slot, n) = this_elem(cx, w)?;
-            let v = if cx.arg_kind(0) == ValueKind::Null {
+            let mut v = if cx.arg_kind(0) == ValueKind::Null {
                 String::new()
             } else {
                 cx.arg_string(0)?
             };
+            if w.doc_slot(slot, |d| {
+                d.is_html_element_named(n, &local_name!("input")) && input_type(d, n) == "number"
+            }) {
+                sanitize_number_input(&mut v);
+            }
             w.values.borrow_mut().insert((slot, n), v);
             // A value set by script puts the caret at the end.
             w.selections.borrow_mut().remove(&(slot, n));
@@ -2234,9 +2260,16 @@ fn register_html(reg: &mut Registry, rt: &Runtime) {
             .get(&(slot, n))
             .cloned()
             .or_else(|| w.doc_slot(slot, |d| d.get_attribute(n, "value").map(str::to_owned)));
+        let number = w.doc_slot(slot, |d| input_type(d, n) == "number");
         cx.ret(
-            v.and_then(|s| s.trim().parse::<f64>().ok())
-                .unwrap_or(f64::NAN),
+            v.and_then(|s| {
+                if number {
+                    number_input_value(&s)
+                } else {
+                    s.trim().parse::<f64>().ok()
+                }
+            })
+            .unwrap_or(f64::NAN),
         )
     });
     // <option> / <select>

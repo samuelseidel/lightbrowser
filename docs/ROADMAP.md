@@ -289,8 +289,9 @@ Open (CDP and page host):
   `prefers-reduced-data` with fixed values instead of the persona's
   `preferences`.
 - Input: contenteditable editing appends at the end (no caret, Range or
-  Selection); number inputs are not sanitized. (Form POST navigations
-  landed, see "M4 status: form POST navigations".)
+  Selection). Number inputs sanitize script-visible and submitted values.
+  The editing buffer still accepts characters Chrome filters out.
+  (Form POST navigations landed, see "M4 status: form POST navigations".)
 - Layout has no real line boxes, shaping, bidi or table layout, and
   `clientWidth` ignores scrollbars (the persona's
   `preferences.scrollbar_width` is not used by `lb-layout` yet).

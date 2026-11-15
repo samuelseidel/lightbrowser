@@ -419,7 +419,7 @@ pub(crate) fn form_entries(
                 if matches!(t.as_str(), "submit" | "button" | "reset" | "image" | "file") {
                     continue;
                 }
-                w.values.borrow().get(&(0, c)).cloned().unwrap_or_else(|| {
+                let mut value = w.values.borrow().get(&(0, c)).cloned().unwrap_or_else(|| {
                     d.get_attribute(c, "value")
                         .map(str::to_owned)
                         .unwrap_or_else(|| {
@@ -429,7 +429,11 @@ pub(crate) fn form_entries(
                                 String::new()
                             }
                         })
-                })
+                });
+                if t == "number" {
+                    super::dom::sanitize_number_input(&mut value);
+                }
+                value
             }
             "textarea" => w
                 .values
