@@ -36,6 +36,9 @@ pub struct LoadInfo {
     pub navigation_type: Option<String>,
     /// Page clock ms of `DOMContentLoaded` and of the `load` event.
     pub dcl_ms: Option<f64>,
+    /// Navigation clock at response completion and document commit.
+    pub response_end_ms: Option<f64>,
+    pub commit_ms: Option<f64>,
     pub load_ms: Option<f64>,
 }
 
@@ -155,10 +158,7 @@ fn load_times(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(), HostError>
     let request = secs(0.0);
     let dcl = li.dcl_ms;
     let load = li.load_ms;
-    // The window is created at commit; the request started a little
-    // earlier. Without the page layer's numbers, put commit a third of
-    // the way to DOMContentLoaded.
-    let commit = secs(dcl.map_or(0.0, |d| (d / 3.0).min(50.0)));
+    let commit = secs(li.commit_ms.unwrap_or(0.0));
     let first_paint = match (load, dcl) {
         (Some(l), _) => secs(l + 12.0),
         (None, Some(d)) => secs(d + 12.0),
