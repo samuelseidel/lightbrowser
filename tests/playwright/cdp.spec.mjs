@@ -174,18 +174,20 @@ test('CDP console events preserve primitive argument types', { timeout: 10_000 }
     const session = await context.newCDPSession(page);
     await session.send('Runtime.enable');
     const event = new Promise((resolve) => session.once('Runtime.consoleAPICalled', resolve));
-    await page.evaluate(() => console.log('message', 42, true, null, undefined, NaN, -0));
+    await page.evaluate(() => console.log('message', 42, true, null, undefined, NaN, -0, 9007199254740993n, Symbol('key')));
     const { args } = await event;
-    assert.deepEqual(args.map(({ type, value, unserializableValue }) => [
-      type, value, unserializableValue,
+    assert.deepEqual(args.map(({ type, value, unserializableValue, description }) => [
+      type, value, unserializableValue, type === 'symbol' ? description : undefined,
     ]), [
-      ['string', 'message', undefined],
-      ['number', 42, undefined],
-      ['boolean', true, undefined],
-      ['object', null, undefined],
-      ['undefined', undefined, undefined],
-      ['number', undefined, 'NaN'],
-      ['number', undefined, '-0'],
+      ['string', 'message', undefined, undefined],
+      ['number', 42, undefined, undefined],
+      ['boolean', true, undefined, undefined],
+      ['object', null, undefined, undefined],
+      ['undefined', undefined, undefined, undefined],
+      ['number', undefined, 'NaN', undefined],
+      ['number', undefined, '-0', undefined],
+      ['bigint', undefined, '9007199254740993n', undefined],
+      ['symbol', undefined, undefined, 'Symbol(key)'],
     ]);
   } finally {
     await context.close();

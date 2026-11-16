@@ -233,6 +233,14 @@ impl StoragePartition {
     }
 }
 
+/// A primitive console argument copied without retaining a realm handle.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConsoleArgument {
+    Primitive(lb_js::JsValue),
+    BigInt(String),
+    Symbol(String),
+}
+
 /// Console message captured from the page (forwarded by the CDP layer).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConsoleMessage {
@@ -241,7 +249,7 @@ pub struct ConsoleMessage {
     pub level: String,
     pub text: String,
     /// Unformatted primitive console arguments, when available.
-    pub arguments: Option<Vec<lb_js::JsValue>>,
+    pub arguments: Option<Vec<ConsoleArgument>>,
     /// Script URL and 1-based line, for exceptions.
     pub url: Option<String>,
     pub line: Option<u32>,

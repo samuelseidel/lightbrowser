@@ -13,7 +13,7 @@ use super::{
     HistEntry, Js, K_OBJ, NavRequest, Obj, Runtime, TaskSource, TimerCallback, WINDOW_REF, Window,
     getter, illegal, method, need_args, setter, this_obj,
 };
-use crate::host::ConsoleMessage;
+use crate::host::{ConsoleArgument, ConsoleMessage};
 use crate::registry::{Registry, host_fn};
 
 // ---------------------------------------------------------------------------
@@ -80,9 +80,31 @@ fn console_call(
                     | ValueKind::Bool
                     | ValueKind::Number
                     | ValueKind::String
+                    | ValueKind::BigInt
+                    | ValueKind::Symbol
             )
         }) {
-        Some((start..cx.len()).map(|i| cx.arg_value(i)).collect())
+        Some(
+            (start..cx.len())
+                .map(|i| {
+                    let kind = cx.arg_kind(i);
+                    let value = cx.arg_value(i);
+                    match (kind, value) {
+                        (ValueKind::BigInt, JsValue::Opaque(value)) => ConsoleArgument::BigInt(
+                            value.strip_suffix('n').unwrap_or(&value).to_owned(),
+                        ),
+                        (ValueKind::Symbol, JsValue::Opaque(value)) => ConsoleArgument::Symbol(
+                            value
+                                .strip_prefix("Symbol(")
+                                .and_then(|s| s.strip_suffix(')'))
+                                .unwrap_or(&value)
+                                .to_owned(),
+                        ),
+                        (_, value) => ConsoleArgument::Primitive(value),
+                    }
+                })
+                .collect(),
+        )
     } else {
         None
     };
@@ -167,6 +189,10 @@ fn format_arg(cx: &mut CallCtx<'_, '_, '_>, i: usize) -> String {
         ValueKind::String => cx.arg_string(i).unwrap_or_default(),
         ValueKind::Undefined => "undefined".into(),
         ValueKind::Null => "null".into(),
+        ValueKind::Symbol => match cx.arg_value(i) {
+            JsValue::Opaque(description) => description,
+            _ => "Symbol()".into(),
+        },
         ValueKind::Object => match cx.arg_value(i) {
             JsValue::Json(s) if s != "{}" => s,
             _ => cx.arg_string(i).unwrap_or_default(),
