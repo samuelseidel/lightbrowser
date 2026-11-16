@@ -22,7 +22,7 @@ use lb_js::{
     Arg, Caught, Engine, Handle, Inspected, JsErrorKind, JsValue, PromiseOutcome, RealmId,
     RealmOps, ScriptOrigin,
 };
-use lb_webapi::host::ConsoleMessage;
+use lb_webapi::host::{ConsoleArgument, ConsoleMessage};
 use lb_webapi::rt::frames;
 use lb_webapi::rt::{EngineJs, K_NODE, K_WINDOW, Window};
 
@@ -1416,11 +1416,15 @@ pub(crate) fn console_event(m: &ConsoleMessage, ctx: ExecutionContextId) -> Page
         |args| {
             args.iter()
                 .map(|arg| match arg {
-                    JsValue::Undefined => CdpValue::Undefined,
-                    JsValue::Null => CdpValue::Null,
-                    JsValue::Bool(value) => CdpValue::Bool(*value),
-                    JsValue::Number(value) => CdpValue::Number(*value),
-                    JsValue::String(value) | JsValue::Json(value) | JsValue::Opaque(value) => {
+                    ConsoleArgument::BigInt(value) => CdpValue::BigInt(value.clone()),
+                    ConsoleArgument::Symbol(value) => CdpValue::Symbol(value.clone()),
+                    ConsoleArgument::Primitive(JsValue::Undefined) => CdpValue::Undefined,
+                    ConsoleArgument::Primitive(JsValue::Null) => CdpValue::Null,
+                    ConsoleArgument::Primitive(JsValue::Bool(value)) => CdpValue::Bool(*value),
+                    ConsoleArgument::Primitive(JsValue::Number(value)) => CdpValue::Number(*value),
+                    ConsoleArgument::Primitive(JsValue::String(value))
+                    | ConsoleArgument::Primitive(JsValue::Json(value))
+                    | ConsoleArgument::Primitive(JsValue::Opaque(value)) => {
                         CdpValue::String(value.clone())
                     }
                 })
