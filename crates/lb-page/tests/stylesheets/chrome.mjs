@@ -1,7 +1,7 @@
 // Load each case in local Chrome for Testing (loopback) and print its log.
 const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib/node_modules/playwright/index.mjs');
 const [base, ...cases] = process.argv.slice(2);
-const b = await chromium.launch({ executablePath: process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'] });
+const b = await chromium.launch({ executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'] });
 console.error(b.version());
 const out = {};
 for (const c of cases) {

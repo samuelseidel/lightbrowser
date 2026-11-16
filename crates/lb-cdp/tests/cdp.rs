@@ -127,10 +127,12 @@ impl Client {
 
 /// Starts a server with `host`; returns `(ws_url, http_addr)`.
 async fn start(host: Rc<MockHost>) -> (String, std::net::SocketAddr) {
-    let cfg = ServerConfig {
-        addr: "127.0.0.1:0".parse().unwrap(),
-        allow_origins: Vec::new(),
-    };
+    start_with(host, ServerConfig::default()).await
+}
+
+/// [`start`] with `cfg` (its address is replaced by 127.0.0.1:0).
+async fn start_with(host: Rc<MockHost>, mut cfg: ServerConfig) -> (String, std::net::SocketAddr) {
+    cfg.addr = "127.0.0.1:0".parse().unwrap();
     let server = Server::bind(cfg, host).await.unwrap();
     let url = server.browser_ws_url();
     let addr = server.local_addr();
@@ -1303,7 +1305,7 @@ fn contexts_die_with_their_connection_and_browser_close_stops() {
         let h = host();
         let cfg = ServerConfig {
             addr: "127.0.0.1:0".parse().unwrap(),
-            allow_origins: Vec::new(),
+            ..ServerConfig::default()
         };
         let server = Server::bind(cfg, h).await.unwrap();
         let url = server.browser_ws_url();
@@ -1503,6 +1505,264 @@ fn worker_targets() {
             })
             .collect();
         assert_eq!(order.first(), Some(&(w4, "W4".to_string())), "{order:?}");
+    })
+    .unwrap();
+}
+
+#[test]
+fn json_new_needs_put_as_in_chrome() {
+    block_on_local(async {
+        let (_, addr) = start(host()).await;
+        for method in ["GET", "POST"] {
+            let (head, body) = http(
+                addr,
+                &format!("{method} /json/new?about:blank HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"),
+            )
+            .await;
+            assert!(
+                head.starts_with("HTTP/1.1 405 Method Not Allowed"),
+                "{head}"
+            );
+            // Chrome 153's text.
+            assert_eq!(
+                body,
+                format!(
+                    "Using unsafe HTTP verb {method} to invoke /json/new. This action supports only PUT verb."
+                )
+            );
+        }
+        let (_, body) = http(addr, "GET /json/list HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").await;
+        assert_eq!(body.trim(), "[]", "GET /json/new opened a page");
+        let (head, body) = http(addr, "PUT /json/new HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").await;
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        let t: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(t["url"], "about:blank");
+    })
+    .unwrap();
+}
+
+#[test]
+fn host_header_guard_accepts_ips_and_localhost_names() {
+    block_on_local(async {
+        let (_, addr) = start(host()).await;
+        let p = addr.port();
+        for h in [
+            format!("127.0.0.1:{p}"),
+            format!("[::1]:{p}"),
+            format!("localhost:{p}"),
+            format!("devtools.localhost:{p}"),
+            "127.0.0.1".to_string(),
+        ] {
+            let req = format!("GET /json/version HTTP/1.1\r\nHost: {h}\r\n\r\n");
+            let (head, _) = http(addr, &req).await;
+            assert!(head.starts_with("HTTP/1.1 200"), "{h}: {head}");
+        }
+        // No Host header at all (HTTP/1.0) is allowed, as in Chrome.
+        let (head, _) = http(addr, "GET /json/version HTTP/1.0\r\n\r\n").await;
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        for h in [
+            format!("evil.example:{p}"),
+            format!("localhost.evil.example:{p}"),
+            format!("127.0.0.1.evil.example:{p}"),
+        ] {
+            for path in ["/json/version", "/json/list", "/json/new"] {
+                let req = format!("PUT {path} HTTP/1.1\r\nHost: {h}\r\n\r\n");
+                let (head, body) = http(addr, &req).await;
+                assert!(head.starts_with("HTTP/1.1 500"), "{h} {path}: {head}");
+                assert_eq!(
+                    body,
+                    "Host header is specified and is not an IP address or localhost."
+                );
+            }
+        }
+        let (_, body) = http(addr, "GET /json/list HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").await;
+        assert_eq!(body.trim(), "[]");
+    })
+    .unwrap();
+}
+
+#[test]
+fn page_cap_refuses_with_a_cdp_error() {
+    block_on_local(async {
+        let cfg = ServerConfig {
+            max_pages: 2,
+            ..ServerConfig::default()
+        };
+        let (ws, addr) = start_with(host(), cfg).await;
+        let mut c = Client::connect(&ws).await;
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let r = c
+                .ok("Target.createTarget", json!({"url": "about:blank"}), None)
+                .await;
+            ids.push(r["targetId"].as_str().unwrap().to_string());
+        }
+        let e = c
+            .call("Target.createTarget", json!({"url": "about:blank"}), None)
+            .await
+            .unwrap_err();
+        assert_eq!(e["code"], -32000, "{e}");
+        assert!(
+            e["message"]
+                .as_str()
+                .unwrap()
+                .contains("Too many open pages"),
+            "{e}"
+        );
+        let (head, body) = http(addr, "PUT /json/new HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").await;
+        assert!(head.starts_with("HTTP/1.1 503"), "{head}");
+        assert!(body.contains("Too many open pages"), "{body}");
+        // The connection still works, and closing a page makes room.
+        c.ok("Target.closeTarget", json!({"targetId": ids[0]}), None)
+            .await;
+        c.ok("Target.createTarget", json!({"url": "about:blank"}), None)
+            .await;
+    })
+    .unwrap();
+}
+
+#[test]
+fn connection_cap_answers_503() {
+    block_on_local(async {
+        let cfg = ServerConfig {
+            max_connections: 2,
+            ..ServerConfig::default()
+        };
+        let (ws, addr) = start_with(host(), cfg).await;
+        let mut a = Client::connect(&ws).await;
+        let mut b = Client::connect(&ws).await;
+        a.ok("Browser.getVersion", json!({}), None).await;
+        b.ok("Browser.getVersion", json!({}), None).await;
+        let (head, body) = http(
+            addr,
+            "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        )
+        .await;
+        assert!(head.starts_with("HTTP/1.1 503"), "{head}");
+        assert!(body.contains("Too many connections"), "{body}");
+        assert!(tokio_tungstenite::connect_async(ws.as_str()).await.is_err());
+        // Open connections are unaffected; a closed one frees its slot.
+        a.ok("Browser.getVersion", json!({}), None).await;
+        drop(b);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let (head, _) = http(
+            addr,
+            "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        )
+        .await;
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    })
+    .unwrap();
+}
+
+#[test]
+fn client_that_never_reads_is_closed_at_the_queue_bound() {
+    block_on_local(async {
+        let cfg = ServerConfig {
+            max_queued_bytes: 64 << 10,
+            ..ServerConfig::default()
+        };
+        let (ws, _) = start_with(host(), cfg).await;
+        let mut c = Client::connect(&ws).await;
+        // Each reply is a few hundred bytes: 300k of them are far more than
+        // the socket buffers and the bound hold.
+        let total = 300_000;
+        let mut sent = 0;
+        for i in 0..total {
+            let msg = format!(r#"{{"id":{i},"method":"Browser.getVersion"}}"#);
+            if c.ws.feed(Message::Text(msg.into())).await.is_err() {
+                break;
+            }
+            sent += 1;
+            if i % 500 == 0 && c.ws.flush().await.is_err() {
+                break;
+            }
+        }
+        let _ = c.ws.flush().await;
+        // Now read: the server must have closed the connection early, so
+        // the stream ends before every reply arrived.
+        let mut replies = 0usize;
+        let ended = tokio::time::timeout(Duration::from_secs(20), async {
+            while let Some(Ok(m)) = c.ws.next().await {
+                if m.is_close() {
+                    break;
+                }
+                replies += 1;
+            }
+        })
+        .await;
+        assert!(
+            ended.is_ok(),
+            "connection still open after {replies} replies to {sent} commands"
+        );
+        assert!(replies < total, "all {replies} replies arrived");
+        // The server is fine and serves others.
+        let mut d = Client::connect(&ws).await;
+        d.ok("Browser.getVersion", json!({}), None).await;
+    })
+    .unwrap();
+}
+
+#[test]
+fn one_reply_larger_than_the_queue_bound_still_arrives() {
+    block_on_local(async {
+        // Far below one `Browser.getVersion` reply (a few hundred bytes).
+        let cfg = ServerConfig {
+            max_queued_bytes: 64,
+            ..ServerConfig::default()
+        };
+        let (ws, _) = start_with(host(), cfg).await;
+        let mut c = Client::connect(&ws).await;
+        for _ in 0..3 {
+            let v = c.ok("Browser.getVersion", json!({}), None).await;
+            assert!(v.to_string().len() > 64, "{v}");
+        }
+    })
+    .unwrap();
+}
+
+#[test]
+fn create_target_fails_cleanly_if_the_target_closes_meanwhile() {
+    block_on_local(async {
+        let h = host();
+        h.delay_create_page(Duration::from_millis(300));
+        let (ws, addr) = start(h.clone()).await;
+        let mut c = Client::connect(&ws).await;
+        c.ok("Target.setDiscoverTargets", json!({"discover": true}), None)
+            .await;
+        c.send_raw(r#"{"id":99,"method":"Target.createTarget","params":{"url":"about:blank"}}"#)
+            .await;
+        // While the host makes the page, close its target.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let (_, body) = http(addr, "GET /json/list HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").await;
+        let list: Value = serde_json::from_str(&body).unwrap();
+        let id = list[0]["id"].as_str().unwrap().to_string();
+        let req = format!("GET /json/close/{id} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        let (head, _) = http(addr, &req).await;
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        let reply = loop {
+            let m = c.recv().await;
+            if m["id"] == 99 {
+                break m;
+            }
+        };
+        assert_eq!(reply["error"]["code"], -32000, "{reply}");
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("closed"),
+            "{reply}"
+        );
+        // The server goes on: the target is gone and a new one works.
+        let infos = c.ok("Target.getTargets", json!({}), None).await;
+        assert!(
+            infos["targetInfos"].as_array().unwrap().is_empty(),
+            "{infos}"
+        );
+        h.delay_create_page(Duration::ZERO);
+        c.ok("Target.createTarget", json!({"url": "about:blank"}), None)
+            .await;
     })
     .unwrap();
 }

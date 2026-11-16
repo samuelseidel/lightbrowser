@@ -11,28 +11,42 @@ use lb_net::ClientHelloProfile;
 use lb_persona::{Persona, PersonaProfile};
 
 mod mcp;
+mod ops;
 
 const USAGE: &str = "\
 lightbrowser - headless browser for detection testing
 
 USAGE:
-  lightbrowser --version
+  lightbrowser --version [--verbose]        --verbose adds the commit id
   lightbrowser serve [--port 9222] [--persona FILE] [--remote-allow-origins O]
                     [--profiles-dir DIR] [--insecure] [--workers N]
                     [--proxy URL] [--proxy-bypass-list LIST]
                     [--egress open|loopback|allowlist] [--allow-host H]...
+                    [--max-pages N] [--max-connections N] [--log LEVEL]
                                             CDP server on 127.0.0.1 for Playwright
-                                            connectOverCDP
-  lightbrowser mcp [--allow-host GLOB]... [--persona FILE] [--profiles-dir DIR]
+                                            connectOverCDP. --max-pages: open
+                                            pages at most (default 1000; more
+                                            fail with a CDP error);
+                                            --max-connections: client
+                                            connections at most (default 512;
+                                            more get HTTP 503). /json/new
+                                            needs PUT, as in Chrome (GET gets
+                                            405). SIGINT/SIGTERM close pages
+                                            and exit 0; a second signal, or 5 s
+                                            without finishing, exits at once
+                                            (status 130). Same for mcp.
+  lightbrowser mcp [--allow-host ENTRY]... [--persona FILE] [--profiles-dir DIR]
                   [--insecure] [--proxy URL] [--proxy-bypass-list LIST]
-                  [--timeout SECS]
+                  [--timeout SECS] [--log LEVEL]
                                             Model Context Protocol server on
                                             stdin/stdout (JSON-RPC lines) so an
                                             AI agent can drive the browser;
                                             listens on nothing. Only loopback,
                                             localhost, *.localhost and *.test
                                             are visited unless --allow-host adds
-                                            hosts (repeatable). See ADR 0041.
+                                            hosts (repeatable; the same entries
+                                            as `serve`, see --allow-host below).
+                                            See ADR 0041.
   lightbrowser fetch <url> [OPTIONS]
   lightbrowser tcp-shim [--queue N] [--tcp-dir DIR] [--no-rules]   (Linux, root)
   lightbrowser validate <persona.json>...   check v1/v2 personas against the
@@ -53,7 +67,8 @@ FETCH OPTIONS:
                          markdown); default: none
   --wait-until W         load (default) | networkidle | domcontentloaded |
                          commit | <ms> (load, then that many ms more)
-  --timeout SECS         give up waiting after SECS (default 30)
+  --timeout SECS         give up after SECS, waiting for the response
+                         included (default 30)
   --persona P            a persona file (PATH.json), or chrome | firefox for
                          that family's reference persona (default: the
                          compiled family's reference persona)
@@ -83,6 +98,10 @@ FETCH OPTIONS:
                          block (10.0.0.0/8). Needs --egress loopback|allowlist.
                          A proxy's own address must be allowed too.
   -v, --verbose          print the status line and headers to stderr
+
+SERVE AND MCP OPTIONS:
+  --log LEVEL            print the browser's log events at LEVEL and above to
+                         stderr: error | warn | info | debug (default: none)
 
 TCP-SHIM OPTIONS:
   --queue N              netfilter queue number (default 4100)
@@ -496,6 +515,12 @@ async fn load_page(
 ) -> Result<Loaded, String> {
     use std::time::Duration;
     let until: lb_page::WaitUntil = args.wait_until.parse()?;
+    // `--timeout` bounds the whole load: the navigation up to commit, then
+    // the wait for `--wait-until`.
+    let now = tokio::time::Instant::now();
+    let deadline = now
+        .checked_add(Duration::from_secs(args.timeout))
+        .unwrap_or_else(|| now + Duration::from_secs(100 * 365 * 24 * 3600));
     let browser = lb_page::Browser::new(lb_page::BrowserOptions {
         workers: 1,
         // One page per process: making the snapshot costs more than it saves.
@@ -507,14 +532,21 @@ async fn load_page(
         .new_page_to_load(ctx)
         .await
         .map_err(|e| e.to_string())?;
-    let nav = page
-        .navigate(url.as_str())
-        .await
-        .map_err(|e| e.to_string())?;
-    match page
-        .wait_for(until, Duration::from_secs(args.timeout))
-        .await
-    {
+    let nav = match tokio::time::timeout_at(deadline, page.navigate(url.as_str())).await {
+        Ok(r) => r.map_err(|e| e.to_string())?,
+        Err(_) => {
+            // The navigation is still running on the worker thread; the
+            // process exits right after this error, so do not wait for it.
+            std::mem::forget(page);
+            std::mem::forget(browser);
+            return Err(format!(
+                "timed out after {} s waiting for a response from {url}",
+                args.timeout
+            ));
+        }
+    };
+    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    match page.wait_for(until, left).await {
         Ok(()) => {}
         Err(lb_page::PageError::Timeout) => eprintln!(
             "warning: timed out waiting for {}; dumping the DOM as it is",
@@ -556,9 +588,17 @@ async fn load_page(
     url: url::Url,
     args: &FetchArgs,
 ) -> Result<Loaded, String> {
-    let (resp, doc) = lb_page::load_document(ctx, url)
-        .await
-        .map_err(|e| e.to_string())?;
+    let timeout = std::time::Duration::from_secs(args.timeout);
+    let (resp, doc) =
+        match tokio::time::timeout(timeout, lb_page::load_document(ctx, url.clone())).await {
+            Ok(r) => r.map_err(|e| e.to_string())?,
+            Err(_) => {
+                return Err(format!(
+                    "timed out after {} s waiting for a response from {url}",
+                    args.timeout
+                ));
+            }
+        };
     let text = lb_webapi::text::document_text(&doc);
     // No style engine here: only `hidden` and inline styles hide content.
     let extracted = args
@@ -705,6 +745,10 @@ struct ServeArgs {
     proxy: Option<String>,
     proxy_bypass: Option<String>,
     egress: EgressArgs,
+    /// `--max-pages`, `--max-connections`, `--log` (GAP-096, GAP-097).
+    max_pages: Option<usize>,
+    max_connections: Option<usize>,
+    log: Option<tracing::Level>,
 }
 
 fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
@@ -719,6 +763,9 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
         proxy: None,
         proxy_bypass: None,
         egress: EgressArgs::default(),
+        max_pages: None,
+        max_connections: None,
+        log: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -763,6 +810,18 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
                     .filter(|s| !s.is_empty())
                     .collect()
             }
+            "--max-pages" | "--max-connections" => {
+                let n = value(flag)?
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| format!("{flag} needs a number above 0"))?;
+                match flag {
+                    "--max-pages" => out.max_pages = Some(n),
+                    _ => out.max_connections = Some(n),
+                }
+            }
+            "--log" => out.log = Some(ops::parse_log_level(&value("--log")?)?),
             other => return Err(format!("unknown option: {other}")),
         }
     }
@@ -822,7 +881,13 @@ fn run_serve(args: &ServeArgs) -> Result<(), String> {
     let config = lb_cdp::ServerConfig {
         addr: std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
         allow_origins: args.allow_origins.clone(),
+        max_pages: args.max_pages.unwrap_or(lb_cdp::DEFAULT_MAX_PAGES),
+        max_connections: args
+            .max_connections
+            .unwrap_or(lb_cdp::DEFAULT_MAX_CONNECTIONS),
+        ..lb_cdp::ServerConfig::default()
     };
+    ops::init_log(args.log);
     serve_with(persona, tls_dir, args, config)
 }
 
@@ -850,11 +915,14 @@ fn serve_with(
     opts.egress = args.egress.policy()?;
     let host = std::rc::Rc::new(lb_page::CdpHost::new(opts)?);
     eprintln!("persona {label}");
+    let stop = ops::stop_signal();
+    // On SIGINT/SIGTERM `run_until` closes pages and contexts; dropping the
+    // host at the end of `block_on_local` joins the worker threads.
     lb_cdp::block_on_local(async move {
         let server = lb_cdp::Server::bind(config, host).await?;
         // Same line Chrome prints; launchers wait for it.
         eprintln!("\nDevTools listening on {}", server.browser_ws_url());
-        server.run().await
+        server.run_until(stop).await
     })
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())
@@ -885,10 +953,11 @@ fn serve_with(
     let label = persona.profile_id.clone();
     let host = std::rc::Rc::new(lb_cdp::mock::MockHost::new(persona));
     eprintln!("page host: MOCK (no JS engine in the firefox build yet); persona {label}");
+    let stop = ops::stop_signal();
     lb_cdp::block_on_local(async move {
         let server = lb_cdp::Server::bind(config, host).await?;
         eprintln!("\nDevTools listening on {}", server.browser_ws_url());
-        server.run().await
+        server.run_until(stop).await
     })
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())
@@ -912,10 +981,10 @@ fn run_validate(paths: &[String]) -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    ops::install_panic_hook();
     match args.first().map(String::as_str) {
         Some("--version" | "-V") => {
-            let family = lb_js::COMPILED_FAMILY.map_or("none", |f| f.as_str());
-            println!("lightbrowser {} ({family})", env!("CARGO_PKG_VERSION"));
+            ops::print_version(args[1..].iter().any(|a| a == "--verbose" || a == "-v"));
             ExitCode::SUCCESS
         }
         Some("fetch") => {

@@ -10,6 +10,16 @@
 //! [`NetContext::websocket`] starts a connection on the network thread;
 //! the caller talks to it through channels ([`WsCommand`] in,
 //! [`WsEvent`] out), so a page or worker thread never blocks on it.
+//!
+//! Limits: payloads are read as they arrive (a frame's declared length is
+//! never allocated up front), and a message (one frame, its fragments, its
+//! inflated `permessage-deflate` form) may not exceed the context's
+//! `ws_max_message` ([`MAX_MESSAGE`] by default). Past it the connection
+//! fails as Chrome fails a frame over its own limit: a close frame with
+//! 1009 to the server, "Max frame length exceeded" and a 1006 close to the
+//! page. The opening handshake, connect included, must finish within
+//! `timeouts.ws_handshake` (Chrome's 240 s); an open connection has no
+//! time limit.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,8 +29,24 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use url::Url;
 
+use crate::decompress::push_bounded;
 use crate::error::NetError;
 use crate::fetch::NetContext;
+
+/// Default largest message: 64 MiB, after inflating. Chrome's own frame
+/// limit is 2^63 - 1 bytes; this one keeps a server from making the
+/// process allocate without bound. Override it per context
+/// (`NetContext::ws_max_message`), e.g. in tests.
+pub const MAX_MESSAGE: usize = 64 << 20;
+
+/// Close code for a message that is too big (RFC 6455 7.4.1).
+const CLOSE_TOO_BIG: u16 = 1009;
+
+/// Chrome's console text for a frame over its limit.
+const TOO_BIG_TEXT: &str = "Max frame length exceeded";
+
+/// Payload bytes read per step.
+const READ_STEP: usize = 64 * 1024;
 
 /// What a page asks for.
 #[derive(Debug, Clone)]
@@ -114,7 +140,14 @@ async fn run(
             clean: false,
         });
     };
-    let (stream, open) = match handshake(&ctx, tls, &req).await {
+    let limit = ctx.timeouts.ws_handshake;
+    let opened = tokio::time::timeout_at(
+        crate::fetch::deadline_after(limit),
+        handshake(&ctx, tls, &req),
+    )
+    .await
+    .unwrap_or_else(|_| Err("WebSocket opening handshake timed out".to_owned()));
+    let (stream, open) = match opened {
         Ok(v) => v,
         Err(msg) => return fail(&events, msg),
     };
@@ -133,7 +166,14 @@ async fn run(
         open.deflate.clone(),
         close_sent.clone(),
     );
-    let reader = read_loop(rd, ctl_tx, events.clone(), open.deflate, close_sent);
+    let reader = read_loop(
+        rd,
+        ctl_tx,
+        events.clone(),
+        open.deflate,
+        close_sent,
+        ctx.ws_max_message,
+    );
     tokio::pin!(writer, reader);
     let mut writer_done = false;
     let r = loop {
@@ -158,6 +198,13 @@ async fn run(
             });
         }
         ReadEnd::Failed(msg) => fail(&events, msg),
+        ReadEnd::TooBig => {
+            // Let the writer send the 1009 close frame the reader queued.
+            if !writer_done {
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), &mut writer).await;
+            }
+            fail(&events, TOO_BIG_TEXT.to_owned());
+        }
     }
 }
 
@@ -231,8 +278,18 @@ async fn handshake(
         })?;
     let mut stream: Box<dyn Io> = match tls {
         Some(c) if url.scheme() == "wss" => {
-            let (s, _) = c.connect_http1_only(&host, tcp).await.map_err(|_| {
-                "Error in connection establishment: net::ERR_SSL_PROTOCOL_ERROR".to_owned()
+            let (s, _) = crate::tls::handshake_within(
+                ctx.timeouts.tls_handshake,
+                &host,
+                c.connect_http1_only(&host, tcp),
+            )
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("timed out") {
+                    "Error in connection establishment: net::ERR_TIMED_OUT".to_owned()
+                } else {
+                    "Error in connection establishment: net::ERR_SSL_PROTOCOL_ERROR".to_owned()
+                }
             })?;
             Box::new(s)
         }
@@ -417,12 +474,19 @@ enum Ctl {
     Pong(Vec<u8>),
     /// Answer the server's close frame with this code.
     CloseEcho(Option<u16>),
+    /// Fail the connection: send a close frame with this code, then stop.
+    Fail(u16),
 }
 
 enum ReadEnd {
-    Closed { code: u16, reason: String },
+    Closed {
+        code: u16,
+        reason: String,
+    },
     Dropped,
     Failed(String),
+    /// A message over the limit; a 1009 close frame is queued.
+    TooBig,
 }
 
 /// A client frame (masked).
@@ -465,29 +529,60 @@ fn deflate_message(c: &mut Compress, data: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn inflate_message(d: &mut Decompress, data: &[u8]) -> Option<Vec<u8>> {
+enum InflateError {
+    Broken,
+    TooBig,
+}
+
+/// Inflate one message; its output may not exceed `limit` bytes (the
+/// output buffer never grows past it).
+fn inflate_message(d: &mut Decompress, data: &[u8], limit: usize) -> Result<Vec<u8>, InflateError> {
     let mut input = data.to_vec();
     input.extend_from_slice(&[0, 0, 0xff, 0xff]);
-    let mut out = Vec::with_capacity(data.len() * 3 + 64);
+    let mut out = Vec::new();
+    let mut step = vec![0u8; READ_STEP];
     let mut pos = 0;
     loop {
-        out.reserve(8192);
-        let before_in = d.total_in();
+        let (before_in, before_out) = (d.total_in(), d.total_out());
         let st = d
-            .decompress_vec(&input[pos..], &mut out, FlushDecompress::Sync)
-            .ok()?;
-        pos += (d.total_in() - before_in) as usize;
-        if pos >= input.len() && out.len() < out.capacity() {
+            .decompress(&input[pos..], &mut step, FlushDecompress::Sync)
+            .map_err(|_| InflateError::Broken)?;
+        let used = (d.total_in() - before_in) as usize;
+        let made = (d.total_out() - before_out) as usize;
+        pos += used;
+        if !push_bounded(&mut out, &step[..made], limit) {
+            return Err(InflateError::TooBig);
+        }
+        if st == Status::StreamEnd || (pos >= input.len() && made < step.len()) {
             break;
         }
-        if st == Status::StreamEnd {
-            break;
-        }
-        if out.len() > 64 << 20 {
-            return None;
+        if used == 0 && made == 0 {
+            // No progress with input left: a broken stream.
+            return Err(InflateError::Broken);
         }
     }
-    Some(out)
+    Ok(out)
+}
+
+/// Read `len` payload bytes into `out` as they arrive (`out` must be able
+/// to take them within `limit`, checked by the caller).
+async fn read_payload<R: AsyncRead + Unpin>(
+    rd: &mut R,
+    len: usize,
+    out: &mut Vec<u8>,
+    limit: usize,
+) -> std::io::Result<()> {
+    let mut step = [0u8; 8192];
+    let mut left = len;
+    while left > 0 {
+        let k = left.min(step.len());
+        rd.read_exact(&mut step[..k]).await?;
+        if !push_bounded(out, &step[..k], limit) {
+            return Err(std::io::Error::other("message over the limit"));
+        }
+        left -= k;
+    }
+    Ok(())
 }
 
 async fn write_loop<W: AsyncWrite + Unpin>(
@@ -509,6 +604,13 @@ async fn write_loop<W: AsyncWrite + Unpin>(
                     }
                     let payload = code.map(|c| c.to_be_bytes().to_vec()).unwrap_or_default();
                     (frame(0x8, false, &payload), 0)
+                }
+                Some(Ctl::Fail(code)) => {
+                    if !close_sent.swap(true, Ordering::SeqCst) {
+                        let _ = wr.write_all(&frame(0x8, false, &code.to_be_bytes())).await;
+                        let _ = wr.flush().await;
+                    }
+                    return;
                 }
                 None => return,
             },
@@ -565,7 +667,12 @@ async fn read_loop<R: AsyncRead + Unpin>(
     events: UnboundedSender<WsEvent>,
     deflate: Deflate,
     close_sent: Arc<AtomicBool>,
+    max_message: usize,
 ) -> ReadEnd {
+    let too_big = |ctl: &UnboundedSender<Ctl>| {
+        let _ = ctl.send(Ctl::Fail(CLOSE_TOO_BIG));
+        ReadEnd::TooBig
+    };
     let mut inflater = Decompress::new(false);
     let mut msg: Vec<u8> = Vec::new();
     let mut msg_op = 0u8;
@@ -603,11 +710,31 @@ async fn read_loop<R: AsyncRead + Unpin>(
             }
             len = u64::from_be_bytes(b);
         }
-        if len > 256 << 20 {
-            return ReadEnd::Failed("Max frame length exceeded".into());
-        }
-        let mut payload = vec![0u8; len as usize];
-        if rd.read_exact(&mut payload).await.is_err() {
+        // A continuation frame adds to the message being assembled; other
+        // frames stand alone. Either way the total must fit the limit
+        // before a byte of it is read.
+        let held = if op == 0 { msg.len() } else { 0 };
+        let Some(len) = usize::try_from(len)
+            .ok()
+            .filter(|&n| n.checked_add(held).is_some_and(|t| t <= max_message))
+        else {
+            return too_big(&ctl);
+        };
+        let mut payload = Vec::new();
+        if op <= 0x2 {
+            if op != 0 {
+                msg.clear();
+            }
+            if read_payload(&mut rd, len, &mut msg, max_message)
+                .await
+                .is_err()
+            {
+                return ReadEnd::Dropped;
+            }
+        } else if read_payload(&mut rd, len, &mut payload, max_message)
+            .await
+            .is_err()
+        {
             return ReadEnd::Dropped;
         }
         match op {
@@ -649,11 +776,9 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 if op != 0 {
                     msg_op = op;
                     msg_compressed = rsv1;
-                    msg.clear();
                 } else if msg_op == 0 {
                     return ReadEnd::Failed("Received unexpected continuation frame.".into());
                 }
-                msg.extend_from_slice(&payload);
                 if !fin {
                     continue;
                 }
@@ -661,9 +786,10 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     if deflate.server_no_context {
                         inflater.reset(false);
                     }
-                    match inflate_message(&mut inflater, &msg) {
-                        Some(d) => d,
-                        None => {
+                    match inflate_message(&mut inflater, &msg, max_message) {
+                        Ok(d) => d,
+                        Err(InflateError::TooBig) => return too_big(&ctl),
+                        Err(InflateError::Broken) => {
                             return ReadEnd::Failed("Received a broken compressed message.".into());
                         }
                     }

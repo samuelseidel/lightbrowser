@@ -351,14 +351,14 @@ pub fn import_specifiers(src: &str) -> Vec<String> {
         Some((src[j + 1..end].to_owned(), end + 1))
     };
     while i < b.len() {
-        let rest = &src[i..];
+        let rest = &b[i..];
         let word_start =
             i == 0 || !(b[i - 1] as char).is_alphanumeric() && b[i - 1] != b'_' && b[i - 1] != b'.';
         let kw = if !word_start {
             0
-        } else if rest.starts_with("from") {
+        } else if rest.starts_with(b"from") {
             4
-        } else if rest.starts_with("import") {
+        } else if rest.starts_with(b"import") {
             6
         } else {
             0
@@ -373,4 +373,37 @@ pub fn import_specifiers(src: &str) -> Vec<String> {
         i += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::import_specifiers;
+
+    #[test]
+    fn finds_static_specifiers() {
+        let src = "import a from './a.js';\nimport 'b';\nexport { c } from \"./c.js\";\n\
+                   import d,{e} from\"./d.js\";";
+        assert_eq!(import_specifiers(src), ["./a.js", "b", "./c.js", "./d.js"]);
+    }
+
+    #[test]
+    fn ignores_words_that_only_contain_the_keywords() {
+        let src = "const fromage = 'x'; obj.from('y'); my_import 'z';";
+        assert!(import_specifiers(src).is_empty());
+    }
+
+    // The scan steps one byte at a time. Slicing the source at such an
+    // offset panicked inside a multi-byte character (and aborted the process
+    // in release builds).
+    #[test]
+    fn non_ascii_source_does_not_panic() {
+        let src = "// café 日本語 ✓\nimport x from './é.js';\n\
+                   const s = '→'; export * from \"./b.js\";\n";
+        assert_eq!(import_specifiers(src), ["./é.js", "./b.js"]);
+        for cut in 0..=src.len() {
+            if src.is_char_boundary(cut) {
+                let _ = import_specifiers(&src[..cut]);
+            }
+        }
+    }
 }

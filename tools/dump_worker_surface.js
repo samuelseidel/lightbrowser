@@ -129,7 +129,7 @@ window.run = () => Promise.all([
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({
-    executablePath: process.env.CHROME || '/opt/pw-browsers/chromium',
+    executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium',
     args: ['--no-sandbox', '--disable-background-networking', '--no-proxy-server'],
   });
   const p = await browser.newPage();

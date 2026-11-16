@@ -10,7 +10,7 @@
 //! connections, so the client sees host events before the reply of the
 //! command that caused them.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -99,7 +99,48 @@ impl TargetState {
 
 #[derive(Debug)]
 pub(crate) struct ConnState {
+    pub tx: ConnTx,
+}
+
+/// A connection's outgoing queue. For a socket, `backlog` counts the bytes
+/// queued but not yet written; once a message would take it past the
+/// limit, the connection is marked overflowed, nothing more is queued and
+/// its socket task closes it (a client that stops reading must not make
+/// the server's memory grow without bound).
+#[derive(Debug)]
+pub(crate) struct ConnTx {
     pub tx: mpsc::UnboundedSender<String>,
+    pub backlog: Option<Rc<Backlog>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Backlog {
+    /// Bytes queued and not yet written to the socket.
+    pub bytes: Cell<usize>,
+    pub limit: usize,
+    pub overflowed: Cell<bool>,
+    /// Wakes the socket task when `overflowed` is set.
+    pub notify: tokio::sync::Notify,
+}
+
+impl ConnTx {
+    pub fn send(&self, text: String) {
+        if let Some(b) = &self.backlog {
+            if b.overflowed.get() {
+                return;
+            }
+            let n = b.bytes.get().saturating_add(text.len());
+            // One message larger than the bound still goes out when
+            // nothing else is waiting: only a backlog means "not reading".
+            if n > b.limit && b.bytes.get() > 0 {
+                b.overflowed.set(true);
+                b.notify.notify_one();
+                return;
+            }
+            b.bytes.set(n);
+        }
+        let _ = self.tx.send(text);
+    }
 }
 
 #[derive(Debug, Default)]
@@ -145,8 +186,7 @@ impl State {
         if let Some(s) = self.sessions.get(key)
             && let Some(c) = self.conns.get(&s.conn)
         {
-            let _ =
-                c.tx.send(protocol::event(method, params, s.wire.as_deref()));
+            c.tx.send(protocol::event(method, params, s.wire.as_deref()));
         }
     }
 
@@ -171,6 +211,8 @@ pub(crate) struct Shared<H> {
     pub shutdown: watch::Sender<bool>,
     /// Path id of `ws://.../devtools/browser/<id>`.
     pub browser_ws_id: String,
+    /// Most page targets open at once ([`crate::ServerConfig::max_pages`]).
+    pub max_pages: Cell<usize>,
 }
 
 impl<H: PageHost + 'static> Shared<H> {
@@ -203,6 +245,7 @@ impl<H: PageHost + 'static> Shared<H> {
             ids,
             shutdown: watch::channel(false).0,
             browser_ws_id,
+            max_pages: Cell::new(crate::server::DEFAULT_MAX_PAGES),
         }))
     }
 
@@ -223,7 +266,7 @@ impl<H: PageHost + 'static> Shared<H> {
 
     /// Registers a connection. `page` binds its root session to a target
     /// (`/devtools/page/<id>`); otherwise it is a browser connection.
-    pub fn open_conn(&self, tx: mpsc::UnboundedSender<String>, page: Option<TargetId>) -> ConnId {
+    pub fn open_conn(&self, tx: ConnTx, page: Option<TargetId>) -> ConnId {
         let mut st = self.state.borrow_mut();
         st.next_conn += 1;
         let id = st.next_conn;
@@ -294,7 +337,7 @@ impl<H: PageHost + 'static> Shared<H> {
         match item {
             Outgoing::Send(conn, text) => {
                 if let Some(c) = self.state.borrow().conns.get(&conn) {
-                    let _ = c.tx.send(text);
+                    c.tx.send(text);
                 }
             }
             Outgoing::Host(ev) => self.on_host_event(*ev),
@@ -410,6 +453,9 @@ impl<H: PageHost + 'static> Shared<H> {
             }
             ctx
         };
+        if let Some(e) = self.page_cap_error() {
+            return Err(e);
+        }
         let id = self.ids.hex32();
         self.state.borrow_mut().targets.push(TargetState {
             info: TargetInfo {
@@ -449,7 +495,13 @@ impl<H: PageHost + 'static> Shared<H> {
                     .collect(),
             )
         };
-        let info = self.state.borrow().target_info(&id).expect("target");
+        // The target can be closed while the host made the page (its
+        // context disposed, `/json/close/<id>`): then there is nothing to
+        // announce or attach, and the page the host just made goes too.
+        let Some(info) = self.state.borrow().target_info(&id) else {
+            let _ = self.host.close_page(&id);
+            return Err(CdpError::server("Target closed before it was created"));
+        };
         for key in &discover {
             self.queue_event(key, "Target.targetCreated", json!({ "targetInfo": info }));
         }
@@ -773,6 +825,49 @@ impl<H: PageHost + 'static> Shared<H> {
         self.host
             .dispose_context(ctx)
             .map_err(|e| CdpError::server(e.0))
+    }
+
+    /// The error for opening a page when [`Shared::max_pages`] are open.
+    pub fn page_cap_error(&self) -> Option<CdpError> {
+        let max = self.max_pages.get();
+        let open = self
+            .state
+            .borrow()
+            .targets
+            .iter()
+            .filter(|t| t.info.kind == "page")
+            .count();
+        (open >= max).then(|| {
+            CdpError::server(format!(
+                "Too many open pages ({open}, the limit is {max}); close one first"
+            ))
+        })
+    }
+
+    /// Closes every page and every browser context but the default one
+    /// (graceful shutdown of `serve`).
+    pub fn close_all(&self) {
+        let (pages, contexts): (Vec<TargetId>, Vec<BrowserContextId>) = {
+            let st = self.state.borrow();
+            (
+                st.targets
+                    .iter()
+                    .filter(|t| t.info.kind == "page")
+                    .map(|t| t.info.target_id.clone())
+                    .collect(),
+                st.contexts
+                    .iter()
+                    .filter(|c| c.id != st.default_context)
+                    .map(|c| c.id.clone())
+                    .collect(),
+            )
+        };
+        for p in pages {
+            let _ = self.close_target(&p);
+        }
+        for c in contexts {
+            let _ = self.dispose_context(&c);
+        }
     }
 
     /// Product string for `Browser.getVersion` and `/json/version`.
@@ -1281,6 +1376,17 @@ pub(crate) async fn dispatch<H: PageHost + 'static>(
     }
 }
 
+/// End (in base64 characters) of the `IO.read` chunk of a `len`-character
+/// stream read from `pos` with the client's `size` in bytes (1 MiB when
+/// absent; 3 bytes are 4 characters). The client picks `size`: it is
+/// clamped to the stream (Chrome reads at most what is left), so nothing
+/// below overflows.
+fn io_chunk_end(len: usize, pos: usize, size: Option<u64>) -> usize {
+    let size = size.map_or(1 << 20, |s| s.clamp(3, len as u64 + 3) as usize);
+    let chars = (size / 3 * 4).max(4);
+    pos.saturating_add(chars).min(len)
+}
+
 /// `IO.read` / `IO.close` on streams made by `Page.printToPDF`. Chunks
 /// end on 4-character boundaries, so each is valid base64 on its own.
 fn io_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError> {
@@ -1293,12 +1399,7 @@ fn io_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError> 
                 .get_mut(&handle)
                 .ok_or_else(|| CdpError::server("Invalid stream handle"))?;
             // `size` counts bytes; 3 bytes are 4 base64 characters.
-            let size =
-                c.p.get("size")
-                    .and_then(Value::as_u64)
-                    .map_or(1 << 20, |s| s.max(3) as usize);
-            let chars = (size / 3 * 4).max(4);
-            let end = (*pos + chars).min(data.len());
+            let end = io_chunk_end(data.len(), *pos, c.p.get("size").and_then(Value::as_u64));
             let chunk = data[*pos..end].to_owned();
             *pos = end;
             Ok(json!({ "base64Encoded": true, "data": chunk, "eof": end >= data.len() }))
@@ -2743,6 +2844,21 @@ async fn lightbrowser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `IO.read` sizes come from the client: huge ones once overflowed
+    /// (`size / 3 * 4`, then `pos + chars`).
+    #[test]
+    fn io_read_sizes_are_clamped() {
+        assert_eq!(io_chunk_end(100, 0, None), 100);
+        assert_eq!(io_chunk_end(100, 0, Some(3)), 4);
+        assert_eq!(io_chunk_end(100, 8, Some(0)), 12);
+        assert_eq!(io_chunk_end(100, 8, Some(30)), 48);
+        for s in [u64::MAX, u64::MAX / 3 * 2, 1 << 62, usize::MAX as u64 - 1] {
+            assert_eq!(io_chunk_end(100, 0, Some(s)), 100);
+            assert_eq!(io_chunk_end(100, 96, Some(s)), 100);
+            assert_eq!(io_chunk_end(100, 100, Some(s)), 100);
+        }
+    }
 
     fn ax(
         id: &str,

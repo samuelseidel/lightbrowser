@@ -769,4 +769,14 @@ mod tests {
             "net::ERR_CONNECTION_REFUSED"
         );
     }
+
+    /// A TLS handshake timeout reaches the page as a timeout, not as a
+    /// certificate or SSL error: "timed out" is matched before "tls".
+    #[test]
+    fn tls_handshake_timeout_is_err_timed_out() {
+        let e = lb_net::tls::handshake_timed_out("127.0.0.1", lb_net::fetch::TLS_HANDSHAKE_TIMEOUT);
+        let text = e.to_string();
+        assert!(text.starts_with("tls: "), "{text}");
+        assert_eq!(net_error_text(&text), "net::ERR_TIMED_OUT");
+    }
 }

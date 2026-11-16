@@ -579,6 +579,25 @@ fn sigalg_name(id: u16) -> Option<&'static str> {
     })
 }
 
+/// A TLS handshake `fut` with `host` that must finish within `limit`
+/// ([`crate::fetch::NetTimeouts::tls_handshake`]).
+pub(crate) async fn handshake_within<T>(
+    limit: std::time::Duration,
+    host: &str,
+    fut: impl std::future::Future<Output = Result<T, NetError>>,
+) -> Result<T, NetError> {
+    crate::fetch::within(limit, fut, || handshake_timed_out(host, limit)).await
+}
+
+/// The error of a TLS handshake with `host` that took longer than `limit`.
+/// Its text says "timed out", which lb-page reports as `net::ERR_TIMED_OUT`.
+pub fn handshake_timed_out(host: &str, limit: std::time::Duration) -> NetError {
+    NetError::Tls(format!(
+        "handshake with {host} timed out ({} s)",
+        limit.as_secs_f64()
+    ))
+}
+
 /// Decompress-only brotli for `compress_certificate`. The client never
 /// compresses its own certificate.
 struct BrotliDecompressor;
@@ -606,8 +625,35 @@ impl CertificateCompressor for ZlibDecompressor {
     }
 }
 
-fn copy_all<R: Read, W: Write>(mut r: R, w: &mut W) -> io::Result<()> {
-    io::copy(&mut r, w).map(|_| ())
+/// The largest uncompressed length a `CompressedCertificate` can declare
+/// (a 24-bit field, RFC 8879).
+const MAX_CERT_UNCOMPRESSED: u64 = (1 << 24) - 1;
+
+/// Decompress a certificate into `w`, at most [`MAX_CERT_UNCOMPRESSED`]
+/// bytes.
+///
+/// BoringSSL already bounds this: it refuses a declared length above
+/// `max_cert_list` before calling us (`tls13_both.cc`), `boring` hands us a
+/// writer over a buffer of exactly the declared length (a full buffer
+/// fails the write) and BoringSSL checks the length afterwards. The trait
+/// does not tell us the declared length, so the bound here is the most any
+/// peer can declare; it keeps a decompressor from running on for ever if
+/// the writer ever stops limiting it.
+fn copy_all<R: Read, W: Write>(r: R, w: &mut W) -> io::Result<()> {
+    copy_bounded(r, w, MAX_CERT_UNCOMPRESSED)
+}
+
+/// Copy at most `limit` bytes from `r` to `w`: read `limit + 1` at most and
+/// fail if that many came out.
+fn copy_bounded<R: Read, W: Write>(r: R, w: &mut W, limit: u64) -> io::Result<()> {
+    let n = io::copy(&mut r.take(limit.saturating_add(1)), w)?;
+    if n > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "decompressed certificate is longer than declared",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -907,5 +953,51 @@ mod tests {
         let h = capture(&c, "127.0.0.1").await;
         assert_eq!(h.sni, None);
         assert!(!h.extensions.contains(&0));
+    }
+
+    /// A zlib stream of `mib` MiB of zeros, a few KiB long: one
+    /// sync-flushed 1 MiB run repeated (the trailer is left off; a bounded
+    /// reader stops long before it).
+    fn zlib_bomb(mib: usize) -> Vec<u8> {
+        use flate2::{Compress, Compression, FlushCompress};
+        let mut c = Compress::new(Compression::best(), false);
+        let mut run = Vec::with_capacity(64 * 1024);
+        c.compress_vec(&vec![0u8; 1 << 20], &mut run, FlushCompress::Sync)
+            .unwrap();
+        let mut out = vec![0x78, 0xda];
+        for _ in 0..mib {
+            out.extend_from_slice(&run);
+        }
+        out
+    }
+
+    /// Certificate decompression stops at the bound: at most `limit + 1`
+    /// bytes are written, then an error.
+    #[test]
+    fn cert_decompression_is_bounded() {
+        let bomb = zlib_bomb(4);
+        let mut out = Vec::new();
+        let r = copy_bounded(flate2::read::ZlibDecoder::new(&bomb[..]), &mut out, 1000);
+        assert!(r.is_err());
+        assert_eq!(out.len(), 1001);
+        // Exactly the declared length is fine.
+        let one = zlib_bomb(1);
+        let mut full = Vec::new();
+        let mut d = flate2::read::ZlibDecoder::new(&one[..]);
+        let mut first = vec![0u8; 1 << 20];
+        d.read_exact(&mut first).unwrap();
+        copy_bounded(&first[..], &mut full, 1 << 20).unwrap();
+        assert_eq!(full.len(), 1 << 20);
+        // The helper the compressors use stops at the 24-bit maximum: a
+        // 32 MiB bomb into an unbounded writer (the old `io::copy` wrote
+        // all 32 MiB).
+        let big = zlib_bomb(32);
+        let mut sink = Vec::new();
+        assert!(ZlibDecompressor.decompress(&big, &mut sink).is_err());
+        assert!(
+            sink.len() as u64 <= MAX_CERT_UNCOMPRESSED + 1,
+            "{}",
+            sink.len()
+        );
     }
 }

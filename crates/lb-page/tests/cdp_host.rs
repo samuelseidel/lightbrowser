@@ -55,6 +55,84 @@ const PAGE: &str = "<!DOCTYPE html><title>Host</title><body style='margin:0'>\
     <button id=b style='width:100px;height:40px' onclick=\"this.textContent='done:'+event.isTrusted\">go</button>\
     <input id=i style='width:100px;height:20px'></body>";
 
+// A client's frame id is checked before it is parsed: a short or non-ASCII
+// id once sliced inside a character and panicked the page worker.
+#[test]
+fn malformed_frame_ids_are_unknown_frames() {
+    lb_cdp::block_on_local(async {
+        let s = serve(vec![("/", Resource::html(PAGE))]).await;
+        let h = host();
+        h.create_context("C", ContextOptions::default()).unwrap();
+        h.create_page("C", "T").await.unwrap();
+        h.navigate(
+            "T",
+            NavigateRequest {
+                url: s.url("/"),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let odd = format!("a{}a", "é".repeat(15));
+        assert_eq!(odd.len(), 32);
+        for id in [
+            odd.as_str(),
+            "",
+            "x",
+            "日本語",
+            &"F".repeat(32),
+            &"+1".repeat(16),
+        ] {
+            let e = h.create_isolated_world("T", id, "w", false).unwrap_err();
+            assert_eq!(e.0, "No frame for given id found", "{id:?}");
+            let e = h.frame_owner("T", id).unwrap_err();
+            assert_eq!(e.0, "Frame with the given id was not found.", "{id:?}");
+        }
+        // The page still works.
+        assert_eq!(eval(&h, "T", "document.title").await, json!("Host"));
+        h.close_page("T").unwrap();
+    })
+    .unwrap();
+}
+
+// A script-built tree 10k elements deep: layout, hit testing and
+// `DOM.getDocument` with `depth: -1` once overflowed the page worker's stack.
+#[test]
+fn script_built_deep_tree() {
+    lb_cdp::block_on_local(async {
+        let s = serve(vec![("/", Resource::html(PAGE))]).await;
+        let h = host();
+        h.create_context("C", ContextOptions::default()).unwrap();
+        h.create_page("C", "T").await.unwrap();
+        h.navigate(
+            "T",
+            NavigateRequest {
+                url: s.url("/"),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let r = eval(
+            &h,
+            "T",
+            "(() => { let t = document.createElement('div'); t.textContent = 'x';\
+             for (let i = 0; i < 10000; i++) { const d = document.createElement('div'); d.appendChild(t); t = d; }\
+             document.body.appendChild(t);\
+             return [document.body.offsetHeight > 0, !!document.elementFromPoint(5, 5)]; })()",
+        )
+        .await;
+        assert_eq!(r, json!([true, true]));
+        let doc = h.get_document("T", -1, false).unwrap();
+        assert_eq!(doc.node_name, "#document");
+        let node = h.frame_tree("T").unwrap().frame.id;
+        let _ = h.create_isolated_world("T", &node, "w", false).unwrap();
+        assert_eq!(eval(&h, "T", "document.title").await, json!("Host"));
+        h.close_page("T").unwrap();
+    })
+    .unwrap();
+}
+
 // Isolated worlds are reported at once and get their realm on first use:
 // bindings added before that are there, the DOM is shared, globals are not.
 #[test]

@@ -48,7 +48,7 @@ const COMBOS = [
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
 function parseArgs(argv) {
-  const a = { out: null, mode: 'headless', chromium: '/opt/pw-browsers/chromium', timeout: 60000 };
+  const a = { out: null, mode: 'headless', chromium: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium', timeout: 60000 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${k} needs a value`); return argv[++i]; };

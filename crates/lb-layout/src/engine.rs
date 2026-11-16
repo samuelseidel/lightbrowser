@@ -377,12 +377,27 @@ impl LayoutEngine {
         if let Some(b) = self.box_of(doc, node) {
             return self.state(doc).geo[b].rect;
         }
-        // display: contents: union of the children's boxes.
-        let rects: Vec<Rect> = doc
-            .children(node)
-            .map(|c| self.bounding_client_rect(doc, c))
-            .filter(|r| !r.is_empty())
-            .collect();
+        // display: contents: union of the children's boxes, looking through
+        // boxless children in turn. An explicit stack: the page picks the
+        // depth (elements past the box depth limit have no boxes).
+        let mut rects: Vec<Rect> = Vec::new();
+        let mut todo: Vec<NodeId> = doc.children(node).collect();
+        todo.reverse();
+        while let Some(c) = todo.pop() {
+            match self.box_of(doc, c) {
+                Some(b) => {
+                    let r = self.state(doc).geo[b].rect;
+                    if !r.is_empty() {
+                        rects.push(r);
+                    }
+                }
+                None => {
+                    let at = todo.len();
+                    todo.extend(doc.children(c));
+                    todo[at..].reverse();
+                }
+            }
+        }
         union(&rects)
     }
 

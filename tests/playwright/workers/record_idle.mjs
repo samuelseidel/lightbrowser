@@ -57,7 +57,7 @@ let dir;
 let proc;
 if (mode === 'chrome') {
   dir = mkdtempSync(path.join(os.tmpdir(), 'lb-idle-'));
-  proc = spawn(process.env.CHROME || '/opt/pw-browsers/chromium', ['--headless=new', '--no-sandbox',
+  proc = spawn(process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium', ['--headless=new', '--no-sandbox',
     '--remote-debugging-port=0', `--user-data-dir=${dir}`, '--no-proxy-server',
     '--disable-background-networking', '--disable-component-extensions-with-background-pages', '--no-first-run', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
 } else {

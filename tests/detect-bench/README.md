@@ -30,6 +30,7 @@ against.
 | `test_scoring.py`, `test_server.py` | Unit tests, using `fixtures/`. |
 | `test_rules_wave2.py`, `test_server_wave2.py` | Tests of the wave-2 rules, signed agents, clusters and the STUN responder (ADR 0043). |
 | `test_hardening_r2.py` | Round-2 tests: hostile header and beacon values, a parked pointer, bounded searches, WebRTC on `::1` (ADR 0043). |
+| `configs/*.json` | `--config` files that put the info-only rules at their target weights ("the OS rules at full weight"); see "Info rules at their target weights". |
 | `fixtures/T-*.json` | Sessions recorded by `run.js --save-fixtures`. |
 | `fixtures/synthetic-human-trace.json` | Synthetic human-like trace for T-020 (curved paths, minimum-jerk speed, varied timing). Not a real person. |
 | `fixtures/chrome153_{browse,t010,referer_case}.json` | Sessions recorded from stock Chrome 153 (`--headless=new`, Linux, over CDP, loopback) with the wave-2 server and collector: normal browsing, the T-010 flow, and a driver-set Referer. The must-not-fire ground truth for the wave-2 rules. Probes of pages after the first are trimmed to the ones the rules read. |
@@ -410,6 +411,55 @@ retry leaves `header_order` and `cookie_not_echoed` quiet. Re-checked at the
 M7 close-out (after WP-E): still no OS rule fires, and all eight reference
 LightBrowser personas score fp 0 (Playwright input) and beh 0 (`--input
 human`) with the three info rules at their target weights.
+
+### Info rules at their target weights (`configs/`)
+
+Five rules are info-only (weight 0) in the catalogue and name a target weight in
+their description. "The OS rules at full weight" in `CLAUDE.md` and the roadmap
+means those weights; they used to exist only in the `os_cfg()` helper of
+`test_scoring.py`. Two `--config` files carry them now, and `test_scoring.py`
+(`CommittedConfigs`) checks both against the catalogue, so a new rule with a
+`(target N)` fails the test until a file lists it:
+
+| Config | Sets |
+|---|---|
+| `configs/os_full_weight.json` | the M7 OS rules: `codecs_os` 15, `screen_os` 15, `window_work_area` 15, `wheel_os` 20 |
+| `configs/all_targets.json` | the same four and `webrtc_candidates` 15 (wave 2, ADR 0043) |
+
+T-010 for one reference persona with the M7 OS rules at full weight. Start a
+fresh `serve` and a fresh bench server for every run (`<id>` comes from `curl
+127.0.0.1:19222/json/version`); for `--input human` start the pair again:
+
+```bash
+python3 tests/detect-bench/server.py --port 18766 --results-dir "$(mktemp -d)" \
+    --config tests/detect-bench/configs/os_full_weight.json &
+./target/debug/lightbrowser serve --port 19222 --egress loopback \
+    --persona profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json &
+node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
+    --cdp ws://127.0.0.1:19222/devtools/browser/<id> --expect 'fp<=30'
+node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
+    --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
+# stop both servers afterwards; --config .../all_targets.json for the second row below
+```
+
+Results (2026-11-16, rtx-dev, the debug binary of this tree, the eight files of
+`profiles/reference/chrome/`, one run per persona and input):
+
+| Config | Input | fp | beh | Rules that fired |
+|---|---|---|---|---|
+| `os_full_weight.json` | Playwright | 0, 8 of 8 | 92.3 | none of the four OS rules |
+| `all_targets.json` | Playwright | 15, 8 of 8 | 92.3 | `webrtc_candidates` |
+| `all_targets.json` | `--input human` | 15, 8 of 8 | 0, 8 of 8 | `webrtc_candidates` |
+
+`webrtc_candidates` fires on every persona because LightBrowser gathers no
+server-reflexive ICE candidate ("no server-reflexive candidate although the STUN
+responder 127.0.0.1:PORT is on loopback"): that is why the rule is info-only
+until it does. None of `codecs_os`, `screen_os`, `window_work_area` and
+`wheel_os` fires in any of the runs, so the claim "fp 0 and, with human input,
+beh 0 with the M7 OS rules at full weight" holds; with `webrtc_candidates` at
+its target as well, fp is 15. (`wheel_os` is a behaviour rule and was at its
+weight in the human runs; `webrtc_candidates` is a consistency rule, so beh does
+not depend on it.)
 
 ## Wave 2 rules (ADR 0043)
 

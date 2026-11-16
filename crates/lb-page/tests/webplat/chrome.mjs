@@ -17,7 +17,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib
 const here = path.dirname(fileURLToPath(import.meta.url));
 const [base, ...cases] = process.argv.slice(2);
 const b = await chromium.launch({
-  executablePath: process.env.CHROME || '/opt/pw-browsers/chromium',
+  executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium',
   args: ['--disable-background-networking', '--no-proxy-server'],
   ignoreDefaultArgs: ['--disable-ipc-flooding-protection'],
 });
@@ -26,7 +26,7 @@ const out = {};
 for (const c of cases) {
   const dir = fs.existsSync(path.join(here, 'cases', c, 'persistent')) ? fs.mkdtempSync(path.join(os.tmpdir(), 'webplat-')) : null;
   const ctx = dir
-    ? await chromium.launchPersistentContext(dir, { executablePath: process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'], ignoreDefaultArgs: ['--disable-ipc-flooding-protection'] })
+    ? await chromium.launchPersistentContext(dir, { executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'], ignoreDefaultArgs: ['--disable-ipc-flooding-protection'] })
     : await b.newContext();
   const p = await ctx.newPage();
   const cdp = await ctx.newCDPSession(p);

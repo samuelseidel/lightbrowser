@@ -53,7 +53,7 @@ it with exit code 0.
 | `browser_press_key` | `key` (`Enter`, `ArrowDown`, `Control+a`, ...) | confirmation |
 | `browser_evaluate` | `expression` | the JSON result (pretty-printed) |
 | `browser_screenshot` | none | MCP image content, base64 PNG |
-| `browser_extract` | `format`: `text` or `html` | page text (`innerText`) or HTML after scripts |
+| `browser_extract` | `format`: `text`, `html` or `markdown` | page text (`innerText`), HTML after scripts, or Markdown (ADR 0042) |
 | `browser_close` | none | closes the page; the next call opens a fresh one |
 
 Output above 100 KB is cut on a character boundary with a note saying how
@@ -84,8 +84,11 @@ returned, values cut at 2000 characters).
 world: they see the DOM, never the page's own globals, and the page sees
 nothing of the server (nothing automation-related is visible to the page
 world, as for every CDP helper).
-`browser_extract` has a marked hook (`EXTRACT-HOOK` in `driver.rs` and
-`tools.rs`) where the extract package adds `markdown` once it is merged.
+`browser_extract` `markdown` is the converter of `lightbrowser fetch
+--dump markdown` (ADR 0042) on the live document, with the page's computed
+style deciding what is hidden: the driver calls `CdpHost::extract` (which
+runs `lb_page::Page::extract`) directly, not through a CDP method, so no
+CDP surface is added.
 
 JavaScript dialogs would freeze the page with nobody to answer them, so the
 server accepts `alert` and `beforeunload` and dismisses `confirm` and
@@ -133,9 +136,14 @@ the centre of the element's first visible box: move, press, release.
 ### Host policy (internal-use rule)
 
 By default the browser may only request loopback addresses (`127.0.0.0/8`,
-`::1`), `localhost`, `*.localhost` and `*.test`. `--allow-host GLOB`
-(repeatable; `*` and `?`, matched case-insensitively against the host name
-or IP literal) adds hosts. `about:`, `data:` and `blob:` need no network and
+`::1`), `localhost`, `*.localhost` and `*.test`. `--allow-host ENTRY`
+(repeatable) adds hosts; an entry is an egress policy allow entry (ADR
+0044): a name glob with `*` (no `?`), an IP address, a CIDR block, or a
+name pinned to addresses. Names are compared after normalisation (case,
+trailing dot, IDN to punycode); an IP literal in a URL is compared with
+address entries only, never with name globs. An entry the egress policy
+refuses (`?`, a port, a bare `*`, `0.0.0.0/0`) stops the server at
+start-up with exit 1. `about:`, `data:` and `blob:` need no network and
 are not blocked by the policy (`data:` and `blob:` work for subresources;
 lb-page cannot load a `data:` URL as the top-level document, so
 `browser_navigate` does not offer it); other schemes (`file:`, `ftp:`,
@@ -147,20 +155,36 @@ Checking the URL in the tool is not enough: a redirect, a script setting
 follows redirects itself). So the policy is enforced in `lb-net`, which
 every request of every page, worker and service worker passes:
 
-- `lb_net::NetContext::url_filter: Option<UrlFilter>`
-  (`Arc<dyn Fn(&Url) -> bool + Send + Sync>`), asked at the top of every hop
-  of `fetch` and before a WebSocket handshake, before any DNS lookup or
-  socket. A refusal is `NetError::Blocked`, whose text is Chrome's
+- The policy is an `lb_net::EgressPolicy` in mode `loopback` with the
+  entries `*.test`, `test` and the `--allow-host` entries (ADR 0044),
+  handed to every context through `CdpHostOptions::egress`. lb-net asks it
+  at the top of every hop of `fetch` and before a WebSocket handshake,
+  before any DNS lookup or socket, and checks every resolved address
+  again. A refusal is `NetError::Blocked`, whose text is Chrome's
   `net::ERR_BLOCKED_BY_CLIENT`.
-- `lb_page::BrowserContext::set_url_filter` and
-  `CdpHostOptions::url_filter` hand it to every context.
-- The MCP filter also remembers what it refused. A blocked navigation is a
-  tool error naming the URL and the flag (`--allow-host <glob>`); other
-  results get a note when a subresource or a script-started navigation was
-  blocked meanwhile. `browser_navigate` also checks first, so an obvious
-  violation never reaches the page.
+- There is one parser and one matcher: `mcp/policy.rs` `HostPolicy` builds
+  that policy and its up-front check in `browser_navigate` is
+  `EgressPolicy::check_url`, the same name check lb-net's `fetch` makes
+  per hop of a direct request. So an obvious violation never reaches the
+  page, and the tool cannot allow what the transport refuses or the
+  reverse (`tool_and_transport_agree_on_every_entry` runs one table of
+  entries and hosts through both). Through `--proxy` the transport is
+  stricter than the tool (`check_remote_name`: only a name an unpinned
+  entry lists), never looser.
+- Refusals become notes. The driver keeps the URL of every page request
+  from `Network.requestWillBeSent` until `loadingFinished` or
+  `loadingFailed`; a `loadingFailed` with `net::ERR_BLOCKED_BY_CLIENT`
+  (the server uses no `Fetch` interception, so only the egress policy
+  gives it) puts the URL in a `BlockedLog`. A blocked navigation is a tool
+  error naming the URL and the flag (`--allow-host <entry>`); any other
+  result ends with `Note: the host policy blocked requests to <urls>
+  (--allow-host <entry> allows more hosts)` when a subresource, a fetch or
+  a script-started navigation was refused since the last result (at most
+  20 URLs, each once). Requests of workers are not seen (the server does
+  not attach to worker targets), and a redirect that lb-net follows itself
+  is named by the URL of its first hop.
 
-Not set by default anywhere else: `serve` and `fetch` do not use the filter.
+Not set by default anywhere else: `serve` and `fetch` use `--egress`.
 A pooled keep-alive connection is reused without asking again, which is
 fine: its host was allowed when it was opened (pool groups are per host).
 
@@ -207,17 +231,20 @@ exits 1.
   flight when stdin closes is finished and answered before the exit, up to
   `--timeout`: a client that pipes one request and closes stdin
   (`printf ... | lightbrowser mcp`) gets its answer.
-- `url_filter` is a general hook; an operator could use it elsewhere, but
-  only `mcp` sets it.
 - Tests: `bin/lightbrowser/tests/mcp.rs` spawns the binary against a loopback
   page server (protocol versions, `tools/list` schemas, navigate, snapshot,
-  type and click on a form, evaluate, screenshot, extract, blocked hosts
-  including a redirect and a script navigation, `--allow-host` through a
+  type and click on a form, evaluate, screenshot, extract (`markdown` equals
+  the `fetch --dump markdown` goldens in `crates/lb-page/tests/extract/`),
+  blocked hosts including a redirect and a script navigation, blocked-request
+  notes for subresources and fetches, `alert`/`confirm`/`prompt` answered and
+  noted, `--allow-host` through a
   loopback proxy (no name lookup), bad refs, unknown methods, no listening
   socket, exit on stdin EOF, and the cases of revision 1); unit tests cover
-  the protocol, policy globs, keys and snapshot rendering; `lb-net` has
-  `url_filter_stops_the_first_request_and_every_redirect_hop`; `lb-layout`
-  has the deep-page AX tests.
+  the protocol, the policy (one table of entries and hosts through the tool
+  check and the transport check), keys and snapshot rendering; the egress
+  tests in `lb-net` cover redirect hops; `lb-layout` has the deep-page AX
+  tests. `tests/mcp_firefox.rs` (firefox build) checks the refusal and
+  exit code 1.
 
 ## Revision 1 (review round 2)
 

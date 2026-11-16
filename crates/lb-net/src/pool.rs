@@ -483,6 +483,8 @@ pub(crate) struct ConnectParams {
     pub(crate) tcp_profile: Option<Arc<TcpProfile>>,
     /// The context's egress policy (ADR 0044).
     pub(crate) egress: Arc<EgressPolicy>,
+    /// The context's TLS, proxy and response-head time limits.
+    pub(crate) timeouts: crate::fetch::NetTimeouts,
 }
 
 struct Inner {
@@ -731,6 +733,7 @@ impl ConnectionPool {
                         host,
                         key.port,
                         &params.user_agent,
+                        params.timeouts.proxy_handshake,
                     )
                     .await?;
                 (tcp, ConnTiming::whole(t0, Instant::now()))
@@ -766,9 +769,12 @@ impl ConnectionPool {
             )),
             Some(c) => {
                 timing.secure_start = Some(Instant::now());
-                let (s, version) = c
-                    .connect_resuming(host, tcp, Some(&key.session_key()))
-                    .await?;
+                let (s, version) = crate::tls::handshake_within(
+                    params.timeouts.tls_handshake,
+                    host,
+                    c.connect_resuming(host, tcp, Some(&key.session_key())),
+                )
+                .await?;
                 timing.connect_end = Instant::now();
                 Ok((
                     Conn {
@@ -1078,6 +1084,7 @@ mod tests {
             user_agent: Arc::from("test"),
             tcp_profile: None,
             egress: Arc::new(egress),
+            timeouts: crate::fetch::NetTimeouts::default(),
         }
     }
 

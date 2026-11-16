@@ -6,9 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
 import path from 'node:path';
-import { env, newPage, pages, html } from './harness.mjs';
+import { env, newPage, pages, html, playwrightEntry } from './harness.mjs';
 
 // ---- tiny PNG codec (8-bit RGB/RGBA, non-interlaced) ----
 
@@ -95,14 +94,16 @@ function decodePng(buf) {
   return { width: w, height: h, data: out };
 }
 
-// JPEG decoding uses the jpeg-js copy bundled with Playwright, when found.
+// JPEG decoding uses the jpeg-js copy bundled with Playwright (playwright-core
+// sits next to the `playwright` package the harness found). When it cannot be
+// loaded the pixel check is skipped, and the run says so.
 function jpegDecoder() {
   try {
     const require = createRequire(import.meta.url);
-    const root = execSync('npm root -g').toString().trim();
-    const pkg = require.resolve('playwright-core/package.json', { paths: [path.join(root, 'playwright')] });
+    const pkg = require.resolve('playwright-core/package.json', { paths: [path.dirname(playwrightEntry)] });
     return require(path.join(path.dirname(pkg), 'lib/utilsBundle.js')).jpegjs;
-  } catch {
+  } catch (e) {
+    console.warn(`jpeg pixel check skipped: no jpeg-js in playwright-core (${e.message.split('\n')[0]})`);
     return null;
   }
 }

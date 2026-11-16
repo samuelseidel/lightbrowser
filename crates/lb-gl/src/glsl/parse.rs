@@ -200,7 +200,32 @@ pub struct Parser<'a> {
     uses_frag_color: bool,
     max_draw_buffers: u32,
     def_order: Vec<FuncId>,
+    /// Nesting of the recursive descent (statements, expressions, prefix
+    /// operators): past [`MAX_NESTING`] the parse stops ("memory
+    /// exhausted", as ANGLE's parser stack).
+    nest: usize,
+    /// Approximate depth of the AST being built: past
+    /// [`MAX_EXPRESSION_DEPTH`] the shader is "Expression too complex.".
+    ast_depth: usize,
+    too_complex: bool,
+    /// Log length and error count when `too_complex` was set: later
+    /// messages come from the shortened tree and are dropped.
+    complex_mark: (usize, u32),
 }
+
+/// Recursion budget of the parser. ANGLE's parser stack holds 10000 states
+/// (a few per nesting level: 1000 nested parentheses compile in Chrome,
+/// 10000 do not); this keeps the recursion within the compile thread's
+/// stack (`COMPILE_STACK` in `glsl/mod.rs`) in a debug build.
+pub(crate) const MAX_NESTING: usize = 1100;
+/// ANGLE's `MaxExpressionComplexity` in Chrome: deeper trees fail with
+/// "Expression too complex.". Also bounds the recursion of later passes.
+const MAX_EXPRESSION_DEPTH: usize = 256;
+
+/// How long a chain of function calls may be: ANGLE's `MaxCallStackDepth`.
+/// The call-graph walk and the inlining in `codegen` recurse once per level.
+/// The text of the error follows ANGLE's but was not recorded from Chrome.
+const MAX_CALL_STACK_DEPTH: usize = 256;
 
 fn zero_expr() -> Expr {
     Expr {
@@ -297,6 +322,49 @@ impl<'a> Parser<'a> {
     }
     fn err(&mut self, line: u32, tok: &str, msg: &str) {
         self.log.error(line, tok, msg);
+    }
+
+    /// Runs `f` one nesting level deeper; past [`MAX_NESTING`] the parse
+    /// stops with ANGLE's "memory exhausted" at the token that opened the
+    /// level. `ast` says whether the level also deepens the AST.
+    fn nested<T>(&mut self, ast: bool, f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        if self.nest >= MAX_NESTING {
+            let t = self
+                .toks
+                .get(self.pos.saturating_sub(1))
+                .or(self.toks.last());
+            let (l, s) = t.map_or((self.last_line, String::new()), |t| {
+                (t.line, t.text.clone())
+            });
+            self.log.error(l, &s, "memory exhausted");
+            return Err(());
+        }
+        self.nest += 1;
+        self.ast_depth += usize::from(ast);
+        if self.ast_depth > MAX_EXPRESSION_DEPTH {
+            self.set_too_complex();
+        }
+        let r = f(self);
+        self.nest -= 1;
+        self.ast_depth -= usize::from(ast);
+        r
+    }
+
+    /// Whether a left-assoc chain `k` links long at the current depth is
+    /// too deep; the caller then stops growing it (so the tree stays
+    /// shallow) and the shader fails as "Expression too complex.".
+    fn chain_too_deep(&mut self, k: usize) -> bool {
+        if self.ast_depth + k > MAX_EXPRESSION_DEPTH {
+            self.set_too_complex();
+        }
+        self.too_complex
+    }
+
+    fn set_too_complex(&mut self) {
+        if !self.too_complex {
+            self.too_complex = true;
+            self.complex_mark = (self.log.text.len(), self.log.errors);
+        }
     }
 
     fn is_reserved(&self, s: &str) -> bool {
@@ -1398,6 +1466,10 @@ impl<'a> Parser<'a> {
     // ---------------------------------------------------------------
 
     fn statement(&mut self) -> R<Stmt> {
+        self.nested(true, Self::statement_inner)
+    }
+
+    fn statement_inner(&mut self) -> R<Stmt> {
         let line = self.line();
         if self.is_punct("{") {
             self.pos += 1;
@@ -1809,8 +1881,13 @@ impl<'a> Parser<'a> {
 
     fn expr(&mut self) -> R<Expr> {
         let mut e = self.assign_expr()?;
+        let mut k = 0;
         while self.eat_punct(",") {
             let r = self.assign_expr()?;
+            k += 1;
+            if self.chain_too_deep(k) {
+                continue;
+            }
             let ty = r.ty;
             let prec = r.prec;
             e = Expr {
@@ -1824,6 +1901,10 @@ impl<'a> Parser<'a> {
     }
 
     fn assign_expr(&mut self) -> R<Expr> {
+        self.nested(true, Self::assign_expr_inner)
+    }
+
+    fn assign_expr_inner(&mut self) -> R<Expr> {
         let lhs = self.cond_expr()?;
         let line = self.line();
         let op = match self.peek() {
@@ -2038,6 +2119,7 @@ impl<'a> Parser<'a> {
             return self.unary();
         }
         let mut l = self.bin_expr(level + 1)?;
+        let mut k = 0;
         loop {
             let op = match self.peek() {
                 Some(Tok::Punct(p)) if LEVELS[level].contains(p) => *p,
@@ -2046,6 +2128,10 @@ impl<'a> Parser<'a> {
             let line = self.line();
             self.pos += 1;
             let r = self.bin_expr(level + 1)?;
+            k += 1;
+            if self.chain_too_deep(k) {
+                continue;
+            }
             l = match op {
                 "&&" | "||" => {
                     if l.ty != Type::BOOL || r.ty != Type::BOOL {
@@ -2235,7 +2321,7 @@ impl<'a> Parser<'a> {
             _ => return self.postfix(),
         };
         self.pos += 1;
-        let e = self.unary()?;
+        let e = self.nested(true, Self::unary)?;
         let bad = |p: &mut Self, e: &Expr| {
             let tn = p.type_name(e);
             p.err(
@@ -2324,11 +2410,18 @@ impl<'a> Parser<'a> {
 
     fn postfix(&mut self) -> R<Expr> {
         let mut e = self.primary()?;
+        // Each `[i]`, `.x` and `++` wraps `e` once more: count the links
+        // like a binary chain and stop wrapping past the depth limit.
+        let mut k = 0;
         loop {
             let line = self.line();
+            k += 1;
             if self.eat_punct("[") {
                 let idx = self.expr()?;
                 self.expect("]")?;
+                if self.chain_too_deep(k) {
+                    continue;
+                }
                 e = self.index(e, idx, line);
             } else if self.eat_punct(".") {
                 let name = self.ident_any()?;
@@ -2350,11 +2443,17 @@ impl<'a> Parser<'a> {
                     };
                     continue;
                 }
+                if self.chain_too_deep(k) {
+                    continue;
+                }
                 e = self.field(e, &name, line);
             } else if self.is_punct("++") || self.is_punct("--") {
                 let inc = self.is_punct("++");
                 self.pos += 1;
                 let op = if inc { "++" } else { "--" };
+                if self.chain_too_deep(k) {
+                    continue;
+                }
                 if !e.ty.is_numeric() {
                     let tn = self.type_name(&e);
                     self.err(line, op, &format!("wrong operand type - no operation '{op}' exists that takes an operand of type {tn} (or there is no acceptable conversion)"));
@@ -2558,7 +2657,12 @@ impl<'a> Parser<'a> {
             }
             Tok::Punct("(") => {
                 self.pos += 1;
-                let e = self.expr()?;
+                // Parentheses make no AST node.
+                let depth = self.ast_depth;
+                self.ast_depth = depth.saturating_sub(1);
+                let e = self.expr();
+                self.ast_depth = depth;
+                let e = e?;
                 self.expect(")")?;
                 Ok(e)
             }
@@ -3027,6 +3131,10 @@ pub fn parse(pp: &PpOut, stage: Stage, opts: &Options, log: &mut Log) -> Option<
         uses_frag_color: false,
         max_draw_buffers: opts.max_draw_buffers.max(1),
         def_order: Vec::new(),
+        nest: 0,
+        ast_depth: 0,
+        too_complex: false,
+        complex_mark: (0, 0),
     };
     // Default precisions.
     {
@@ -3055,6 +3163,13 @@ pub fn parse(pp: &PpOut, stage: Stage, opts: &Options, log: &mut Log) -> Option<
             return None;
         }
     }
+    if p.too_complex {
+        let (len, errors) = p.complex_mark;
+        p.log.text.truncate(len);
+        p.log.errors = errors;
+        p.log.raw("ERROR: Expression too complex.\n");
+        return None;
+    }
     // main().
     let main = p
         .funcs
@@ -3068,15 +3183,49 @@ pub fn parse(pp: &PpOut, stage: Stage, opts: &Options, log: &mut Log) -> Option<
     let n = p.funcs.len();
     let mut state = vec![0u8; n];
     let mut stack: Vec<usize> = Vec::new();
+    // Longest chain of calls starting at each finished function (itself
+    // included); a chain over `MAX_CALL_STACK_DEPTH` is refused, because the
+    // inlining in `codegen` recurses once per level.
+    let mut height = vec![0usize; n];
+    fn too_deep(log: &mut Log, funcs: &[Func], height: &[usize], mut f: usize) {
+        let mut chain = vec![funcs[f].name.as_str()];
+        // Follow the deepest callee down to a leaf.
+        while let Some(next) = funcs[f]
+            .calls
+            .iter()
+            .map(|c| *c as usize)
+            .filter(|c| height[*c] > 0 && height[*c] < height[f])
+            .max_by_key(|c| height[*c])
+        {
+            chain.push(funcs[next].name.as_str());
+            f = next;
+        }
+        log.raw(&format!(
+            "ERROR: Call stack too deep (larger than {MAX_CALL_STACK_DEPTH}) with the following call chain: {}\n",
+            chain.join(" -> ")
+        ));
+    }
     fn dfs(
         f: usize,
         funcs: &[Func],
         state: &mut [u8],
         stack: &mut Vec<usize>,
+        height: &mut [usize],
         log: &mut Log,
     ) -> bool {
         state[f] = 1;
         stack.push(f);
+        if stack.len() > MAX_CALL_STACK_DEPTH {
+            // The walk itself recurses once per level (a caller defined
+            // before its callee, with a prototype): stop before the stack does.
+            let chain: Vec<&str> = stack.iter().map(|i| funcs[*i].name.as_str()).collect();
+            log.raw(&format!(
+                "ERROR: Call stack too deep (larger than {MAX_CALL_STACK_DEPTH}) with the following call chain: {}\n",
+                chain.join(" -> ")
+            ));
+            return false;
+        }
+        let mut h = 1;
         for c in &funcs[f].calls {
             let c = *c as usize;
             if state[c] == 1 {
@@ -3092,9 +3241,15 @@ pub fn parse(pp: &PpOut, stage: Stage, opts: &Options, log: &mut Log) -> Option<
                 ));
                 return false;
             }
-            if state[c] == 0 && !dfs(c, funcs, state, stack, log) {
+            if state[c] == 0 && !dfs(c, funcs, state, stack, height, log) {
                 return false;
             }
+            h = h.max(height[c] + 1);
+        }
+        height[f] = h;
+        if h > MAX_CALL_STACK_DEPTH {
+            too_deep(log, funcs, height, f);
+            return false;
         }
         stack.pop();
         state[f] = 2;
@@ -3103,7 +3258,7 @@ pub fn parse(pp: &PpOut, stage: Stage, opts: &Options, log: &mut Log) -> Option<
     for f in p.def_order.clone().into_iter().map(|f| f as usize) {
         if state[f] == 0
             && p.funcs[f].body.is_some()
-            && !dfs(f, &p.funcs, &mut state, &mut stack, p.log)
+            && !dfs(f, &p.funcs, &mut state, &mut stack, &mut height, p.log)
         {
             return None;
         }

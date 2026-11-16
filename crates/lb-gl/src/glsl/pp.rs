@@ -856,8 +856,14 @@ fn eval_if(
         t: &toks,
         i: 0,
         err: None,
+        depth: 0,
+        too_deep: false,
     };
     let v = p.ternary();
+    if p.too_deep {
+        log.error(line, "", "conditional expression too complex");
+        return None;
+    }
     if let Some(e) = p.err.take() {
         log.error(line, &e, "unexpected token after conditional expression");
         return None;
@@ -881,15 +887,36 @@ fn eval_if(
     Some(v)
 }
 
+/// How deep `#if` expressions may nest (parentheses, prefix operators and
+/// `?:` chains each count). A page controls the line, so an unbounded
+/// recursion would overflow the stack.
+const MAX_IF_DEPTH: usize = 512;
+
 struct IfParser<'a> {
     t: &'a [PpTok],
     i: usize,
     err: Option<String>,
+    /// Current depth of `ternary` and `unary`, the two unbounded recursions.
+    depth: usize,
+    /// Set when [`MAX_IF_DEPTH`] was hit; the input is then consumed so
+    /// every loop above ends at once.
+    too_deep: bool,
 }
 
 impl IfParser<'_> {
     fn peek(&self) -> Option<&Pp> {
         self.t.get(self.i).map(|t| &t.t)
+    }
+    /// One level deeper, or `false` (and the rest of the line skipped) past
+    /// [`MAX_IF_DEPTH`].
+    fn enter(&mut self) -> bool {
+        if self.depth >= MAX_IF_DEPTH {
+            self.too_deep = true;
+            self.i = self.t.len();
+            return false;
+        }
+        self.depth += 1;
+        true
     }
     fn eat(&mut self, p: &str) -> bool {
         if matches!(self.peek(), Some(Pp::Punct(x)) if *x == p) {
@@ -900,6 +927,14 @@ impl IfParser<'_> {
         }
     }
     fn ternary(&mut self) -> i64 {
+        if !self.enter() {
+            return 0;
+        }
+        let v = self.ternary_level();
+        self.depth -= 1;
+        v
+    }
+    fn ternary_level(&mut self) -> i64 {
         let c = self.bin(0);
         if self.eat("?") {
             let a = self.ternary();
@@ -961,6 +996,14 @@ impl IfParser<'_> {
         }
     }
     fn unary(&mut self) -> i64 {
+        if !self.enter() {
+            return 0;
+        }
+        let v = self.unary_level();
+        self.depth -= 1;
+        v
+    }
+    fn unary_level(&mut self) -> i64 {
         if self.eat("-") {
             return self.unary().wrapping_neg();
         }

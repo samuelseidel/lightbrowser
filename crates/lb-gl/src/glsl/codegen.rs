@@ -728,6 +728,14 @@ impl Gen<'_> {
         let Some(body) = &func.body else {
             return Vec::new();
         };
+        if self.too_big {
+            // Over the op limit already: the shader is refused at the end.
+            // Stop inlining, or a tree of calls (each function calling the
+            // next twice) makes this walk grow exponentially with depth.
+            let n = func.ret.cells(&self.u.structs);
+            let r = self.alloc(n);
+            return (r..r + n).collect();
+        }
         // Arguments: evaluate in order; out/inout keep their place.
         let mut places = Vec::new();
         let mut params = Vec::new();

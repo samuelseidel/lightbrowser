@@ -372,8 +372,13 @@ impl DeclarationBlock {
 /// Splits a trailing `!important` off a value.
 pub(crate) fn split_important(text: &str) -> (&str, bool) {
     let t = text.trim_end();
-    if t.len() >= 9 && t[t.len() - 9..].eq_ignore_ascii_case("important") {
-        let rest = t[..t.len() - 9].trim_end();
+    // `get` is `None` when the cut falls inside a multi-byte character; such
+    // a value cannot end in "important", so it carries no priority.
+    if let Some(cut) = t.len().checked_sub(9)
+        && t.get(cut..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case("important"))
+    {
+        let rest = t[..cut].trim_end();
         if let Some(r) = rest.strip_suffix('!') {
             return (r.trim(), true);
         }
@@ -1528,5 +1533,28 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    // `split_important` once sliced the value nine bytes from the end, which
+    // panicked when that byte lay inside a multi-byte character.
+    #[test]
+    fn important_split_is_safe_for_multibyte_values() {
+        assert_eq!(split_important("\"日本語\""), ("\"日本語\"", false));
+        assert_eq!(
+            split_important("\"日本語\" !IMPORTANT"),
+            ("\"日本語\"", true)
+        );
+        assert_eq!(split_important("é!important"), ("é", true));
+        assert_eq!(
+            split_important("日本語日本語日本語"),
+            ("日本語日本語日本語", false)
+        );
+        assert_eq!(split_important("a!important"), ("a", true));
+        assert_eq!(split_important("important"), ("important", false));
+        assert_eq!(split_important(""), ("", false));
+        let d = decls("font-family: \"日本語\", serif; color: red !important; content: \"日本語\"");
+        assert_eq!(d.len(), 2);
+        assert!(!d[0].important);
+        assert!(d[1].important);
     }
 }

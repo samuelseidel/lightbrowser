@@ -27,6 +27,47 @@ different ports (one origin and one same-site origin, for `Referer` and
 Steps that differ from Chrome on purpose are listed in `KNOWN` in
 `replay.mjs` with the reason; they are reported but do not fail the run.
 
+## Behaviour probes (`behavior.mjs`, ADR 0045)
+
+`behavior.mjs` covers what `replay.mjs` does not: session history, referrers,
+offline emulation, blocked URLs, script disabling and redirect events. Each of
+its 40 probes drives one fresh page over raw CDP and returns plain data (URLs,
+event names, the request headers the two test servers saw). Chrome 153's data
+is in `behavior.chrome.json`, one key per probe; LightBrowser's must equal it,
+except the `KNOWN` entries of the script (each with its reason).
+
+```sh
+# compare (needs a debug build: cargo build -p lightbrowser)
+node tests/cdp-raw/behavior.mjs compare --launch lightbrowser --port 19262
+node tests/cdp-raw/behavior.mjs compare --launch lightbrowser --only histcap,offline
+# re-record all probes from Chrome for Testing 153 (headless shell, loopback only)
+node tests/cdp-raw/behavior.mjs record --launch chrome --port 19262
+```
+
+`record` writes `behavior.chrome.json` (`--out FILE` for another file; with
+`--only A,B` it merges those probes into the existing file). The Chrome binary
+is `--bin PATH`, else `$CHROME_BIN`, else Playwright's `chromium_headless_shell-1243`
+under `~/.cache/ms-playwright`. The file must come from the script as committed:
+a recording made with another version of the script has other keys or other
+values (history lengths, event order after changed waits) and `compare` reports
+them as differences. Record again whenever a probe changes, and check a
+recording by making two and comparing them; they are equal as long as every
+probe returns only stable data (`blocked_raw` keeps only the types of
+`requestId` and `timestamp` for that reason).
+
+Status on c07cd39 plus the baseline fixes (2026-11-16, debug binary, Chrome for
+Testing 153.0.8010.12 for the recording): `replay.mjs compare` finds 0
+differences in 350 steps (36 known). `behavior.mjs compare` finds 158 differences
+in 24 of its 40 probes, the same 158 in two runs: for example `Network.setBlockedURLs`
+does not reject a wrong parameter type (Chrome: -32602), a blocked request fails
+with `net::ERR_BLOCKED_BY_CLIENT` where Chrome gives an empty `errorText` and
+`blockedReason: "inspector"`, and script disabling, history traversal and
+frame navigation events differ. The probes were written with product changes
+(history cap, first traversal wins, entry referrer, fragment navigation rules) in
+commit `ea703e6` of branch `wf/borrow-cdpcov-r2`, which is not an ancestor of
+c07cd39; the differences may be those. Until they are closed only `replay.mjs`
+runs in CI.
+
 ## What the clients send
 
 Read from the public sources (puppeteer `packages/puppeteer-core/src/cdp/*.ts`,

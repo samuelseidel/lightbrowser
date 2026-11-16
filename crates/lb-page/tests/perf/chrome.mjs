@@ -8,7 +8,7 @@
 const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib/node_modules/playwright/index.mjs');
 const [base, xport, ...cases] = process.argv.slice(2);
 const b = await chromium.launch({
-  executablePath: process.env.CHROME,
+  executablePath: process.env.LB_CHROME || process.env.CHROME,
   args: ['--no-sandbox', '--disable-background-networking', '--no-proxy-server'],
 });
 console.error(b.version());

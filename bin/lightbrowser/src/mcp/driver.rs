@@ -88,17 +88,29 @@ struct State {
     refs: Refs,
     /// Things worth telling the agent (dialogs answered).
     notes: Vec<String>,
+    /// URL per `Network` request id of the page, until the request
+    /// finishes or fails (to name a request the egress policy refused).
+    requests: HashMap<String, String>,
 }
+
+/// Most open requests remembered; past it the map starts over (a request
+/// that never finishes must not grow it without bound).
+const MAX_OPEN_REQUESTS: usize = 4096;
 
 struct Shared {
     next_id: Cell<i64>,
     pending: RefCell<HashMap<i64, oneshot::Sender<Result<Value, String>>>>,
     st: RefCell<State>,
     changed: Notify,
+    /// Written by the reader when the transport refuses a request.
+    blocked: BlockedLog,
 }
 
 pub struct Driver {
     cdp: Rc<InProcess<CdpHost>>,
+    /// The same host, for what is not a CDP command (`browser_extract`
+    /// markdown, ADR 0042).
+    host: Rc<CdpHost>,
     shared: Rc<Shared>,
     timeout: Duration,
     blocked: BlockedLog,
@@ -113,17 +125,20 @@ impl Driver {
         policy: HostPolicy,
         blocked: BlockedLog,
     ) -> Result<Driver, String> {
-        let (cdp, rx) = InProcess::connect(Rc::new(host)).map_err(|e| e.to_string())?;
+        let host = Rc::new(host);
+        let (cdp, rx) = InProcess::connect(host.clone()).map_err(|e| e.to_string())?;
         let cdp = Rc::new(cdp);
         let shared = Rc::new(Shared {
             next_id: Cell::new(1),
             pending: RefCell::new(HashMap::new()),
             st: RefCell::new(State::default()),
             changed: Notify::new(),
+            blocked: blocked.clone(),
         });
         tokio::task::spawn_local(reader(cdp.clone(), shared.clone(), rx));
         Ok(Driver {
             cdp,
+            host,
             shared,
             timeout,
             blocked,
@@ -294,10 +309,8 @@ impl Driver {
         }
         let blocked = self.blocked.take();
         if !blocked.is_empty() {
-            text.push_str(&format!(
-                "\nNote: the host policy blocked requests to {} (--allow-host <glob> allows more hosts)",
-                blocked.join(", ")
-            ));
+            text.push_str("\nNote: ");
+            text.push_str(&policy::blocked_note(&blocked));
         }
         ToolResult::text(text)
     }
@@ -717,6 +730,20 @@ impl Driver {
 
     async fn extract(&self, format: &str) -> Result<ToolResult, String> {
         self.ensure_page().await?;
+        if format == "markdown" {
+            // `lightbrowser fetch --dump markdown`'s converter on the live
+            // document, with the page's computed style deciding what is
+            // hidden (ADR 0042).
+            let target = self
+                .shared
+                .st
+                .borrow()
+                .target
+                .clone()
+                .ok_or("no page is open")?;
+            let e = self.host.extract(&target).await?;
+            return Ok(self.finish(snapshot::truncate(e.markdown)));
+        }
         let expr = match format {
             "text" => {
                 "document.body ? document.body.innerText : (document.documentElement ? document.documentElement.textContent : '')"
@@ -724,9 +751,11 @@ impl Driver {
             "html" => {
                 "(document.doctype ? '<!DOCTYPE ' + document.doctype.name + '>\\n' : '') + (document.documentElement ? document.documentElement.outerHTML : '')"
             }
-            // EXTRACT-HOOK: the extract package adds `"markdown" => ...` here
-            // (and "markdown" to the schema enum in tools.rs).
-            other => return Err(format!("format must be text or html, got {other:?}")),
+            other => {
+                return Err(format!(
+                    "format must be text, html or markdown, got {other:?}"
+                ));
+            }
         };
         let text = self.eval_string(expr).await?;
         Ok(self.finish(snapshot::truncate(text)))
@@ -884,6 +913,34 @@ fn on_event(cdp: &InProcess<CdpHost>, shared: &Shared, msg: &Value) {
                     (p["loaderId"].as_str(), p["response"]["status"].as_u64())
             {
                 st.statuses.insert(l.to_owned(), s as u16);
+            }
+        }
+        "Network.requestWillBeSent" => {
+            if let (Some(id), Some(url)) = (p["requestId"].as_str(), p["request"]["url"].as_str()) {
+                if st.requests.len() >= MAX_OPEN_REQUESTS {
+                    st.requests.clear();
+                }
+                st.requests.insert(id.to_owned(), url.to_owned());
+            }
+        }
+        "Network.loadingFinished" => {
+            if let Some(id) = p["requestId"].as_str() {
+                st.requests.remove(id);
+            }
+        }
+        "Network.loadingFailed" => {
+            // The egress policy (ADR 0044) refuses with Chrome's
+            // `net::ERR_BLOCKED_BY_CLIENT`; this server intercepts nothing
+            // (no `Fetch` domain), so nothing else blocks a request.
+            let url = p["requestId"]
+                .as_str()
+                .and_then(|id| st.requests.remove(id));
+            if p["errorText"]
+                .as_str()
+                .is_some_and(|e| e.starts_with("net::ERR_BLOCKED_BY_CLIENT"))
+                && let Some(url) = url
+            {
+                shared.blocked.push(url);
             }
         }
         "Page.javascriptDialogOpening" => {

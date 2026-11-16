@@ -94,7 +94,7 @@ const dir = mkdtempSync(path.join(os.tmpdir(), 'cdp-beh-'));
 const bin =
   opt('bin', null) ||
   (kind === 'chrome'
-    ? process.env.CHROME_BIN || path.join(os.homedir(), '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell')
+    ? process.env.LB_CHROME || process.env.CHROME_BIN || path.join(os.homedir(), '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell')
     : process.env.LIGHTBROWSER_BIN || path.join(repo, 'target/debug/lightbrowser'));
 const args =
   kind === 'chrome'
@@ -800,7 +800,9 @@ probes.blocked_raw = async () => {
   P.mark();
   await P.ev(`fetch('/json').catch(()=>1)`); await sleep(200);
   const ev = P.events(['Network.loadingFailed', 'Network.requestWillBeSent', 'Network.requestWillBeSentExtraInfo']);
-  return norm(ev.map((e) => ({ m: e.method, p: e.method.endsWith('Failed') ? e.params : Object.keys(e.params).sort() })));
+  // requestId and timestamp differ on every run (and between browsers): keep their types only.
+  const stable = (p) => ({ ...p, requestId: typeof p.requestId, timestamp: typeof p.timestamp });
+  return norm(ev.map((e) => ({ m: e.method, p: e.method.endsWith('Failed') ? stable(e.params) : Object.keys(e.params).sort() })));
 };
 probes.redirect_raw = async () => {
   const P = await newPage();

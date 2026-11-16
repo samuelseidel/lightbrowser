@@ -36,6 +36,8 @@ pub struct McpArgs {
     pub timeout: u64,
     /// `--allow-host` globs on top of the loopback set.
     pub allow_hosts: Vec<String>,
+    /// `--log LEVEL`: browser log events to stderr.
+    pub log: Option<tracing::Level>,
 }
 
 /// The longest `--timeout` (one day): a larger value overflows the clock.
@@ -80,6 +82,7 @@ pub fn parse_args(args: &[String]) -> Result<McpArgs, String> {
                         format!("--timeout needs a number of seconds from 1 to {MAX_TIMEOUT_SECS}")
                     })?
             }
+            "--log" => out.log = Some(super::ops::parse_log_level(&value("--log")?)?),
             other => return Err(format!("unknown option: {other}")),
         }
     }
@@ -113,7 +116,7 @@ pub fn run(args: &McpArgs) -> Result<(), String> {
     super::network_for(&persona, &tls_dir)?;
     let label = persona.profile_id.clone();
 
-    let policy = policy::HostPolicy::new(&args.allow_hosts);
+    let policy = policy::HostPolicy::new(&args.allow_hosts)?;
     let blocked = policy::BlockedLog::default();
     let mut opts = lb_page::CdpHostOptions::new(Arc::new(persona), tls_dir);
     opts.accept_invalid_certs = args.insecure;
@@ -126,15 +129,12 @@ pub fn run(args: &McpArgs) -> Result<(), String> {
         opts.proxy_bypass_list = args.proxy_bypass.clone();
     }
     // Transport-level policy (ADR 0044): loopback, `localhost` names, `*.test`
-    // and the --allow-host entries.
-    let mut allow: Vec<String> = vec!["*.test".into(), "test".into()];
-    allow.extend(args.allow_hosts.iter().cloned());
-    opts.egress = Some(Arc::new(
-        lb_net::EgressPolicy::parse("loopback", &allow)
-            .map_err(|e| format!("--allow-host: {e}"))?,
-    ));
+    // and the --allow-host entries. The same policy answers the tool's own
+    // up-front check.
+    opts.egress = Some(policy.egress());
     // Before the browser starts, so nothing it prints can reach the protocol.
     let out = protocol_out();
+    super::ops::init_log(args.log);
     let host = lb_page::CdpHost::new(opts)?;
     let timeout = Duration::from_secs(args.timeout);
     eprintln!(
@@ -182,6 +182,10 @@ async fn serve_stdio(
 ) -> Result<(), String> {
     use std::io::BufRead;
 
+    // SIGINT/SIGTERM end the server like a closed stdin (exit 0), even
+    // during a tool call; a second signal, or the shutdown deadline,
+    // exits at once.
+    let mut stop = std::pin::pin!(super::ops::stop_signal());
     let driver = driver::Driver::new(host, timeout, policy, blocked)?;
     // A thread reads stdin lines so the browser's tasks keep running while
     // we wait; closing stdin ends the server.
@@ -206,8 +210,19 @@ async fn serve_stdio(
             }
         })
         .map_err(|e| format!("starting the stdin reader: {e}"))?;
-    while let Some(line) = rx.recv().await {
-        if let Some(reply) = rpc::handle_line(&driver, &line).await
+    loop {
+        let line = tokio::select! {
+            l = rx.recv() => l,
+            _ = &mut stop => None,
+        };
+        let Some(line) = line else { break };
+        // A signal also ends a tool call that is still running (a
+        // navigation may wait up to --timeout).
+        let reply = tokio::select! {
+            r = rpc::handle_line(&driver, &line) => r,
+            _ = &mut stop => break,
+        };
+        if let Some(reply) = reply
             && writeln!(out, "{reply}").and_then(|()| out.flush()).is_err()
         {
             // The client went away.

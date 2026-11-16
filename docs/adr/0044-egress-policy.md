@@ -147,13 +147,13 @@ cannot confuse it with a real network failure.
 
 ### The mcp subcommand
 
-The `mcp` subcommand (branch `wf/borrow-mcp-r1`) has its own host check at
-the tool layer and is not touched here. To adopt this later it replaces
-that check with `lb_net::EgressPolicy::parse(..)` built from its own flags,
-calls `check_name(host)` on the URL's host in the tool, and passes the same
-`Arc<EgressPolicy>` to the `BrowserContext` (`set_egress`) so the transport
-enforces what the tool promised, redirects and subresources included. Its
-tool-level refusal can reuse `Blocked`'s display.
+The `mcp` subcommand uses this policy for both of its checks (ADR 0041):
+it builds one `EgressPolicy` (mode `loopback`, entries `*.test`, `test`
+and its `--allow-host` values), hands the same `Arc` to every context
+(`CdpHostOptions::egress`), and its up-front check in `browser_navigate` is
+`EgressPolicy::check_url`, the name check `fetch` makes per hop of a direct
+request (`fetch` calls `check_url` too). Its old tool-level glob matcher
+(with `?`, and IP literals compared as text) is gone.
 
 ### Revision 1: findings of the independent review
 

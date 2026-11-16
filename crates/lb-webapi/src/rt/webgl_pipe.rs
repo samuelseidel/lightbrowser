@@ -798,7 +798,7 @@ impl Gl {
                     let end = if size == 0 {
                         bytes.len()
                     } else {
-                        (off + size).min(bytes.len())
+                        off.saturating_add(size).min(bytes.len())
                     };
                     bytes.get(off.min(end)..end)
                 })
@@ -996,18 +996,41 @@ impl Gl {
             if !ok {
                 return Err(INVALID_OPERATION);
             }
-            let bpp = if ty == UNSIGNED_BYTE { 4 } else { 16 };
-            let align = (self.num(0x0D05) as usize).max(1);
-            let row = (w as usize * bpp).div_ceil(align) * align;
-            let need = if h > 0 {
-                row * (h as usize - 1) + w as usize * bpp
-            } else {
-                0
+            let bpp: u32 = if ty == UNSIGNED_BYTE { 4 } else { 16 };
+            let align = (self.num(0x0D05) as u32).max(1);
+            // Blink computes the image size in 32 bits; a size that does
+            // not fit is INVALID_VALUE ("invalid dimensions"), even with
+            // no rows.
+            let size = (|| {
+                let line = (w as u32).checked_mul(bpp)?;
+                let row = line.div_ceil(align).checked_mul(align)?;
+                let need = match h {
+                    0 => 0,
+                    _ => row.checked_mul(h as u32 - 1)?.checked_add(line)?,
+                };
+                Some((row as usize, need as usize))
+            })();
+            let Some((row, need)) = size else {
+                return Err(INVALID_VALUE);
             };
             if dst.len() < need {
                 return Err(INVALID_OPERATION);
             }
+            // ANGLE rejects a rectangle whose far edge overflows 32 bits.
+            if x.checked_add(w).is_none() || y.checked_add(h).is_none() {
+                return Err(INVALID_OPERATION);
+            }
             let (fw, fh) = (b.width as i32, b.height as i32);
+            // Only rows and columns inside the framebuffer are written
+            // (the others stay as they were).
+            let span = |o: i32, n: i32, lim: i32| {
+                let (o, lim) = (i64::from(o), i64::from(lim));
+                let a = o.clamp(0, lim) - o;
+                let b = (o + i64::from(n)).clamp(0, lim) - o;
+                // Within 0..=n, so both fit in i32.
+                a as i32..b as i32
+            };
+            let (rows, cols) = (span(y, h, fh), span(x, w, fw));
             if ty == UNSIGNED_BYTE {
                 // Stored values with the readback noise (top-down copy).
                 let up = img.resolve_rgba8(0);
@@ -1031,13 +1054,13 @@ impl Gl {
                         &mut noised,
                     );
                 }
-                for r in 0..h {
+                for r in rows.clone() {
                     let gy = y + r;
                     if gy < 0 || gy >= fh {
                         continue;
                     }
                     let src_row = ih - 1 - gy as usize;
-                    for c in 0..w {
+                    for c in cols.clone() {
                         let gx = x + c;
                         if gx < 0 || gx >= fw {
                             continue;
@@ -1049,12 +1072,12 @@ impl Gl {
                 }
             } else {
                 let res = img.resolved();
-                for r in 0..h {
+                for r in rows.clone() {
                     let gy = y + r;
                     if gy < 0 || gy >= fh {
                         continue;
                     }
-                    for c in 0..w {
+                    for c in cols.clone() {
                         let gx = x + c;
                         if gx < 0 || gx >= fw {
                             continue;
@@ -3935,21 +3958,34 @@ fn register_draws(reg: &mut Registry, rt: &Runtime) {
             "WebGLRenderingContext"
         };
         if cx.arg_kind(6) == ValueKind::Number && gl.borrow().webgl2 {
-            // PIXEL_PACK_BUFFER target.
-            let off = cx.arg_f64(6)?.max(0.0) as usize;
+            // PIXEL_PACK_BUFFER target: read straight into the buffer, so
+            // nothing is allocated from the page's dimensions.
             let mut g = gl.borrow_mut();
-            let Some(buf) = g.bound.get(&0x88EB).copied() else {
+            let off = match gl_intptr(cx.arg_f64(6)?) {
+                Ok(o) => o,
+                Err(e) => {
+                    g.set_error(e);
+                    return Ok(());
+                }
+            };
+            // Bound under PIXEL_PACK_BUFFER_BINDING, as `bindBuffer` stores it.
+            let Some(buf) = g.bound.get(&0x88ED).copied() else {
                 g.set_error(INVALID_OPERATION);
                 return Ok(());
             };
-            let mut tmp = vec![0u8; (wd as usize * 16 + 8) * ht.max(1) as usize];
-            if let Err(e) = g.read_rect(x, y, wd, ht, format, ty, &mut tmp) {
-                g.set_error(e);
+            let Some(mut bytes) = g.res.get_mut(&buf).map(|r| std::mem::take(&mut r.bytes)) else {
+                g.set_error(INVALID_OPERATION);
                 return Ok(());
+            };
+            let r = match bytes.get_mut(off..) {
+                Some(dst) => g.read_rect(x, y, wd, ht, format, ty, dst),
+                None => Err(INVALID_OPERATION),
+            };
+            if let Some(res) = g.res.get_mut(&buf) {
+                res.bytes = bytes;
             }
-            if let Some(r) = g.res.get_mut(&buf) {
-                let n = r.bytes.len().saturating_sub(off).min(tmp.len());
-                r.bytes[off..off + n].copy_from_slice(&tmp[..n]);
+            if let Err(e) = r {
+                g.set_error(e);
             }
             return Ok(());
         }
@@ -3970,17 +4006,18 @@ fn register_draws(reg: &mut Registry, rt: &Runtime) {
             gl.borrow_mut().set_error(INVALID_OPERATION);
             return Ok(());
         }
-        let el = if ty == UNSIGNED_BYTE { 1 } else { 4 };
+        let el: u64 = if ty == UNSIGNED_BYTE { 1 } else { 4 };
+        // `dstOffset` is a GLuint64 in elements of the view.
         let dst_off = if cx.len() > 7 {
-            cx.arg_f64(7)?.max(0.0) as usize * el
+            idl_u64(cx.arg_f64(7)?).saturating_mul(el)
         } else {
             0
         };
         let mut buf = cx.arg_bytes(6).unwrap_or_default();
-        if dst_off > buf.len() {
+        let Some(dst_off) = usize::try_from(dst_off).ok().filter(|&o| o <= buf.len()) else {
             gl.borrow_mut().set_error(INVALID_VALUE);
             return Ok(());
-        }
+        };
         let r = gl
             .borrow_mut()
             .read_rect(x, y, wd, ht, format, ty, &mut buf[dst_off..]);
@@ -3996,7 +4033,14 @@ fn register_draws(reg: &mut Registry, rt: &Runtime) {
 
 fn draw_elements(gl: &Rc<RefCell<Gl>>, mode: u32, count: i32, ty: u32, off: f64, inst: i32) {
     let mut g = gl.borrow_mut();
-    if count < 0 || off < 0.0 || inst < 0 {
+    let off = match gl_intptr(off) {
+        Ok(o) => o,
+        Err(e) => {
+            g.set_error(e);
+            return;
+        }
+    };
+    if count < 0 || inst < 0 {
         g.set_error(INVALID_VALUE);
         return;
     }
@@ -4009,7 +4053,6 @@ fn draw_elements(gl: &Rc<RefCell<Gl>>, mode: u32, count: i32, ty: u32, off: f64,
             return;
         }
     };
-    let off = off as usize;
     if !off.is_multiple_of(size) {
         g.set_error(INVALID_OPERATION);
         return;
@@ -4019,7 +4062,7 @@ fn draw_elements(gl: &Rc<RefCell<Gl>>, mode: u32, count: i32, ty: u32, off: f64,
         return;
     };
     let b = &buf.bytes;
-    if off + count as usize * size > b.len() {
+    if !in_range(off, count as usize * size, b.len()) {
         g.set_error(INVALID_OPERATION);
         return;
     }
@@ -4121,10 +4164,14 @@ fn register_state2(reg: &mut Registry, rt: &Runtime) {
             let index = cx.arg_u32(1)? as usize;
             let obj = arg_res(cx, w, 2, gl);
             let (off, size) = if name == "bindBufferRange" {
-                (
-                    cx.arg_f64(3)?.max(0.0) as usize,
-                    cx.arg_f64(4)?.max(0.0) as usize,
-                )
+                let (off, size) = (cx.arg_f64(3)?, cx.arg_f64(4)?);
+                match (gl_intptr(off), gl_intptr(size)) {
+                    (Ok(o), Ok(s)) => (o, s),
+                    (Err(e), _) | (_, Err(e)) => {
+                        gl.borrow_mut().set_error(e);
+                        return Ok(());
+                    }
+                }
             } else {
                 (0, 0)
             };
@@ -4154,7 +4201,13 @@ fn register_state2(reg: &mut Registry, rt: &Runtime) {
     }
     gl_op(reg, rt, "getBufferSubData", |cx, _w, gl| {
         let target = cx.arg_u32(0)?;
-        let src = cx.arg_f64(1)?.max(0.0) as usize;
+        let src = match gl_intptr(cx.arg_f64(1)?) {
+            Ok(o) => o,
+            Err(e) => {
+                gl.borrow_mut().set_error(e);
+                return Ok(());
+            }
+        };
         let pname = match target {
             ARRAY_BUFFER => 0x8894,
             ELEMENT_ARRAY_BUFFER => 0x8895,
@@ -4178,8 +4231,14 @@ fn register_state2(reg: &mut Registry, rt: &Runtime) {
         let Some(dst) = cx.arg_bytes(2) else {
             return Ok(());
         };
-        if src + dst.len() > data.len() {
+        if dst.is_empty() {
+            // Chrome maps nothing, so any offset is accepted.
+            return Ok(());
+        }
+        if !in_range(src, dst.len(), data.len()) {
+            // Chrome's mapping fails and the destination reads as zeros.
             gl.borrow_mut().set_error(INVALID_VALUE);
+            cx.write_arg_bytes(2, 0, &vec![0u8; dst.len()]);
             return Ok(());
         }
         cx.write_arg_bytes(2, 0, &data[src..src + dst.len()]);
@@ -4188,9 +4247,14 @@ fn register_state2(reg: &mut Registry, rt: &Runtime) {
     gl_op(reg, rt, "copyBufferSubData", |cx, _w, gl| {
         let rt_ = cx.arg_u32(0)?;
         let wt = cx.arg_u32(1)?;
-        let ro = cx.arg_f64(2)?.max(0.0) as usize;
-        let wo = cx.arg_f64(3)?.max(0.0) as usize;
-        let n = cx.arg_f64(4)?.max(0.0) as usize;
+        let (ro, wo, n) = (cx.arg_f64(2)?, cx.arg_f64(3)?, cx.arg_f64(4)?);
+        let (ro, wo, n) = match (gl_intptr(ro), gl_intptr(wo), gl_intptr(n)) {
+            (Ok(ro), Ok(wo), Ok(n)) => (ro, wo, n),
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                gl.borrow_mut().set_error(e);
+                return Ok(());
+            }
+        };
         let pn = |t: u32| match t {
             ARRAY_BUFFER => 0x8894,
             ELEMENT_ARRAY_BUFFER => 0x8895,
@@ -4211,9 +4275,9 @@ fn register_state2(reg: &mut Registry, rt: &Runtime) {
         let src = g
             .res
             .get(&a)
-            .and_then(|r| r.bytes.get(ro..ro + n).map(<[u8]>::to_vec));
+            .and_then(|r| r.bytes.get(ro..ro.checked_add(n)?).map(<[u8]>::to_vec));
         let ok = match (src, g.res.get_mut(&b)) {
-            (Some(s), Some(r)) if wo + n <= r.bytes.len() => {
+            (Some(s), Some(r)) if in_range(wo, n, r.bytes.len()) => {
                 r.bytes[wo..wo + n].copy_from_slice(&s);
                 true
             }

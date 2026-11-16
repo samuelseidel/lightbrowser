@@ -910,7 +910,7 @@ function launch(kind, port) {
   if (kind === 'chrome') {
     cmd =
       opt('bin', null) ||
-      process.env.CHROME_BIN ||
+      process.env.LB_CHROME || process.env.CHROME_BIN ||
       path.join(os.homedir(), '.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell');
     args = ['--no-sandbox', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', '--disable-background-networking', '--no-proxy-server', 'about:blank'];
   } else {

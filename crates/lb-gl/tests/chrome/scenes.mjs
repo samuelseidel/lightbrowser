@@ -24,7 +24,7 @@ async function run(browser) {
   await p.close();
   return r;
 }
-const chrome = await chromium.launch({ executablePath: process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--no-proxy-server'] });
+const chrome = await chromium.launch({ executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--no-proxy-server'] });
 const c = await run(chrome);
 await chrome.close();
 const bin = process.env.LIGHTBROWSER_BIN || path.join(repo, 'target/debug/lightbrowser');

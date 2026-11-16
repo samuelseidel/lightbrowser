@@ -32,7 +32,7 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(port, '127.0.0.1', r));
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROME,
+  executablePath: process.env.LB_CHROME || process.env.CHROME,
   args: ['--disable-background-networking', '--no-proxy-server'],
 });
 const ctx = await browser.newContext();

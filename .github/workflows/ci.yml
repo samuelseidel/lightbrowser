@@ -1,24 +1,40 @@
 name: ci
 
+# Every cargo command uses --locked, so a stale Cargo.lock fails here instead of
+# changing silently. Anything longer than a command or two is a script under
+# tools/ci/ that also runs locally (tests/README.md, "CI").
+
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Keep line numbers in backtraces, drop the rest of the debug info: the V8
+  # test binaries are large and a runner's disk is small.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  RUST_BACKTRACE: "1"
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  check:
-    name: ${{ matrix.family }}
+  # Format, lints, the whole workspace test suite (WPT subset and page suites
+  # included), the generated bindings table and the persona files.
+  rust:
+    name: rust
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - family: chrome
-            features: ""
-          - family: firefox
-            features: "--no-default-features --features firefox"
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -26,16 +42,117 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.family }}
+          shared-key: rust
+      # cargo fmt takes no --locked.
       - name: Format
         run: cargo fmt --all --check
-      # --features on a workspace command applies to every member that
-      # declares the feature (verified locally: lightbrowser, lb-js).
+      - name: Chrome bindings table is current
+        run: cargo run --locked -p lb-webidl-gen -- --family chrome --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets ${{ matrix.features }} -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo test --workspace ${{ matrix.features }}
-      - name: Build release
-        run: cargo build --release -p lightbrowser ${{ matrix.features }}
+        run: cargo test --locked --workspace
+      - name: Build the debug binary
+        run: cargo build --locked -p lightbrowser
+      - name: Personas (reference files validate, adversarial files fail)
+        run: bash tools/ci/validate_personas.sh
+
+  # Stock Playwright over CDP against `lightbrowser serve`.
+  playwright:
+    name: playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug-binary
+      - name: Build the debug binary
+        run: cargo build --locked -p lightbrowser
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install the pinned Playwright
+        run: npm install --prefix tests/playwright --no-audit --no-fund
+      - name: Playwright suite
+        run: node --test tests/playwright/
+      # Chrome's answers are recorded in tests/cdp-raw/chrome.json: no Chrome needed.
+      - name: Raw CDP replay against Chrome's recorded answers
+        run: node tests/cdp-raw/replay.mjs compare --launch lightbrowser --port 19261
+
+  # Detection bench, crawl bench tooling and the Python SDK (its integration
+  # tests launch the debug binary).
+  python-tools:
+    name: python-tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug-binary
+      - name: Build the debug binary
+        run: cargo build --locked -p lightbrowser
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest and Playwright for Python
+        run: python3 -m pip install pytest 'playwright>=1.63'
+      - name: detect-bench, bench and SDK tests
+        run: bash tools/ci/python_tools.sh
+
+  # The firefox family: no JS engine yet, so its own lints and tests.
+  firefox:
+    name: firefox
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: firefox
+      - name: Clippy
+        run: cargo clippy --locked -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox -- -D warnings
+      - name: Test
+        run: cargo test --locked -p lightbrowser -p lb-js -p lb-webapi -p lb-page --no-default-features --features firefox
+
+  # The chrome binary as released, against the size budget (ADR 0013 revision 4:
+  # under 50 MB, decimal).
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+      - name: Build
+        run: cargo build --release --locked -p lightbrowser
       - name: Version
         run: ./target/release/lightbrowser --version
+      - name: Binary size budget
+        run: bash tools/ci/check_binary_size.sh
+
+  # Manual runs only (Actions tab, "Run workflow").
+  macos:
+    name: macos
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos
+      - name: Build
+        run: cargo build --locked -p lightbrowser
+      - name: Unit tests of lb-net, lb-css and lb-dom
+        run: cargo test --locked -p lb-net -p lb-css -p lb-dom

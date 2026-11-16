@@ -4,6 +4,66 @@ Unit tests stay inside each crate. This file lists the cross-crate suites.
 Run everything with `cargo test --workspace` plus `node --test
 tests/playwright/` (build `lightbrowser` first).
 
+## CI (`.github/workflows/ci.yml`)
+
+Every push and pull request runs the jobs below on ubuntu-latest; every cargo
+command uses `--locked`. Anything longer than a command or two is a script in
+`tools/ci/`, so the same check runs locally from the repository root.
+
+| Job | Runs | Locally |
+|---|---|---|
+| `rust` | fmt, clippy (`--workspace --all-targets -D warnings`), `cargo test --workspace` (WPT subset and page suites included), the bindings table, the personas | `cargo fmt --all --check`; `cargo clippy --locked --workspace --all-targets -- -D warnings`; `cargo test --locked --workspace`; `cargo run --locked -p lb-webidl-gen -- --family chrome --check`; `tools/ci/validate_personas.sh` |
+| `playwright` | the debug binary, the pinned Playwright, the suite below | `cargo build --locked -p lightbrowser`; `npm install --prefix tests/playwright`; `node --test tests/playwright/` |
+| `python-tools` | detect-bench and bench unit tests, the Python SDK suite (needs the debug binary, `pytest` and Playwright >= 1.63) | `tools/ci/python_tools.sh` |
+| `firefox` | clippy and unit tests of `lightbrowser`, `lb-js`, `lb-webapi`, `lb-page` with `--no-default-features --features firefox` | the two firefox commands in `CLAUDE.md` "Commands", plus `--locked` |
+| `release` | `cargo build --release --locked -p lightbrowser` and the size budget | `tools/ci/check_binary_size.sh` |
+| `macos` | build, then the tests of `lb-net`, `lb-css`, `lb-dom`; **manual runs only** (`workflow_dispatch`) | `cargo test --locked -p lb-net -p lb-css -p lb-dom` |
+
+The scripts:
+
+- `tools/ci/validate_personas.sh [BIN]`: the 8 files in `profiles/reference/chrome/`
+  must validate (`lightbrowser validate` exits 0), and each file in
+  `profiles/generated/adversarial/` must be rejected (exit 1 with at least one
+  `[VIOLATION]` line, so an unreadable file does not count). Which rule fires
+  is not checked: one adversarial file breaks several. The binary is the
+  argument, `$LIGHTBROWSER_BIN` or `target/debug/lightbrowser`.
+- `tools/ci/python_tools.sh`: `python3 -m unittest discover -s tests/detect-bench`,
+  `python3 -m unittest discover -s bench` and `python3 -m pytest -ra tests` in
+  `sdk/python`. Every suite runs even if one fails. The SDK integration tests
+  skip when there is no binary, which would hide a broken build, so the script
+  fails without one (`SDK_UNIT_ONLY=1` runs only the unit tests). `PYTHON=...`
+  picks an interpreter that has `pytest` and Playwright.
+- `tools/ci/check_binary_size.sh [BIN]`: the release binary must be under the
+  budget. The budget is **< 50 MB, decimal** (50,000,000 bytes, not 50 MiB):
+  ADR 0013 revision 4, and `BUDGET_BINARY_MB = 50.0` with `st_size / 1e6` in
+  `bench/run.py`, from which the script reads the number. The release job builds
+  `-p lightbrowser` because that is the build the budget is measured on (a
+  whole-workspace build unifies more features into the binary).
+
+CI sets `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_DEV_DEBUG=line-tables-only`
+(smaller test binaries on a runner's disk). The `macos` job starts from the
+Actions tab ("Run workflow") only. The `playwright` job also runs the raw CDP
+replay (`tests/cdp-raw/replay.mjs compare`, 350 steps against Chrome's recorded
+answers in `tests/cdp-raw/chrome.json`; no Chrome needed). `tests/cdp-raw/behavior.mjs`
+is not in CI: it reports differences from Chrome on this tree (see its README).
+
+## Reference Chrome for the recorder scripts
+
+The scripts that record Chrome's answers or compare against a local Chrome read
+the browser binary from `$LB_CHROME`: `crates/lb-gl/tests/chrome/*.mjs`,
+`crates/lb-page/tests/*/chrome.mjs` (and `screenshots/chrome_shots.mjs`,
+`perf/fulfill.mjs`, `console/record.sh`), `crates/lb-net/tests/proxy/*chrome.mjs`,
+`tests/cdp-raw/{replay,behavior}.mjs`, `tests/playwright/workers/record*.mjs`,
+`tests/header-capture/drive.js`, `tools/dump_worker_surface.js`,
+`tools/header_capture/accept_ch.js`, `tools/os_truth/capture.js` and `bench/run.py`.
+The old variables still work as the next choice (`$CHROME`; `$CHROME_BIN` for the
+two cdp-raw scripts), then each script's old default (`/opt/pw-browsers/chromium`,
+or Playwright's cache under `~/.cache/ms-playwright` for cdp-raw). A command-line
+option (`--bin`, `--chromium`, the port arguments of `drive.js`) wins over all of
+them. `tools/surface_diff/run.py` takes Chrome only from `--chromium` (the Chrome
+dump is optional there). Use the Chrome for Testing build a fixture was recorded
+with: 153.0.8010.12 for `chrome.json`, `behavior.chrome.json` and most of the others.
+
 ## Network fingerprint test (M1, in place)
 
 `crates/lb-net/tests/fingerprint.rs` runs `lb_net::fetch` against
@@ -47,8 +107,9 @@ cargo test -p lb-net --test public_reference -- --nocapture   # prints each shar
 ## TCP SYN fingerprint test (M1b, in place)
 
 `crates/lb-net/tests/tcp_fingerprint.rs` (ADR 0031), loopback only. Needs root
-for raw capture, the netfilter queue and iptables; without them it prints
-`SKIP` and passes.
+for raw capture, the netfilter queue and iptables; without them each test
+prints `LB-SKIP <test>: <reason>` and returns, which counts as a pass (see
+"Skipped tests"; `LB_REQUIRE_NO_SKIPS=1` makes it fail).
 
 ```bash
 cargo test -p lb-net --test tcp_fingerprint -- --nocapture --test-threads=1
@@ -96,23 +157,168 @@ The last JSON line summarises the stack: `syn_times_ms` (retransmit schedule),
 `syn_option_kinds` (layout per attempt), `ip_id` (`zero`, `sequential`,
 `random`), `ts_hz` and `window_fields`. Put them into `ip.id`, `syn_retransmit`
 and the notes.
-## WPT subset (M2, in place)
+## Skipped tests (LB-SKIP)
 
-`tests/wpt/` holds testharness.js and 83 upstream WPT files (dom/nodes,
-dom/events, html/dom, url, encoding); see `tests/wpt/README.md`.
-`crates/lb-page/tests/wpt.rs` serves them on loopback and fails below 2520
-passing subtests (2552/2788 today).
+A skipped Rust test counts as passed, so a test that cannot run here must say
+so. In `lb-net` (the only crate with such tests) it calls `lb_skip!("reason")`
+from `crates/lb-net/tests/common/mod.rs` and returns:
+
+- By default one line, `LB-SKIP <binary>::<test>: <reason>`, goes to the real
+  stderr. libtest does not capture that, so a plain `cargo test` log has it
+  (no `--nocapture` needed); the test still passes.
+- With `LB_REQUIRE_NO_SKIPS=1` the same call panics with that line, so the
+  test fails. Set it on a machine that is meant to have the environment (a
+  root CI job); a box without it should leave it unset.
+
+`tools/ci/skip_summary.sh` reads a log (files or stdin) and prints the count
+per reason, with the tests under each; it prints "no skipped tests" for a clean
+log and always exits 0:
 
 ```bash
-cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
+cargo test --locked -p lb-net 2>&1 | tee lb-net.log
+tools/ci/skip_summary.sh lb-net.log
+LB_REQUIRE_NO_SKIPS=1 cargo test --locked -p lb-net --test tcp_fingerprint   # as root: any skip fails
 ```
+
+| Test binary | Skips when |
+|---|---|
+| `tcp_fingerprint` (6 of 7 tests; `syn_matches_each_profile` also skips the shim profiles alone) | it cannot capture on `lo` (`CAP_NET_RAW`), has no `iptables`, or cannot bind the netfilter queue or install the rule (`CAP_NET_ADMIN`) |
+| `egress` (11 of 20 tests) | no non-loopback address on a default route (10 tests), no IPv6 loopback, or the default-route address is IPv6 |
+
+On rtx-dev as a non-root user (2026-11-16): 6 of the 7 `tcp_fingerprint` tests
+skip (5 with "cannot capture on lo: Operation not permitted (os error 1)",
+`shim_profile_needs_the_rule` with "needs root and iptables"), and all 20
+`egress` tests run. Tests that need `python3` (`proxy`, `egress`, the lb-page
+suites that start `serve.py`) fail when it is missing instead of skipping.
+
+## WPT subset (M2, in place)
+
+`tests/wpt/` holds testharness.js and 450 upstream WPT files (dom, url,
+encoding, html, shadow-dom, custom-elements, IndexedDB); see
+`tests/wpt/README.md`. `crates/lb-page/tests/wpt.rs` serves them on loopback
+and checks every file against `tests/wpt/EXPECTATIONS.txt` (11742/12472
+subtests pass today; about 2 minutes in the debug profile).
+
+```bash
+cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x, WPT_TIMEOUT_SCALE=2
+```
+
+`EXPECTATIONS.txt` has one line for every `MANIFEST.txt` entry, in manifest
+order: `<path> <passes> <total> <status>`, then an optional `timeout=<seconds>`
+and a `# why`. The status is `ok`, `harness-error`, `harness-timeout` or
+`no-result` (the page printed nothing in the file's timeout). The runner
+writes the file; nobody types the numbers:
+
+```bash
+LB_WPT_BLESS=1 cargo test --locked -p lb-page --test wpt -- --nocapture   # whole manifest, not with WPT_FILTER
+```
+
+A run **fails** when
+
+- a file passes fewer subtests than its line says;
+- a file's status is worse: `ok`, then `harness-error` and `harness-timeout`
+  (the same level), then `no-result`;
+- a file that had subtests has none (0 of 5 becoming 0 of 0 would raise the
+  ratio without a fix);
+- `MANIFEST.txt` and `EXPECTATIONS.txt` name different files, a file is
+  listed twice, or a manifest file is not on disk (checked before anything
+  runs, and by the fast test `expectations_file_matches_the_manifest`);
+- a page's thread is still busy 180 s after the file's timeout (a script
+  stuck in a loop; the polls queue behind it, so without this the run would
+  hang).
+
+Better results (more passes, a better status, another total) **pass** and print
+the files with the bless command. After a fix: bless, read the diff of
+`EXPECTATIONS.txt`, commit it with the fix. Blessing a worse result is
+possible and prints `blessed a regression`, so it shows in review. The total
+floor is the sum of the expected passes; `wpt.rs` has no constant. The run
+prints the totals, a table per group (first path component), the files with
+no subtests (0/0) and the files with a harness error, a harness timeout or no
+result, each with its reason, so the known problems are listed in every log
+and in `EXPECTATIONS.txt` (12 files at 0/0 and 23 not `ok` today).
+
+Files that print no result, measured on rtx-dev (2026-11-15):
+
+- Four IndexedDB files (`event-dispatch-active-flag`, `idb-explicit-commit`,
+  `transaction-deactivation-timing`, `upgrade-transaction-deactivation-timing`)
+  print nothing in 60 s: the page thread spins at 100% CPU and still answers
+  `evaluate`. The runner's context has a virtual clock. The page loop
+  (`crates/lb-page/src/page.rs`) runs a due timer ahead of queued tasks only
+  on a real clock (the 50-task streak and `timer_first`) and moves the virtual
+  clock only when no task is queued, so a page that always has a task queued
+  never runs a timer, not even testharness' own 10 s one. With a real clock the
+  same pages print in 25 to 45 ms: 4/4, 11/12 (with a harness error), 4/5 and
+  3/3. Which task keeps them busy was not traced (`idb-explicit-commit` has no
+  `setTimeout` of its own). They get a 5 s timeout instead of 30 s each.
+  Running them on a real clock would add 22 passing subtests; that is a change
+  of the runner's context and is not done.
+- `custom-elements/form-associated/ElementInternals-target-element-is-held-strongly.html`
+  is not a hang. One script task builds 1e5 elements and takes about 65 s in
+  the debug profile, during which every poll waits behind it; the old runner
+  gave up after 30 s and recorded no result, but the result (1 of 1) follows
+  the task. Its line has `timeout=300`.
+
+`WPT_TIMEOUT_SCALE=2` doubles every timeout on a slow machine.
+
+## Web API coverage (M2, in place)
+
+`cargo test -p lb-webapi --test coverage` asks the page layer's registry
+(`rt::Runtime::new`, plus the defaults `Bindings::define` adds) about every
+member of the generated Chrome table, as the installer does, and counts what
+is bound to host code and what is a stub (a getter returning a default, an
+operation throwing `NotSupportedError`, `Illegal constructor`). `tests/install.rs`
+only checks shapes, which a stub has too. The line goes to the real stderr, so
+every `cargo test` log has it (`docs/PLAN.md`: track coverage as a number in CI):
+
+```text
+web api coverage: 1143/2458 operations, 2269/4504 attributes, 394/893 interfaces
+```
+
+Counted per (interface, member), so a mixin member counts once per interface
+that includes it:
+
+- an operation is real when the registry has its method (static: static
+  method), or for `toString` of a `stringifier attribute` the attribute's
+  getter; constants and the 28 operations that are `Array.prototype` functions
+  are not counted;
+- an attribute is real when the registry has its getter (static: static
+  getter);
+- an interface is real when any of its attribute getters, operations,
+  constructor, legacy factory or indexed/named getter is; the 45 interfaces
+  with nothing to implement (callback interfaces with constants, opaque
+  handles such as `WebGLBuffer`) are not in the 893.
+
+The test fails when a real count falls below its floor in `coverage.rs` (today's
+numbers); more passes, and the floors go up with the change.
+`LB_COVERAGE_DUMP=file` writes one line per interface (operations, attributes,
+setters, constructors, collections) to see the gaps. Also printed: 1309 of 1933
+writable attributes have a real setter, 160 of 379 constructors and factories
+are real, 188 interfaces are complete, and 317 of the 394 have a real member
+beyond event handlers (the rest are real through generic `on*` registrations
+only); no namespace has a real member (`CSS.supports` and `CSS.escape` are
+stubs).
+
+This differs from a count of interface names in the source (337 of 938 in the
+2026-11-14 audit; a word search of `lb-webapi/src` without `generated/` gives
+349): 85 of the 394 real interfaces have no literal name in the source (75 are
+real only through generic `on*` handler registrations, 10 through code that does
+not name them: `LargestContentfulPaint`, `LayoutShift`, the `Performance*Timing`
+family), and 40 names in the source have no real member (22 have nothing to
+implement, 18 are stubs such as `CSS`, `Range` and `SVGRectElement`). The count
+here is of members the installer binds, so it falls when an implementation is
+removed.
 
 ## Playwright CDP suite (M3, in place)
 
 `tests/playwright/` runs stock Playwright `connectOverCDP` against
 `lightbrowser serve` (the real V8 page host) with `viewport: null` in every
-context (ADR 0009). 38 tests (one for shadow DOM, one for proxies per context with `Fetch.authRequired`, two for workers as CDP targets, five in `content.spec.mjs` for `setContent` and JavaScript dialogs, ADR 0036, eight for uploads, permissions, geolocation, drag and drop and PDF, ADR 0037, one for a plain `newContext()`), all passing (debug and release binaries);
-`harness.mjs` starts `serve` and a local site.
+context (ADR 0009). 58 tests (the 38 of the macOS port plus the CDP coverage, performance timeline and web-platform additions; among them one for shadow DOM, one for proxies per context with `Fetch.authRequired`, two for workers as CDP targets, five in `content.spec.mjs` for `setContent` and JavaScript dialogs, ADR 0036, eight for uploads, permissions, geolocation, drag and drop and PDF, ADR 0037, one for a plain `newContext()`), all passing (debug and release binaries);
+`harness.mjs` starts `serve` and a local site. `tests/playwright/package.json`
+pins `playwright` to 1.65.0, the version the suite is checked with; install it
+with `npm install --prefix tests/playwright` (a Chromium download is not needed:
+the browser is `lightbrowser`). The harness looks for the package in a local
+`node_modules` (next to the harness or above it), then in `$NODE_PATH`, then in
+`npm root -g`, and says where it looked when it finds none.
 
 | Spec | Covers |
 |---|---|
@@ -131,6 +337,7 @@ context (ADR 0009). 38 tests (one for shadow DOM, one for proxies per context wi
 | `screenshot.spec.mjs` | `page.screenshot()`: viewport, element (also scrolled into view), full page, jpeg quality and clip, `omitBackground`, raw CDP clip scale and `captureBeyondViewport`, un-noised canvas pixels, the 0-width error (ADR 0014) |
 
 ```bash
+npm install --prefix tests/playwright      # once; or NODE_PATH=/dir/with/node_modules
 cargo build -p lightbrowser && node --test tests/playwright/   # LIGHTBROWSER_BIN overrides
 ```
 
@@ -202,7 +409,7 @@ curl -s http://127.0.0.1:19222/json/version      # webSocketDebuggerUrl
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --expect 'fp<=30'
 # stop both servers afterwards
-python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (33)
+python3 -m unittest -v   # in tests/detect-bench: scoring and server tests (170)
 ```
 
 Since M7 the bench also has OS rules (`scoring.py`, "OS rules (M7)" in its
@@ -259,6 +466,9 @@ python3 -m pytest tests -m "not integration"   # unit tests, no binary, about a 
 python3 -m pytest tests                        # also launches target/debug/lightbrowser
 python3 -m lightbrowser.scenarios --bench http://127.0.0.1:PORT   # scenarios T-001..T-007
 ```
+
+`sdk/python/pyproject.toml` requires `playwright>=1.63` (CI installs `pytest`
+and that Playwright, then runs `tools/ci/python_tools.sh`).
 
 93 pass and 4 skip with the installed Python Playwright 1.52: the bench
 scenarios T-002, T-004, T-006 and T-007 skip, because Playwright older than

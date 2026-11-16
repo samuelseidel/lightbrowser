@@ -108,7 +108,7 @@ function startBrowser() {
   let dir;
   if (mode === 'chrome') {
     dir = mkdtempSync(path.join(os.tmpdir(), 'lb-rec-'));
-    cmd = process.env.CHROME || '/opt/pw-browsers/chromium';
+    cmd = process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium';
     args = ['--headless=new', '--no-sandbox', '--remote-debugging-port=0', `--user-data-dir=${dir}`,
       '--no-proxy-server', '--disable-background-networking', '--disable-component-extensions-with-background-pages', '--no-first-run', 'about:blank'];
   } else {

@@ -124,11 +124,9 @@ pub fn list() -> Value {
         },
         {
             "name": "browser_extract",
-            "description": "Return the page content: its visible text, or its HTML after scripts ran.",
+            "description": "Return the page content: its visible text, its HTML after scripts ran, or Markdown (headings, lists, links with absolute URLs, tables; hidden content left out), the same Markdown as lightbrowser fetch --dump markdown.",
             "inputSchema": obj(json!({
-                // EXTRACT-HOOK: the extract package adds "markdown" here and in
-                // `Driver::extract`; until it is merged the formats are text and html.
-                "format": {"type": "string", "enum": ["text", "html"], "description": "text or html."}
+                "format": {"type": "string", "enum": ["text", "html", "markdown"], "description": "text, html or markdown."}
             }), &["format"]),
         },
         {

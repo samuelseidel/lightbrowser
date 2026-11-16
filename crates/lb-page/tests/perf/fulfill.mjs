@@ -10,7 +10,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MJS);
 const base = process.argv[2];
 const b = process.env.LB_CDP
   ? await chromium.connectOverCDP(process.env.LB_CDP)
-  : await chromium.launch({ executablePath: process.env.CHROME, args: ['--no-sandbox', '--disable-background-networking'] });
+  : await chromium.launch({ executablePath: process.env.LB_CHROME || process.env.CHROME, args: ['--no-sandbox', '--disable-background-networking'] });
 const ctx = b.contexts()[0] && process.env.LB_CDP ? b.contexts()[0] : await b.newContext();
 const p = await ctx.newPage();
 await p.route('**/fulfilled/**', (route) => {

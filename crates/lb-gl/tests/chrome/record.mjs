@@ -2,7 +2,7 @@
 // loopback server. Usage: python3 -m http.server 18991 --bind 127.0.0.1 &
 //   node record.mjs http://127.0.0.1:18991/logs.html > logs.json
 const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib/node_modules/playwright/index.mjs');
-const b = await chromium.launch({ executablePath: process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'] });
+const b = await chromium.launch({ executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'] });
 const p = await b.newPage();
 p.on('pageerror', e => console.error('pageerror:', e.message));
 await p.goto(process.argv[2]);

@@ -1,9 +1,10 @@
 //! The egress policy (ADR 0044) at the transport level, with no external
 //! network. Servers are bound to loopback or to this machine's own address on
 //! its default route (found with a connected UDP socket, which sends
-//! nothing); tests that need that address print a message and pass without
-//! it. Every server here is on this machine; "outside" means "not a
-//! loopback address".
+//! nothing); tests that need that address print `LB-SKIP <test>: <reason>`
+//! and return without it (`LB_REQUIRE_NO_SKIPS=1` makes that a failure, see
+//! `tests/common`). Every server here is on this machine; "outside" means
+//! "not a loopback address".
 //!
 //! What is checked:
 //! - loopback mode reaches loopback servers (by IP and by `localhost`);
@@ -25,6 +26,9 @@
 //! These tests have no browser to record: the refusal logic is ours, the
 //! error texts it ends in were recorded from Chrome in `lb-page`'s
 //! `tests/egress/chrome.json`.
+
+#[macro_use]
+mod common;
 
 use std::io::{BufRead, BufReader};
 use std::net::{IpAddr, SocketAddr, TcpListener as StdListener};
@@ -78,7 +82,7 @@ macro_rules! outside_or_skip {
         match outside_ip() {
             Some(ip) => ip,
             None => {
-                eprintln!("skipped: this machine has no non-loopback address on a default route");
+                lb_skip!("this machine has no non-loopback address on a default route");
                 return;
             }
         }
@@ -219,9 +223,9 @@ async fn loopback_mode_reaches_loopback_servers() {
 
 #[tokio::test]
 async fn loopback_ipv6_and_mapped_forms() {
-    // Skip quietly where the box has no IPv6 loopback.
+    // Skipped (and said so) where the box has no IPv6 loopback.
     let Ok(l) = TcpListener::bind("[::1]:0").await else {
-        eprintln!("skipped: no IPv6 loopback");
+        lb_skip!("no IPv6 loopback: [::1] cannot be bound");
         return;
     };
     let port = l.local_addr().unwrap().port();
@@ -526,7 +530,7 @@ async fn redirects_are_checked_at_every_hop() {
 async fn numeric_spellings_of_an_outside_address_are_refused() {
     let ip = outside_or_skip!();
     let IpAddr::V4(v4) = ip else {
-        eprintln!("skipped: the default-route address is IPv6");
+        lb_skip!("the default-route address is IPv6, the spellings tested are IPv4");
         return;
     };
     let l = Silent::bind(ip);

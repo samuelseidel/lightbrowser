@@ -137,6 +137,7 @@ class Report(unittest.TestCase):
             self.assertEqual(cm.exception.code, 2)
         finally:
             srv.shutdown()
+            srv.server_close()  # release the listening socket
 
     def test_corpus_server_serves_loopback(self):
         srv = run.Server()

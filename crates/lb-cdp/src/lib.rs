@@ -66,4 +66,7 @@ pub use host::{
     PageMetrics, Rgba, ViewportOverride,
 };
 pub use protocol::CdpError;
-pub use server::{InProcess, Server, ServerConfig, block_on_local};
+pub use server::{
+    DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_PAGES, DEFAULT_MAX_QUEUED_BYTES, InProcess,
+    MAX_WS_FRAME_BYTES, MAX_WS_MESSAGE_BYTES, Server, ServerConfig, block_on_local,
+};

@@ -50,6 +50,9 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0045](0045-cdp-coverage.md) | CDP coverage for stock clients: session history, `Page.navigate` referrer, Audits and other missing methods, raw CDP replay against Chrome | Accepted (2026-11-07) |
 | [0046](0046-performance-timeline.md) | Performance Timeline (navigation, resource, paint, user timing, observers) from the loader's own measurements | Accepted (2026-11-07) |
 | [0047](0047-web-platform-small-items.md) | History rate limit, pointer events (coalesced, `sourceCapabilities`, `pointerrawupdate`), StorageManager, speech synthesis events | Accepted (2026-11-07) |
+| [0048](0048-serve-limits-and-shutdown.md) | `serve` and `mcp` as long-lived services: connection, page and queue limits, `/json/new` needs PUT, signals with a hard deadline, `--log`, panic hook | Accepted (2026-11-16) |
+| [0049](0049-network-input-limits.md) | Network input limits: decoder caps, WebSocket message cap, timeouts | Accepted (2026-11-16) |
+| [0050](0050-depth-limits.md) | Depth limits: layout, CDP trees, the shader compiler and page stacks | Accepted (2026-11-16) |
 
 ## Adding an ADR
 

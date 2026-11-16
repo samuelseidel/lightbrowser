@@ -31,7 +31,53 @@
 
 use std::path::PathBuf;
 
+/// `LB_GIT_COMMIT` and `LB_GIT_DIRTY` for `--version --verbose`: from
+/// `LB_BUILD_COMMIT` if set (trees built outside git), else from git, else
+/// `unknown`. Reruns when HEAD or its branch moves (not on `git add` or
+/// edits), so the dirty flag is the state when HEAD last moved and the
+/// script ran: it can say clean for a tree edited since.
+fn git_info() {
+    println!("cargo:rerun-if-env-changed=LB_BUILD_COMMIT");
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let (commit, dirty) = match std::env::var("LB_BUILD_COMMIT") {
+        Ok(c) if !c.is_empty() => (c, false),
+        _ => match git(&["rev-parse", "HEAD"]) {
+            Some(c) => {
+                // HEAD and the ref it names (a branch, or packed-refs when
+                // the branch has no loose file): a commit or checkout
+                // reruns this, `git add` does not.
+                let mut watch = vec!["HEAD".to_string()];
+                if let Some(r) = git(&["symbolic-ref", "-q", "HEAD"]) {
+                    watch.push(r);
+                    watch.push("packed-refs".into());
+                }
+                for f in &watch {
+                    if let Some(p) = git(&["rev-parse", "--git-path", f])
+                        && std::path::Path::new(&p).exists()
+                    {
+                        println!("cargo:rerun-if-changed={p}");
+                    }
+                }
+                let dirty = git(&["status", "--porcelain", "--untracked-files=no"])
+                    .is_some_and(|s| !s.is_empty());
+                (c, dirty)
+            }
+            None => ("unknown".to_string(), false),
+        },
+    };
+    println!("cargo:rustc-env=LB_GIT_COMMIT={commit}");
+    println!("cargo:rustc-env=LB_GIT_DIRTY={dirty}");
+}
+
 fn main() {
+    git_info();
     println!("cargo:rerun-if-env-changed=LB_PLAIN_LINK");
     println!("cargo:rerun-if-env-changed=LB_KEEP_UNWIND");
     println!("cargo:rerun-if-env-changed=LB_LINK_MAP");

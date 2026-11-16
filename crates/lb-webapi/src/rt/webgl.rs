@@ -63,6 +63,69 @@ const INVALID_ENUM: u32 = 0x0500;
 const INVALID_VALUE: u32 = 0x0501;
 const INVALID_OPERATION: u32 = 0x0502;
 const CONTEXT_LOST_WEBGL: u32 = 0x9242;
+
+/// WebIDL `long long` / `unsigned long long` conversion (no
+/// `[EnforceRange]`), as V8 converts `GLintptr`, `GLsizeiptr` and
+/// `GLuint64`: NaN and infinities are 0, other values are truncated and
+/// taken modulo 2^64 (so `2 ** 64` is 0 and `2 ** 63` is negative).
+fn idl_u64(v: f64) -> u64 {
+    if !v.is_finite() {
+        return 0;
+    }
+    let t = v.trunc();
+    if t.abs() < 9_223_372_036_854_775_808.0 {
+        // Below 2^63 in magnitude: `i64` holds it, and its two's complement
+        // is the value modulo 2^64 (`rem_euclid` would round -2.0 up to 2^64).
+        return t as i64 as u64;
+    }
+    // From 2^63 up every double is a multiple of 2^11, so the remainder
+    // modulo 2^64 is exact too.
+    t.rem_euclid(18_446_744_073_709_551_616.0) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::idl_u64;
+
+    #[test]
+    fn idl_u64_is_the_value_modulo_2_pow_64() {
+        let two64 = 18_446_744_073_709_551_616.0_f64;
+        assert_eq!(idl_u64(f64::NAN), 0);
+        assert_eq!(idl_u64(f64::INFINITY), 0);
+        assert_eq!(idl_u64(f64::NEG_INFINITY), 0);
+        assert_eq!(idl_u64(0.0), 0);
+        assert_eq!(idl_u64(-0.0), 0);
+        assert_eq!(idl_u64(5.9), 5);
+        assert_eq!(idl_u64(-1.0), u64::MAX);
+        assert_eq!(idl_u64(-2.0), u64::MAX - 1);
+        assert_eq!(idl_u64(-1.5), u64::MAX);
+        assert_eq!(idl_u64(two64), 0);
+        assert_eq!(idl_u64(-two64), 0);
+        assert_eq!(idl_u64(two64 + 4096.0), 4096);
+        assert_eq!(idl_u64(9_223_372_036_854_775_808.0), 1 << 63);
+        assert_eq!(idl_u64(-9_223_372_036_854_775_808.0), 1 << 63);
+        assert_eq!(idl_u64(-two64 - 4096.0), u64::MAX - 4095);
+    }
+}
+
+/// A `GLintptr` / `GLsizeiptr` argument with Blink's checks: negative is
+/// INVALID_VALUE, more than 32 bits INVALID_OPERATION (recorded in Chrome,
+/// `tests/chrome/api.html` group `ranges`).
+fn gl_intptr(v: f64) -> Result<usize, u32> {
+    let n = idl_u64(v) as i64;
+    if n < 0 {
+        Err(INVALID_VALUE)
+    } else if n > i64::from(i32::MAX) {
+        Err(INVALID_OPERATION)
+    } else {
+        Ok(n as usize)
+    }
+}
+
+/// Whether `[off, off + len)` lies within a buffer of `size` bytes.
+fn in_range(off: usize, len: usize, size: usize) -> bool {
+    off.checked_add(len).is_some_and(|end| end <= size)
+}
 const ARRAY_BUFFER: u32 = 0x8892;
 const ELEMENT_ARRAY_BUFFER: u32 = 0x8893;
 const BUFFER_SIZE: u32 = 0x8764;
@@ -1635,12 +1698,14 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
         };
         let usage = cx.arg_u32(2)?;
         let bytes = if cx.arg_kind(1) == ValueKind::Number {
-            let n = cx.arg_f64(1)?;
-            if n < 0.0 {
-                gl.borrow_mut().set_error(INVALID_VALUE);
-                return Ok(());
+            // Checked before allocating: the page picks the size.
+            match gl_intptr(cx.arg_f64(1)?) {
+                Ok(n) => vec![0u8; n],
+                Err(e) => {
+                    gl.borrow_mut().set_error(e);
+                    return Ok(());
+                }
             }
-            vec![0u8; n as usize]
         } else {
             match cx.arg_bytes(1) {
                 Some(b) => b,
@@ -1672,7 +1737,13 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
             0x8C8E => 0x8C8F,
             _ => target,
         };
-        let off = cx.arg_f64(1)?.max(0.0) as usize;
+        let off = match gl_intptr(cx.arg_f64(1)?) {
+            Ok(o) => o,
+            Err(e) => {
+                gl.borrow_mut().set_error(e);
+                return Ok(());
+            }
+        };
         let Some(src) = cx.arg_bytes(2) else {
             return Ok(());
         };
@@ -1682,7 +1753,7 @@ fn register_objects(reg: &mut Registry, rt: &Runtime) {
             return Ok(());
         };
         let bad = match g.res.get_mut(&id) {
-            Some(r) if off + src.len() <= r.bytes.len() => {
+            Some(r) if in_range(off, src.len(), r.bytes.len()) => {
                 r.bytes[off..off + src.len()].copy_from_slice(&src);
                 false
             }

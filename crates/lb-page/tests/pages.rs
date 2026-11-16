@@ -436,6 +436,60 @@ async fn module_scripts_with_imports() {
     );
 }
 
+// A character outside ASCII anywhere in a module (comments, strings) must
+// not break the scan for static imports: it once sliced the source inside a
+// character, panicking the page worker.
+#[tokio::test]
+async fn module_scripts_with_non_ascii_source() {
+    let s = serve(vec![
+        (
+            "/",
+            Resource::html("<body><script type=module>// café 日本語\nimport {v} from './m.js'; document.body.setAttribute('data-m', v);</script></body>"),
+        ),
+        (
+            "/m.js",
+            Resource::new(
+                "text/javascript; charset=utf-8",
+                "// ü → ✓\nimport {w} from './dep/n.js'; export const v = 'mod-' + w + '→';",
+            ),
+        ),
+        ("/dep/n.js", Resource::js("export const w = 42;")),
+    ])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    assert_eq!(
+        page.evaluate("document.body.getAttribute('data-m')")
+            .await
+            .unwrap(),
+        JsValue::String("mod-42→".into())
+    );
+}
+
+// A declaration whose ninth byte from the end lies inside a multi-byte
+// character once panicked the cascade, which aborts the process in release
+// builds.
+#[tokio::test]
+async fn author_sheet_values_with_non_ascii_text() {
+    let s = serve(vec![(
+        "/",
+        Resource::html(
+            "<head><style>p{content:\"日本語\"}p{font-family:\"日本語\",serif;color:red !important}</style></head>\
+             <body><p id=a>x</p><script>var c = getComputedStyle(document.getElementById('a'));\
+             document.body.setAttribute('data-r', c.color + '|' + (c.fontFamily.indexOf('日本語') >= 0));</script></body>",
+        ),
+    )])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    assert_eq!(
+        page.evaluate("document.body.getAttribute('data-r')")
+            .await
+            .unwrap(),
+        JsValue::String("rgb(255, 0, 0)|true".into())
+    );
+}
+
 #[tokio::test]
 async fn encoding_from_meta() {
     let mut body = b"<html><head><meta charset=windows-1251></head><body><p>".to_vec();

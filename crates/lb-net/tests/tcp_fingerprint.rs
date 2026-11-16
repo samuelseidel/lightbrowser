@@ -8,10 +8,15 @@
 //! disagrees with what the peer was told would stall or fail here.
 //!
 //! Needs root (`CAP_NET_RAW` to capture, `CAP_NET_ADMIN` for the shim, and
-//! `iptables`). Without them the test prints why and skips. Run with
-//! `--nocapture` to see the measured values.
+//! `iptables`). Without them a test prints `LB-SKIP <test>: <reason>` and
+//! returns, which counts as a pass; `LB_REQUIRE_NO_SKIPS=1` makes that a
+//! failure (`tests/common`, `tests/README.md`). Run with `--nocapture` to see
+//! the measured values.
 
 #![cfg(target_os = "linux")]
+
+#[macro_use]
+mod common;
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -86,7 +91,7 @@ fn can_capture() -> Result<(), String> {
 async fn syn_matches_each_profile() {
     let _lock = RULES.lock().await;
     if let Err(why) = can_capture() {
-        eprintln!("SKIP tcp fingerprint test: {why}");
+        lb_skip!("{why}");
         return;
     }
     let all = profiles();
@@ -102,16 +107,17 @@ async fn syn_matches_each_profile() {
         let mut _rules = None;
         if p.needs_shim() {
             if !shim_ok {
-                eprintln!("SKIP {}: no iptables", p.profile_id);
+                // Only the profiles that need the shim are skipped.
+                lb_skip!("no iptables: the profiles that need the shim are not checked");
                 continue;
             }
             let queue = 4200 + i as u16;
             let s = match Shim::bind(queue, all.clone()) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!(
-                        "SKIP {}: cannot bind the netfilter queue (needs CAP_NET_ADMIN): {e}",
-                        p.profile_id
+                    lb_skip!(
+                        "cannot bind the netfilter queue (needs CAP_NET_ADMIN): {e}; \
+                         the profiles that need the shim are not checked"
                     );
                     continue;
                 }
@@ -208,7 +214,7 @@ async fn syn_matches_each_profile() {
 #[tokio::test(flavor = "multi_thread")]
 async fn without_a_profile_the_host_stack_shows() {
     if let Err(why) = can_capture() {
-        eprintln!("SKIP: {why}");
+        lb_skip!("{why}");
         return;
     }
     let addr = serve().await;
@@ -247,13 +253,13 @@ fn tcp_profile_must_match_the_user_agent() {
 async fn shim_down_fails_closed() {
     let _lock = RULES.lock().await;
     if let Err(why) = can_capture() {
-        eprintln!("SKIP: {why}");
+        lb_skip!("{why}");
         return;
     }
     let all = profiles();
     let win = all.iter().find(|p| p.os == "windows").unwrap();
     let Ok(rules) = RuleGuard::install(4299) else {
-        eprintln!("SKIP: cannot install the iptables rule");
+        lb_skip!("cannot install the iptables rule");
         return;
     };
     let addr = serve().await;
@@ -281,7 +287,7 @@ async fn shim_down_fails_closed() {
 async fn shim_profile_needs_the_rule() {
     let _lock = RULES.lock().await;
     if can_capture().is_err() || lb_net::tcpfp::nfq::rule_installed().is_err() {
-        eprintln!("SKIP: needs root and iptables");
+        lb_skip!("needs root and iptables");
         return;
     }
     let all = profiles();
@@ -328,7 +334,7 @@ fn get(addr: SocketAddr) -> Request {
 async fn ip_id_follows_the_profile() {
     let _lock = RULES.lock().await;
     if let Err(why) = can_capture() {
-        eprintln!("SKIP: {why}");
+        lb_skip!("{why}");
         return;
     }
     let all = profiles();
@@ -452,7 +458,7 @@ impl Drop for IgnoreSyns {
 async fn syn_retransmission_follows_the_schedule() {
     let _lock = RULES.lock().await;
     if let Err(why) = can_capture() {
-        eprintln!("SKIP: {why}");
+        lb_skip!("{why}");
         return;
     }
     let all = profiles();

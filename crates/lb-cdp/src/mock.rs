@@ -20,10 +20,10 @@
 //!   `init`; then on the next tick `loadingFinished`, `DOMContentLoaded`,
 //!   `load`, `frameStoppedLoading`, `networkAlmostIdle`, `networkIdle`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lb_dom::{Document, NodeId};
 use lb_layout::{LayoutEngine, ScrollAlign};
@@ -87,6 +87,8 @@ pub struct MockHost {
     sink: RefCell<Option<EventSink>>,
     ids: IdGen,
     start: Instant,
+    /// Tests: how long `create_page` waits before it makes the page.
+    create_delay: Cell<Option<Duration>>,
 }
 
 const BLANK: &str = "<html><head></head><body></body></html>";
@@ -191,6 +193,7 @@ impl MockHost {
             sink: RefCell::new(None),
             ids: IdGen::new(),
             start: Instant::now(),
+            create_delay: Cell::new(None),
         }
     }
 
@@ -265,6 +268,12 @@ impl MockHost {
     /// The last session count the server reported for worker `id`.
     pub fn worker_session_count(&self, id: &str) -> Option<usize> {
         self.state.borrow().worker_sessions.get(id).copied()
+    }
+
+    /// Makes `create_page` wait `d` first, so a test can act on the target
+    /// while the server awaits it.
+    pub fn delay_create_page(&self, d: Duration) {
+        self.create_delay.set(Some(d));
     }
 
     fn now(&self) -> f64 {
@@ -857,6 +866,9 @@ impl PageHost for MockHost {
     }
 
     async fn create_page(&self, context: &str, target_id: &str) -> HostResult<()> {
+        if let Some(d) = self.create_delay.get() {
+            tokio::time::sleep(d).await;
+        }
         let persona = self.persona_for(context);
         self.state.borrow_mut().pages.insert(
             target_id.to_string(),

@@ -10,13 +10,15 @@
 //! position of their first occurrence. Response headers come back the same
 //! way: arrival order, with repeated names grouped.
 
+use std::time::Duration;
+
 use bytes::{Bytes, BytesMut};
 use h2::client::{Builder, PseudoHeader};
 use http::{HeaderMap, HeaderName, HeaderValue, Uri, Version};
 
 use crate::HttpVersion;
 use crate::error::NetError;
-use crate::fetch::{RawResponse, Request};
+use crate::fetch::{RESPONSE_HEADERS_TIMEOUT, RawResponse, Request};
 use crate::headers::OrderedHeaders;
 use crate::profile::ClientHelloProfile;
 
@@ -65,6 +67,21 @@ pub async fn send_with_limit<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    send_with_limits(io, req, profile, max_body, RESPONSE_HEADERS_TIMEOUT).await
+}
+
+/// [`send_with_limit`], waiting at most `head_timeout` for the response
+/// head once the request is sent (the body has no time limit).
+pub async fn send_with_limits<S>(
+    io: S,
+    req: &Request,
+    profile: &ClientHelloProfile,
+    max_body: usize,
+    head_timeout: Duration,
+) -> Result<RawResponse, NetError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let started = start(io, req, profile).await?;
     let (client, conn) = (started.send, started.conn);
 
@@ -82,7 +99,7 @@ where
         send_body(&mut stream, req.body.clone()).await?;
     }
 
-    let response = started.response.await?;
+    let response = head_within(head_timeout, started.response).await?;
     drop(client);
     read_body(response, max_body).await
 }
@@ -154,6 +171,7 @@ pub(crate) async fn finish_started(
     started_response: StartedResponse,
     req: &Request,
     max_body: usize,
+    head_timeout: Duration,
 ) -> Result<RawResponse, NetError> {
     let StartedResponse {
         response,
@@ -162,8 +180,29 @@ pub(crate) async fn finish_started(
     if !req.body.is_empty() {
         send_body(&mut stream, req.body.clone()).await?;
     }
-    let response = response.await?;
+    let response = head_within(head_timeout, response).await?;
     read_body(response, max_body).await
+}
+
+/// The response head of a stream, within `limit`.
+async fn head_within(
+    limit: Duration,
+    response: h2::client::ResponseFuture,
+) -> Result<http::Response<h2::RecvStream>, NetError> {
+    crate::fetch::within(limit, async { Ok(response.await?) }, || {
+        head_timed_out(limit)
+    })
+    .await
+}
+
+fn head_timed_out(limit: Duration) -> NetError {
+    NetError::Connect(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        format!(
+            "timed out waiting for the response head ({} s)",
+            limit.as_secs_f64()
+        ),
+    ))
 }
 
 /// The response half of [`Started`].
@@ -197,6 +236,7 @@ pub(crate) async fn request_on(
     send: h2::client::SendRequest<Bytes>,
     req: &Request,
     max_body: usize,
+    head_timeout: Duration,
 ) -> Result<RawResponse, SessionError> {
     let request = build_request(req)?;
     let mut send = send.ready().await.map_err(session_error)?;
@@ -208,7 +248,10 @@ pub(crate) async fn request_on(
     if !end_of_stream {
         send_body(&mut stream, req.body.clone()).await?;
     }
-    let response = response.await.map_err(session_error)?;
+    let response = tokio::time::timeout_at(crate::fetch::deadline_after(head_timeout), response)
+        .await
+        .map_err(|_| SessionError::from(head_timed_out(head_timeout)))?
+        .map_err(session_error)?;
     Ok(read_body(response, max_body).await?)
 }
 
@@ -583,6 +626,38 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, NetError::BodyTooLarge { limit: 100 }));
+    }
+
+    /// A server that completes the h2 handshake and never answers the
+    /// request: the wait for the head ends at the limit.
+    #[tokio::test]
+    async fn head_timeout_ends_a_silent_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut conn = h2::server::handshake(tcp).await.unwrap();
+            // Accept the stream, keep it open, never respond.
+            let _held = conn.accept().await;
+            while let Some(r) = conn.accept().await {
+                if r.is_err() {
+                    break;
+                }
+            }
+        });
+        let tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let t0 = std::time::Instant::now();
+        let err = send_with_limits(
+            tcp,
+            &get(port, "/"),
+            &firefox(),
+            100,
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("timed out"), "{err}");
+        assert!(t0.elapsed() < Duration::from_secs(5));
     }
 
     /// What a raw server sees before it answers: SETTINGS, WINDOW_UPDATE and

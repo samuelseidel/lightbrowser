@@ -2,8 +2,11 @@
 // one `lightbrowser serve`, started once per test process and stopped at
 // the end. Loopback only.
 //
-// Uses the globally installed `playwright` package (`npm root -g`), stock
-// `chromium.connectOverCDP`. Set LIGHTBROWSER_BIN to test another binary.
+// Uses stock `playwright` (`chromium.connectOverCDP`). package.json pins the
+// version the suite is checked with (`npm install --prefix tests/playwright`).
+// The package is looked up in this order: a local install (node_modules next
+// to this file or above it), the directories of $NODE_PATH, then the global
+// install (`npm root -g`). Set LIGHTBROWSER_BIN to test another binary.
 
 import { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,10 +17,37 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repo = path.resolve(here, '../..');
 const require = createRequire(import.meta.url);
-const globalRoot = execSync('npm root -g').toString().trim();
-export const { chromium } = require(path.join(globalRoot, 'playwright'));
+
+/** The entry file of the `playwright` package, found as the header says. */
+function findPlaywright() {
+  // Node's own lookup covers the first two places, in that order: node_modules
+  // directories from this file upwards, then $NODE_PATH.
+  try {
+    return require.resolve('playwright');
+  } catch (e) {
+    // Anything but "playwright itself is missing" is a broken install: say so.
+    if (e?.code !== 'MODULE_NOT_FOUND' || !/Cannot find module 'playwright'/.test(e.message)) throw e;
+  }
+  let globalRoot = '';
+  try {
+    globalRoot = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {}
+  if (globalRoot && existsSync(path.join(globalRoot, 'playwright'))) {
+    return require.resolve(path.join(globalRoot, 'playwright'));
+  }
+  throw new Error(
+    `Playwright was not found in node_modules next to or above ${here}, in NODE_PATH (${process.env.NODE_PATH || 'unset'}) ` +
+      `or in the global install (${globalRoot || '`npm root -g` failed'}).\n` +
+      'Install the pinned version: npm install --prefix tests/playwright',
+  );
+}
+
+/** Path of the resolved `playwright` entry file; `playwright-core` sits next to it. */
+export const playwrightEntry = findPlaywright();
+export const { chromium } = require(playwrightEntry);
 
 const bin = process.env.LIGHTBROWSER_BIN || path.join(repo, 'target/debug/lightbrowser');
 

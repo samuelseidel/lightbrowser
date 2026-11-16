@@ -36,6 +36,18 @@ const EDIT: &str = r#"<!doctype html><title>Edit</title>
 <input id="gone" aria-label="gone G" value="g">
 <button onclick="document.getElementById('gone').remove()">remove R</button>"#;
 
+const DIALOGS: &str = r#"<!doctype html><title>Dialogs</title>
+<script>alert('on load')</script>
+<button onclick="alert('hello A'); const c = confirm('sure C?'); const p = prompt('name P', 'dflt'); document.getElementById('out').textContent = 'confirm=' + c + ' prompt=' + p">Ask</button>
+<p id="out">idle</p>"#;
+
+/// A page whose image and script ask hosts outside the policy; the
+/// transport refuses both before any DNS lookup or connection.
+const BLOCKED_SUB: &str = r#"<!doctype html><title>Blocked sub</title>
+<img src="http://blocked.example/pixel.png" alt="px">
+<script src="http://10.255.255.1/lib.js"></script>
+<p>body</p>"#;
+
 const HASH: &str = "<!doctype html><title>Hash</title><a href=\"#x\">jump</a><div id=\"x\">x</div>";
 
 /// 60 text fields, then enough buttons for several 100 KB snapshot parts.
@@ -96,6 +108,8 @@ fn serve(mut stream: TcpStream) {
         "/title-substring" => ("200 OK", html, TITLE_SUBSTRING.to_owned()),
         "/edit" => ("200 OK", html, EDIT.to_owned()),
         "/hash" => ("200 OK", html, HASH.to_owned()),
+        "/dialogs" => ("200 OK", html, DIALOGS.to_owned()),
+        "/blocked-sub" => ("200 OK", html, BLOCKED_SUB.to_owned()),
         "/many" => ("200 OK", html, many_page()),
         "/deep-div" => ("200 OK", html, deep_page("<div>", "</div>", 3000)),
         "/deep-group" => (
@@ -526,7 +540,7 @@ fn drives_a_page_end_to_end() {
         "{html}"
     );
     let e = m.fails("browser_extract", json!({"format": "pdf"}));
-    assert!(e.contains("text or html"), "{e}");
+    assert!(e.contains("text, html or markdown"), "{e}");
 
     // Press a key: Enter on the focused field submits the form again.
     let pressed = m.ok("browser_press_key", json!({"key": "Enter"}));
@@ -611,7 +625,12 @@ fn blocks_hosts_outside_the_policy() {
         href.starts_with(&format!("\"{base}/\"")),
         "the page stayed where it was: {href}"
     );
-    let _ = notes;
+    // ... and a tool result said so (the transport's refusal reaches the
+    // note through `Network.loadingFailed`).
+    assert!(
+        notes.contains("the host policy blocked requests to http://blocked.example/js"),
+        "{notes}"
+    );
 
     // Bad input is a tool error too.
     let e = m.fails("browser_navigate", json!({"url": "not a url"}));
@@ -968,5 +987,165 @@ fn same_document_navigations_report_the_new_url() {
         "browser_click",
         json!({"ref": ref_of(&snap, "link \"jump\"")}),
     );
+    m.finish();
+}
+
+/// Requests the transport (egress policy, ADR 0044) refuses come back as a
+/// note on the tool result that caused them (ADR 0041). The page is on
+/// loopback; its image and script ask hosts no entry allows, which are
+/// refused before any lookup, so nothing leaves the machine.
+#[test]
+fn blocked_requests_are_noted_in_tool_results() {
+    let port = page_server();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut m = Mcp::start(&["--allow-host", "*.lab.example"]);
+    m.initialize("2025-06-18");
+    let nav = m.ok(
+        "browser_navigate",
+        json!({"url": format!("{base}/blocked-sub")}),
+    );
+    assert!(nav.contains("Title: Blocked sub"), "{nav}");
+    let note = nav
+        .lines()
+        .find(|l| l.starts_with("Note: the host policy blocked requests to "))
+        .unwrap_or_else(|| panic!("no blocked-request note in {nav:?}"));
+    assert!(note.contains("http://blocked.example/pixel.png"), "{note}");
+    assert!(note.contains("http://10.255.255.1/lib.js"), "{note}");
+    assert!(
+        note.ends_with("(--allow-host <entry> allows more hosts)"),
+        "{note}"
+    );
+    // A note is given once: the next result has none.
+    let t = m.ok("browser_evaluate", json!({"expression": "1 + 1"}));
+    assert_eq!(t, "2");
+    // A request a tool makes itself is noted on that tool's result.
+    let t = m.ok(
+        "browser_evaluate",
+        json!({"expression": "fetch('http://other.example/api').then(() => 'loaded', () => 'refused')"}),
+    );
+    assert!(t.starts_with("\"refused\""), "{t}");
+    assert!(
+        t.contains("Note: the host policy blocked requests to http://other.example/api"),
+        "{t}"
+    );
+    m.finish();
+}
+
+/// JavaScript dialogs: nobody can answer them, so the server accepts
+/// `alert`, dismisses `confirm` and `prompt`, and says so in the result.
+#[test]
+fn javascript_dialogs_are_answered_and_noted() {
+    let port = page_server();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut m = Mcp::start(&[]);
+    m.initialize("2025-06-18");
+    // An alert while the page loads does not hold up the navigation.
+    let nav = m.ok(
+        "browser_navigate",
+        json!({"url": format!("{base}/dialogs")}),
+    );
+    assert!(nav.contains("Title: Dialogs"), "{nav}");
+    assert!(
+        nav.contains("Note: a JavaScript alert dialog (\"on load\") was accepted"),
+        "{nav}"
+    );
+    let snap = m.ok("browser_snapshot", json!({}));
+    let mut text = m.ok(
+        "browser_click",
+        json!({"ref": ref_of(&snap, "button \"Ask\"")}),
+    );
+    // The notes belong to the click; read the result of the handler too.
+    let out = m.ok(
+        "browser_evaluate",
+        json!({"expression": "document.getElementById('out').textContent"}),
+    );
+    text.push_str(&out);
+    for want in [
+        "Note: a JavaScript alert dialog (\"hello A\") was accepted",
+        "Note: a JavaScript confirm dialog (\"sure C?\") was dismissed",
+        "Note: a JavaScript prompt dialog (\"name P\") was dismissed",
+    ] {
+        assert!(text.contains(want), "{want:?} not in {text}");
+    }
+    // Dismissed: confirm() is false and prompt() is null, as in Chrome.
+    assert!(out.starts_with("\"confirm=false prompt=null\""), "{out}");
+    // Each note is given once.
+    let again = m.ok("browser_evaluate", json!({"expression": "1"}));
+    assert_eq!(again, "1");
+    m.finish();
+}
+
+fn extract_golden_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../crates/lb-page/tests/extract")
+}
+
+/// `python3 -m http.server` on a free loopback port serving the extract
+/// goldens (as `tests/extract_cli.rs` does), stopped on drop.
+struct GoldenServer {
+    child: Child,
+    port: u16,
+}
+
+impl GoldenServer {
+    fn start() -> GoldenServer {
+        let mut child = Command::new("python3")
+            .args(["-u", "-m", "http.server", "0", "--bind", "127.0.0.1"])
+            .arg("--directory")
+            .arg(extract_golden_dir())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("python3 -m http.server");
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let port = line
+            .split(" port ")
+            .nth(1)
+            .and_then(|r| r.split(' ').next())
+            .and_then(|p| p.parse().ok())
+            .unwrap_or_else(|| panic!("no port in {line:?}"));
+        GoldenServer { child, port }
+    }
+}
+
+impl Drop for GoldenServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// `browser_extract` markdown is `lightbrowser fetch --dump markdown`'s
+/// output (ADR 0042): the same golden files, byte for byte.
+#[test]
+fn extract_markdown_equals_the_fetch_golden_files() {
+    let srv = GoldenServer::start();
+    let host = format!("127.0.0.1:{}", srv.port);
+    let mut m = Mcp::start(&[]);
+    m.initialize("2025-06-18");
+    for (name, ext) in [
+        ("headings", "html"),
+        ("links_base", "html"),
+        ("table", "html"),
+        ("shadow", "html"),
+        ("scripted", "html"),
+        ("plain", "txt"),
+        ("regress", "html"),
+        ("regress3", "html"),
+    ] {
+        m.ok(
+            "browser_navigate",
+            json!({"url": format!("http://{host}/{name}.{ext}")}),
+        );
+        let got = m.ok("browser_extract", json!({"format": "markdown"}));
+        let want = std::fs::read_to_string(extract_golden_dir().join(format!("{name}.md")))
+            .unwrap()
+            .replace("{HOST}", &host);
+        assert_eq!(got, want, "{name}.{ext} markdown");
+    }
+    let e = m.fails("browser_extract", json!({"format": "pdf"}));
+    assert!(e.contains("text, html or markdown"), "{e}");
     m.finish();
 }

@@ -29,9 +29,31 @@ fn visible_children(doc: &Document, id: NodeId) -> Vec<NodeId> {
     doc.children(id).filter(|c| !skipped(doc, *c)).collect()
 }
 
-/// `DOM.Node` for `id` with `depth` levels of children (`-1` = all).
-/// `ids` maps arena ids to backend node ids.
+/// Most levels of children one `DOM.Node` describes. Script can nest
+/// elements without limit and describing (and later serializing and
+/// dropping) the tree recurses per level, so `depth: -1` and larger depths
+/// stop here; the deepest nodes keep `childNodeCount`, and
+/// `DOM.requestChildNodes` describes what lies below.
+pub const MAX_DESCRIBE_DEPTH: i32 = 256;
+
+/// `DOM.Node` for `id` with `depth` levels of children (`-1` = all, up to
+/// [`MAX_DESCRIBE_DEPTH`]). `ids` maps arena ids to backend node ids.
 pub fn dom_node(
+    doc: &Document,
+    id: NodeId,
+    depth: i32,
+    ids: &dyn Fn(NodeId) -> BackendNodeId,
+    info: &DocInfo<'_>,
+) -> DomNode {
+    let depth = if (0..=MAX_DESCRIBE_DEPTH).contains(&depth) {
+        depth
+    } else {
+        MAX_DESCRIBE_DEPTH
+    };
+    describe(doc, id, depth, ids, info)
+}
+
+fn describe(
     doc: &Document,
     id: NodeId,
     depth: i32,
@@ -124,7 +146,7 @@ pub fn dom_node(
         } else {
             0
         };
-        n.shadow_roots = Some(vec![dom_node(doc, sr, d, ids, info)]);
+        n.shadow_roots = Some(vec![describe(doc, sr, d, ids, info)]);
     }
     if ty == NodeType::Element || ty == NodeType::Text {
         if let Some(slot) = doc.find_slot(id, false) {
@@ -140,7 +162,7 @@ pub fn dom_node(
     if describe_kids && !kids.is_empty() {
         n.children = Some(
             kids.into_iter()
-                .map(|c| dom_node(doc, c, depth - 1, ids, info))
+                .map(|c| describe(doc, c, depth - 1, ids, info))
                 .collect(),
         );
     }
@@ -322,6 +344,41 @@ pub fn node_class(doc: &Document, id: NodeId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Script can nest elements without limit: `depth: -1` on such a
+    /// document must not recurse once per level.
+    #[test]
+    fn deep_documents_with_depth_minus_one() {
+        let mut doc = Document::parse_html("<body></body>");
+        let mut top = doc.create_element_by_name("div").unwrap();
+        for _ in 0..100_000 {
+            let d = doc.create_element_by_name("div").unwrap();
+            doc.append_child(d, top).unwrap();
+            top = d;
+        }
+        let body = doc.body().unwrap();
+        doc.append_child(body, top).unwrap();
+        let ids = |n: NodeId| i64::from(n.0) + 1;
+        let info = DocInfo {
+            url: "http://127.0.0.1/",
+            frame_id: "F",
+            pierce: false,
+        };
+        for depth in [-1, i32::MAX] {
+            let root = dom_node(&doc, Document::DOCUMENT, depth, &ids, &info);
+            let json = serde_json::to_string(&root).unwrap();
+            assert!(json.contains("\"nodeName\":\"DIV\""));
+            // The deepest described node still counts its children.
+            let mut n = &root;
+            let mut levels = 0;
+            while let Some(k) = n.children.as_ref().and_then(|k| k.last()) {
+                n = k;
+                levels += 1;
+            }
+            assert_eq!(levels, MAX_DESCRIBE_DEPTH);
+            assert_eq!(n.child_node_count, Some(1));
+        }
+    }
 
     #[test]
     fn dom_node_shapes() {

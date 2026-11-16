@@ -616,7 +616,12 @@ impl Agent {
         if s == self.target {
             return Some(0);
         }
-        if s.len() != 32 || u64::from_str_radix(&s[..16], 16).ok()? != self.page_id {
+        // The id comes from the client: only 32 hex digits can be ours
+        // (slicing a non-ASCII id at byte 16 could split a character).
+        if s.len() != 32 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        if u64::from_str_radix(&s[..16], 16).ok()? != self.page_id {
             return None;
         }
         u64::from_str_radix(&s[16..], 16).ok().filter(|&id| id != 0)

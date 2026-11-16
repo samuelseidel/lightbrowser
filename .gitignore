@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 .venv/
+node_modules/
 
 # detect-bench session records (local runs)
 tests/detect-bench/results/

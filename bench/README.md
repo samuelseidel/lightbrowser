@@ -14,7 +14,7 @@ python3 bench/gen_corpus.py [--check]          # regenerate / verify bench/corpu
 Needs Python 3.10+, `playwright` (Python, any 1.5x or newer; only the client
 is used) and the Chromium at `/opt/pw-browsers/chromium-1243` (on macOS
 Playwright's cache, `~/Library/Caches/ms-playwright/chromium-1243`; override
-with `--chromium`). `--binary` or `$LIGHTBROWSER_BIN` picks the LightBrowser
+with `--chromium` or `$LB_CHROME`). `--binary` or `$LIGHTBROWSER_BIN` picks the LightBrowser
 binary (default `target/release/lightbrowser`). Exit code 1 if a budget
 fails or a browser did not render every page.
 

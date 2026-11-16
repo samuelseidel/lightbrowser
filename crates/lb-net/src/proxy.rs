@@ -253,6 +253,11 @@ impl Proxy {
     /// before the proxy is contacted: the proxy resolves a name itself, so
     /// the name is all there is to check. The proxy's own address is
     /// checked by [`dial`](Self::dial).
+    ///
+    /// The whole tunnel (TCP to the proxy, the exchange, `407` rounds) must
+    /// be up within `limit`
+    /// ([`crate::fetch::NetTimeouts::proxy_handshake`]); a proxy that
+    /// accepts and never answers fails with `net::ERR_TIMED_OUT`.
     pub(crate) async fn tunnel(
         &self,
         dialer: &Dialer,
@@ -260,15 +265,22 @@ impl Proxy {
         host: &str,
         port: u16,
         user_agent: &str,
+        limit: std::time::Duration,
     ) -> Result<TcpStream, NetError> {
         egress.check_remote_name(host)?;
-        match self.kind {
-            ProxyKind::Http => {
-                self.connect_tunnel(dialer, egress, host, port, user_agent)
-                    .await
+        let setup = async {
+            match self.kind {
+                ProxyKind::Http => {
+                    self.connect_tunnel(dialer, egress, host, port, user_agent)
+                        .await
+                }
+                ProxyKind::Socks5 => self.socks5(dialer, egress, host, port).await,
             }
-            ProxyKind::Socks5 => self.socks5(dialer, egress, host, port).await,
-        }
+        };
+        crate::fetch::within(limit, setup, || {
+            NetError::Proxy("net::ERR_TIMED_OUT".into())
+        })
+        .await
     }
 
     /// TCP to the proxy itself (forward requests). This hop always uses the

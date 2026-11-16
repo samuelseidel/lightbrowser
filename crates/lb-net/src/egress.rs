@@ -512,6 +512,22 @@ impl EgressPolicy {
         }
     }
 
+    /// [`check_name`](Self::check_name) on the host of `url`, as the
+    /// transport asks it per hop of a direct request (`fetch`). Callers that
+    /// check a URL before handing it to the stack (`lightbrowser mcp`) use
+    /// this, so their verdict is the transport's. A URL without a host is
+    /// refused (unless the policy is open).
+    pub fn check_url(&self, url: &url::Url) -> Result<(), Blocked> {
+        if self.is_open() {
+            return Ok(());
+        }
+        let Some(host) = url.host_str() else {
+            return Err(self.refuse(url.as_str(), BlockedKind::Invalid));
+        };
+        // `host_str` brackets IPv6 literals; `fetch` passes them bare.
+        self.check_name(host.trim_start_matches('[').trim_end_matches(']'))
+    }
+
     /// May the stack connect to `ip`? Loopback (`loopback` mode) or an
     /// allowed address; an IPv4-mapped IPv6 address counts as the IPv4
     /// address.
@@ -1021,6 +1037,22 @@ mod tests {
         assert!(EgressPolicy::open().check_remote_name("anything").is_ok());
         // An entry for localhost itself does vouch.
         assert!(lb(&["localhost"]).check_remote_name("localhost").is_ok());
+    }
+
+    #[test]
+    fn url_check_is_the_name_check_of_its_host() {
+        let p = lb(&["[fd00::1]", "*.lab.example"]);
+        let u = |s: &str| url::Url::parse(s).unwrap();
+        assert!(p.check_url(&u("http://[fd00::1]:81/")).is_ok());
+        assert!(p.check_url(&u("http://[::1]/")).is_ok());
+        assert!(p.check_url(&u("https://A.Lab.Example./x")).is_ok());
+        assert!(p.check_url(&u("http://[fd00::2]/")).is_err());
+        assert!(p.check_url(&u("http://example.com/")).is_err());
+        assert_eq!(
+            p.check_url(&u("data:text/plain,x")).unwrap_err().kind,
+            BlockedKind::Invalid
+        );
+        assert!(EgressPolicy::open().check_url(&u("data:,x")).is_ok());
     }
 
     #[test]
