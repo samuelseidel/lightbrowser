@@ -1,0 +1,24 @@
+{
+  "url": "http://{HOST}/images.html",
+  "final_url": "http://{HOST}/images.html",
+  "status": 200,
+  "title": "Images",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Images"
+    }
+  ],
+  "links": [
+    {
+      "url": "https://static.example.com/assets/page.html",
+      "text": "Thumb",
+      "rel": ""
+    }
+  ],
+  "text": "Images\nand .",
+  "markdown": "# Images\n\n![Site logo](https://static.example.com/assets/logo.png) and ![A \\[bracket\\] \\*star\\*](https://static.example.com/img/a%20b.png).\n\n[![Thumb](https://static.example.com/assets/thumb.jpg)](https://static.example.com/assets/page.html)\n\n![](https://static.example.com/assets/pic.gif)\n\n![spaced alt](https://other.example.net/x.png)\n"
+}

@@ -79,7 +79,7 @@ class Catalogue(unittest.TestCase):
 
     def test_collector_and_catalogue_agree(self):
         src = (HERE / "sites" / "collector.js").read_text()
-        emitted = set(re.findall(r"\b(?:probe|add)\('([a-z0-9_]+)'", src))
+        emitted = set(re.findall(r"\b(?:probe|add|late)\('([a-z0-9_]+)'", src))
         catalogued = {r["probe"] for r in scoring.RULES if "probe" in r}
         self.assertEqual(emitted - catalogued, set(), "probes missing from scoring.RULES")
         self.assertEqual(catalogued - emitted, set(), "rules for probes the collector never sends")
@@ -182,11 +182,52 @@ OS_RULES = ["uach_platform_version", "uach_arch_gpu", "ch_high_entropy", "api_th
 OS_TRUTH = HERE.parent / "fixtures" / "os"
 
 
+OS_FULL_WEIGHT = HERE / "configs" / "os_full_weight.json"
+ALL_TARGETS = HERE / "configs" / "all_targets.json"
+
+
 def os_cfg() -> dict:
-    """Default config with the info-only OS rules at their target weights."""
-    cfg = scoring.load_config()
-    cfg["weights"].update({"codecs_os": 15, "screen_os": 15, "window_work_area": 15, "wheel_os": 20})
-    return cfg
+    """Default config with the info-only OS rules at their target weights: the committed
+    configs/os_full_weight.json, which the bench reads with `server.py --config`."""
+    return scoring.load_config(str(OS_FULL_WEIGHT))
+
+
+def info_rule_targets() -> dict[str, int]:
+    """Catalogue rules that are info-only (weight 0) and name a target weight, as {id: target}."""
+    targets = {}
+    for r in scoring.RULES:
+        m = re.search(r"\(target (\d+)\)", r["why"])
+        if m:
+            targets[r["id"]] = int(m.group(1))
+    return targets
+
+
+class CommittedConfigs(unittest.TestCase):
+    """configs/*.json are the weight overrides the docs mean by "the OS rules at full weight":
+    each info-only rule at the target its description names, and nothing else."""
+
+    def test_every_rule_with_a_target_is_info_only_by_default(self):
+        targets = info_rule_targets()
+        self.assertTrue(targets)
+        for rid in targets:
+            self.assertEqual(next(r["weight"] for r in scoring.RULES if r["id"] == rid), 0, rid)
+
+    def test_os_full_weight_is_the_m7_os_rules_at_their_targets(self):
+        want = {rid: t for rid, t in info_rule_targets().items() if rid in OS_RULES}
+        self.assertEqual(want, {"codecs_os": 15, "screen_os": 15, "window_work_area": 15, "wheel_os": 20})
+        self.assertEqual(json.loads(OS_FULL_WEIGHT.read_text()), {"weights": want})
+
+    def test_all_targets_is_every_info_rule_at_its_target(self):
+        self.assertEqual(json.loads(ALL_TARGETS.read_text()), {"weights": info_rule_targets()})
+
+    def test_load_config_applies_a_file_and_changes_nothing_else(self):
+        base = scoring.load_config()
+        for path in (OS_FULL_WEIGHT, ALL_TARGETS):
+            cfg = scoring.load_config(str(path))
+            weights = json.loads(path.read_text())["weights"]
+            self.assertEqual({k: v for k, v in cfg["weights"].items()}, weights)
+            self.assertEqual({k: v for k, v in cfg.items() if k != "weights"},
+                             {k: v for k, v in base.items() if k != "weights"})
 
 
 def os_session(name: str) -> dict:

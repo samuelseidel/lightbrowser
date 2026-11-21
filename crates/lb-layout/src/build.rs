@@ -49,7 +49,16 @@ pub(crate) struct Builder<'a> {
     ends_in_space: bool,
     /// Natural sizes of loaded images.
     intrinsic: Option<&'a HashMap<NodeId, (f32, f32)>>,
+    /// Elements open in the walk (see [`MAX_BOX_DEPTH`]).
+    depth: usize,
 }
+
+/// Deepest element nesting that gets boxes. Script can nest elements
+/// without limit (only the HTML parser caps nesting, at 512 in Chrome), and
+/// building, laying out (taffy), painting and hit testing recurse per box
+/// level on the page worker's stack ([`crate::PAGE_STACK`]). Deeper
+/// elements get no box, as if `display: none`.
+pub(crate) const MAX_BOX_DEPTH: usize = 512;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Mode {
@@ -84,6 +93,7 @@ impl<'a> Builder<'a> {
             node_box: HashMap::new(),
             ends_in_space: true,
             intrinsic: None,
+            depth: 0,
         }
     }
 
@@ -124,6 +134,16 @@ impl<'a> Builder<'a> {
     /// Boxes for an element (none for `display: none`, the children's for
     /// `display: contents`).
     fn element(&mut self, el: NodeId, parent_mode: Mode) -> Vec<Item> {
+        if self.depth >= MAX_BOX_DEPTH {
+            return Vec::new();
+        }
+        self.depth += 1;
+        let items = self.element_boxes(el, parent_mode);
+        self.depth -= 1;
+        items
+    }
+
+    fn element_boxes(&mut self, el: NodeId, parent_mode: Mode) -> Vec<Item> {
         let Some(css) = self.style_of(el) else {
             return Vec::new();
         };

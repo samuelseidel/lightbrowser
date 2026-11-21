@@ -442,15 +442,21 @@ impl Window {
     /// subresources); not controlled, or not http(s): the network.
     pub fn net_fetch(self: &Rc<Self>, req: NetRequest) -> LocalFuture<Result<NetResponse, String>> {
         let ctrl = self.sw.controller.borrow().as_ref().map(|v| v.id);
-        match (ctrl, self.sw_host()) {
-            (Some(v), Some(host))
-                if matches!(req.url.scheme(), "http" | "https") && !self.is_worker() =>
-            {
-                let w = self.clone();
-                Box::pin(intercept(w, host, v, req))
-            }
-            _ => self.net.fetch(req),
-        }
+        let (fut, pending): (LocalFuture<Result<NetResponse, String>>, _) =
+            match (ctrl, self.sw_host()) {
+                (Some(v), Some(host))
+                    if matches!(req.url.scheme(), "http" | "https") && !self.is_worker() =>
+                {
+                    let w = self.clone();
+                    let p = super::perf::Pending::of(&req, true);
+                    (Box::pin(intercept(w, host, v, req)), p)
+                }
+                _ => {
+                    let p = super::perf::Pending::of(&req, false);
+                    (self.net.fetch(req), p)
+                }
+            };
+        super::perf::track(self, pending, fut)
     }
 
     /// The window or scope goes away.
@@ -1002,6 +1008,7 @@ fn response_of(
         redirected,
         protocol: None,
         navigation_redirect_count: 0,
+        timing: None,
     })
 }
 
@@ -1843,8 +1850,37 @@ pub struct CacheStorageData {
     caches: Vec<(String, CacheRef)>,
 }
 
+impl CacheStorageData {
+    /// Bytes this origin's caches hold, as `navigator.storage.estimate()`
+    /// reports them: the cache names, and for each entry its request (URL,
+    /// method, headers) and response (URL, status text, headers, body).
+    pub fn usage(&self) -> u64 {
+        fn headers(h: &[(String, String)]) -> u64 {
+            h.iter().map(|(n, v)| (n.len() + v.len()) as u64).sum()
+        }
+        let mut bytes = 0u64;
+        for (name, cache) in &self.caches {
+            bytes += name.len() as u64;
+            for e in lock(cache).iter() {
+                bytes += (e.url.as_str().len() + e.method.len()) as u64 + headers(&e.headers);
+                let r = &e.response;
+                bytes +=
+                    (r.url.len() + r.status_text.len() + r.body.len()) as u64 + headers(&r.headers);
+            }
+        }
+        bytes
+    }
+}
+
 /// `caches` of one origin of one context.
 pub type CacheStorageRef = Arc<Mutex<CacheStorageData>>;
+
+/// Bytes the Cache API holds for the origin of `w` (0 without a service
+/// worker host).
+pub(crate) fn caches_usage(w: &Window) -> u64 {
+    w.sw_host()
+        .map_or(0, |h| lock(&h.caches(&w.origin_string())).usage())
+}
 
 /// A request argument as (url, method, headers).
 type ReqKey = (Url, String, Vec<(String, String)>);

@@ -1,0 +1,8 @@
+{
+  "weights": {
+    "codecs_os": 15,
+    "screen_os": 15,
+    "window_work_area": 15,
+    "wheel_os": 20
+  }
+}

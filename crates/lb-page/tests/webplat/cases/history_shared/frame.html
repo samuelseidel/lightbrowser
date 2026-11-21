@@ -1,0 +1,23 @@
+<!doctype html><script>
+var kind = decodeURIComponent(location.search.slice(1)), n = 0;
+function push() { var s = ++n; history.pushState(s, '', '#s' + s); return history.state === s; }
+// A few entries to go back through.
+var made = 0;
+for (var i = 0; i < 5; i++) if (push()) made++;
+function done() {
+  for (var j = 0; j < 300; j++) if (push()) made++;
+  parent.postMessage(kind + ': pushState accepted in all ' + made, '*');
+}
+if (kind == 'replaceState') {
+  for (var i = 0; i < 40; i++) history.replaceState(i, '', '#r' + i);
+  done();
+} else if (kind == 'hash') {
+  for (var i = 0; i < 40; i++) location.hash = '#h' + i;
+  done();
+} else if (kind == 'back-forward') {
+  for (var i = 0; i < 20; i++) { history.back(); history.forward(); }
+  setTimeout(done, 300);
+} else {
+  done();
+}
+</script>

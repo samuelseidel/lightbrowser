@@ -242,6 +242,47 @@ fn form_controls_get_chrome_sizes() {
     assert!(c.x > t.right() && b.x > c.right());
 }
 
+/// The page chooses the nesting depth: building the tree must not use stack
+/// per level (the old recursive walk overflowed a worker thread at about
+/// 1500 levels in a debug build; a test thread has a 2 MiB stack too).
+#[test]
+fn accessibility_tree_of_a_deeply_nested_page() {
+    let depth = 5000;
+    let html = format!(
+        "<title>deep</title>{}<button id=deep>x</button>{}<p id=after>tail</p>",
+        "<div role=group>".repeat(depth),
+        "</div>".repeat(depth)
+    );
+    let doc = Document::parse_html(&html);
+    let mut e = engine();
+    let ax = e.accessibility_tree(&doc);
+    assert_eq!(ax.query(Some("group"), None).len(), depth);
+    let b = ax.query(Some("button"), Some("x"));
+    assert_eq!(b.len(), 1);
+    assert_eq!(b[0].dom, Some(id(&doc, "deep")));
+    // Document order survives the explicit stack: the button is the last
+    // node inside the groups, then the paragraph follows.
+    let last_group = ax.query(Some("group"), None).last().unwrap().id;
+    assert_eq!(ax.nodes[last_group].children.len(), 1);
+    assert_eq!(ax.query(Some("paragraph"), None).len(), 1);
+}
+
+/// A button inside thousands of nested elements gets a name from content
+/// without recursing without bound.
+#[test]
+fn accessibility_name_from_deep_content_is_bounded() {
+    let depth = 3000;
+    let html = format!(
+        "<button id=b>{}text{}</button>",
+        "<span>".repeat(depth),
+        "</span>".repeat(depth)
+    );
+    let doc = Document::parse_html(&html);
+    let mut e = engine();
+    let ax = e.accessibility_tree(&doc);
+    assert_eq!(ax.query(Some("button"), None).len(), 1);
+}
+
 #[test]
 fn accessibility_tree_of_a_small_form() {
     let doc = Document::parse_html(
@@ -358,4 +399,47 @@ fn inline_runs_grid_and_calc() {
     assert_eq!(g4.y, g2.bottom());
     let w = rect(&mut e, &doc, "w");
     assert_eq!((w.x, w.width, w.height), (10.0, 380.0, 16.0));
+}
+
+/// Script can nest elements without limit (`appendChild` has no depth cap,
+/// unlike the HTML parser): laying out such a tree must not use stack per
+/// level without bound.
+#[test]
+fn layout_of_a_script_built_deep_tree() {
+    // On a thread with a page worker's stack.
+    std::thread::Builder::new()
+        .stack_size(lb_layout::PAGE_STACK)
+        .spawn(deep_tree_layout)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn deep_tree_layout() {
+    let mut doc = Document::parse_html("<body><p id=after>tail</p></body>");
+    let mut top = doc.create_element_by_name("div").unwrap();
+    let leaf = doc.create_text("x");
+    doc.append_child(top, leaf).unwrap();
+    for _ in 0..100_000 {
+        let d = doc.create_element_by_name("div").unwrap();
+        doc.append_child(d, top).unwrap();
+        top = d;
+    }
+    let body = doc.body().unwrap();
+    let after = id(&doc, "after");
+    doc.insert_before(body, top, Some(after)).unwrap();
+    let mut e = engine();
+    let r = rect(&mut e, &doc, "after");
+    assert!(r.height > 0.0, "{r:?}");
+    // Elements past the box depth limit get no box; those above keep theirs.
+    let mut deep = top;
+    for _ in 0..500 {
+        deep = doc.first_child(deep).unwrap();
+    }
+    assert_eq!(e.bounding_client_rect(&doc, deep).width, 784.0);
+    for _ in 0..100 {
+        deep = doc.first_child(deep).unwrap();
+    }
+    assert_eq!(e.bounding_client_rect(&doc, deep).width, 0.0);
+    let _ = e.element_from_point(&doc, 5.0, 5.0);
 }

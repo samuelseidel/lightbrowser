@@ -10,7 +10,7 @@
 //! connections, so the client sees host events before the reply of the
 //! command that caused them.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -99,7 +99,48 @@ impl TargetState {
 
 #[derive(Debug)]
 pub(crate) struct ConnState {
+    pub tx: ConnTx,
+}
+
+/// A connection's outgoing queue. For a socket, `backlog` counts the bytes
+/// queued but not yet written; once a message would take it past the
+/// limit, the connection is marked overflowed, nothing more is queued and
+/// its socket task closes it (a client that stops reading must not make
+/// the server's memory grow without bound).
+#[derive(Debug)]
+pub(crate) struct ConnTx {
     pub tx: mpsc::UnboundedSender<String>,
+    pub backlog: Option<Rc<Backlog>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Backlog {
+    /// Bytes queued and not yet written to the socket.
+    pub bytes: Cell<usize>,
+    pub limit: usize,
+    pub overflowed: Cell<bool>,
+    /// Wakes the socket task when `overflowed` is set.
+    pub notify: tokio::sync::Notify,
+}
+
+impl ConnTx {
+    pub fn send(&self, text: String) {
+        if let Some(b) = &self.backlog {
+            if b.overflowed.get() {
+                return;
+            }
+            let n = b.bytes.get().saturating_add(text.len());
+            // One message larger than the bound still goes out when
+            // nothing else is waiting: only a backlog means "not reading".
+            if n > b.limit && b.bytes.get() > 0 {
+                b.overflowed.set(true);
+                b.notify.notify_one();
+                return;
+            }
+            b.bytes.set(n);
+        }
+        let _ = self.tx.send(text);
+    }
 }
 
 #[derive(Debug, Default)]
@@ -145,8 +186,7 @@ impl State {
         if let Some(s) = self.sessions.get(key)
             && let Some(c) = self.conns.get(&s.conn)
         {
-            let _ =
-                c.tx.send(protocol::event(method, params, s.wire.as_deref()));
+            c.tx.send(protocol::event(method, params, s.wire.as_deref()));
         }
     }
 
@@ -171,6 +211,8 @@ pub(crate) struct Shared<H> {
     pub shutdown: watch::Sender<bool>,
     /// Path id of `ws://.../devtools/browser/<id>`.
     pub browser_ws_id: String,
+    /// Most page targets open at once ([`crate::ServerConfig::max_pages`]).
+    pub max_pages: Cell<usize>,
 }
 
 impl<H: PageHost + 'static> Shared<H> {
@@ -203,6 +245,7 @@ impl<H: PageHost + 'static> Shared<H> {
             ids,
             shutdown: watch::channel(false).0,
             browser_ws_id,
+            max_pages: Cell::new(crate::server::DEFAULT_MAX_PAGES),
         }))
     }
 
@@ -223,7 +266,7 @@ impl<H: PageHost + 'static> Shared<H> {
 
     /// Registers a connection. `page` binds its root session to a target
     /// (`/devtools/page/<id>`); otherwise it is a browser connection.
-    pub fn open_conn(&self, tx: mpsc::UnboundedSender<String>, page: Option<TargetId>) -> ConnId {
+    pub fn open_conn(&self, tx: ConnTx, page: Option<TargetId>) -> ConnId {
         let mut st = self.state.borrow_mut();
         st.next_conn += 1;
         let id = st.next_conn;
@@ -294,7 +337,7 @@ impl<H: PageHost + 'static> Shared<H> {
         match item {
             Outgoing::Send(conn, text) => {
                 if let Some(c) = self.state.borrow().conns.get(&conn) {
-                    let _ = c.tx.send(text);
+                    c.tx.send(text);
                 }
             }
             Outgoing::Host(ev) => self.on_host_event(*ev),
@@ -410,6 +453,9 @@ impl<H: PageHost + 'static> Shared<H> {
             }
             ctx
         };
+        if let Some(e) = self.page_cap_error() {
+            return Err(e);
+        }
         let id = self.ids.hex32();
         self.state.borrow_mut().targets.push(TargetState {
             info: TargetInfo {
@@ -449,7 +495,13 @@ impl<H: PageHost + 'static> Shared<H> {
                     .collect(),
             )
         };
-        let info = self.state.borrow().target_info(&id).expect("target");
+        // The target can be closed while the host made the page (its
+        // context disposed, `/json/close/<id>`): then there is nothing to
+        // announce or attach, and the page the host just made goes too.
+        let Some(info) = self.state.borrow().target_info(&id) else {
+            let _ = self.host.close_page(&id);
+            return Err(CdpError::server("Target closed before it was created"));
+        };
         for key in &discover {
             self.queue_event(key, "Target.targetCreated", json!({ "targetInfo": info }));
         }
@@ -775,6 +827,49 @@ impl<H: PageHost + 'static> Shared<H> {
             .map_err(|e| CdpError::server(e.0))
     }
 
+    /// The error for opening a page when [`Shared::max_pages`] are open.
+    pub fn page_cap_error(&self) -> Option<CdpError> {
+        let max = self.max_pages.get();
+        let open = self
+            .state
+            .borrow()
+            .targets
+            .iter()
+            .filter(|t| t.info.kind == "page")
+            .count();
+        (open >= max).then(|| {
+            CdpError::server(format!(
+                "Too many open pages ({open}, the limit is {max}); close one first"
+            ))
+        })
+    }
+
+    /// Closes every page and every browser context but the default one
+    /// (graceful shutdown of `serve`).
+    pub fn close_all(&self) {
+        let (pages, contexts): (Vec<TargetId>, Vec<BrowserContextId>) = {
+            let st = self.state.borrow();
+            (
+                st.targets
+                    .iter()
+                    .filter(|t| t.info.kind == "page")
+                    .map(|t| t.info.target_id.clone())
+                    .collect(),
+                st.contexts
+                    .iter()
+                    .filter(|c| c.id != st.default_context)
+                    .map(|c| c.id.clone())
+                    .collect(),
+            )
+        };
+        for p in pages {
+            let _ = self.close_target(&p);
+        }
+        for c in contexts {
+            let _ = self.dispose_context(&c);
+        }
+    }
+
     /// Product string for `Browser.getVersion` and `/json/version`.
     pub fn version_info(&self) -> Value {
         let persona = self.default_persona();
@@ -866,6 +961,16 @@ fn translate(target: &str, ev: &PageEvent) -> Vec<(Gate, String, Value)> {
             "Page",
             "Page.navigatedWithinDocument",
             json!({ "frameId": frame_id, "url": url, "navigationType": navigation_type }),
+        ),
+        PageEvent::FrameStartedNavigating {
+            frame_id,
+            loader_id,
+            url,
+            navigation_type,
+        } => one(
+            "Page",
+            "Page.frameStartedNavigating",
+            json!({ "frameId": frame_id, "loaderId": loader_id, "url": url, "navigationType": navigation_type }),
         ),
         PageEvent::Lifecycle {
             frame_id,
@@ -1000,7 +1105,21 @@ fn to_value<T: serde::Serialize>(v: &T) -> Value {
 }
 
 fn host_err(e: HostError) -> CdpError {
-    CdpError::server(e.0)
+    // Texts Chrome answers with `-32602` (a bad id or enum value the
+    // client sent), not the `-32000` of a failed command.
+    const BAD_PARAMS: &[&str] = &[
+        "Invalid InterceptionId.",
+        "Invalid cookie fields",
+        "Unknown permission type",
+        "No frame for given id found",
+        "Unknown errorReason",
+        "No entry with passed id",
+    ];
+    if BAD_PARAMS.iter().any(|p| e.0.starts_with(p)) {
+        CdpError::new(protocol::code::INVALID_PARAMS, e.0)
+    } else {
+        CdpError::server(e.0)
+    }
 }
 
 /// One command being handled.
@@ -1100,6 +1219,52 @@ fn str_param<'a>(p: &'a Value, key: &str) -> Result<&'a str, CdpError> {
 
 fn bool_param(p: &Value, key: &str) -> bool {
     p.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// The CDP `Page.ReferrerPolicy` values.
+fn lb_net_referrer_policy(p: &str) -> Option<()> {
+    matches!(
+        p,
+        "noReferrer"
+            | "noReferrerWhenDowngrade"
+            | "origin"
+            | "originWhenCrossOrigin"
+            | "sameOrigin"
+            | "strictOrigin"
+            | "strictOriginWhenCrossOrigin"
+            | "unsafeUrl"
+    )
+    .then_some(())
+}
+
+/// A required boolean: Chrome answers `Invalid parameters` when it is
+/// missing or not a boolean.
+fn req_bool(p: &Value, key: &str) -> Result<bool, CdpError> {
+    p.get(key).and_then(Value::as_bool).ok_or_else(|| {
+        CdpError::invalid_params(format!(
+            "Failed to deserialize params.{key} - BINDINGS: bool value expected"
+        ))
+    })
+}
+
+/// A required number.
+fn req_f64(p: &Value, key: &str) -> Result<f64, CdpError> {
+    p.get(key).and_then(Value::as_f64).ok_or_else(|| {
+        CdpError::invalid_params(format!(
+            "Failed to deserialize params.{key} - BINDINGS: double value expected"
+        ))
+    })
+}
+
+/// An optional string: present but not a string is `Invalid parameters`.
+fn opt_str<'a>(p: &'a Value, key: &str) -> Result<Option<&'a str>, CdpError> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(_) => Err(CdpError::invalid_params(format!(
+            "Failed to deserialize params.{key} - BINDINGS: string value expected"
+        ))),
+    }
 }
 
 #[derive(Deserialize)]
@@ -1204,11 +1369,22 @@ pub(crate) async fn dispatch<H: PageHost + 'static>(
         "Fetch" => fetch_domain(&c),
         "Emulation" => emulation_domain(&c),
         "Accessibility" => accessibility_domain(&c),
-        "Security" | "Log" | "Performance" => misc_domain(&c),
+        "Security" | "Log" | "Performance" | "Audits" | "WebMCP" => misc_domain(&c),
         "IO" => io_domain(&c),
         "LightBrowser" => lightbrowser_domain(&c).await,
         _ => Err(CdpError::method_not_found(&cmd.method)),
     }
+}
+
+/// End (in base64 characters) of the `IO.read` chunk of a `len`-character
+/// stream read from `pos` with the client's `size` in bytes (1 MiB when
+/// absent; 3 bytes are 4 characters). The client picks `size`: it is
+/// clamped to the stream (Chrome reads at most what is left), so nothing
+/// below overflows.
+fn io_chunk_end(len: usize, pos: usize, size: Option<u64>) -> usize {
+    let size = size.map_or(1 << 20, |s| s.clamp(3, len as u64 + 3) as usize);
+    let chars = (size / 3 * 4).max(4);
+    pos.saturating_add(chars).min(len)
 }
 
 /// `IO.read` / `IO.close` on streams made by `Page.printToPDF`. Chunks
@@ -1223,12 +1399,7 @@ fn io_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError> 
                 .get_mut(&handle)
                 .ok_or_else(|| CdpError::server("Invalid stream handle"))?;
             // `size` counts bytes; 3 bytes are 4 base64 characters.
-            let size =
-                c.p.get("size")
-                    .and_then(Value::as_u64)
-                    .map_or(1 << 20, |s| s.max(3) as usize);
-            let chars = (size / 3 * 4).max(4);
-            let end = (*pos + chars).min(data.len());
+            let end = io_chunk_end(data.len(), *pos, c.p.get("size").and_then(Value::as_u64));
             let chunk = data[*pos..end].to_owned();
             *pos = end;
             Ok(json!({ "base64Encoded": true, "data": chunk, "eof": end >= data.len() }))
@@ -1271,6 +1442,9 @@ async fn browser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value,
                 _ => Err(CdpError::invalid_params(format!("unknown behavior {b:?}"))),
             }
         }
+        // Playwright goes on to `Browser.setWindowBounds` when this succeeds and
+        // would resize the persona's window (ADR 0009 revision 2): the answer
+        // stays "not found", as for a headless browser without a window.
         "Browser.getWindowForTarget" => Err(CdpError::server("Browser window not found")),
         "Browser.grantPermissions" | "Browser.resetPermissions" | "Browser.setPermission" => {
             let explicit =
@@ -1466,7 +1640,10 @@ async fn target_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, 
         "Target.attachToTarget" => {
             let id = str_param(c.p, "targetId")?;
             if sh.state.borrow().target(id).is_none() {
-                return Err(CdpError::server("No target with given id found"));
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "No target with given id found",
+                ));
             }
             if c.p.get("flatten").and_then(Value::as_bool) == Some(false) {
                 return Err(CdpError::server(
@@ -1522,7 +1699,14 @@ async fn target_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, 
             Ok(json!({}))
         }
         "Target.closeTarget" => {
-            sh.close_target(str_param(c.p, "targetId")?)?;
+            let id = str_param(c.p, "targetId")?;
+            if sh.state.borrow().target(id).is_none() {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "No target found for targetId",
+                ));
+            }
+            sh.close_target(id)?;
             Ok(json!({ "success": true }))
         }
         "Target.activateTarget" => {
@@ -1584,31 +1768,28 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
             Ok(json!({ "frameTree": tree }))
         }
         "Page.navigate" => {
+            let url = str_param(c.p, "url")?.to_string();
+            let referrer = opt_str(c.p, "referrer")?.map(str::to_string);
+            let referrer_policy = opt_str(c.p, "referrerPolicy")?.map(str::to_string);
+            let frame_id = opt_str(c.p, "frameId")?.map(str::to_string);
+            let transition_type = opt_str(c.p, "transitionType")?.map(str::to_string);
+            if let Some(p) = &referrer_policy
+                && lb_net_referrer_policy(p).is_none()
+            {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "Invalid referrerPolicy",
+                ));
+            }
             let req = NavigateRequest {
-                url: str_param(c.p, "url")?.to_string(),
-                referrer: c
-                    .p
-                    .get("referrer")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                referrer_policy: c
-                    .p
-                    .get("referrerPolicy")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                frame_id: c
-                    .p
-                    .get("frameId")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                transition_type: c
-                    .p
-                    .get("transitionType")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
+                url,
+                referrer,
+                referrer_policy,
+                frame_id,
+                transition_type,
             };
             if url::Url::parse(&req.url).is_err() {
-                return Err(CdpError::invalid_params("Cannot navigate to invalid URL"));
+                return Err(CdpError::server("Cannot navigate to invalid URL"));
             }
             let r = host.navigate(&t, req).await.map_err(host_err)?;
             Ok(to_value(&r))
@@ -1619,15 +1800,56 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
                 .map_err(host_err)?;
             Ok(json!({}))
         }
-        "Page.stopLoading" | "Page.bringToFront" | "Page.setInterceptFileChooserDialog" => {
+        "Page.stopLoading" | "Page.bringToFront" => Ok(json!({})),
+        // No Content-Security-Policy is enforced, so bypassing it changes
+        // nothing; font families are the persona's (ADR 0045).
+        "Page.setBypassCSP" => {
+            req_bool(c.p, "enabled")?;
             Ok(json!({}))
         }
-        "Page.getNavigationHistory" => {
-            let info = c.sh.state.borrow().target_info(&t).unwrap_or_default();
-            Ok(json!({
-                "currentIndex": 0,
-                "entries": [{ "id": 0, "url": info.url, "userTypedURL": info.url, "title": info.title, "transitionType": "typed" }]
-            }))
+        "Page.setFontFamilies" => {
+            if !c.p.get("fontFamilies").is_some_and(Value::is_object) {
+                return Err(CdpError::invalid_params("fontFamilies: object expected"));
+            }
+            Ok(json!({}))
+        }
+        "Page.setInterceptFileChooserDialog" => {
+            req_bool(c.p, "enabled")?;
+            Ok(json!({}))
+        }
+        "Page.getNavigationHistory" => match host.navigation_history(&t) {
+            Ok(h) => Ok(to_value(&h)),
+            Err(e) if e.0.ends_with("is not supported") => {
+                // A host without a session history (the mock): one entry.
+                let info = c.sh.state.borrow().target_info(&t).unwrap_or_default();
+                Ok(json!({
+                    "currentIndex": 0,
+                    "entries": [{ "id": 0, "url": info.url, "userTypedURL": info.url, "title": info.title, "transitionType": "typed" }]
+                }))
+            }
+            Err(e) => Err(host_err(e)),
+        },
+        "Page.navigateToHistoryEntry" => {
+            let id = c.p.get("entryId").and_then(Value::as_i64).ok_or_else(|| {
+                CdpError::invalid_params(
+                    "Failed to deserialize params.entryId - BINDINGS: int32 value expected",
+                )
+            })?;
+            let h = host.navigation_history(&t).map_err(host_err)?;
+            if !h.entries.iter().any(|e| e.id == id) {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "No entry with passed id",
+                ));
+            }
+            host.navigate_to_history_entry(&t, id)
+                .await
+                .map_err(host_err)?;
+            Ok(json!({}))
+        }
+        "Page.resetNavigationHistory" => {
+            host.reset_navigation_history(&t).map_err(host_err)?;
+            Ok(json!({}))
         }
         "Page.getLayoutMetrics" => {
             let p = c.persona();
@@ -1706,6 +1928,14 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
             Ok(json!({}))
         }
         "Page.captureScreenshot" => {
+            if let Some(f) = opt_str(c.p, "format")?
+                && !matches!(f, "png" | "jpeg" | "webp")
+            {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "Invalid image format",
+                ));
+            }
             let data = host.capture_screenshot(&t, c.p).map_err(host_err)?;
             Ok(json!({ "data": data }))
         }
@@ -1841,6 +2071,15 @@ async fn runtime_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value,
                 .map_err(host_err)?;
             Ok(json!({}))
         }
+        "Runtime.getHeapUsage" => {
+            let (used, total) = host.heap_usage(&t).map_err(host_err)?;
+            Ok(json!({
+                "usedSize": used,
+                "totalSize": total,
+                "embedderHeapUsedSize": 0,
+                "backingStorageSize": 0,
+            }))
+        }
         "Runtime.releaseObjectGroup" => {
             host.release_object_group(&t, str_param(c.p, "objectGroup")?)
                 .map_err(host_err)?;
@@ -1968,6 +2207,11 @@ fn dom_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError>
                 Ok(json!({ "nodeIds": host.query_selector_all(&t, node, sel).map_err(host_err)? }))
             }
         }
+        "DOM.getFrameOwner" => {
+            let frame = str_param(c.p, "frameId")?;
+            let id = host.frame_owner(&t, frame).map_err(host_err)?;
+            Ok(json!({ "backendNodeId": id }))
+        }
         "DOM.getOuterHTML" => {
             Ok(json!({ "outerHTML": host.outer_html(&t, &c.node_ref()?).map_err(host_err)? }))
         }
@@ -2041,6 +2285,12 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
         c.p.get("browserContextId")
             .and_then(Value::as_str)
             .map(str::to_string);
+    if c.method.starts_with("Storage.") && c.target.is_some() && explicit_ctx.is_some() {
+        return Err(CdpError::new(
+            protocol::code::INVALID_PARAMS,
+            "browserContextId is only allowed for Browser target",
+        ));
+    }
     match c.method {
         "Network.enable" => {
             c.page()?;
@@ -2071,6 +2321,12 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
         "Network.setCookie" => {
             let ctx = c.cookie_context(None);
             let cookie: CookieParam = params(c.p)?;
+            if cookie.url.is_none() && cookie.domain.is_none() {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "At least one of the url or domain needs to be specified",
+                ));
+            }
             let ok = host.set_cookies(&ctx, vec![cookie]).is_ok();
             Ok(json!({ "success": ok }))
         }
@@ -2085,12 +2341,107 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
             Ok(json!({}))
         }
         "Network.clearBrowserCache" => Ok(json!({})),
+        "Network.setBypassServiceWorker" => {
+            let t = c.page()?;
+            host.set_bypass_service_worker(&t, req_bool(c.p, "bypass")?)
+                .map_err(host_err)?;
+            Ok(json!({}))
+        }
+        "Network.emulateNetworkConditions"
+        | "Network.overrideNetworkState"
+        | "Network.emulateNetworkConditionsByRule" => {
+            let t = c.page()?;
+            // `emulateNetworkConditionsByRule` carries the conditions in
+            // `matchedNetworkConditions`; one rule without a URL pattern
+            // is all that is supported (every request).
+            let p = if c.method == "Network.emulateNetworkConditionsByRule" {
+                let rules = c
+                    .p
+                    .get("matchedNetworkConditions")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        CdpError::invalid_params(
+                            "Failed to deserialize params.matchedNetworkConditions - BINDINGS: array value expected",
+                        )
+                    })?;
+                rules.first().cloned().unwrap_or_else(|| json!({}))
+            } else {
+                c.p.clone()
+            };
+            let offline = req_bool(&p, "offline")?;
+            let latency = req_f64(&p, "latency")?;
+            let down = req_f64(&p, "downloadThroughput")?;
+            let up = req_f64(&p, "uploadThroughput")?;
+            if let Some(ty) = opt_str(&p, "connectionType")?
+                && !matches!(
+                    ty,
+                    "none"
+                        | "cellular2g"
+                        | "cellular3g"
+                        | "cellular4g"
+                        | "bluetooth"
+                        | "ethernet"
+                        | "wifi"
+                        | "wimax"
+                        | "other"
+                )
+            {
+                return Err(CdpError::server("Unknown connection type"));
+            }
+            host.set_network_conditions(
+                &t,
+                NetworkConditions {
+                    offline,
+                    latency,
+                    download_throughput: down,
+                    upload_throughput: up,
+                },
+            )
+            .map_err(host_err)?;
+            if c.method == "Network.emulateNetworkConditionsByRule" {
+                Ok(json!({ "ruleIds": ["1"] }))
+            } else {
+                Ok(json!({}))
+            }
+        }
+        "Network.setBlockedURLs" => {
+            let t = c.page()?;
+            let mut patterns: Vec<(String, bool)> = Vec::new();
+            if let Some(list) = c.p.get("urlPatterns") {
+                let list = list.as_array().ok_or_else(|| {
+                    CdpError::invalid_params(
+                        "Failed to deserialize params.urlPatterns - BINDINGS: array value expected",
+                    )
+                })?;
+                for e in list {
+                    let pat = e.get("urlPattern").and_then(Value::as_str).ok_or_else(|| {
+                        CdpError::invalid_params(
+                            "Failed to deserialize params.urlPatterns - BINDINGS: mandatory field missing",
+                        )
+                    })?;
+                    let block = e.get("block").and_then(Value::as_bool).ok_or_else(|| {
+                        CdpError::invalid_params(
+                            "Failed to deserialize params.urlPatterns - BINDINGS: mandatory field missing",
+                        )
+                    })?;
+                    patterns.push((pat.to_string(), block));
+                }
+            } else if let Some(urls) = c.p.get("urls").and_then(Value::as_array) {
+                patterns.extend(
+                    urls.iter()
+                        .filter_map(|u| u.as_str())
+                        .map(|u| (u.to_string(), true)),
+                );
+            }
+            host.set_blocked_urls(&t, patterns).map_err(host_err)?;
+            Ok(json!({}))
+        }
         "Network.setExtraHTTPHeaders" => {
             let t = c.page()?;
             let headers: Vec<(String, String)> =
                 c.p.get("headers")
                     .and_then(Value::as_object)
-                    .ok_or_else(|| CdpError::invalid_params("headers is required"))?
+                    .ok_or_else(|| CdpError::invalid_params("headers: object expected"))?
                     .iter()
                     .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
                     .collect();
@@ -2099,7 +2450,7 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
         }
         "Network.setCacheDisabled" => {
             let t = c.page()?;
-            host.set_cache_disabled(&t, bool_param(c.p, "cacheDisabled"))
+            host.set_cache_disabled(&t, req_bool(c.p, "cacheDisabled")?)
                 .map_err(host_err)?;
             Ok(json!({}))
         }
@@ -2111,6 +2462,7 @@ fn network_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpEr
             Ok(json!({ "body": body, "base64Encoded": b64 }))
         }
         "Network.setUserAgentOverride" => {
+            str_param(c.p, "userAgent")?;
             emulation::check_user_agent(&c.persona(), &params(c.p)?)?;
             Ok(json!({}))
         }
@@ -2123,6 +2475,18 @@ fn fetch_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpErro
     let host = &c.sh.host;
     match c.method {
         "Fetch.enable" => {
+            if let Some(list) = c.p.get("patterns").and_then(Value::as_array) {
+                for p in list {
+                    if let Some(stage) = p.get("requestStage").and_then(Value::as_str)
+                        && !matches!(stage, "Request" | "Response")
+                    {
+                        return Err(CdpError::new(
+                            protocol::code::INVALID_PARAMS,
+                            format!("Unsupported request stage '{stage}'"),
+                        ));
+                    }
+                }
+            }
             let patterns: Vec<RequestPattern> = match c.p.get("patterns") {
                 Some(v) => serde_json::from_value(v.clone())
                     .map_err(|e| CdpError::invalid_params(e.to_string()))?,
@@ -2164,12 +2528,31 @@ fn fetch_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpErro
             Ok(json!({}))
         }
         "Fetch.failRequest" => {
-            host.fail_request(
-                &t,
-                str_param(c.p, "requestId")?,
-                str_param(c.p, "errorReason")?,
-            )
-            .map_err(host_err)?;
+            let reason = str_param(c.p, "errorReason")?;
+            if !matches!(
+                reason,
+                "Failed"
+                    | "Aborted"
+                    | "TimedOut"
+                    | "AccessDenied"
+                    | "ConnectionClosed"
+                    | "ConnectionReset"
+                    | "ConnectionRefused"
+                    | "ConnectionAborted"
+                    | "ConnectionFailed"
+                    | "NameNotResolved"
+                    | "InternetDisconnected"
+                    | "AddressUnreachable"
+                    | "BlockedByClient"
+                    | "BlockedByResponse"
+            ) {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "Unknown errorReason",
+                ));
+            }
+            host.fail_request(&t, str_param(c.p, "requestId")?, reason)
+                .map_err(host_err)?;
             Ok(json!({}))
         }
         _ => Err(CdpError::method_not_found(c.method)),
@@ -2182,6 +2565,15 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
     let persona = c.persona();
     match c.method {
         "Emulation.setDeviceMetricsOverride" => {
+            let (w, h) = (req_f64(c.p, "width")?, req_f64(c.p, "height")?);
+            req_f64(c.p, "deviceScaleFactor")?;
+            req_bool(c.p, "mobile")?;
+            if !(0.0..=10_000_000.0).contains(&w) || !(0.0..=10_000_000.0).contains(&h) {
+                return Err(CdpError::new(
+                    protocol::code::INVALID_PARAMS,
+                    "Width and height values must be positive, not greater than 10000000",
+                ));
+            }
             let vp = emulation::check_device_metrics(&persona, &params(c.p)?)?;
             host.set_viewport(&t, vp).map_err(host_err)?;
             if let Some(ts) = c.sh.state.borrow_mut().target_mut(&t) {
@@ -2194,7 +2586,10 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
                 ts.viewport = None;
             }
         }
-        "Emulation.setUserAgentOverride" => emulation::check_user_agent(&persona, &params(c.p)?)?,
+        "Emulation.setUserAgentOverride" => {
+            str_param(c.p, "userAgent")?;
+            emulation::check_user_agent(&persona, &params(c.p)?)?
+        }
         "Emulation.setTimezoneOverride" => emulation::check_timezone(
             &persona,
             c.p.get("timezoneId").and_then(Value::as_str).unwrap_or(""),
@@ -2203,15 +2598,35 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
             emulation::check_locale(&persona, c.p.get("locale").and_then(Value::as_str))?
         }
         "Emulation.setFocusEmulationEnabled" => host
-            .set_focus_emulation(&t, bool_param(c.p, "enabled"))
+            .set_focus_emulation(&t, req_bool(c.p, "enabled")?)
             .map_err(host_err)?,
+        "Emulation.setScriptExecutionDisabled" => host
+            .set_script_execution_disabled(&t, req_bool(c.p, "value")?)
+            .map_err(host_err)?,
+        "Emulation.setCPUThrottlingRate" => {
+            // Accepted like Chrome (any rate); LightBrowser does not slow
+            // the page down (ADR 0045).
+            req_f64(c.p, "rate")?;
+        }
+        "Emulation.setEmulatedVisionDeficiency" => {
+            // Accepted; nothing is filtered at paint time (ADR 0045).
+            str_param(c.p, "type")?;
+        }
+        "Emulation.setIdleOverride" => {
+            req_bool(c.p, "isUserActive")?;
+            req_bool(c.p, "isScreenUnlocked")?;
+        }
+        "Emulation.clearIdleOverride" => {}
+        "Emulation.clearGeolocationOverride" => {
+            host.set_geolocation_override(&t, None).map_err(host_err)?
+        }
         "Emulation.setEmulatedMedia" => {
             let o = emulation::parse_emulated_media(&params(c.p)?)?;
             host.set_emulated_media(&t, o).map_err(host_err)?;
         }
         "Emulation.setTouchEmulationEnabled" => {
             let has_touch = persona.hardware.max_touch_points > 0;
-            if bool_param(c.p, "enabled") != has_touch {
+            if req_bool(c.p, "enabled")? != has_touch {
                 return Err(CdpError::server(format!(
                     "Emulation.setTouchEmulationEnabled: the persona has maxTouchPoints {}; it contradicts the persona",
                     persona.hardware.max_touch_points
@@ -2335,12 +2750,13 @@ fn misc_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError
                 .map_err(host_err)?;
             Ok(json!({}))
         }
-        "Security.enable" | "Log.enable" | "Performance.enable" => {
-            c.enable(c.method.split('.').next().unwrap_or(""), true)
-        }
-        "Security.disable" | "Log.disable" | "Performance.disable" => {
-            c.enable(c.method.split('.').next().unwrap_or(""), false)
-        }
+        "Security.enable" | "Log.enable" | "Performance.enable" | "Audits.enable"
+        | "WebMCP.enable" => c.enable(c.method.split('.').next().unwrap_or(""), true),
+        "Security.disable"
+        | "Log.disable"
+        | "Performance.disable"
+        | "Audits.disable"
+        | "WebMCP.disable" => c.enable(c.method.split('.').next().unwrap_or(""), false),
         "Log.clear" => Ok(json!({})),
         _ => Err(CdpError::method_not_found(c.method)),
     }
@@ -2434,6 +2850,21 @@ async fn lightbrowser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `IO.read` sizes come from the client: huge ones once overflowed
+    /// (`size / 3 * 4`, then `pos + chars`).
+    #[test]
+    fn io_read_sizes_are_clamped() {
+        assert_eq!(io_chunk_end(100, 0, None), 100);
+        assert_eq!(io_chunk_end(100, 0, Some(3)), 4);
+        assert_eq!(io_chunk_end(100, 8, Some(0)), 12);
+        assert_eq!(io_chunk_end(100, 8, Some(30)), 48);
+        for s in [u64::MAX, u64::MAX / 3 * 2, 1 << 62, usize::MAX as u64 - 1] {
+            assert_eq!(io_chunk_end(100, 0, Some(s)), 100);
+            assert_eq!(io_chunk_end(100, 96, Some(s)), 100);
+            assert_eq!(io_chunk_end(100, 100, Some(s)), 100);
+        }
+    }
 
     fn ax(
         id: &str,

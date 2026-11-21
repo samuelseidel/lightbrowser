@@ -1,0 +1,11 @@
+<!doctype html><!--LOG--><script>
+// A session history shows at most 50 entries: history.length stops at 50.
+var len0 = history.length;
+for (var i = 1; i <= 3; i++) history.pushState(i, '', '#c' + i);
+log('3 pushes add ' + (history.length - len0));
+var lens = [];
+for (var i = 4; i <= 70; i++) { history.pushState(i, '', '#c' + i); if (i % 10 == 0) lens.push(history.length); }
+log('length after 10 ... 70 pushes: ' + lens.join(' '));
+log('state ' + history.state + ' hash ' + location.hash);
+end();
+</script>

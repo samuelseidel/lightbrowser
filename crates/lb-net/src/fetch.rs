@@ -5,6 +5,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http::{Method, StatusCode};
@@ -14,6 +15,7 @@ use url::Url;
 use crate::HttpVersion;
 use crate::client_hints::{self, ClientHintsStore, UaHint};
 use crate::cookies::CookieJar;
+use crate::egress::EgressPolicy;
 use crate::error::NetError;
 use crate::header_profile::{BuildInput, HeaderProfile, RequestKind, RequestMeta, Site};
 use crate::headers::{self, OrderedHeaders};
@@ -21,11 +23,69 @@ use crate::pool::{ConnectParams, ConnectionPool, Dialer, GroupKey, Lease};
 use crate::profile::ClientHelloProfile;
 use crate::proxy::{self, Proxy};
 use crate::tcpfp::TcpProfile;
+use crate::timing::{ConnTiming, FetchTiming, RedirectTiming};
 use crate::tls::TlsConnector;
 use crate::{decompress, h1, h2};
 
 /// Redirects followed before giving up.
 const MAX_REDIRECTS: usize = 10;
+
+/// Time allowed for a TLS handshake (Chrome's `kSSLHandshakeTimeout`).
+pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Time allowed for a proxy tunnel: TCP to the proxy and the `CONNECT` or
+/// SOCKS5 exchange, `407` rounds included (Chrome's proxy connect jobs
+/// allow 30 s).
+pub const PROXY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Time allowed from a request being written to its response head. Chrome
+/// has no such limit; this one is long enough not to cut slow servers and
+/// stops a server that accepts and never answers from holding a request
+/// for ever.
+pub const RESPONSE_HEADERS_TIMEOUT: Duration = Duration::from_secs(300);
+/// Time allowed for a WebSocket opening handshake, connect included
+/// (Chrome's `kOpeningHandshakeTimeout`, 240 s).
+pub const WS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(240);
+
+/// Time limits of connection setup and of the wait for a response head.
+/// Bodies and open connections (streaming responses, WebSockets) have no
+/// limit, as in Chrome. The TCP connect has its own per-address limit in
+/// the dialer (10 s).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetTimeouts {
+    pub tls_handshake: Duration,
+    pub proxy_handshake: Duration,
+    pub response_headers: Duration,
+    pub ws_handshake: Duration,
+}
+
+impl Default for NetTimeouts {
+    fn default() -> Self {
+        NetTimeouts {
+            tls_handshake: TLS_HANDSHAKE_TIMEOUT,
+            proxy_handshake: PROXY_HANDSHAKE_TIMEOUT,
+            response_headers: RESPONSE_HEADERS_TIMEOUT,
+            ws_handshake: WS_HANDSHAKE_TIMEOUT,
+        }
+    }
+}
+
+/// `now + d`, or a far deadline when that does not fit.
+pub(crate) fn deadline_after(d: Duration) -> tokio::time::Instant {
+    let now = tokio::time::Instant::now();
+    now.checked_add(d)
+        .unwrap_or_else(|| now + Duration::from_secs(100 * 365 * 24 * 3600))
+}
+
+/// Run `fut` for at most `limit`; `on_timeout` makes the error.
+pub(crate) async fn within<T>(
+    limit: Duration,
+    fut: impl Future<Output = Result<T, NetError>>,
+    on_timeout: impl FnOnce() -> NetError,
+) -> Result<T, NetError> {
+    match tokio::time::timeout_at(deadline_after(limit), fut).await {
+        Ok(r) => r,
+        Err(_) => Err(on_timeout()),
+    }
+}
 
 /// An outgoing request. Headers are ordered.
 #[derive(Debug, Clone)]
@@ -70,6 +130,10 @@ pub struct RawResponse {
     pub headers: OrderedHeaders,
     pub body: Bytes,
     pub version: HttpVersion,
+    /// The response head had been read, and the body (Resource Timing's
+    /// `responseStart` and `responseEnd`).
+    pub head_at: std::time::Instant,
+    pub done_at: std::time::Instant,
 }
 
 /// One redirect that was followed on the way to a [`Response`].
@@ -108,6 +172,8 @@ pub struct Response {
     pub request_headers: OrderedHeaders,
     /// Redirects followed, in order. Empty when there were none.
     pub redirects: Vec<RedirectHop>,
+    /// What the fetch measured (ADR 0046).
+    pub timing: FetchTiming,
 }
 
 impl Response {
@@ -130,9 +196,15 @@ pub struct NetContext {
     /// Per-origin `Accept-CH` sets (memory only; share it across the
     /// contexts of one browser context like the cookie jar).
     pub client_hints: ClientHintsStore,
-    /// Maximum body size, enforced on the wire and again after decoding.
-    /// Default 32 MiB.
+    /// Maximum body size, enforced on the wire and while decoding (every
+    /// `Content-Encoding` layer stops at it). Default 32 MiB.
     pub max_body: usize,
+    /// Setup and response-head time limits ([`NetTimeouts`]).
+    pub timeouts: NetTimeouts,
+    /// Largest WebSocket message (one frame or the fragments of one
+    /// message, after `permessage-deflate`). Default
+    /// [`crate::websocket::MAX_MESSAGE`].
+    pub ws_max_message: usize,
     /// Skip certificate chain and hostname checks. Only for our own local test
     /// servers with self-signed certificates. Default `false`. Changing it
     /// between requests rebuilds the cached connector.
@@ -149,6 +221,10 @@ pub struct NetContext {
     /// the wire. Set it with [`NetContext::with_tcp_profile`]. It shapes
     /// direct connections only; a proxy hop uses the host's stack.
     pub tcp_profile: Option<Arc<TcpProfile>>,
+    /// Which destinations this context may connect to (ADR 0044). The
+    /// default is open (no checks). It is checked per hop before the pool
+    /// and DNS, and again per resolved address in the dialer.
+    pub egress: Arc<EgressPolicy>,
     /// Lazily built, then reused for every https request of this context. The
     /// flag records the `danger_accept_invalid_certs` it was built with.
     connector: Option<(bool, Arc<TlsConnector>)>,
@@ -184,13 +260,29 @@ impl NetContext {
             cookies: CookieJar::new(),
             client_hints: ClientHintsStore::new(),
             max_body: 32 << 20,
+            timeouts: NetTimeouts::default(),
+            ws_max_message: crate::websocket::MAX_MESSAGE,
             danger_accept_invalid_certs: false,
             pool: None,
             proxy: None,
             tcp_profile: None,
+            egress: Arc::new(EgressPolicy::open()),
             connector: None,
             dialer: Arc::new(Dialer::default()),
         })
+    }
+
+    /// Restrict this context's destinations with `policy` (ADR 0044).
+    pub fn with_egress(mut self, policy: Arc<EgressPolicy>) -> Self {
+        self.egress = policy;
+        self
+    }
+
+    /// Answer name lookups of this context's own connections (the ones
+    /// made without a pool) from `hook` first. For tests.
+    #[doc(hidden)]
+    pub fn set_resolve_hook(&self, hook: Option<Arc<crate::pool::ResolveHook>>) {
+        self.dialer.set_hook(hook);
     }
 
     /// Shape the SYN of every direct connection from this context with `tcp`.
@@ -234,10 +326,13 @@ impl NetContext {
             cookies: self.cookies.clone(),
             client_hints: self.client_hints.clone(),
             max_body: self.max_body,
+            timeouts: self.timeouts,
+            ws_max_message: self.ws_max_message,
             danger_accept_invalid_certs: self.danger_accept_invalid_certs,
             pool: self.pool.clone(),
             proxy: self.proxy.clone(),
             tcp_profile: self.tcp_profile.clone(),
+            egress: Arc::clone(&self.egress),
             connector: self.connector.clone(),
             dialer: Arc::clone(&self.dialer),
         }
@@ -258,12 +353,19 @@ impl NetContext {
     ) -> Result<tokio::net::TcpStream, NetError> {
         match self.proxy_for(url) {
             Some(p) => {
-                p.tunnel(&self.dialer, host, port, &self.persona.user_agent)
-                    .await
+                p.tunnel(
+                    &self.dialer,
+                    &self.egress,
+                    host,
+                    port,
+                    &self.persona.user_agent,
+                    self.timeouts.proxy_handshake,
+                )
+                .await
             }
             None => {
                 let tcp = self.tcp_profile.as_deref();
-                self.dialer.connect(host, port, tcp).await
+                self.dialer.connect(host, port, tcp, &self.egress).await
             }
         }
     }
@@ -345,6 +447,9 @@ pub fn fetch(
 
 async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, NetError> {
     let mut req = req;
+    let chain_start = Instant::now();
+    let mut redirect_end: Option<Instant> = None;
+    let mut redirect_times: Vec<RedirectTiming> = Vec::new();
     let mut redirects: Vec<RedirectHop> = Vec::new();
     let initiator = req.meta.as_ref().and_then(|m| m.initiator.clone());
     let meta = req.meta.clone().unwrap_or_default();
@@ -363,6 +468,7 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
         } else {
             Vec::new()
         };
+        let hop_start = Instant::now();
         let hop = fetch_once(ctx, &req, redirects.len(), site, &hints, restart).await?;
         restart = false;
         if hints_on && top_level {
@@ -382,6 +488,11 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             if !matches!(next.scheme(), "http" | "https") {
                 return Err(NetError::UnsupportedScheme(next.scheme().to_owned()));
             }
+            redirect_end = Some(hop.done_at);
+            redirect_times.push(RedirectTiming {
+                url: req.url.clone(),
+                timing_allow_origin: header_values(&hop.headers, "timing-allow-origin"),
+            });
             redirects.push(RedirectHop {
                 url: req.url.clone(),
                 method: req.method.clone(),
@@ -403,6 +514,18 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             continue;
         }
 
+        let timing = FetchTiming {
+            start: chain_start,
+            redirect: redirect_end.map(|e| (chain_start, e)),
+            redirects: redirect_times,
+            fetch_start: hop_start,
+            conn: hop.conn,
+            request_start: hop.request_start,
+            response_start: hop.head_at,
+            response_end: hop.done_at,
+            encoded_body_size: hop.encoded_len as u64,
+            decoded_body_size: hop.body.len() as u64,
+        };
         return Ok(Response {
             status: hop.status,
             headers: hop.headers,
@@ -414,6 +537,7 @@ async fn fetch_chain(ctx: &mut NetContext, req: Request) -> Result<Response, Net
             method: req.method,
             request_headers: hop.sent,
             redirects,
+            timing,
         });
     }
 }
@@ -428,6 +552,13 @@ struct Hop {
     sent: OrderedHeaders,
     connection_id: Option<u64>,
     connection_reused: bool,
+    /// Setup of the connection opened for this hop (`None`: reused).
+    conn: Option<ConnTiming>,
+    request_start: Instant,
+    head_at: Instant,
+    done_at: Instant,
+    /// Body bytes on the wire (before `Content-Encoding` is undone).
+    encoded_len: usize,
 }
 
 /// `Critical-CH`: the response names a hint its origin asked for (stored
@@ -495,6 +626,18 @@ async fn fetch_once_inner(
         .unwrap_or(if https { 443 } else { 80 });
     // `host_str` brackets IPv6 literals; resolution wants them bare.
     let bare_host = host.trim_start_matches('[').trim_end_matches(']');
+    // Egress policy (ADR 0044): first thing per hop, so a refused host
+    // costs no header work, no pool entry and no DNS query. Redirects come
+    // through here too. The dialer checks every resolved address again.
+    // Through a proxy the proxy resolves the name, so only a name an allow
+    // entry vouches for goes (`check_remote_name`).
+    if ctx.proxy_for(&req.url).is_some() {
+        ctx.egress.check_remote_name(bare_host)?;
+    } else {
+        // The same check `EgressPolicy::check_url` gives callers that test
+        // a URL up front (lightbrowser mcp), so the two cannot disagree.
+        ctx.egress.check_url(&req.url)?;
+    }
 
     // Final headers for this hop. The set depends on the HTTP version
     // (ALPN), so it is built once the version is known.
@@ -536,79 +679,119 @@ async fn fetch_once_inner(
         }
     };
 
-    let (raw, sent, connection_id, connection_reused) = if let Some(pool) = ctx.pool.clone() {
-        let key = GroupKey::for_request(&req.url, &meta)
-            .ok_or_else(|| NetError::Http(format!("url has no host: {}", req.url)))?;
-        // The urgency the request's `priority` value carries orders the
-        // waiting requests (HTTP/1.1 drops the header, the value stays).
-        let urgency = crate::pool::urgency(
-            wire(HttpVersion::Http2)
-                .headers
-                .iter()
-                .find(|(n, _)| n.eq_ignore_ascii_case("priority"))
-                .map(|(_, v)| v.as_str()),
-        );
-        let params = ConnectParams {
-            profile: Arc::clone(&ctx.profile),
-            insecure: ctx.danger_accept_invalid_certs,
-            proxy,
-            user_agent: Arc::from(ctx.persona.user_agent.as_str()),
-            tcp_profile: ctx.tcp_profile.clone(),
-        };
-        pooled_exchange(
-            &pool,
-            &key,
-            urgency,
-            &params,
-            &wire,
-            ctx.max_body,
-            forward.is_some(),
-        )
-        .await?
-    } else {
-        let connector = if https {
-            Some(ctx.tls_connector()?)
+    let (raw, sent, connection_id, connection_reused, conn, request_start) =
+        if let Some(pool) = ctx.pool.clone() {
+            let key = GroupKey::for_request(&req.url, &meta)
+                .ok_or_else(|| NetError::Http(format!("url has no host: {}", req.url)))?;
+            // The urgency the request's `priority` value carries orders the
+            // waiting requests (HTTP/1.1 drops the header, the value stays).
+            let urgency = crate::pool::urgency(
+                wire(HttpVersion::Http2)
+                    .headers
+                    .iter()
+                    .find(|(n, _)| n.eq_ignore_ascii_case("priority"))
+                    .map(|(_, v)| v.as_str()),
+            );
+            let params = ConnectParams {
+                profile: Arc::clone(&ctx.profile),
+                insecure: ctx.danger_accept_invalid_certs,
+                proxy,
+                user_agent: Arc::from(ctx.persona.user_agent.as_str()),
+                tcp_profile: ctx.tcp_profile.clone(),
+                egress: Arc::clone(&ctx.egress),
+                timeouts: ctx.timeouts,
+            };
+            pooled_exchange(
+                &pool,
+                &key,
+                urgency,
+                &params,
+                &wire,
+                ctx.max_body,
+                forward.is_some(),
+            )
+            .await?
         } else {
-            None
-        };
-        let mut tcp = match &forward {
-            Some(p) => p.dial(&ctx.dialer).await?,
-            None => ctx.connect_tcp(&req.url, bare_host, port).await?,
-        };
-        let (raw, sent) = match connector {
-            None => {
-                let wire = wire(HttpVersion::Http1);
-                let raw = h1::send_on_form(&mut tcp, &wire, ctx.max_body, forward.is_some())
+            let connector = if https {
+                Some(ctx.tls_connector()?)
+            } else {
+                None
+            };
+            let timeouts = ctx.timeouts;
+            let t0 = Instant::now();
+            let mut tcp = match &forward {
+                Some(p) => p.dial(&ctx.dialer, &ctx.egress).await?,
+                None => ctx.connect_tcp(&req.url, bare_host, port).await?,
+            };
+            let mut conn = ConnTiming::whole(t0, Instant::now());
+            let (raw, sent, request_start) = match connector {
+                None => {
+                    let wire = wire(HttpVersion::Http1);
+                    let request_start = Instant::now();
+                    let raw = h1::send_on_form(
+                        &mut tcp,
+                        &wire,
+                        ctx.max_body,
+                        forward.is_some(),
+                        timeouts.response_headers,
+                    )
                     .await
                     .map_err(|e| e.error)?
                     .0;
-                (raw, wire.headers)
-            }
-            Some(connector) => {
-                let (stream, version) = connector.connect(bare_host, tcp).await?;
-                let wire = wire(version);
-                let raw = match version {
-                    HttpVersion::Http2 => {
-                        h2::send_with_limit(stream, &wire, &ctx.profile, ctx.max_body).await?
-                    }
-                    HttpVersion::Http1 => h1::send_with_limit(stream, &wire, ctx.max_body).await?,
-                };
-                (raw, wire.headers)
-            }
+                    (raw, wire.headers, request_start)
+                }
+                Some(connector) => {
+                    conn.secure_start = Some(Instant::now());
+                    let (mut stream, version) = crate::tls::handshake_within(
+                        timeouts.tls_handshake,
+                        bare_host,
+                        connector.connect(bare_host, tcp),
+                    )
+                    .await?;
+                    conn.connect_end = Instant::now();
+                    let wire = wire(version);
+                    let request_start = Instant::now();
+                    let raw = match version {
+                        HttpVersion::Http2 => {
+                            h2::send_with_limits(
+                                stream,
+                                &wire,
+                                &ctx.profile,
+                                ctx.max_body,
+                                timeouts.response_headers,
+                            )
+                            .await?
+                        }
+                        HttpVersion::Http1 => {
+                            h1::send_on_form(
+                                &mut stream,
+                                &wire,
+                                ctx.max_body,
+                                false,
+                                timeouts.response_headers,
+                            )
+                            .await
+                            .map_err(|e| e.error)?
+                            .0
+                        }
+                    };
+                    (raw, wire.headers, request_start)
+                }
+            };
+            (raw, sent, None, false, Some(conn), request_start)
         };
-        (raw, sent, None, false)
-    };
 
     let set_cookies = header_values(&raw.headers, "set-cookie");
     if !set_cookies.is_empty() {
         ctx.cookies.store_response(&req.url, &set_cookies);
     }
 
+    let encoded_len = raw.body.len();
     let encoding = header_values(&raw.headers, "content-encoding").join(",");
     let body = if raw.body.is_empty() || encoding.trim().is_empty() {
         raw.body
     } else {
-        decompress::decode(&encoding, raw.body)?
+        decompress::decode_with_limit(&encoding, raw.body, ctx.max_body)?
     };
     if body.len() > ctx.max_body {
         return Err(NetError::BodyTooLarge {
@@ -623,6 +806,11 @@ async fn fetch_once_inner(
         sent,
         connection_id,
         connection_reused,
+        conn,
+        request_start,
+        head_at: raw.head_at,
+        done_at: raw.done_at,
+        encoded_len,
     })
 }
 
@@ -638,19 +826,29 @@ async fn pooled_exchange(
     wire: &(dyn Fn(HttpVersion) -> Request + Sync),
     max_body: usize,
     absolute: bool,
-) -> Result<(RawResponse, OrderedHeaders, Option<u64>, bool), NetError> {
+) -> Result<PooledExchange, NetError> {
     let mut retried = false;
     loop {
         match pool.acquire(key, urgency, params).await? {
             Lease::H1 { mut conn, reused } => {
                 let req = wire(HttpVersion::Http1);
                 let mut guard = SocketGuard::new(pool, key, params, false);
-                match h1::send_on_form(&mut conn.stream, &req, max_body, absolute).await {
+                let opened = (!reused).then_some(*conn.timing);
+                let request_start = Instant::now();
+                match h1::send_on_form(
+                    &mut conn.stream,
+                    &req,
+                    max_body,
+                    absolute,
+                    params.timeouts.response_headers,
+                )
+                .await
+                {
                     Ok((raw, reusable)) => {
                         guard.defuse();
                         let id = conn.id;
                         pool.release(key, conn, reusable, params);
-                        return Ok((raw, req.headers, Some(id), reused));
+                        return Ok((raw, req.headers, Some(id), reused, opened, request_start));
                     }
                     Err(e) if reused && e.nothing_received && !retried => {
                         tracing::debug!("resending on a new connection: {}", e.error);
@@ -663,6 +861,8 @@ async fn pooled_exchange(
                 let req = wire(HttpVersion::Http2);
                 let mut guard = SocketGuard::new(pool, key, params, true);
                 let id = conn.id;
+                let opened = Some(*conn.timing);
+                let request_start = Instant::now();
                 let started = h2::start(conn.stream, &req, &params.profile).await?;
                 let (send, driver, first) = started.split();
                 guard.defuse();
@@ -671,14 +871,24 @@ async fn pooled_exchange(
                         tracing::debug!("h2 connection ended: {e}");
                     }
                 });
-                let raw = h2::finish_started(first, &req, max_body).await?;
-                return Ok((raw, req.headers, Some(id), false));
+                let raw =
+                    h2::finish_started(first, &req, max_body, params.timeouts.response_headers)
+                        .await?;
+                return Ok((raw, req.headers, Some(id), false, opened, request_start));
             }
             Lease::H2(session) => {
                 let req = wire(HttpVersion::Http2);
                 let id = session.id;
-                match h2::request_on(session.send.clone(), &req, max_body).await {
-                    Ok(raw) => return Ok((raw, req.headers, Some(id), true)),
+                let request_start = Instant::now();
+                match h2::request_on(
+                    session.send.clone(),
+                    &req,
+                    max_body,
+                    params.timeouts.response_headers,
+                )
+                .await
+                {
+                    Ok(raw) => return Ok((raw, req.headers, Some(id), true, None, request_start)),
                     Err(e) if e.retryable && !retried => {
                         tracing::debug!("session {id} refused the request: {}", e.error);
                         pool.session_closed(key, id);
@@ -690,6 +900,18 @@ async fn pooled_exchange(
         }
     }
 }
+
+/// What [`pooled_exchange`] returns: the response, the request headers as
+/// sent, the connection's id, whether it was reused, the setup of a
+/// connection opened for the request, and when the request was written.
+type PooledExchange = (
+    RawResponse,
+    OrderedHeaders,
+    Option<u64>,
+    bool,
+    Option<ConnTiming>,
+    Instant,
+);
 
 /// Gives a busy socket's slot back to the pool if the request ends without
 /// [`ConnectionPool::release`] (error, panic).

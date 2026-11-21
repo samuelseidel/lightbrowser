@@ -5,7 +5,7 @@ import fs from 'node:fs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib/node_modules/playwright/index.mjs');
 const [base, out, cdp] = process.argv.slice(2);
 const pages = ['images', 'gradients', 'radius_shadow', 'root'];
-const b = cdp ? await chromium.connectOverCDP(cdp) : await chromium.launch({ executablePath: process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'] });
+const b = cdp ? await chromium.connectOverCDP(cdp) : await chromium.launch({ executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium', args: ['--disable-background-networking', '--no-proxy-server'] });
 const ctx = cdp ? b.contexts()[0] || await b.newContext() : await b.newContext({ viewport: { width: 400, height: 300 }, deviceScaleFactor: 1 });
 fs.mkdirSync(out, { recursive: true });
 for (const name of pages) {

@@ -54,7 +54,7 @@ import gen_corpus  # noqa: E402
 CORPUS = HERE / "corpus"
 RESULTS = HERE / "results"
 IS_MAC = sys.platform == "darwin"
-DEFAULT_CHROMIUM = (
+DEFAULT_CHROMIUM = os.environ.get("LB_CHROME") or (
     str(Path.home() / "Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")
     if IS_MAC else "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome"
 )
@@ -362,11 +362,14 @@ class Server:
         line = self.proc.stdout.readline()
         m = re.search(r"listening (127\.0\.0\.1):(\d+)", line)
         if not m:
+            self.close()
             raise RuntimeError(f"corpus server did not start: {line!r}")
         self.base = assert_loopback(f"http://{m.group(1)}:{m.group(2)}")
 
     def close(self) -> None:
         stop(self.proc)
+        if self.proc.stdout:  # the pipe the "listening" line came through
+            self.proc.stdout.close()
 
 
 def free_port() -> int:

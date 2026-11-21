@@ -55,6 +55,8 @@ pub(crate) enum NavObj {
     DeviceInfo(Box<DeviceInfo>),
     Speech,
     Voice(u16),
+    /// `navigator.storage`.
+    Storage,
     Orientation,
     /// WebRTC objects (`rtc`).
     Rtc(Box<super::rtc::RtcObj>),
@@ -102,6 +104,7 @@ impl NavObj {
             }
             NavObj::Speech => "SpeechSynthesis",
             NavObj::Voice(_) => "SpeechSynthesisVoice",
+            NavObj::Storage => "StorageManager",
             NavObj::Orientation => "ScreenOrientation",
             NavObj::Rtc(r) => r.iface_name(),
             NavObj::Timing => "PerformanceTiming",
@@ -1385,6 +1388,20 @@ fn register_media(reg: &mut Registry, rt: &Runtime) {
 // Speech synthesis
 // ---------------------------------------------------------------------------
 
+/// The `SpeechSynthesisVoice` object of persona voice `i` (the one
+/// `getVoices()` lists).
+pub(crate) fn voice_arg(w: &Window, i: u16) -> Arg {
+    single(w, "nav:voice", u32::from(i), || NavObj::Voice(i))
+}
+
+/// The persona voice index of a `SpeechSynthesisVoice` object.
+pub(crate) fn voice_index(w: &Window, id: u32) -> Option<u16> {
+    nav(w, id, |o| match o {
+        NavObj::Voice(i) => Some(*i),
+        _ => None,
+    })
+}
+
 fn voice_count(w: &Window) -> usize {
     profile(w).map_or(0, |p| p.speech_voices.len())
 }
@@ -1426,21 +1443,47 @@ fn register_speech(reg: &mut Registry, rt: &Runtime) {
             .collect();
         cx.ret(Arg::Array(list))
     });
-    for name in ["pending", "speaking", "paused"] {
-        getter(reg, rt, "SpeechSynthesis", name, |cx, w| {
-            check(cx, w)?;
-            cx.ret(false)
-        });
-    }
-    for name in ["cancel", "pause", "resume"] {
-        method(reg, rt, "SpeechSynthesis", name, |cx, w| {
-            check(cx, w)?;
-            Ok(())
-        });
-    }
+    getter(reg, rt, "SpeechSynthesis", "pending", |cx, w| {
+        check(cx, w)?;
+        cx.ret(super::speech::pending(w))
+    });
+    getter(reg, rt, "SpeechSynthesis", "speaking", |cx, w| {
+        check(cx, w)?;
+        cx.ret(super::speech::speaking(w))
+    });
+    getter(reg, rt, "SpeechSynthesis", "paused", |cx, w| {
+        check(cx, w)?;
+        cx.ret(super::speech::paused(w))
+    });
+    method(reg, rt, "SpeechSynthesis", "cancel", |cx, w| {
+        check(cx, w)?;
+        super::speech::cancel(w);
+        Ok(())
+    });
+    method(reg, rt, "SpeechSynthesis", "pause", |cx, w| {
+        check(cx, w)?;
+        super::speech::pause(w);
+        Ok(())
+    });
+    method(reg, rt, "SpeechSynthesis", "resume", |cx, w| {
+        check(cx, w)?;
+        super::speech::resume(w);
+        Ok(())
+    });
     method(reg, rt, "SpeechSynthesis", "speak", |cx, w| {
         check(cx, w)?;
-        need_args(cx, 1, "speak", "SpeechSynthesis")
+        need_args(cx, 1, "speak", "SpeechSynthesis")?;
+        let utt = cx
+            .arg_host(0)
+            .filter(|h| h.kind == super::K_OBJ)
+            .filter(|h| w.with_obj(h.id, |o| matches!(o, Obj::Utterance(_))) == Some(true));
+        let Some(utt) = utt else {
+            return Err(HostError::type_error(
+                "Failed to execute 'speak' on 'SpeechSynthesis': parameter 1 is not of type 'SpeechSynthesisUtterance'.",
+            ));
+        };
+        super::speech::speak(cx, w, utt.id);
+        Ok(())
     });
     fn voice(
         cx: &mut CallCtx<'_, '_, '_>,
@@ -1473,6 +1516,133 @@ fn register_speech(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "SpeechSynthesisVoice", "default", |cx, w| {
         let v = voice(cx, w)?;
         cx.ret(v.default)
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Storage manager
+// ---------------------------------------------------------------------------
+
+const GIB: u64 = 1 << 30;
+
+/// The disk `navigator.storage.estimate()` is computed for: 256 GiB, a
+/// typical desktop disk (the recording machine's was 246 GB; Chrome 153
+/// reports the same quota for any disk of 10 GiB or more, see
+/// [`reported_quota`], so the value only matters below that). It is not a
+/// persona field.
+pub(crate) const STORAGE_DISK_BYTES: u64 = 256 * GIB;
+
+/// The quota Chrome 153 reports to pages (`CalculateReportedQuota` in
+/// `quota_manager_impl.cc`, with `report_static_storage_quota_` on):
+/// usage plus 10 GiB when the disk has 10 GiB or more (or in a private
+/// window), else usage plus the disk size rounded up to a whole GiB. The
+/// real, much larger per-origin quota is not shown to pages.
+pub(crate) fn reported_quota(disk_bytes: u64, usage: u64) -> u64 {
+    if disk_bytes >= 10 * GIB {
+        usage + 10 * GIB
+    } else {
+        usage + disk_bytes.div_ceil(GIB) * GIB
+    }
+}
+
+/// Bytes of each storage system `navigator.storage.estimate()` counts for
+/// the origin of `w`, as `(usageDetails key, bytes)`. Chrome 153 counts
+/// IndexedDB, the Cache API, service worker registrations and the file
+/// system; `localStorage`, `sessionStorage` and cookies do not move the
+/// number (recorded). A key is listed only when its system holds something.
+fn storage_breakdown(w: &Window) -> Vec<(&'static str, u64)> {
+    let origin = w.origin_string();
+    let mut v = vec![
+        ("caches", super::sw::caches_usage(w)),
+        ("indexedDB", w.idb_backend().map_or(0, |b| b.usage(&origin))),
+    ];
+    v.retain(|(_, n)| *n > 0);
+    v.sort_by_key(|(k, _)| *k);
+    v
+}
+
+/// Start a `StorageManager` promise method: the promise, with `this`
+/// checked (a bad `this` rejects, as in Chrome) and, for the methods that
+/// need one, an origin that is not opaque. `false` when it is rejected.
+fn storage_begin(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    name: &str,
+    needs_origin: bool,
+) -> Result<(lb_js::Resolver, bool), HostError> {
+    let r = cx.ret_new_promise()?;
+    if this_nav(cx, w, |o| matches!(o, NavObj::Storage).then_some(())).is_err() {
+        cx.reject_promise(r, illegal())?;
+        return Ok((r, false));
+    }
+    if needs_origin && w.origin_string() == "null" {
+        cx.reject_promise(
+            r,
+            HostError::type_error(format!(
+                "Failed to execute '{name}' on 'StorageManager': The operation is not supported in this context."
+            )),
+        )?;
+        return Ok((r, false));
+    }
+    Ok((r, true))
+}
+
+fn register_storage(reg: &mut Registry, rt: &Runtime) {
+    getter(reg, rt, "Navigator", "storage", |cx, w| {
+        this_obj(cx)?;
+        cx.ret(single(w, "nav:storage", 0, || NavObj::Storage))
+    });
+    method(reg, rt, "StorageManager", "estimate", |cx, w| {
+        let (r, ok) = storage_begin(cx, w, "estimate", true)?;
+        if !ok {
+            return Ok(());
+        }
+        let parts = storage_breakdown(w);
+        let usage: u64 = parts.iter().map(|(_, n)| n).sum();
+        let details: Vec<String> = parts.iter().map(|(k, n)| format!("\"{k}\":{n}")).collect();
+        cx.resolve_promise(
+            r,
+            Arg::Json(format!(
+                "{{\"quota\":{},\"usage\":{usage},\"usageDetails\":{{{}}}}}",
+                reported_quota(STORAGE_DISK_BYTES, usage),
+                details.join(",")
+            )),
+        )
+    });
+    // `persist()` asks for the permission and `persisted()` reads it. The
+    // state is the persona's `persistent-storage` (`prompt` unless set, as
+    // in Chrome 153 headless): the answer is true only for `granted`, and
+    // asking changes nothing (headless Chrome does not prompt).
+    for name in ["persist", "persisted"] {
+        method(reg, rt, "StorageManager", name, move |cx, w| {
+            let (r, ok) = storage_begin(cx, w, name, true)?;
+            if !ok {
+                return Ok(());
+            }
+            let granted = persona_state(w, "persistent-storage", "prompt") == "granted";
+            cx.resolve_promise(r, Arg::Bool(granted))
+        });
+    }
+    method(reg, rt, "StorageManager", "getDirectory", |cx, w| {
+        let (r, ok) = storage_begin(cx, w, "getDirectory", false)?;
+        if !ok {
+            return Ok(());
+        }
+        if w.origin_string() == "null" {
+            return cx.reject_promise(
+                r,
+                w.rt.err(
+                    "SecurityError",
+                    "Storage directory access is denied because the context is sandboxed and lacks the 'allow-same-origin' flag.",
+                ),
+            );
+        }
+        // No origin private file system yet (ADR 0047): rejected as Chrome
+        // does when it denies the origin its storage directory.
+        cx.reject_promise(
+            r,
+            w.rt.err("SecurityError", "Storage directory access is denied."),
+        )
     });
 }
 
@@ -1596,31 +1766,9 @@ const TIMING_FIELDS: [&str; 21] = [
 ];
 
 /// Legacy `performance.timing` value of `field` (ms since the epoch, 0
-/// when not reached). The document loader records response completion and
-/// commit. Unmeasured transport phases use estimates capped at response end.
+/// when not reached): the navigation entry's values (`perf.rs`).
 fn timing_value(w: &Window, field: &str) -> f64 {
-    let nav = w.clock.time_origin.floor();
-    let li = w.load_info.borrow().clone();
-    let at = |ms: Option<f64>| ms.map_or(0.0, |m| (w.clock.time_origin + m).floor());
-    let https = w.url().scheme() == "https";
-    let response_end = li.response_end_ms.map_or(nav + 4.0, |ms| at(Some(ms)));
-    let estimate = |offset: f64| (nav + offset).min(response_end);
-    match field {
-        "navigationStart" => nav,
-        "fetchStart" | "domainLookupStart" | "domainLookupEnd" | "connectStart" | "connectEnd" => {
-            estimate(1.0)
-        }
-        "secureConnectionStart" if https => estimate(1.0),
-        "requestStart" => estimate(2.0),
-        "responseStart" => estimate(3.0),
-        "responseEnd" => response_end,
-        "domLoading" => li.commit_ms.map_or(response_end, |ms| at(Some(ms))),
-        "domInteractive" | "domContentLoadedEventStart" | "domContentLoadedEventEnd" => {
-            at(li.dcl_ms)
-        }
-        "domComplete" | "loadEventStart" | "loadEventEnd" => at(li.load_ms),
-        _ => 0.0,
-    }
+    super::perf::legacy_timing(w, field)
 }
 
 /// `PerformanceNavigationTiming` / resource high-res times (ms since
@@ -1862,16 +2010,9 @@ fn register_timing(reg: &mut Registry, rt: &Runtime) {
             .collect();
         cx.ret(Arg::Json(format!("{{{}}}", body.join(","))))
     });
-    let nav_type = |w: &Window| -> u32 {
-        match w.load_info.borrow().navigation_type.as_deref() {
-            Some("Reload") => 1,
-            Some("BackForward") => 2,
-            _ => 0,
-        }
-    };
     getter(reg, rt, "PerformanceNavigation", "type", move |cx, w| {
         this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
-        cx.ret(nav_type(w))
+        cx.ret(super::perf::legacy_navigation(w).0)
     });
     getter(
         reg,
@@ -1880,15 +2021,14 @@ fn register_timing(reg: &mut Registry, rt: &Runtime) {
         "redirectCount",
         |cx, w| {
             this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
-            cx.ret(w.load_info.borrow().redirect_count)
+            cx.ret(super::perf::legacy_navigation(w).1)
         },
     );
     method(reg, rt, "PerformanceNavigation", "toJSON", move |cx, w| {
         this_nav(cx, w, |o| matches!(o, NavObj::Navigation).then_some(()))?;
+        let (t, rc) = super::perf::legacy_navigation(w);
         cx.ret(Arg::Json(format!(
-            "{{\"type\":{},\"redirectCount\":{}}}",
-            nav_type(w),
-            w.load_info.borrow().redirect_count
+            "{{\"type\":{t},\"redirectCount\":{rc}}}"
         )))
     });
 }
@@ -2062,6 +2202,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_battery(reg, rt);
     register_media(reg, rt);
     register_speech(reg, rt);
+    register_storage(reg, rt);
     register_screen_extras(reg, rt);
     register_timing(reg, rt);
     register_keyboard(reg, rt);
@@ -2633,5 +2774,21 @@ mod tests {
             brands_json(&b),
             r#"[{"brand":"Google Chrome","version":"153"},{"brand":"Not_A Brand","version":"8"}]"#
         );
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+
+    /// Chrome's `CalculateReportedQuota` (`quota_manager_impl.cc`): a disk
+    /// below 10 GiB cannot be had on the recording machine, so the
+    /// small-disk branch is checked against the source, not a recording.
+    #[test]
+    fn reported_quota_formula() {
+        assert_eq!(reported_quota(256 * GIB, 0), 10 * GIB);
+        assert_eq!(reported_quota(10 * GIB, 5), 10 * GIB + 5);
+        assert_eq!(reported_quota(8 * GIB + 1, 7), 9 * GIB + 7);
+        assert_eq!(reported_quota(4 * GIB, 0), 4 * GIB);
     }
 }

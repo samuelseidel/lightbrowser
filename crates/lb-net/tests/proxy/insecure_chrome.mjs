@@ -4,7 +4,7 @@
 const { chromium } = await import(process.env.PLAYWRIGHT_MJS || '/opt/node22/lib/node_modules/playwright/index.mjs');
 const port = process.argv[2];
 const b = await chromium.launch({
-  executablePath: process.env.CHROME || '/opt/pw-browsers/chromium',
+  executablePath: process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium',
   args: ['--disable-background-networking', '--no-proxy-server', '--host-resolver-rules=MAP insecure.test 127.0.0.1'],
 });
 const p = await (await b.newContext()).newPage();

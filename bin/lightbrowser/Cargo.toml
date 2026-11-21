@@ -17,8 +17,10 @@ lb-net = { path = "../../crates/lb-net" }
 lb-page = { path = "../../crates/lb-page", default-features = false }
 lb-webapi = { path = "../../crates/lb-webapi", default-features = false }
 lb-cdp = { path = "../../crates/lb-cdp" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 url = "2"
 # Signal handling for `tcp-shim` (Linux only).
 libc = "0.2"
 serde_json = "1"
+# Already in the tree (lb-page, lb-net); the `--log` subscriber.
+tracing = "0.1"

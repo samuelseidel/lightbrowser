@@ -54,9 +54,28 @@ pub struct Options {
     pub max_draw_buffers: u32,
 }
 
+/// Stack of the compile thread. The parser recurses per nesting level of
+/// the page's source (up to `parse::MAX_NESTING` levels), and a debug build uses
+/// tens of KiB per level, far more than a page worker's 2 MiB. The memory
+/// is only reserved; pages touch what the shader needs.
+const COMPILE_STACK: usize = 64 << 20;
+
 /// Compiles one shader. Returns the compiled shader (on success) and the
-/// info log.
+/// info log. Runs on a short-lived thread with a large stack (see
+/// [`COMPILE_STACK`]).
 pub fn compile(src: &str, stage: Stage, opts: &Options) -> (Option<crate::ir::Shader>, String) {
+    std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .name("lb-glsl".into())
+            .stack_size(COMPILE_STACK)
+            .spawn_scoped(s, || compile_here(src, stage, opts))
+            .ok()
+            .and_then(|t| t.join().ok())
+            .unwrap_or_else(|| (None, "ERROR: 0:1: '' : memory exhausted\n".into()))
+    })
+}
+
+fn compile_here(src: &str, stage: Stage, opts: &Options) -> (Option<crate::ir::Shader>, String) {
     let mut log = Log::default();
     let exts: Vec<&str> = opts.extensions.to_vec();
     let pp = pp::preprocess(src, opts.webgl2, &exts, &mut log);

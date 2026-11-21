@@ -117,6 +117,10 @@ pub struct CdpHostOptions {
     /// `profiles/tcp`, or `None` / `"off"` to leave the host stack (default).
     /// Windows and macOS profiles need `tcp-shim` (ADR 0031, T10).
     pub tcp_profile: Option<String>,
+    /// Egress policy of every context this host makes (ADR 0044). `None`:
+    /// open. A CDP client cannot change it (`createBrowserContext` has no
+    /// such parameter).
+    pub egress: Option<Arc<lb_net::EgressPolicy>>,
 }
 
 impl CdpHostOptions {
@@ -130,6 +134,7 @@ impl CdpHostOptions {
             proxy_server: None,
             proxy_bypass_list: None,
             tcp_profile: None,
+            egress: None,
         }
     }
 }
@@ -264,6 +269,16 @@ impl CdpHost {
             .map_err(|_| HostError::new("Execution context was destroyed."))?
     }
 
+    /// Markdown, links and metadata of a page target's current document
+    /// (ADR 0042), exactly as `lightbrowser fetch --dump markdown` makes
+    /// them ([`Page::extract`]). Not a CDP method: the in-process MCP
+    /// server (`browser_extract`, ADR 0041) calls it directly.
+    #[cfg(feature = "chrome")]
+    pub async fn extract(&self, target: &str) -> Result<crate::extract::Extracted, String> {
+        let page = self.page(target).map_err(|e| e.to_string())?;
+        page.extract().await.map_err(|e| e.to_string())
+    }
+
     fn page(&self, target: &str) -> HostResult<Rc<Page>> {
         self.pages
             .borrow()
@@ -318,6 +333,9 @@ impl CdpHost {
                 );
             }
             ctx.set_tcp_profile(tcp).map_err(page_err)?;
+        }
+        if let Some(e) = &self.opts.egress {
+            ctx.set_egress(Arc::clone(e));
         }
         Ok(ctx)
     }
@@ -552,42 +570,155 @@ impl PageHost for CdpHost {
         if let Some(f) = &req.frame_id
             && f != target_id
         {
-            return Err(HostError::new("No frame for given id found"));
+            return Err(HostError::new("No frame with given id found"));
         }
         let page = self.page(target_id)?;
         let url = url::Url::parse(&req.url)
             .map_err(|_| HostError::new("Cannot navigate to invalid URL"))?;
+        // An unparsable referrer is dropped, as Chrome does.
+        let referrer = req
+            .referrer
+            .as_deref()
+            .and_then(|r| url::Url::parse(r).ok())
+            .map(|r| (r, req.referrer_policy.clone()));
         let mut result = NavigateResult {
             frame_id: target_id.to_string(),
-            loader_id: None,
-            error_text: None,
+            ..Default::default()
         };
-        if url.fragment().is_some()
-            && self
-                .on_worker(target_id, move |_, p| async move {
-                    Ok(p.window().is_some_and(|w| w.navigate_fragment(&url, false)))
-                })
-                .await?
+        match page
+            .navigate_cdp(url, referrer, req.transition_type.clone())
+            .await
         {
-            return Ok(result);
-        }
-        match page.navigate(&req.url).await {
-            Ok(nav) => result.loader_id = Some(agent::loader_id(page.id(), nav.loader_id)),
-            Err(PageError::Net(e)) => result.error_text = Some(net::net_error_text(&e)),
+            Ok(Some(nav)) => result.loader_id = Some(agent::loader_id(page.id(), nav.loader_id)),
+            // Same document: no loader.
+            Ok(None) => {}
+            Err(PageError::Net(e)) => {
+                result.error_text = Some(net::net_error_text(&e));
+                result.loader_id = Some(agent::loader_id(page.id(), page.last_loader()));
+            }
             Err(PageError::Aborted) => result.error_text = Some("net::ERR_ABORTED".into()),
             Err(e) => return Err(page_err(e)),
         }
         Ok(result)
     }
 
-    async fn reload(&self, target_id: &str, _ignore_cache: bool) -> HostResult<()> {
+    fn navigation_history(&self, target_id: &str) -> HostResult<NavigationHistory> {
+        let page = self.page(target_id)?;
+        page.call_blocking(BLOCK, |_, p| {
+            let (current, entries) = p.session_snapshot();
+            NavigationHistory {
+                current_index: current as i64,
+                entries: entries
+                    .into_iter()
+                    .map(|e| NavigationEntry {
+                        id: e.id,
+                        url: e.url.to_string(),
+                        user_typed_url: e.user_typed,
+                        title: e.title,
+                        transition_type: e.transition,
+                    })
+                    .collect(),
+            }
+        })
+        .map_err(page_err)
+    }
+
+    async fn navigate_to_history_entry(&self, target_id: &str, entry_id: i64) -> HostResult<()> {
+        let page = self.page(target_id)?;
+        let (tx, rx) = oneshot::channel();
+        let found = page
+            .call(move |ws, p| async move {
+                Ok(crate::session::traverse_to(&ws, &p, entry_id, Some(tx)))
+            })
+            .await
+            .map_err(page_err)?;
+        if !found {
+            return Err(HostError::new("No entry with passed id"));
+        }
+        // A document load answers at its commit; a move inside the
+        // document drops the sender at once.
+        match rx.await {
+            Ok(Err(PageError::Net(_) | PageError::Aborted)) | Ok(Ok(_)) | Err(_) => Ok(()),
+            Ok(Err(e)) => Err(page_err(e)),
+        }
+    }
+
+    fn reset_navigation_history(&self, target_id: &str) -> HostResult<()> {
+        let page = self.page(target_id)?;
+        page.post(|_, p| p.history.borrow_mut().reset())
+            .map_err(page_err)
+    }
+
+    fn set_script_execution_disabled(&self, target_id: &str, disabled: bool) -> HostResult<()> {
+        self.post(target_id, move |_, p, a| {
+            a.st.borrow_mut().scripts_disabled = disabled;
+            if let Some(w) = p.window() {
+                for x in crate::frames::tree(&w) {
+                    x.set_scripts_disabled(disabled);
+                }
+            }
+        })
+    }
+
+    fn set_network_conditions(
+        &self,
+        target_id: &str,
+        conditions: NetworkConditions,
+    ) -> HostResult<()> {
+        self.post(target_id, move |_, _, a| {
+            a.st.borrow_mut().offline = conditions.offline;
+        })
+    }
+
+    fn set_blocked_urls(&self, target_id: &str, patterns: Vec<(String, bool)>) -> HostResult<()> {
+        self.post(target_id, move |_, _, a| {
+            a.st.borrow_mut().blocked = patterns;
+        })
+    }
+
+    fn set_bypass_service_worker(&self, target_id: &str, bypass: bool) -> HostResult<()> {
+        self.post(target_id, move |_, _, a| {
+            a.st.borrow_mut().bypass_sw = bypass;
+        })
+    }
+
+    fn frame_owner(&self, target_id: &str, frame_id: &str) -> HostResult<BackendNodeId> {
+        let frame = frame_id.to_string();
+        self.blocking(target_id, move |_, agent, top| {
+            if frame == agent.target {
+                return Err(HostError::new(
+                    "Frame with the given id does not belong to the target.",
+                ));
+            }
+            let not_found = || HostError::new("Frame with the given id was not found.");
+            let id = agent.frame_of(&frame).ok_or_else(not_found)?;
+            let w = lb_webapi::rt::frames::find(top, id).ok_or_else(not_found)?;
+            let n = lb_webapi::rt::frames::frame_element(&w).ok_or_else(not_found)?;
+            let parent = lb_webapi::rt::frames::parent(&w).ok_or_else(not_found)?;
+            Ok(agent::backend_id(parent.doc_key(0), n))
+        })
+    }
+
+    fn heap_usage(&self, target_id: &str) -> HostResult<(f64, f64)> {
+        let page = self.page(target_id)?;
+        page.call_blocking(BLOCK, |ws, _| {
+            ws.with_engine(|e| {
+                let s = e.heap_stats();
+                (s.used as f64, s.total as f64)
+            })
+            .unwrap_or((0.0, 0.0))
+        })
+        .map_err(page_err)
+    }
+
+    async fn reload(&self, target_id: &str, ignore_cache: bool) -> HostResult<()> {
         let page = self
             .pages
             .borrow()
             .get(target_id)
             .map(|p| p.page.clone())
             .ok_or_else(|| HostError::new("No target with given id found"))?;
-        match page.reload().await {
+        match page.reload_with(ignore_cache).await {
             Ok(_) | Err(PageError::Net(_)) | Err(PageError::Aborted) => Ok(()),
             Err(e) => Err(page_err(e)),
         }
@@ -1661,10 +1792,7 @@ fn child_trees(a: &agent::Agent, w: &lb_webapi::rt::Window) -> Vec<FrameTree> {
                 loader,
                 c.window.url().as_str(),
             );
-            let name = frames::window_name(&c.window);
-            if !name.is_empty() {
-                frame.name = Some(name);
-            }
+            frame.name = Some(frames::window_name(&c.window));
             FrameTree {
                 frame,
                 child_frames: child_trees(a, &c.window),

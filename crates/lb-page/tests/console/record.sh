@@ -2,8 +2,10 @@
 # Record which page code Chrome runs during console calls, with no DevTools
 # client attached (Playwright would attach one): load each case with
 # `chrome-headless-shell --dump-dom` on loopback and print its hit list.
-# Usage: CHROME=/path/to/chrome-headless-shell sh record.sh > chrome.json
+# Usage: LB_CHROME=/path/to/chrome-headless-shell sh record.sh > chrome.json
+# (CHROME works too; LB_CHROME is the variable every recorder script reads.)
 set -e
+CHROME="${LB_CHROME:-${CHROME:?set LB_CHROME to the chrome-headless-shell binary}}"
 cd "$(dirname "$0")/cases"
 python3 -m http.server 18995 --bind 127.0.0.1 >/dev/null 2>&1 &
 srv=$!

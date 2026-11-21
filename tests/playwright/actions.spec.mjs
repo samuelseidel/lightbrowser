@@ -171,7 +171,10 @@ test('link navigation, form submit and a second document', async () => {
   assert.equal(await page.inputValue('#again'), 'still works');
   await page.click('#b2');
   assert.equal(await page.textContent('#b2'), 'pressed');
-  await page.goBack().catch(() => {});
+  // Back to the form document, as a real history navigation.
+  await page.goBack();
+  assert.equal(page.url(), `${base}/form`);
+  assert.equal(await page.title(), 'Form');
   await page.goto(`${base}/form`);
   await page.fill('#name', 'Ada');
   await page.fill('#email', 'ada@example.test');

@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>reload</title></head><body>
+<!--LOG-->
+<script>
+var step=sessionStorage.getItem('step')||'0';
+function info(){var e=performance.getEntriesByType('navigation')[0];return [e.type,e.redirectCount,performance.navigation.type,chrome.loadTimes().navigationType,e.startTime,e.name===location.href].join(' ')}
+// Navigations before the load event replace the entry, so each step waits for it.
+addEventListener('load',function(){setTimeout(function(){
+  if(step==='0'){log('first: '+info());sessionStorage.setItem('log0',L.join('\n'));sessionStorage.setItem('step','1');location.reload()}
+  else if(step==='1'){sessionStorage.setItem('step','2');log(sessionStorage.getItem('log0'));log('after reload: '+info());sessionStorage.setItem('log1',L.join('\n'));location.href='next.html'}
+  else {log(sessionStorage.getItem('log1'));log('after back: '+info());end()}
+},30)});
+</script></body></html>

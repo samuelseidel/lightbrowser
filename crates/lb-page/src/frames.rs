@@ -48,9 +48,9 @@ impl FrameHooks for Hooks {
                 frame_id: agent.frame_str(frame),
                 url,
                 navigation_type: if history_api {
-                    "historyApi"
+                    "historyApi".into()
                 } else {
-                    "fragment"
+                    "fragment".into()
                 },
             });
         }
@@ -152,6 +152,7 @@ async fn navigate_frame(
         None
     };
     let reserved = lb_webapi::rt::sw::uuid4();
+    let started = std::time::Instant::now();
     let (resp, creator) = match &nav.srcdoc {
         Some(doc) => (
             Ok(NetResponse {
@@ -163,6 +164,7 @@ async fn navigate_frame(
                 redirected: false,
                 protocol: None,
                 navigation_redirect_count: 0,
+                timing: None,
             }),
             Some(parent_url.clone()),
         ),
@@ -176,6 +178,7 @@ async fn navigate_frame(
                 redirected: false,
                 protocol: None,
                 navigation_redirect_count: 0,
+                timing: None,
             }),
             Some(parent_url.clone()),
         ),
@@ -246,18 +249,29 @@ async fn navigate_frame(
         .as_ref()
         .map(|u| u.to_string())
         .unwrap_or_default();
-    let w = Window::new_with_clock(&rt, init, clock);
+    let w = Window::new_at(&rt, init, resp.timing.as_ref().map(|t| t.start));
+    w.set_nav_info(lb_webapi::rt::NavInfo {
+        timing: resp.timing.clone(),
+        nav_type: if nav.reload { "reload" } else { "navigate" },
+        status: resp.status,
+        headers: resp.headers.clone(),
+        encoded: resp
+            .timing
+            .as_ref()
+            .map_or(resp.body.len() as u64, |t| t.encoded_body_size),
+        decoded: resp.body.len() as u64,
+    });
     {
         let mut info = w.load_info.borrow_mut();
-        info.connection_info = resp.protocol.map(str::to_owned);
+        if info.connection_info.is_none() {
+            info.connection_info = resp.protocol.map(str::to_owned);
+        }
         if info.connection_info.is_none() && resp.url.scheme() == "https" {
             info.connection_info = Some("h2".into());
         }
         info.response_end_ms = Some(response_end_ms);
         info.redirect_count = resp.navigation_redirect_count;
         info.commit_ms = Some(w.clock.now());
-        // Body is post-Content-Encoding. Approximate the wire size until
-        // lb-net exposes the pre-decompress length.
         let decoded = resp.body.len() as u64;
         let encoded = if resp
             .header("content-encoding")
@@ -270,9 +284,6 @@ async fn navigate_frame(
         info.encoded_body_size = Some(encoded);
         info.decoded_body_size = Some(decoded);
     }
-    if nav.reload {
-        w.load_info.borrow_mut().navigation_type = Some("Reload".into());
-    }
     w.set_worker_host(parent.worker_host());
     w.set_sw_host(parent.sw_host());
     w.set_idb_backend(parent.idb_backend());
@@ -281,6 +292,7 @@ async fn navigate_frame(
     if let (Some(v), Some(h)) = (&controller, w.sw_host()) {
         h.schedule_update(v.id);
     }
+    let network_frame = creator.is_none();
     let r = ws.with_engine(|e| wf::commit_child(e, &parent, id, &w, creator));
     match r {
         Some(Ok(())) => {}
@@ -309,6 +321,10 @@ async fn navigate_frame(
         a.frame_lifecycle(id, "commit");
     }
     let _ = crate::nav::load(&ws, &page, &w, crate::nav::Doc::Frame(id), &text).await;
+    // The parent's timeline gets an `iframe` entry for the document.
+    if network_frame && !parent.is_closed() {
+        parent.perf_iframe(nav.url.clone(), started, &resp);
+    }
     page.notify.notify_one();
     if !w.is_closed() {
         done.finish();

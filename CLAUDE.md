@@ -11,13 +11,16 @@ first and do not contradict them. Current state (Chrome build): M1 (network),
 M2 (DOM + V8), M3 (layout + CDP), M4 (Chrome fingerprints), M5 (human input
 and Python SDK), most of M6 and M7 (OS personas) are done. `lightbrowser serve` runs real V8
 pages through `lb_page::CdpHost`; stock Playwright `connectOverCDP` passes
-38 tests (including screenshots, shadow DOM, proxies, workers, `setContent`,
+58 tests (including screenshots, shadow DOM, proxies, workers, `setContent`,
 dialogs, file uploads, permissions and geolocation, drag and drop, PDF, and
 a plain `newContext()`); the WPT subset
-passes 11739/12471 (11734/12465 before `setContent` and `File`; 2566/2788 of the pre-shadow-DOM files, the same per
-file as the previous code here; 1249/1288 of the IndexedDB files). On our
+passes 11742/12472, checked per file against `tests/wpt/EXPECTATIONS.txt` (11734/12465 before `setContent` and `File`; 2566/2788 of the pre-shadow-DOM files, the same per
+file as the previous code here; 1251/1294 of the IndexedDB files). On our
 detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for all
-8 reference Chrome personas, with the M7 OS rules at full weight. With
+8 reference Chrome personas, with the four M7 OS rules at full weight
+(`tests/detect-bench/configs/os_full_weight.json`; with `webrtc_candidates` at its
+target weight too, `configs/all_targets.json`, fp is 15: no server-reflexive
+candidate). With
 `--input human` (`LightBrowser.human*`) all 8 score beh 0 on their own
 seeds; see "M5 status" and "M7 status" in `docs/ROADMAP.md`. M7 (ADR 0015):
 desktop Windows 10/11, macOS (Intel, Apple Silicon) and Linux (Ubuntu X11,
@@ -183,6 +186,11 @@ and media emulation applies as the client asks (revision 3); `beforeunload`.
 Idle workers drop their engine after 30 s (ADR 0035 revision 1); V8's
 background pool is 2 threads (`LB_V8_THREADS`). Builds and checks also run
 on the `rtx-dev` Linux box (ROADMAP "Linux checks on rtx-dev").
+Borrowed-ideas work (2026-11-07, ADRs 0041-0047, `docs/borrowing.md`):
+`lightbrowser mcp`, `fetch --dump markdown|links|json`, `--egress loopback`
+/ `--allow-host`, detector rules wave 2, CDP session history and Audits,
+Performance Timeline, history rate limit, pointer-event provenance,
+StorageManager and speech events.
 See "Where we stand" and the status
 sections in `docs/ROADMAP.md`.
 
@@ -236,6 +244,8 @@ cargo test -p lb-net --test fingerprint -- --nocapture
 # TCP profile values vs real traffic in profiles/reference/tcp_public.json (ADR 0033)
 cargo test -p lb-net --test public_reference -- --nocapture
 # TCP SYN check (Windows/macOS/Linux stack) on loopback; needs root, skips without it
+# (an LB-SKIP line, still a pass; LB_REQUIRE_NO_SKIPS=1 makes a skip fail;
+# tools/ci/skip_summary.sh LOG counts them; tests/README.md "Skipped tests")
 cargo test -p lb-net --test tcp_fingerprint -- --nocapture --test-threads=1
 # Run the packet shim, then fetch with a persona's TCP stack (ADR 0031)
 sudo ./target/debug/lightbrowser tcp-shim &
@@ -248,9 +258,13 @@ cargo test -p lb-page --test connections
 ./target/debug/lb-fptest site --listen 127.0.0.1:8443 --images 20 --delay-ms 50 --seconds 20
 # Fetch from a local test server (self-signed cert)
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
-# WPT subset (loopback) and the Playwright CDP smoke test
+# WPT subset (loopback), checked per file against tests/wpt/EXPECTATIONS.txt; after a fix
+# or a manifest change write the file: LB_WPT_BLESS=1 cargo test --locked -p lb-page --test wpt -- --nocapture
 cargo test -p lb-page --test wpt -- --nocapture
-cargo build -p lightbrowser && node --test tests/playwright/   # 38 tests; LIGHTBROWSER_BIN overrides
+# Web API coverage (prints "web api coverage: N/M operations, ..."; fails below its floors)
+cargo test -p lb-webapi --test coverage
+# Playwright CDP smoke test
+cargo build -p lightbrowser && node --test tests/playwright/   # 58 tests; LIGHTBROWSER_BIN overrides; needs Playwright 1.65 (npm install --prefix tests/playwright, or NODE_PATH)
 # Workers as CDP targets vs Chrome: record the CDP traffic of either browser, compare (loopback)
 node tests/playwright/workers/record.mjs chrome > /tmp/c.json; node tests/playwright/workers/record.mjs lightbrowser > /tmp/l.json
 node tests/playwright/workers/record.mjs compare /tmp/c.json /tmp/l.json
@@ -304,7 +318,7 @@ node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
 node tests/detect-bench/run.js --base http://127.0.0.1:18766 --scenario T-010 \
     --cdp ws://127.0.0.1:19222/devtools/browser/<id> --input human --expect 'beh<=30'
 # stop both servers afterwards
-python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (43)
+python3 -m unittest discover -s tests/detect-bench   # scoring and server tests (170)
 # Linux ground truth from local Chrome (loopback, headed under xvfb-run): see tools/os_truth/README.md
 # Python SDK tests (run from sdk/python; scenarios need Playwright >= 1.63, else skipped)
 (cd sdk/python && python3 -m pytest tests)
@@ -351,7 +365,8 @@ and run the fingerprint test. Only capture on loopback with a local browser.
   GPU, fonts, seeds, TLS/H2 profile) comes from the context's immutable
   `Arc<Persona>`. No statics, env vars or `thread_local` for fingerprint data.
 - **No disk writes by default.** Cache, cookies and storage live in memory.
-  Disk is used only when an explicit flag is passed (e.g. `--cache-dir`).
+  Disk is used only when an explicit flag is passed. There is no HTTP cache
+  yet; the planned one would get a `--cache-dir` flag.
 - **SFC32 must stay bit-identical** to `geckophantom_config.h` in
   stealth-browser (`geckophantom_config/include/`). Same seed, same sequence.
   Do not change `lb-persona::sfc32` without re-checking against the C output.

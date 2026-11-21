@@ -38,6 +38,7 @@
 //! and parse without running scripts) until SpiderMonkey lands (M4b).
 
 mod context;
+pub mod extract;
 
 #[cfg(feature = "chrome")]
 mod browser;
@@ -51,6 +52,8 @@ mod frames;
 mod nav;
 #[cfg(feature = "chrome")]
 mod page;
+#[cfg(feature = "chrome")]
+mod session;
 #[cfg(feature = "chrome")]
 mod sw;
 #[cfg(feature = "chrome")]

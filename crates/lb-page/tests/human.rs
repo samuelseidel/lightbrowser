@@ -318,6 +318,53 @@ fn same_persona_same_stream_virtual_time() {
 /// Wheel detents and `wheelDelta` follow the persona's OS (Windows 100 px
 /// and ratio 1.2, Linux 120 px and ratio 1, macOS trackpad ratio 3), and
 /// select-all is Ctrl+A off macOS, Cmd+A on macOS.
+// The wheel event list grows with the client's distance: absurd deltas are
+// an error instead of an unbounded list (and a run that never ends).
+#[test]
+fn absurd_scroll_deltas_are_rejected() {
+    lb_cdp::block_on_local(async {
+        let s = serve(vec![("/", Resource::html(PAGE))]).await;
+        let h = host(WIN, true);
+        open(&h, &s.url("/")).await;
+        for (dx, dy) in [
+            (0.0, 1e12),
+            (-1e300, 0.0),
+            (0.0, f64::INFINITY),
+            (f64::NAN, 10.0),
+            (0.0, -1_000_001.0),
+        ] {
+            let e = h
+                .human_input(
+                    "T",
+                    HumanCommand::Scroll(HumanScroll {
+                        delta_x: dx,
+                        delta_y: dy,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                e.0.starts_with("deltaX and deltaY must be"),
+                "{dx} {dy}: {e:?}"
+            );
+        }
+        assert_eq!(eval(&h, "T", "scrollY").await, json!(0));
+        // Normal input is unchanged.
+        h.human_input(
+            "T",
+            HumanCommand::Scroll(HumanScroll {
+                delta_y: 300.0,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(eval(&h, "T", "scrollY").await.as_f64().unwrap() > 0.0);
+    })
+    .unwrap();
+}
+
 #[test]
 fn wheel_and_shortcuts_follow_the_os() {
     lb_cdp::block_on_local(async {

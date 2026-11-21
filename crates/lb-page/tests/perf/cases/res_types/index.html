@@ -1,0 +1,28 @@
+<!doctype html><html><head><title>types</title>
+<link rel=stylesheet href=main.css>
+<script src=sync.js></script>
+<script async src=async.js></script>
+<script defer src=defer.js></script>
+<script type=module src=mod.js></script>
+</head><body><p>hello</p>
+<img src=img.png width=4 height=4>
+<iframe src=frame.html></iframe>
+<script src=body.js></script>
+<!--LOG-->
+<script>
+addEventListener('load',async function(){
+  await sleep(300);
+  var nf=function(e){return !/favicon/.test(e.name)};var before=performance.getEntriesByType('resource').filter(nf).length;
+  var im=new Image(); im.src='newimg.png'; await new Promise(function(r){im.onload=im.onerror=r});
+  await drain(fetch('fetched.json'));
+  await new Promise(function(r){var x=new XMLHttpRequest();x.open('GET','xhr.json');x.onload=r;x.send()});
+  log('beacon '+navigator.sendBeacon('beacon'));
+  await import('./dyn.js');
+  await new Promise(function(r){var s=document.createElement('script');s.src='dynscript.js';s.onload=r;document.head.appendChild(s)});
+  await new Promise(function(r){var l=document.createElement('link');l.rel='stylesheet';l.href='dyn.css';l.onload=r;document.head.appendChild(l)});
+  await sleep(300);
+  log(before+' before; total '+performance.getEntriesByType('resource').filter(nf).length);
+  log(resList(nf));
+  end();
+});
+</script></body></html>

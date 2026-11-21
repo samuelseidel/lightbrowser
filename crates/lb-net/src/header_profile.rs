@@ -159,6 +159,20 @@ pub struct RequestMeta {
     /// `<kind>_post_redirect` for its redirect hops (also after a 303 turned
     /// it into a GET; Chrome keeps `Cache-Control: max-age=0` there).
     pub form_post: bool,
+    /// A referrer a browser-initiated navigation was given (CDP
+    /// `Page.navigate` `referrer` and `referrerPolicy`): the `Referer` of
+    /// every hop follows its policy. `Sec-Fetch-Site` and `Origin` still
+    /// come from `initiator` (none).
+    pub referrer: Option<ReferrerOverride>,
+}
+
+/// The referrer of a navigation that has no initiating document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferrerOverride {
+    pub url: Url,
+    /// A `Page.ReferrerPolicy` value (`unsafeUrl`, `origin`, ...) or the
+    /// spec's token (`unsafe-url`); `None` is the default policy.
+    pub policy: Option<String>,
 }
 
 impl RequestMeta {
@@ -172,6 +186,7 @@ impl RequestMeta {
             preflight: None,
             top_frame: None,
             form_post: false,
+            referrer: None,
         }
     }
 
@@ -255,6 +270,102 @@ pub fn referrer_for(initiator: Option<&Url>, target: &Url) -> Option<String> {
     }
     // Cross-origin: origin only.
     Some(format!("{}/", i.origin().ascii_serialization()))
+}
+
+/// The referrer policies of CDP's `Page.ReferrerPolicy`, as the spec's
+/// tokens. `None` for a value CDP does not know.
+pub fn referrer_policy_token(cdp: &str) -> Option<&'static str> {
+    Some(match cdp {
+        "noReferrer" | "no-referrer" => "no-referrer",
+        "noReferrerWhenDowngrade" | "no-referrer-when-downgrade" => "no-referrer-when-downgrade",
+        "origin" => "origin",
+        "originWhenCrossOrigin" | "origin-when-cross-origin" => "origin-when-cross-origin",
+        "sameOrigin" | "same-origin" => "same-origin",
+        "strictOrigin" | "strict-origin" => "strict-origin",
+        "strictOriginWhenCrossOrigin" | "strict-origin-when-cross-origin" => {
+            "strict-origin-when-cross-origin"
+        }
+        "unsafeUrl" | "unsafe-url" => "unsafe-url",
+        _ => return None,
+    })
+}
+
+/// `Referer` for `referrer` requesting `target` under `policy` (CDP or spec
+/// token; unknown or `None` is `strict-origin-when-cross-origin`), as
+/// Chromium's `URLRequest::ComputeReferrerForPolicy`: a downgrade is a
+/// cryptographic referrer scheme with a non-cryptographic target scheme
+/// (no trustworthiness check), fragments and credentials are dropped, and a
+/// referrer that is not `http(s)` sends nothing.
+pub fn referrer_with_policy(referrer: &Url, policy: Option<&str>, target: &Url) -> Option<String> {
+    if !matches!(referrer.scheme(), "http" | "https") {
+        return None;
+    }
+    let same_origin = referrer.origin() == target.origin();
+    let crypto = |u: &Url| matches!(u.scheme(), "https" | "wss");
+    let downgrade = crypto(referrer) && !crypto(target);
+    let full = || {
+        let mut r = referrer.clone();
+        r.set_fragment(None);
+        let _ = r.set_username("");
+        let _ = r.set_password(None);
+        // Chrome sends the origin when the full URL is over 4096 bytes.
+        if r.as_str().len() > 4096 {
+            return Some(format!("{}/", referrer.origin().ascii_serialization()));
+        }
+        Some(r.to_string())
+    };
+    let origin = || Some(format!("{}/", referrer.origin().ascii_serialization()));
+    match policy.and_then(referrer_policy_token) {
+        Some("no-referrer") => None,
+        Some("no-referrer-when-downgrade") => {
+            if downgrade {
+                None
+            } else {
+                full()
+            }
+        }
+        Some("origin") => origin(),
+        Some("origin-when-cross-origin") => {
+            if same_origin {
+                full()
+            } else {
+                origin()
+            }
+        }
+        Some("same-origin") => {
+            if same_origin {
+                full()
+            } else {
+                None
+            }
+        }
+        Some("strict-origin") => {
+            if downgrade {
+                None
+            } else {
+                origin()
+            }
+        }
+        Some("unsafe-url") => full(),
+        _ => {
+            if same_origin {
+                full()
+            } else if downgrade {
+                None
+            } else {
+                origin()
+            }
+        }
+    }
+}
+
+/// The `Referer` of a request: the navigation's own referrer when it has
+/// one, else the initiating document under the default policy.
+pub fn referer_header(meta: &RequestMeta, target: &Url) -> Option<String> {
+    match &meta.referrer {
+        Some(r) => referrer_with_policy(&r.url, r.policy.as_deref(), target),
+        None => referrer_for(meta.initiator.as_ref(), target),
+    }
 }
 
 /// `Origin` for a request, or `None` when the browser sends none.
@@ -532,7 +643,7 @@ impl HeaderProfile {
         }
 
         let origin = origin_for(meta, input.url, input.method);
-        let referer = referrer_for(meta.initiator.as_ref(), input.url);
+        let referer = referer_header(meta, input.url);
         let value = |name: &str| -> Option<String> {
             if let Some((_, v)) = overrides.iter().rev().find(|(n, _)| n == name) {
                 return Some(v.clone());
@@ -1304,6 +1415,79 @@ mod tests {
                 "Accept-Language",
             ]
         );
+    }
+
+    /// `Page.navigate` with `referrer` and `referrerPolicy`: what Chrome 153
+    /// put in `Referer` (tests/cdp-raw/chrome.json, scenario `goto`; the
+    /// loopback target is `http://`, the cross-site referrer `https://`).
+    #[test]
+    fn referrer_policies_as_chrome_recorded() {
+        let u = |s: &str| Url::parse(s).unwrap();
+        let target = u("http://127.0.0.1:8000/headers");
+        let https = u("https://ref.example.test/page?q=1#frag");
+        let cases: &[(Option<&str>, Option<&str>)] = &[
+            (None, None), // https to http: a downgrade
+            (Some("noReferrer"), None),
+            (Some("noReferrerWhenDowngrade"), None),
+            (Some("origin"), Some("https://ref.example.test/")),
+            (Some("strictOriginWhenCrossOrigin"), None),
+            (Some("sameOrigin"), None),
+            (Some("unsafeUrl"), Some("https://ref.example.test/page?q=1")),
+        ];
+        for (policy, want) in cases {
+            assert_eq!(
+                referrer_with_policy(&https, *policy, &target).as_deref(),
+                *want,
+                "{policy:?}"
+            );
+        }
+        // Same origin, same site (another port), cross origin: same host.
+        let a = u("http://127.0.0.1:8000/from?x=1#h");
+        let b = u("http://127.0.0.1:8001/from?x=1");
+        let full = Some("http://127.0.0.1:8000/from?x=1");
+        assert_eq!(
+            referrer_with_policy(&a, Some("unsafeUrl"), &target).as_deref(),
+            full
+        );
+        assert_eq!(
+            referrer_with_policy(&a, Some("sameOrigin"), &target).as_deref(),
+            full
+        );
+        assert_eq!(
+            referrer_with_policy(&a, Some("originWhenCrossOrigin"), &target).as_deref(),
+            full
+        );
+        assert_eq!(referrer_with_policy(&a, None, &target).as_deref(), full);
+        assert_eq!(
+            referrer_with_policy(&b, Some("unsafeUrl"), &target).as_deref(),
+            Some("http://127.0.0.1:8001/from?x=1")
+        );
+        let other = u("http://127.0.0.1:9000/headers");
+        assert_eq!(
+            referrer_with_policy(&a, Some("unsafeUrl"), &other).as_deref(),
+            full
+        );
+        assert_eq!(
+            referrer_with_policy(&a, None, &other).as_deref(),
+            Some("http://127.0.0.1:8000/")
+        );
+        // Credentials and fragments never go out; http referrers work.
+        let creds = u("https://u:p@ref.example.test/page?q=1");
+        assert_eq!(
+            referrer_with_policy(&creds, Some("unsafeUrl"), &target).as_deref(),
+            Some("https://ref.example.test/page?q=1")
+        );
+        let plain = u("http://ref.example.test/page?q=1");
+        assert_eq!(
+            referrer_with_policy(&plain, Some("unsafeUrl"), &target).as_deref(),
+            Some("http://ref.example.test/page?q=1")
+        );
+        assert_eq!(
+            referrer_with_policy(&u("about:blank"), Some("unsafeUrl"), &target),
+            None
+        );
+        assert_eq!(referrer_policy_token("strictOrigin"), Some("strict-origin"));
+        assert_eq!(referrer_policy_token("bogus"), None);
     }
 
     #[test]

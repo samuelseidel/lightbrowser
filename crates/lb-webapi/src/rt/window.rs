@@ -443,6 +443,14 @@ fn focus_chain(d: &mut lb_dom::Document, n: NodeId, on: bool) {
     }
 }
 
+/// Move focus for the user (a click, Tab): the focus events get
+/// `sourceCapabilities`.
+pub(crate) fn focus_user(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
+    w.input.borrow_mut().user_focus = true;
+    focus(js, w, to);
+    w.input.borrow_mut().user_focus = false;
+}
+
 /// Move focus (`focus()` / `blur()`), firing blur/focusout and
 /// focus/focusin.
 pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
@@ -450,8 +458,10 @@ pub(crate) fn focus(js: &mut dyn Js, w: &Rc<Window>, to: Option<NodeId>) {
     if old == to {
         return;
     }
+    let user = w.input.borrow().user_focus;
     let focus_extra = |related: Option<NodeId>| EventExtra::Focus {
         related: related.map(|r| w.node_ref(0, r)),
+        user,
     };
     if let Some(o) = old {
         super::input::before_blur(js, w, o);
@@ -589,35 +599,90 @@ pub(crate) fn form_entries(
     pairs
 }
 
-/// Navigate this window: fragment changes stay in the document, anything
-/// else goes to the page layer.
-pub(crate) fn navigate_to(w: &Window, url: Url, replace: bool) {
-    if !w.navigate_fragment(&url, replace) {
-        w.request_navigation(NavRequest::get(url, replace));
+/// Add (or replace) a same-document history entry: in the page's session
+/// history when the window has one, else in the window's own list.
+fn record_entry(
+    w: &Rc<Window>,
+    url: &Url,
+    state: Option<String>,
+    replace: bool,
+    fragment: Option<&str>,
+) {
+    let host = w.session.borrow().clone();
+    if let Some(host) = host {
+        host.record(url, state, replace, fragment);
+        return;
+    }
+    let mut h = w.history.borrow_mut();
+    let entry = HistEntry {
+        url: url.clone(),
+        state,
+    };
+    let idx = h.index;
+    if replace {
+        h.entries[idx] = entry;
+    } else {
+        h.entries.truncate(idx + 1);
+        h.entries.push(entry);
+        h.index += 1;
     }
 }
 
-impl Window {
-    /// Apply a fragment navigation to the current document and queue hashchange.
-    /// Returns false when the URL requires a document load.
-    pub fn navigate_fragment(&self, url: &Url, replace: bool) -> bool {
-        let cur = self.url();
-        if url.fragment().is_none()
-            || cur[..url::Position::AfterQuery] != url[..url::Position::AfterQuery]
-        {
-            return false;
-        }
-        if &cur == url {
-            super::frames::navigated_within_document(self, false);
-            return true;
-        }
-        {
-            let mut h = self.history.borrow_mut();
-            let idx = h.index;
+/// A same-document traversal: the window's URL becomes `url`, `popstate`
+/// fires with `state`, and `hashchange` follows when only the fragment
+/// changed.
+pub(crate) fn apply_traversal(js: &mut dyn Js, w: &Rc<Window>, url: Url, state: Option<String>) {
+    let old = w.url();
+    w.set_url(url.clone());
+    super::frames::navigated_within_document(w, false);
+    fire_event_with(
+        js,
+        w,
+        WINDOW_REF,
+        "PopStateEvent",
+        "popstate",
+        false,
+        false,
+        EventExtra::PopState(state),
+    );
+    let (mut a, mut b) = (old.clone(), url.clone());
+    a.set_fragment(None);
+    b.set_fragment(None);
+    if a == b && old.fragment() != url.fragment() {
+        fire_event_with(
+            js,
+            w,
+            WINDOW_REF,
+            "HashChangeEvent",
+            "hashchange",
+            false,
+            false,
+            EventExtra::HashChange {
+                old: old.to_string(),
+                new: url.to_string(),
+            },
+        );
+    }
+}
+
+/// Navigate this window: fragment changes stay in the document, anything
+/// else goes to the page layer.
+pub(crate) fn navigate_to(w: &Window, url: Url, replace: bool) {
+    if !w.navigation_allowed() {
+        return;
+    }
+    if same_document_fragment(w, &url) {
+        let old = w.url().to_string();
+        let new = url.to_string();
+        if let Some(host) = w.session.borrow().clone() {
+            host.record(&url, None, replace, Some("link"));
+        } else {
+            let mut h = w.history.borrow_mut();
             let entry = HistEntry {
                 url: url.clone(),
                 state: None,
             };
+            let idx = h.index;
             if replace {
                 h.entries[idx] = entry;
             } else {
@@ -626,28 +691,104 @@ impl Window {
                 h.index += 1;
             }
         }
-        self.set_url(url.clone());
-        super::frames::navigated_within_document(self, false);
-        let old = cur.to_string();
-        let new = url.to_string();
-        self.queue_task(
+        w.set_url(url);
+        super::frames::navigated_within_document(w, false);
+        w.queue_task(
             TaskSource::DomManipulation,
             Box::new(move |js, w| {
                 fire_event_with(
                     js,
                     w,
                     WINDOW_REF,
-                    "HashChangeEvent",
-                    "hashchange",
+                    "PopStateEvent",
+                    "popstate",
                     false,
                     false,
-                    EventExtra::HashChange { old, new },
+                    EventExtra::PopState(None),
                 );
+                if old != new {
+                    fire_event_with(
+                        js,
+                        w,
+                        WINDOW_REF,
+                        "HashChangeEvent",
+                        "hashchange",
+                        false,
+                        false,
+                        EventExtra::HashChange { old, new },
+                    );
+                }
             }),
         );
-        true
+        return;
     }
+    w.post_navigation(NavRequest::get(url, replace));
 }
+
+/// [`navigate_to`], for the browser when `browser` holds the transition
+/// type of the entry (CDP `Page.navigate`): a fragment navigation to the
+/// URL the document is on adds an entry then; from a script it replaces
+/// the current one, as in Chrome.
+pub(crate) fn navigate_to_as(
+    js: &mut dyn Js,
+    w: &Rc<Window>,
+    url: Url,
+    replace: bool,
+    browser: Option<&str>,
+) {
+    let _ = js;
+    if !w.navigation_allowed() {
+        return;
+    }
+    if same_document_fragment(w, &url) {
+        let old = w.url().to_string();
+        let new = url.to_string();
+        let replace = replace || (browser.is_none() && old == new);
+        record_entry(w, &url, None, replace, Some(browser.unwrap_or("link")));
+        w.set_url(url);
+        super::frames::navigated_within_document(w, false);
+        w.queue_task(
+            TaskSource::DomManipulation,
+            Box::new(move |js, w| {
+                fire_event_with(
+                    js,
+                    w,
+                    WINDOW_REF,
+                    "PopStateEvent",
+                    "popstate",
+                    false,
+                    false,
+                    EventExtra::PopState(None),
+                );
+                if old != new {
+                    fire_event_with(
+                        js,
+                        w,
+                        WINDOW_REF,
+                        "HashChangeEvent",
+                        "hashchange",
+                        false,
+                        false,
+                        EventExtra::HashChange { old, new },
+                    );
+                }
+            }),
+        );
+        return;
+    }
+    w.post_navigation(NavRequest::get(url, replace));
+}
+
+fn same_document_fragment(w: &Window, url: &Url) -> bool {
+    if url.fragment().is_none() {
+        return false;
+    }
+    let (mut a, mut b) = (w.url(), url.clone());
+    a.set_fragment(None);
+    b.set_fragment(None);
+    a == b
+}
+
 
 /// `(screenX, screenY)`: the persona's `window_position()` (Wayland 0,0;
 /// else `screen.window_x/y` or the work-area origin).
@@ -1139,6 +1280,9 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                     Some(u)
                 };
                 match target {
+                    // Blink: setting `hash` to the fragment it has does
+                    // not navigate.
+                    Some(u) if prop == "hash" && u == w.url() => Ok(()),
                     Some(u) => {
                         if prop != "hash" || u != w.url() {
                             navigate_to(w, u, false);
@@ -1167,7 +1311,8 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         });
     }
     method(reg, rt, "Location", "reload", |_cx, w| {
-        w.request_navigation(NavRequest::reload(w.url()));
+        // Not counted by the limiter (Chrome 153).
+        w.post_navigation(NavRequest::reload(w.url()));
         Ok(())
     });
     method(reg, rt, "Location", "toString", |cx, w| {
@@ -1181,14 +1326,21 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     // History
     getter(reg, rt, "History", "length", |cx, w| {
         not_fully_active(w, "length")?;
+        if let Some(host) = w.session.borrow().clone() {
+            return cx.ret(host.length());
+        }
         let h = w.history.borrow();
-        cx.ret(h.before + h.entries.len() as u32)
+        cx.ret((h.before + h.entries.len() as u32).min(super::HISTORY_MAX))
     });
     getter(reg, rt, "History", "state", |cx, w| {
         not_fully_active(w, "state")?;
-        let s = {
-            let h = w.history.borrow();
-            h.entries[h.index].state.clone()
+        let host = w.session.borrow().clone();
+        let s = match host {
+            Some(host) => host.state(),
+            None => {
+                let h = w.history.borrow();
+                h.entries[h.index].state.clone()
+            }
         };
         cx.ret(s.map_or(Arg::Null, Arg::Json))
     });
@@ -1226,21 +1378,10 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 }
                 _ => w.url(),
             };
-            {
-                let mut h = w.history.borrow_mut();
-                let entry = HistEntry {
-                    url: url.clone(),
-                    state,
-                };
-                let idx = h.index;
-                if replace {
-                    h.entries[idx] = entry;
-                } else {
-                    h.entries.truncate(idx + 1);
-                    h.entries.push(entry);
-                    h.index += 1;
-                }
+            if !w.navigation_allowed() {
+                return Ok(());
             }
+            record_entry(w, &url, state, replace, None);
             w.set_url(url);
             super::frames::navigated_within_document(w, true);
             Ok(())
@@ -1253,9 +1394,17 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             } else {
                 delta
             };
+            if !w.navigation_allowed() {
+                return Ok(());
+            }
+            if w.session.borrow().is_some() {
+                // The page's session history decides (and may load).
+                w.request_traversal(delta);
+                return Ok(());
+            }
             if delta == 0 {
                 if name == "go" {
-                    w.request_navigation(NavRequest::reload(w.url()));
+                    w.post_navigation(NavRequest::reload(w.url()));
                 }
                 return Ok(());
             }
@@ -1264,46 +1413,18 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 let t = h.index as i64 + i64::from(delta);
                 (t >= 0 && (t as usize) < h.entries.len()).then_some(t as usize)
             };
-            let Some(t) = target else { return Ok(()) };
+            let Some(t) = target else {
+                return Ok(());
+            };
             w.queue_task(
                 TaskSource::DomManipulation,
                 Box::new(move |js, w| {
-                    let (old, url, state) = {
+                    let (url, state) = {
                         let mut h = w.history.borrow_mut();
-                        let old = h.entries[h.index].url.clone();
                         h.index = t;
-                        (old, h.entries[t].url.clone(), h.entries[t].state.clone())
+                        (h.entries[t].url.clone(), h.entries[t].state.clone())
                     };
-                    w.set_url(url.clone());
-                    super::frames::navigated_within_document(w, false);
-                    fire_event_with(
-                        js,
-                        w,
-                        WINDOW_REF,
-                        "PopStateEvent",
-                        "popstate",
-                        false,
-                        false,
-                        EventExtra::PopState(state),
-                    );
-                    let (mut a, mut b) = (old.clone(), url.clone());
-                    a.set_fragment(None);
-                    b.set_fragment(None);
-                    if a == b && old.fragment() != url.fragment() {
-                        fire_event_with(
-                            js,
-                            w,
-                            WINDOW_REF,
-                            "HashChangeEvent",
-                            "hashchange",
-                            false,
-                            false,
-                            EventExtra::HashChange {
-                                old: old.to_string(),
-                                new: url.to_string(),
-                            },
-                        );
-                    }
+                    apply_traversal(js, w, url, state);
                 }),
             );
             Ok(())
@@ -1437,357 +1558,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     getter(reg, rt, "Performance", "timeOrigin", |cx, w| {
         cx.ret((w.clock.time_origin * 10.0).floor() / 10.0)
     });
-    method(reg, rt, "Performance", "toJSON", |cx, w| {
-        cx.ret(Arg::Json(
-            serde_json::json!({ "timeOrigin": (w.clock.time_origin * 10.0).floor() / 10.0 })
-                .to_string(),
-        ))
-    });
-    method(reg, rt, "Performance", "getEntries", |cx, w| {
-        let _ = this_obj(cx)?;
-        ensure_nav_paint(w);
-        let ids = w.perf_entries.borrow().clone();
-        cx.ret(Arg::Array(
-            ids.into_iter().map(|id| w.obj_arg(id)).collect(),
-        ))
-    });
-    method(reg, rt, "Performance", "getEntriesByType", |cx, w| {
-        let _ = this_obj(cx)?;
-        need_args(cx, 1, "getEntriesByType", "Performance")?;
-        let ty = cx.arg_string(0)?;
-        ensure_nav_paint(w);
-        let ids: Vec<u32> = w
-            .perf_entries
-            .borrow()
-            .iter()
-            .copied()
-            .filter(|&id| {
-                w.with_obj(id, |o| match o {
-                    Obj::PerfEntry { entry_type, .. } => *entry_type == ty,
-                    _ => false,
-                })
-                .unwrap_or(false)
-            })
-            .collect();
-        cx.ret(Arg::Array(
-            ids.into_iter().map(|id| w.obj_arg(id)).collect(),
-        ))
-    });
-    method(reg, rt, "Performance", "getEntriesByName", |cx, w| {
-        let _ = this_obj(cx)?;
-        need_args(cx, 1, "getEntriesByName", "Performance")?;
-        let name = cx.arg_string(0)?;
-        let ty = if cx.len() > 1 && cx.arg_kind(1) != ValueKind::Undefined {
-            Some(cx.arg_string(1)?)
-        } else {
-            None
-        };
-        ensure_nav_paint(w);
-        let ids: Vec<u32> = w
-            .perf_entries
-            .borrow()
-            .iter()
-            .copied()
-            .filter(|&id| {
-                w.with_obj(id, |o| match o {
-                    Obj::PerfEntry {
-                        entry_type,
-                        name: n,
-                        ..
-                    } => n == &name && ty.as_deref().is_none_or(|t| t == *entry_type),
-                    _ => false,
-                })
-                .unwrap_or(false)
-            })
-            .collect();
-        cx.ret(Arg::Array(
-            ids.into_iter().map(|id| w.obj_arg(id)).collect(),
-        ))
-    });
-    method(reg, rt, "Performance", "clearMarks", |cx, w| {
-        let _ = this_obj(cx)?;
-        let name = if !cx.is_empty() && cx.arg_kind(0) != ValueKind::Undefined {
-            Some(cx.arg_string(0)?)
-        } else {
-            None
-        };
-        clear_perf(w, "mark", name.as_deref());
-        Ok(())
-    });
-    method(reg, rt, "Performance", "clearMeasures", |cx, w| {
-        let _ = this_obj(cx)?;
-        let name = if !cx.is_empty() && cx.arg_kind(0) != ValueKind::Undefined {
-            Some(cx.arg_string(0)?)
-        } else {
-            None
-        };
-        clear_perf(w, "measure", name.as_deref());
-        Ok(())
-    });
-    method(reg, rt, "Performance", "clearResourceTimings", |cx, w| {
-        let _ = this_obj(cx)?;
-        clear_perf(w, "resource", None);
-        Ok(())
-    });
-    method(
-        reg,
-        rt,
-        "Performance",
-        "setResourceTimingBufferSize",
-        |_cx, _w| Ok(()),
-    );
-
-    // PerformanceObserver (Chrome has a real constructor; without it the
-    // IDL interface throws Illegal constructor and Turnstile aborts).
-    ctor(reg, rt, "PerformanceObserver", |cx, w| {
-        if cx.is_empty() {
-            return Err(HostError::type_error(
-                "Failed to construct 'PerformanceObserver': 1 argument required, but only 0 present.",
-            ));
-        }
-        if cx.arg_kind(0) != ValueKind::Function {
-            return Err(HostError::type_error(
-                "Failed to construct 'PerformanceObserver': parameter 1 is not of type 'Function'.",
-            ));
-        }
-        let cb = cx.arg_handle(0);
-        let id = w.new_obj(Obj::PerformanceObserver(Box::new(PoData {
-            callback: cb,
-            types: Vec::new(),
-        })));
-        cx.init_this(HostRef::new(K_OBJ, id))
-    });
-    method(reg, rt, "PerformanceObserver", "observe", |cx, w| {
-        let id = this_obj(cx)?;
-        let pre = "Failed to execute 'observe' on 'PerformanceObserver': ";
-        match cx.arg_kind(0) {
-            ValueKind::Undefined | ValueKind::Null | ValueKind::Object | ValueKind::Function => {}
-            _ => {
-                return Err(HostError::type_error(format!(
-                    "{pre}The provided value is not of type 'PerformanceObserverInit'."
-                )));
-            }
-        }
-        let d = Dict::arg(cx, 0);
-        let entry_types = d.get(cx, "entryTypes")?;
-        let ty = d.get(cx, "type")?;
-        let _buffered = d.bool(cx, "buffered")?;
-        d.release(cx);
-        if entry_types.is_none() && ty.is_none() {
-            return Err(HostError::type_error(format!(
-                "{pre}An observe() call must include either entryTypes or type arguments."
-            )));
-        }
-        if entry_types.is_some() && ty.is_some() {
-            if let Some(h) = entry_types {
-                cx.release(h);
-            }
-            if let Some(h) = ty {
-                cx.release(h);
-            }
-            return Err(HostError::type_error(format!(
-                "{pre}An observe() call must not include both entryTypes and type arguments."
-            )));
-        }
-        let mut types = Vec::new();
-        if let Some(h) = entry_types {
-            // Best-effort: JSON arrays and empty / opaque values.
-            if let JsValue::Json(s) = cx.handle_value(h)
-                && let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(&s)
-            {
-                for x in v {
-                    if let serde_json::Value::String(n) = x {
-                        types.push(n);
-                    }
-                }
-            }
-            cx.release(h);
-        } else if let Some(h) = ty {
-            if let Ok(n) = cx.handle_string(h) {
-                types.push(n);
-            }
-            cx.release(h);
-        }
-        let ok = w
-            .with_obj(id, |o| {
-                if let Obj::PerformanceObserver(m) = o {
-                    m.types = types;
-                    true
-                } else {
-                    false
-                }
-            })
-            .unwrap_or(false);
-        if !ok {
-            return Err(illegal());
-        }
-        Ok(())
-    });
-    method(reg, rt, "PerformanceObserver", "disconnect", |cx, w| {
-        let id = this_obj(cx)?;
-        w.with_obj(id, |o| {
-            if let Obj::PerformanceObserver(m) = o {
-                m.types.clear();
-            }
-        });
-        Ok(())
-    });
-    method(reg, rt, "PerformanceObserver", "takeRecords", |cx, w| {
-        let _ = this_obj(cx)?;
-        // Chrome returns a PerformanceObserverEntryList, not a plain array.
-        cx.ret(w.obj_arg(w.new_obj(Obj::PerformanceObserverEntryList)))
-    });
-    reg.register(
-        "PerformanceObserver",
-        "supportedEntryTypes",
-        ImplKind::StaticGetter,
-        super::wf(rt, |cx, w| {
-            // Chrome 153 window order (ADR 0046); frozen when helpers exist.
-            let types = [
-                "element",
-                "event",
-                "first-input",
-                "interaction-contentful-paint",
-                "largest-contentful-paint",
-                "layout-shift",
-                "long-animation-frame",
-                "longtask",
-                "mark",
-                "measure",
-                "navigation",
-                "paint",
-                "resource",
-                "soft-navigation",
-                "visibility-state",
-            ];
-            let json = format!(
-                "[{}]",
-                types
-                    .iter()
-                    .map(|t| format!("\"{t}\""))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            let (parse, freeze) = {
-                let h = w.helpers.borrow();
-                (h.json_parse, h.freeze)
-            };
-            if let (Some(parse), Some(freeze)) = (parse, freeze) {
-                let arr = cx
-                    .try_call_handle(parse, Arg::Undefined, &[Arg::String(json)])
-                    .map_err(|e| HostError::Error(e.message))?;
-                let _ = cx.try_call(freeze, Arg::Undefined, &[Arg::Handle(arr)]);
-                let r = cx.ret(Arg::Handle(arr));
-                cx.release(arr);
-                return r;
-            }
-            cx.ret(Arg::Array(
-                types.iter().map(|t| Arg::String((*t).to_owned())).collect(),
-            ))
-        }),
-    );
-    for name in ["getEntries", "getEntriesByType", "getEntriesByName"] {
-        method(reg, rt, "PerformanceObserverEntryList", name, |cx, _w| {
-            let _ = this_obj(cx)?;
-            cx.ret(Arg::Array(Vec::new()))
-        });
-    }
-    method(reg, rt, "Performance", "mark", |cx, w| {
-        let _ = this_obj(cx)?;
-        need_args(cx, 1, "mark", "Performance")?;
-        let name = cx.arg_string(0)?;
-        let t = coarse_now(w);
-        let id = push_perf(w, "mark", name, t, 0.0);
-        cx.ret(w.obj_arg(id))
-    });
-    method(reg, rt, "Performance", "measure", |cx, w| {
-        let _ = this_obj(cx)?;
-        need_args(cx, 1, "measure", "Performance")?;
-        let name = cx.arg_string(0)?;
-        let end = coarse_now(w);
-        let start = if cx.len() > 1 && cx.arg_kind(1) != ValueKind::Undefined {
-            let start_mark = cx.arg_string(1)?;
-            find_mark_time(w, &start_mark).unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        let end_t = if cx.len() > 2 && cx.arg_kind(2) != ValueKind::Undefined {
-            let end_mark = cx.arg_string(2)?;
-            find_mark_time(w, &end_mark).unwrap_or(end)
-        } else {
-            end
-        };
-        let id = push_perf(w, "measure", name, start, (end_t - start).max(0.0));
-        cx.ret(w.obj_arg(id))
-    });
-
-    for iface in ["PerformanceEntry", "PerformanceMark", "PerformanceMeasure"] {
-        getter(reg, rt, iface, "name", |cx, w| {
-            let id = this_obj(cx)?;
-            let v = w
-                .with_obj(id, |o| match o {
-                    Obj::PerfEntry { name, .. } => Some(name.clone()),
-                    _ => None,
-                })
-                .flatten()
-                .ok_or_else(illegal)?;
-            cx.ret(v)
-        });
-        getter(reg, rt, iface, "entryType", |cx, w| {
-            let id = this_obj(cx)?;
-            let v = w
-                .with_obj(id, |o| match o {
-                    Obj::PerfEntry { entry_type, .. } => Some((*entry_type).to_owned()),
-                    _ => None,
-                })
-                .flatten()
-                .ok_or_else(illegal)?;
-            cx.ret(v)
-        });
-        getter(reg, rt, iface, "startTime", |cx, w| {
-            let id = this_obj(cx)?;
-            let v = w
-                .with_obj(id, |o| match o {
-                    Obj::PerfEntry { start_time, .. } => Some(*start_time),
-                    _ => None,
-                })
-                .flatten()
-                .ok_or_else(illegal)?;
-            cx.ret(v)
-        });
-        getter(reg, rt, iface, "duration", |cx, w| {
-            let id = this_obj(cx)?;
-            let v = w
-                .with_obj(id, |o| match o {
-                    Obj::PerfEntry { duration, .. } => Some(*duration),
-                    _ => None,
-                })
-                .flatten()
-                .ok_or_else(illegal)?;
-            cx.ret(v)
-        });
-        method(reg, rt, iface, "toJSON", |cx, w| {
-            let id = this_obj(cx)?;
-            let json = w
-                .with_obj(id, |o| match o {
-                    Obj::PerfEntry {
-                        entry_type,
-                        name,
-                        start_time,
-                        duration,
-                    } => Some(serde_json::json!({
-                        "name": name,
-                        "entryType": entry_type,
-                        "startTime": start_time,
-                        "duration": duration,
-                    })),
-                    _ => None,
-                })
-                .flatten()
-                .ok_or_else(illegal)?;
-            cx.ret(Arg::Json(json.to_string()))
-        });
-    }
 
     // Screen
     macro_rules! scr {

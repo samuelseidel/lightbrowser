@@ -1,0 +1,38 @@
+{
+  "url": "http://{HOST}/headings.html",
+  "final_url": "http://{HOST}/headings.html",
+  "status": 200,
+  "title": "Headings & paragraphs",
+  "lang": "en",
+  "description": "A test page",
+  "canonical": "http://{HOST}/canon/headings",
+  "headings": [
+    {
+      "level": 1,
+      "text": "Main heading"
+    },
+    {
+      "level": 2,
+      "text": "Second level"
+    },
+    {
+      "level": 3,
+      "text": "Third level"
+    },
+    {
+      "level": 4,
+      "text": "Fourth"
+    },
+    {
+      "level": 5,
+      "text": "Fifth"
+    },
+    {
+      "level": 6,
+      "text": "Sixth"
+    }
+  ],
+  "links": [],
+  "text": "Main heading\nFirst paragraph with inline span text, continued on a second line.\nSecond level\nCafé & crème <tag> © 2026\nThird level\nFourth\nFifth\nSixth\nBare text in a div",
+  "markdown": "# Main heading\n\nFirst paragraph with inline span text, continued on a second line.\n\n## Second level\n\nCafé & crème \\<tag> © 2026\n\n### Third *level*\n\n#### Fourth\n\n##### Fifth\n\n###### Sixth\n\nBare text in a div\n"
+}

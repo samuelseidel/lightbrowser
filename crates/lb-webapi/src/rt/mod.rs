@@ -70,6 +70,7 @@ mod misc;
 pub mod modules;
 mod navigator;
 mod net;
+mod perf;
 mod platform_apis;
 mod rtc;
 mod scheduler;
@@ -78,6 +79,7 @@ pub mod script;
 mod serializer;
 mod shadow;
 mod sheets;
+mod speech;
 mod style;
 pub mod sw;
 mod table;
@@ -112,6 +114,7 @@ pub use canvas::{CanvasTarget, ContextFactory, ExternalContext, canvas_size};
 pub use chrome::LoadInfo;
 pub use events::{EventData, EventExtra, fire_event, fire_event_with};
 pub use image::{load_visible_lazy_images, schedule_lazy_image_check};
+pub use perf::{NavInfo, NavMark};
 pub use script::ScriptKind;
 pub use style::notify_media_lists;
 pub(crate) use webgl::{extension_names, extension_spec};
@@ -484,6 +487,7 @@ impl Runtime {
         input::register(reg, &rt);
         serializer::register(reg, &rt);
         window::register(reg, &rt);
+        perf::register(reg, &rt);
         net::register(reg, &rt);
         misc::register(reg, &rt);
         files::register(reg, &rt);
@@ -509,6 +513,7 @@ impl Runtime {
         platform_apis::register(reg, &rt);
         websocket::register(reg, &rt);
         idb::register(reg, &rt);
+        speech::register(reg, &rt);
         inherit_redeclared(reg);
         rt
     }
@@ -776,6 +781,25 @@ pub type OpenedParserEnd = Rc<dyn Fn(&Rc<Window>, OpenedEnd)>;
 /// is closed, or returns `None` at once when nobody shows dialogs.
 pub type DialogHost = Rc<dyn Fn(&Window, &DialogRequest) -> Option<DialogAnswer>>;
 
+/// The session history of the page that owns a top-level window (ADR
+/// 0045): `history.length` and `history.state` read it, `pushState`,
+/// `replaceState` and fragment navigations write to it, and traversals
+/// (`history.back()`, `forward()`, `go()`) are requested through the
+/// window ([`Window::take_traversal`]) and decided by the page layer.
+/// Windows without one (frames) keep a history of their own.
+pub trait SessionHost {
+    /// `history.length`: all entries, forward ones included.
+    fn length(&self) -> u32;
+    /// `history.state` of the current entry, as JSON.
+    fn state(&self) -> Option<String>;
+    /// The document changed its URL without loading: a new entry (or the
+    /// current one, for `replace`) at `url` with `state`.
+    /// `fragment` is the entry's transition type when it was a fragment
+    /// navigation (`link` from a script, the browser's own for CDP), `None`
+    /// for the History API.
+    fn record(&self, url: &Url, state: Option<String>, replace: bool, fragment: Option<&str>);
+}
+
 /// `document.readyState`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadyState {
@@ -805,13 +829,21 @@ pub struct Clock {
 
 impl Clock {
     pub fn new(virtual_time: bool) -> Clock {
+        Clock::started_at(virtual_time, None)
+    }
+
+    /// A clock whose navigation started at `start` (before the window was
+    /// made: the fetch of the document), so the document's own timeline
+    /// (`PerformanceNavigationTiming`) has no negative times.
+    pub fn started_at(virtual_time: bool, start: Option<Instant>) -> Clock {
         let wall = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0.0, |d| d.as_secs_f64() * 1000.0);
+        let before = start.map_or(0.0, |s| s.elapsed().as_secs_f64() * 1000.0);
         Clock {
-            start: Instant::now(),
-            time_origin: wall,
-            virtual_now: Cell::new(virtual_time.then_some(0.0)),
+            start: start.unwrap_or_else(Instant::now),
+            time_origin: wall - before,
+            virtual_now: Cell::new(virtual_time.then_some(before)),
         }
     }
     /// Milliseconds since navigation start.
@@ -839,6 +871,7 @@ impl Clock {
 pub struct NavRequest {
     pub url: Url,
     pub replace: bool,
+    /// `location.reload()` and `history.go(0)`: a reload navigation.
     pub reload: bool,
     /// Form POST body (`None`: GET).
     pub post: Option<FormBody>,
@@ -905,6 +938,50 @@ pub(crate) struct History {
     /// Entries before this document (`history.length` counts them).
     pub before: u32,
     pub scroll_restoration: String,
+}
+
+/// Chrome's `NavigationRateLimiter` (ADR 0047): a document may start 200
+/// navigations of its own in a window of 10 s; `history.pushState`,
+/// `replaceState`, `go`, `back`, `forward` and navigations started by script,
+/// a link or a form count (a reload does not), and what comes after the
+/// 200th is ignored without a trace for the page. The window starts at the
+/// first counted call and restarts at the first one after it ended. One
+/// console warning for each window in which something was ignored. Chrome 153
+/// keeps one limiter for each document (a new document of the same frame
+/// starts afresh), so it lives in the [`Window`]; time comes from the
+/// window's clock, so a virtual clock works.
+#[derive(Default)]
+pub(crate) struct NavLimiter {
+    count: Cell<u32>,
+    /// Window clock (ms) at the first counted call of this window.
+    start: Cell<f64>,
+    warned: Cell<bool>,
+}
+
+/// Calls the limiter lets through in one window.
+pub(crate) const NAV_LIMIT: u32 = 200;
+/// Length of the limiter's window in ms.
+pub(crate) const NAV_WINDOW_MS: f64 = 10_000.0;
+/// `history.length` never shows more than this (Chrome's session history
+/// size).
+pub(crate) const HISTORY_MAX: u32 = 50;
+/// Text of the warning for the first ignored call of a window.
+pub(crate) const NAV_THROTTLE_WARNING: &str = "Throttling navigation to prevent the browser from hanging. See https://crbug.com/1038223. Command line switch --disable-ipc-flooding-protection can be used to bypass the protection";
+
+impl NavLimiter {
+    /// Count a call at `now` (ms): `true` when it may go on.
+    fn count_call(&self, now: f64) -> bool {
+        if self.count.get() == 0 || now - self.start.get() > NAV_WINDOW_MS {
+            self.count.set(0);
+            self.start.set(now);
+            self.warned.set(false);
+        }
+        if self.count.get() >= NAV_LIMIT {
+            return false;
+        }
+        self.count.set(self.count.get() + 1);
+        true
+    }
 }
 
 /// Event handler storage (`onclick`), see `events`.
@@ -990,6 +1067,8 @@ pub struct Window {
     pub(crate) bg: RefCell<bgimage::BgImages>,
     ready_state: Cell<ReadyState>,
     pub(crate) history: RefCell<History>,
+    nav_limiter: NavLimiter,
+    pub(crate) speech: RefCell<speech::SpeechState>,
     pub(crate) observers: RefCell<Vec<u32>>,
     pub(crate) mo_queued: Cell<bool>,
     /// Live `ResizeObserver` object ids (see `style`).
@@ -1014,6 +1093,13 @@ pub struct Window {
     pub in_flight: Cell<u32>,
     pub(crate) current_script: Cell<Option<NodeId>>,
     nav_request: RefCell<Option<NavRequest>>,
+    /// The page's session history (top-level windows of pages).
+    pub(crate) session: RefCell<Option<Rc<dyn SessionHost>>>,
+    /// A `history.go(delta)` the page layer has not taken yet.
+    traversal: Cell<Option<i32>>,
+    /// `Emulation.setScriptExecutionDisabled`: `<script>` elements do not
+    /// run (CDP evaluation still does).
+    scripts_disabled: Cell<bool>,
     pub(crate) helpers: RefCell<Helpers>,
     pub(crate) error_depth: Cell<u32>,
     /// Async and dynamically inserted scripts that finished loading, run by
@@ -1043,6 +1129,8 @@ pub struct Window {
     /// How the document was loaded (`chrome.loadTimes()`); the page layer
     /// may fill in the protocol and navigation type.
     pub load_info: RefCell<LoadInfo>,
+    /// The performance timeline (`perf.rs`, ADR 0046).
+    pub(crate) perf: RefCell<perf::PerfState>,
     /// Nested browsing contexts: parent link, child frames, page hooks.
     pub(crate) frames: frames::FrameState,
     /// `document.visibilityState` is "hidden" (set while unloading).
@@ -1073,7 +1161,13 @@ impl std::fmt::Debug for Window {
 impl Window {
     /// A window for a new, empty document at `init.url`.
     pub fn new(rt: &Runtime, init: WindowInit) -> Rc<Window> {
-        let clock = Clock::new(init.virtual_time);
+        Window::new_at(rt, init, None)
+    }
+
+    /// [`Window::new`] for a document whose navigation started at
+    /// `nav_start`: `performance.now()` and `timeOrigin` count from there.
+    pub fn new_at(rt: &Runtime, init: WindowInit, nav_start: Option<Instant>) -> Rc<Window> {
+        let clock = Clock::started_at(init.virtual_time, nav_start);
         Self::new_with_clock(rt, init, clock)
     }
 
@@ -1139,6 +1233,8 @@ impl Window {
                 before: init.history_len,
                 scroll_restoration: "auto".into(),
             }),
+            nav_limiter: NavLimiter::default(),
+            speech: RefCell::new(speech::SpeechState::default()),
             observers: RefCell::new(Vec::new()),
             mo_queued: Cell::new(false),
             resize_observers: RefCell::new(Vec::new()),
@@ -1153,6 +1249,9 @@ impl Window {
             in_flight: Cell::new(0),
             current_script: Cell::new(None),
             nav_request: RefCell::new(None),
+            session: RefCell::new(None),
+            traversal: Cell::new(None),
+            scripts_disabled: Cell::new(false),
             helpers: RefCell::new(Helpers::default()),
             error_depth: Cell::new(0),
             closed: Cell::new(false),
@@ -1168,6 +1267,7 @@ impl Window {
             selections: RefCell::new(HashMap::new()),
             nav_state: RefCell::new(navigator::NavState::default()),
             load_info: RefCell::new(LoadInfo::default()),
+            perf: RefCell::new(perf::PerfState::default()),
             frames: frames::FrameState::default(),
             hidden: Cell::new(false),
             wk: worker::WorkerSide::default(),
@@ -1497,6 +1597,55 @@ impl Window {
         self.history.borrow().entries.len() as u32
     }
 
+    /// Give this window the page's session history (see [`SessionHost`]).
+    pub fn set_session_host(&self, host: Option<Rc<dyn SessionHost>>) {
+        *self.session.borrow_mut() = host;
+    }
+
+    /// Stop (or resume) running the document's `<script>` elements.
+    pub fn set_scripts_disabled(&self, off: bool) {
+        self.scripts_disabled.set(off);
+    }
+
+    /// Whether the page's own scripts are off.
+    pub fn scripts_disabled(&self) -> bool {
+        self.scripts_disabled.get()
+    }
+
+    /// A traversal (`history.back()`, `forward()`, `go(delta)`) the
+    /// document asked for, taken by the page layer.
+    pub fn take_traversal(&self) -> Option<i32> {
+        self.traversal.take()
+    }
+
+    /// Chrome keeps the first traversal a task asked for and ignores the
+    /// ones after it (`history.back(); history.forward()` goes back).
+    pub(crate) fn request_traversal(&self, delta: i32) {
+        if self.traversal.get().is_none() {
+            self.traversal.set(Some(delta));
+        }
+        self.wake();
+    }
+
+    /// Run a same-document traversal the page layer decided on: the URL
+    /// and `history.state` become the entry's, `popstate` fires, then
+    /// `hashchange` if only the fragment differs.
+    pub fn traverse_same_document(
+        self: &Rc<Self>,
+        js: &mut dyn Js,
+        url: Url,
+        state: Option<String>,
+    ) {
+        window::apply_traversal(js, self, url, state);
+    }
+
+    /// A fragment navigation made by the browser (`Page.navigate` to a URL
+    /// of this document with a fragment); `transition` is the entry's CDP
+    /// transition type.
+    pub fn navigate_fragment(self: &Rc<Self>, js: &mut dyn Js, url: Url, transition: &str) {
+        window::navigate_to_as(js, self, url, false, Some(transition));
+    }
+
     /// Serialized main document.
     pub fn content(&self) -> String {
         self.with_doc(|d| d.to_html())
@@ -1509,17 +1658,20 @@ impl Window {
     pub fn set_ready_state(&self, s: ReadyState) {
         self.ready_state.set(s);
         let now = self.clock.now();
-        let mut li = self.load_info.borrow_mut();
-        match s {
-            ReadyState::Interactive => {
-                li.dcl_ms.get_or_insert(now);
+        {
+            let mut li = self.load_info.borrow_mut();
+            match s {
+                ReadyState::Interactive => {
+                    li.dcl_ms.get_or_insert(now);
+                }
+                ReadyState::Complete => {
+                    li.dcl_ms.get_or_insert(now);
+                    li.load_ms.get_or_insert(now);
+                }
+                ReadyState::Loading => {}
             }
-            ReadyState::Complete => {
-                li.dcl_ms.get_or_insert(now);
-                li.load_ms.get_or_insert(now);
-            }
-            ReadyState::Loading => {}
         }
+        self.perf_ready_state(s);
     }
 
     /// Forward console messages (and uncaught exceptions) to `sink`.
@@ -1623,9 +1775,33 @@ impl Window {
         self.nav_request.borrow_mut().take()
     }
 
+    /// A navigation script, a link or a form starts: counted by the
+    /// rate limiter, and ignored when that says so.
     pub(crate) fn request_navigation(&self, req: NavRequest) {
+        if self.navigation_allowed() {
+            self.post_navigation(req);
+        }
+    }
+
+    /// Hand a navigation to the page layer, not counted (a reload; callers
+    /// that counted already).
+    pub(crate) fn post_navigation(&self, req: NavRequest) {
         *self.nav_request.borrow_mut() = Some(req);
         self.wake();
+    }
+
+    /// Count one navigation start against this document's limiter; `false`
+    /// when it is over the limit and must be ignored (the first such call
+    /// of a window logs Chrome's warning).
+    pub(crate) fn navigation_allowed(&self) -> bool {
+        let l = &self.nav_limiter;
+        if l.count_call(self.clock.now()) {
+            return true;
+        }
+        if !l.warned.replace(true) {
+            self.warn(NAV_THROTTLE_WARNING);
+        }
+        false
     }
 
     pub fn wake(&self) {
@@ -1812,6 +1988,11 @@ impl Window {
     /// Call after any DOM change and after each parser step.
     pub fn after_mutation(self: &Rc<Self>, js: &mut dyn Js) {
         misc::process_mutations(js, self);
+        if self.ready_state.get() != ReadyState::Loading {
+            // Content a script added after parsing ended is the first
+            // paint's (a single-page app).
+            self.arm_paint();
+        }
     }
 
     /// The layout engine, created on first use.
@@ -2106,6 +2287,8 @@ pub(crate) enum Obj {
         local: bool,
     },
     Performance,
+    /// Performance Timeline entries, observers and lists (`perf.rs`).
+    Perf(Box<perf::PerfObj>),
     Screen,
     /// `window.visualViewport` (layout viewport; Turnstile fingerprints it).
     VisualViewport,
@@ -2201,6 +2384,10 @@ pub(crate) enum Obj {
         sheet: u32,
         uid: u32,
     },
+    /// `InputDeviceCapabilities` (`firesTouchEvents`).
+    InputDevice(bool),
+    /// `SpeechSynthesisUtterance`.
+    Utterance(Box<speech::UtteranceData>),
 }
 
 impl Obj {
@@ -2225,6 +2412,7 @@ impl Obj {
             Obj::Navigator => "Navigator",
             Obj::Storage { .. } => "Storage",
             Obj::Performance => "Performance",
+            Obj::Perf(p) => p.iface_name(),
             Obj::Screen => "Screen",
             Obj::VisualViewport => "VisualViewport",
             Obj::DomImplementation { .. } => "DOMImplementation",
@@ -2285,6 +2473,8 @@ impl Obj {
             Obj::WebSocket(_) => "WebSocket",
             Obj::Idb(x) => x.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
+            Obj::InputDevice(_) => "InputDeviceCapabilities",
+            Obj::Utterance(_) => "SpeechSynthesisUtterance",
         }
     }
 }

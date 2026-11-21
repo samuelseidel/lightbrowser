@@ -90,6 +90,11 @@
         ev.d = e.detail;
         const { el, tg } = targetInfo(e.target);
         ev.tg = tg;
+        // Index among the document's elements of that tag: tells two links
+        // or two buttons apart (beh_click_offset_repeat counts distinct targets).
+        if (el && el.tagName && e.type === 'click') {
+          ev.ti = Array.prototype.indexOf.call(document.getElementsByTagName(el.tagName), el);
+        }
         if (el && el.getBoundingClientRect) {
           const r = el.getBoundingClientRect();
           ev.cx = r1(e.clientX - (r.left + r.width / 2));
@@ -749,6 +754,59 @@
     wk.onerror = () => { clearTimeout(timer); done([{ error: 'worker error' }, false]); };
   }));
 
+  // Text measured in a dedicated worker (OffscreenCanvas) and in the page
+  // (canvas), plus the worker's devicePixelRatio, language, locale and time
+  // zone next to the page's (info only; scoring.py's worker_measure_mismatch
+  // compares them). Chrome measures both with the same font code, so a
+  // persona patched into the page, or measuring text with its own tables
+  // on one side only, differs. Workers have no devicePixelRatio in Chrome:
+  // the worker reports null, which is fine; a number must equal the page's.
+  const MEASURE_STRINGS = ['mmmmmmmmmmlli', 'The quick brown fox jumps over the lazy dog',
+    'Wxyz 0123456789 @#$%', 'éßñü 日本語 العربية',
+    '\u{1F600} \u{1F468}‍\u{1F469}'];
+  const MEASURE_FONTS = ['sans-serif', 'serif', 'monospace', 'system-ui', 'Arial', 'Times New Roman',
+    'Courier New', 'Segoe UI'];
+  const measureSrc = 'function lbMeasure(ctx, strs, fonts) {' +
+    'const out = {}, r = (n) => Math.round(n * 1000) / 1000;' +
+    'for (const f of fonts) {' +
+    'ctx.font = "16px " + (f.indexOf(" ") > -1 ? JSON.stringify(f) : f) + ", sans-serif";' +
+    'strs.forEach((s, i) => { const m = ctx.measureText(s);' +
+    'out[f + "|" + i] = [r(m.width), r(m.actualBoundingBoxLeft), r(m.actualBoundingBoxRight),' +
+    'r(m.actualBoundingBoxAscent), r(m.actualBoundingBoxDescent), r(m.fontBoundingBoxAscent),' +
+    'r(m.fontBoundingBoxDescent)]; }); }' +
+    'return out; }';
+  const measureEnv = 'function lbEnv() { const ro = Intl.DateTimeFormat().resolvedOptions();' +
+    'return { language: navigator.language, languages: Array.from(navigator.languages || []),' +
+    'locale: ro.locale, timeZone: ro.timeZone,' +
+    'dpr: typeof self.devicePixelRatio === "number" ? self.devicePixelRatio : null }; }';
+  probe('worker_measure', 'automation', 0, () => new Promise((resolve) => {
+    if (!window.Worker || !window.Blob) { resolve([{ supported: false }, false]); return; }
+    const args = JSON.stringify(MEASURE_STRINGS) + ',' + JSON.stringify(MEASURE_FONTS);
+    const src = measureSrc + measureEnv + ';const v = lbEnv(); v.supported = typeof OffscreenCanvas === "function";' +
+      'if (v.supported) { try { v.measure = lbMeasure(new OffscreenCanvas(1, 1).getContext("2d"), ' + args + '); }' +
+      'catch (e) { v.error = e.name; } } postMessage(v);';
+    let url, wk;
+    try {
+      url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      wk = new Worker(url);
+    } catch (e) { resolve([{ error: String(e.message) }, false]); return; }
+    const done = (v) => { try { wk.terminate(); URL.revokeObjectURL(url); } catch (_) { /* ignore */ } resolve(v); };
+    const timer = setTimeout(() => done([{ timeout: true }, false]), 2000);
+    wk.onmessage = (e) => {
+      clearTimeout(timer);
+      try {
+        const env = (0, eval)('(' + measureEnv + ')');
+        const win = env();
+        win.dpr = devicePixelRatio;
+        win.supported = true;
+        win.measure = (0, eval)('(' + measureSrc + ')')(document.createElement('canvas').getContext('2d'),
+          MEASURE_STRINGS, MEASURE_FONTS);
+        done([{ window: win, worker: e.data }, false]);
+      } catch (err) { done([{ error: String(err && err.message || err).slice(0, 200) }, false]); }
+    };
+    wk.onerror = () => { clearTimeout(timer); done([{ error: 'worker error' }, false]); };
+  }));
+
   // The same values in a service worker (info only; scoring.py's
   // sw_navigator_mismatch compares them). Registered for a scope no page
   // is under (/static/sw-probe/), so nothing is controlled, and
@@ -963,6 +1021,61 @@
   addEventListener('wheel', (e) => {
     if (e.isTrusted && wheelPairs.length < 400) wheelPairs.push([r1(e.deltaY), e.wheelDeltaY, e.deltaMode]);
   }, { capture: true, passive: true });
+
+  // ---- WebRTC candidate gathering (late probe, info only) ------------------
+  // Gathers ICE candidates against the bench's loopback STUN responder
+  // (ctx.stun, UDP) for up to 3 s and records their types, addresses and the
+  // time to the first one. It does not hold up the load beacon: it sends its
+  // own beacon when gathering ends, and a pagehide beacon carries the partial
+  // state (complete: false) if the page leaves first. scoring.py's
+  // webrtc_candidates compares the result with stock Chrome's.
+  let rtc = null;
+  let rtcDone = false;
+  const late = (id, value) => ({ id, cat: 'consistency', value, suspicious: false, weight: 0 });
+  const lateProbes = () => (rtc ? [late('webrtc_gather', rtc)] : []);
+  function startWebrtc() {
+    const Pc = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    rtc = { supported: !!Pc, stun: ctx.stun || null, complete: false, timedOut: false, candidates: [],
+      firstMs: null, gatherMs: null };
+    if (!Pc) { rtcDone = true; rtc.complete = true; sendLate(); return; }
+    const t0 = now();
+    let pc;
+    const finish = (why) => {
+      if (rtcDone) return;
+      rtcDone = true;
+      rtc.complete = why === 'complete';
+      rtc.timedOut = why === 'timeout';
+      rtc.gatherMs = Math.round(now() - t0);
+      try { pc.close(); } catch (_) { /* ignore */ }
+      sendLate();
+    };
+    try {
+      pc = new Pc({ iceServers: ctx.stun ? [{ urls: 'stun:' + ctx.stun }] : [] });
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) { finish('complete'); return; }
+        const c = e.candidate;
+        const ms = Math.round(now() - t0);
+        if (rtc.firstMs === null) rtc.firstMs = ms;
+        if (rtc.candidates.length < 20) {
+          rtc.candidates.push({ type: c.type, protocol: c.protocol, address: c.address, port: c.port,
+            relatedAddress: c.relatedAddress || null, relatedPort: c.relatedPort === undefined ? null : c.relatedPort,
+            mdns: /\.local$/.test(c.address || ''), ms });
+        }
+      };
+      pc.createDataChannel('lb');
+      pc.createOffer().then((o) => pc.setLocalDescription(o)).catch((e) => { rtc.error = (e && e.name) || 'Error'; finish('error'); });
+      setTimeout(() => finish('timeout'), 3000);
+    } catch (e) {
+      rtc.error = (e && e.name) || 'Error';
+      finish('error');
+    }
+  }
+  function sendLate() {
+    fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sid: ctx.sid, page: { id: pageId, url: location.pathname + location.search, seq: ++seq,
+        reason: 'rtc', t: Math.round(now()) }, probes: lateProbes() }),
+      keepalive: true, credentials: 'same-origin' }).catch(() => {});
+  }
 
   // ---- behavioural probes (recomputed for every beacon) -------------------
 
@@ -1196,7 +1309,7 @@
     const body = JSON.stringify({
       sid: ctx.sid,
       page: { id: pageId, url: location.pathname + location.search, seq: ++seq, reason, t: Math.round(now()) },
-      probes: (fpSent ? [] : fp.slice()).concat(behaviorProbes()),
+      probes: (fpSent ? [] : fp.slice()).concat(behaviorProbes(), rtcDone ? [] : lateProbes()),
       traceFrom: sentTrace,
       trace: trace.slice(sentTrace, mark),
     });
@@ -1215,6 +1328,7 @@
 
   function start() {
     loadedAt = now();
+    startWebrtc();
     Promise.all(P).then(() => {
       if (frame) { frame.remove(); frame = null; }
       send('load', false);

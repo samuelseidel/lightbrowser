@@ -1,0 +1,22 @@
+<!doctype html><!--LOG--><script>
+// The 10 s window: use the budget up at t0, then try at set times.
+var t0 = performance.now(), n = 0;
+function push() { var s = ++n; history.pushState(s, '', '#s' + s); return history.state === s; }
+var ok = 0;
+for (var i = 1; i <= 205; i++) if (push()) ok++;
+log('205 calls, accepted ' + ok);
+var seq = [];
+(async function () {
+  for (var at of [2, 5, 9, 9.7, 9.9, 10.15, 10.4, 11, 12]) {
+    await sleep(at * 1000 - (performance.now() - t0));
+    seq.push(at + 's:' + (push() ? 'ok' : 'ignored'));
+  }
+  log(seq.join(' '));
+  // The window restarted at the call that was accepted: 9 more calls
+  // made here, so the budget lasts for 191 more.
+  var first = 0;
+  for (var i = 1; i <= 250; i++) if (!push() && !first) first = i;
+  log('second episode: first ignored call ' + first);
+  end();
+})();
+</script>

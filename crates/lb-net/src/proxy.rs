@@ -35,6 +35,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use url::Url;
 
+use crate::egress::EgressPolicy;
 use crate::error::NetError;
 use crate::headers::OrderedHeaders;
 use crate::pool::Dialer;
@@ -247,34 +248,67 @@ impl Proxy {
 
     /// TCP to the proxy, then a tunnel to `host:port` (`CONNECT` or
     /// SOCKS5). `user_agent` goes into `CONNECT` as Chrome sends it.
+    ///
+    /// The target is checked against the egress policy first (ADR 0044),
+    /// before the proxy is contacted: the proxy resolves a name itself, so
+    /// the name is all there is to check. The proxy's own address is
+    /// checked by [`dial`](Self::dial).
+    ///
+    /// The whole tunnel (TCP to the proxy, the exchange, `407` rounds) must
+    /// be up within `limit`
+    /// ([`crate::fetch::NetTimeouts::proxy_handshake`]); a proxy that
+    /// accepts and never answers fails with `net::ERR_TIMED_OUT`.
     pub(crate) async fn tunnel(
         &self,
         dialer: &Dialer,
+        egress: &EgressPolicy,
         host: &str,
         port: u16,
         user_agent: &str,
+        limit: std::time::Duration,
     ) -> Result<TcpStream, NetError> {
-        match self.kind {
-            ProxyKind::Http => self.connect_tunnel(dialer, host, port, user_agent).await,
-            ProxyKind::Socks5 => self.socks5(dialer, host, port).await,
-        }
+        egress.check_remote_name(host)?;
+        let setup = async {
+            match self.kind {
+                ProxyKind::Http => {
+                    self.connect_tunnel(dialer, egress, host, port, user_agent)
+                        .await
+                }
+                ProxyKind::Socks5 => self.socks5(dialer, egress, host, port).await,
+            }
+        };
+        crate::fetch::within(limit, setup, || {
+            NetError::Proxy("net::ERR_TIMED_OUT".into())
+        })
+        .await
     }
 
     /// TCP to the proxy itself (forward requests). This hop always uses the
     /// host's own stack: the destination sees the proxy's SYN, not ours, so
     /// a TCP profile does not apply (open question T13 in
     /// docs/tcp-handshake/REMAINING-STEPS.md).
-    pub(crate) async fn dial(&self, dialer: &Dialer) -> Result<TcpStream, NetError> {
+    ///
+    /// The proxy's address must itself be allowed by the egress policy
+    /// (ADR 0044); a refusal is reported as such, not as a failed proxy.
+    pub(crate) async fn dial(
+        &self,
+        dialer: &Dialer,
+        egress: &EgressPolicy,
+    ) -> Result<TcpStream, NetError> {
         let h = self.host.trim_start_matches('[').trim_end_matches(']');
         dialer
-            .connect(h, self.port, None)
+            .connect(h, self.port, None, egress)
             .await
-            .map_err(|_| NetError::Proxy("net::ERR_PROXY_CONNECTION_FAILED".into()))
+            .map_err(|e| match e {
+                NetError::Blocked(_) => e,
+                _ => NetError::Proxy("net::ERR_PROXY_CONNECTION_FAILED".into()),
+            })
     }
 
     async fn connect_tunnel(
         &self,
         dialer: &Dialer,
+        egress: &EgressPolicy,
         host: &str,
         port: u16,
         user_agent: &str,
@@ -285,7 +319,7 @@ impl Proxy {
             format!("{host}:{port}")
         };
         let mut sent_auth = false;
-        let mut tcp = self.dial(dialer).await?;
+        let mut tcp = self.dial(dialer, egress).await?;
         loop {
             let creds = self.cached_credentials();
             let mut head = format!(
@@ -341,7 +375,7 @@ impl Proxy {
                         body -= n;
                     }
                     if !reusable {
-                        tcp = self.dial(dialer).await?;
+                        tcp = self.dial(dialer, egress).await?;
                     }
                 }
                 _ => return Err(tunnel_failed()),
@@ -349,12 +383,18 @@ impl Proxy {
         }
     }
 
-    async fn socks5(&self, dialer: &Dialer, host: &str, port: u16) -> Result<TcpStream, NetError> {
+    async fn socks5(
+        &self,
+        dialer: &Dialer,
+        egress: &EgressPolicy,
+        host: &str,
+        port: u16,
+    ) -> Result<TcpStream, NetError> {
         let fail = || NetError::Proxy("net::ERR_SOCKS_CONNECTION_FAILED".into());
         let creds = self
             .cached_credentials()
             .or_else(|| self.configured.clone());
-        let mut tcp = self.dial(dialer).await?;
+        let mut tcp = self.dial(dialer, egress).await?;
         let greeting: &[u8] = if creds.is_some() {
             &[5, 2, 0, 2]
         } else {

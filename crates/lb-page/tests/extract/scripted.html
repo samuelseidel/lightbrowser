@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<title>Static title</title>
+<h1 id="t"></h1>
+<ul id="l"></ul>
+<script>
+document.getElementById('t').textContent = 'Built by script';
+for (const w of ['alpha', 'beta']) {
+  const li = document.createElement('li');
+  li.innerHTML = '<a href="/' + w + '">' + w + '</a>';
+  document.getElementById('l').appendChild(li);
+}
+document.title = 'Scripted title';
+</script>

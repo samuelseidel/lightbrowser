@@ -30,3 +30,18 @@ number of passing subtests drops below the baseline in
 layout-dependent features, iframes, or stub DOM APIs fail today; that is
 expected and tracked by the pass count, not hidden. Named access on
 `window` (`window[id]`) is implemented.
+The runner prints per-file results, totals per group, and the files with no
+subtests or a harness problem. `EXPECTATIONS.txt` has one line per
+`MANIFEST.txt` entry (passes, total, status) and the run fails when a file
+does worse than its line, or when the two files name different files; there
+is no total floor in `crates/lb-page/tests/wpt.rs` any more. After a fix, or
+when a test is added to the manifest:
+
+```bash
+LB_WPT_BLESS=1 cargo test --locked -p lb-page --test wpt -- --nocapture
+```
+
+then review and commit the diff of `EXPECTATIONS.txt`. Details are in
+`tests/README.md` ("WPT subset"). Tests that need iframes, XML documents or
+layout-dependent features fail today; that is expected and tracked per file,
+not hidden.

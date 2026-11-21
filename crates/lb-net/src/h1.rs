@@ -20,13 +20,15 @@
 //! responses are skipped, then `Content-Length`, `Transfer-Encoding: chunked`
 //! or read-to-close.
 
+use std::time::Duration;
+
 use bytes::{Bytes, BytesMut};
 use http::{Method, StatusCode};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::HttpVersion;
 use crate::error::NetError;
-use crate::fetch::{RawResponse, Request};
+use crate::fetch::{RESPONSE_HEADERS_TIMEOUT, RawResponse, Request};
 use crate::h2::DEFAULT_MAX_BODY;
 use crate::headers::OrderedHeaders;
 
@@ -34,6 +36,11 @@ use crate::headers::OrderedHeaders;
 const MAX_HEAD: usize = 64 * 1024;
 
 /// Send `req` with a body cap of [`DEFAULT_MAX_BODY`].
+///
+/// Every function here waits at most
+/// [`RESPONSE_HEADERS_TIMEOUT`](crate::fetch::RESPONSE_HEADERS_TIMEOUT)
+/// (or the given limit) for the response head once the request is written.
+/// The body has no time limit, as in Chrome.
 pub async fn send<S>(io: S, req: &Request) -> Result<RawResponse, NetError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -89,17 +96,19 @@ pub async fn send_on<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    send_on_form(io, req, max_body, false).await
+    send_on_form(io, req, max_body, false, RESPONSE_HEADERS_TIMEOUT).await
 }
 
 /// [`send_on`], with the request target in absolute form
 /// (`GET http://host/path`) when `absolute`: a forward request to an HTTP
-/// proxy (ADR 0027).
+/// proxy (ADR 0027). The response head must arrive within `head_timeout`
+/// of the request being written.
 pub(crate) async fn send_on_form<S>(
     io: &mut S,
     req: &Request,
     max_body: usize,
     absolute: bool,
+    head_timeout: Duration,
 ) -> Result<(RawResponse, bool), SendError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -112,7 +121,7 @@ where
     };
     io.write_all(&out).await.map_err(stale)?;
     io.flush().await.map_err(stale)?;
-    read_response(io, &req.method, max_body).await
+    read_response(io, &req.method, max_body, head_timeout).await
 }
 
 /// Request line and headers, ending with the blank line.
@@ -185,10 +194,13 @@ async fn read_response<S>(
     io: &mut S,
     method: &Method,
     max_body: usize,
+    head_timeout: Duration,
 ) -> Result<(RawResponse, bool), SendError>
 where
     S: AsyncRead + Unpin,
 {
+    // One deadline for the final head, interim (1xx) heads included.
+    let deadline = crate::fetch::deadline_after(head_timeout);
     let mut buf = BytesMut::with_capacity(8192);
     let mut received = false;
     loop {
@@ -216,7 +228,18 @@ where
                     if buf.len() > MAX_HEAD {
                         return Err(NetError::Http("response head too large".into()).into());
                     }
-                    let n = match io.read_buf(&mut buf).await {
+                    let read = tokio::time::timeout_at(deadline, io.read_buf(&mut buf)).await;
+                    let Ok(read) = read else {
+                        return Err(NetError::Connect(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            format!(
+                                "timed out waiting for the response head ({} s)",
+                                head_timeout.as_secs_f64()
+                            ),
+                        ))
+                        .into());
+                    };
+                    let n = match read {
                         Ok(n) => n,
                         Err(e) => {
                             return Err(SendError {
@@ -247,6 +270,7 @@ where
             }
         };
         let _ = buf.split_to(head_len);
+        let head_at = std::time::Instant::now();
         // 101 is a final answer for us; other 1xx are interim.
         if status.is_informational() && status != StatusCode::SWITCHING_PROTOCOLS {
             continue;
@@ -315,6 +339,8 @@ where
                 headers,
                 body,
                 version: HttpVersion::Http1,
+                head_at,
+                done_at: std::time::Instant::now(),
             },
             reusable,
         ));
@@ -371,8 +397,8 @@ where
         };
         let line = String::from_utf8_lossy(&buf[..line_end]).into_owned();
         let size_text = line.split(';').next().unwrap_or("").trim();
-        let size = usize::from_str_radix(size_text, 16)
-            .map_err(|_| NetError::Http(format!("bad chunk size {size_text:?}")))?;
+        let size = parse_chunk_size(size_text)
+            .ok_or_else(|| NetError::Http(format!("bad chunk size {size_text:?}")))?;
         let _ = buf.split_to(line_end + 2);
         if size == 0 {
             // Trailer lines (ignored), then an empty line.
@@ -394,17 +420,43 @@ where
                 }
             }
         }
-        if body.len() + size > max_body {
+        // Checked: a size near `usize::MAX` must not wrap past the cap.
+        if body
+            .len()
+            .checked_add(size)
+            .is_none_or(|total| total > max_body)
+        {
             return Err(NetError::BodyTooLarge { limit: max_body });
         }
-        while buf.len() < size + 2 {
+        // `size <= max_body` here, so `size + 2` cannot overflow.
+        let with_crlf = size + 2;
+        while buf.len() < with_crlf {
             if io.read_buf(&mut buf).await.map_err(NetError::Connect)? == 0 {
                 return Err(NetError::Http("connection closed inside a chunk".into()));
             }
         }
         body.extend_from_slice(&buf[..size]);
-        let _ = buf.split_to(size + 2);
+        let _ = buf.split_to(with_crlf);
     }
+}
+
+/// Largest chunk size we parse. Chrome's `HttpChunkedDecoder` keeps the
+/// size in an `int64` and fails the body above it
+/// (`ERR_INVALID_CHUNKED_ENCODING`); the body cap applies before that.
+const MAX_CHUNK_SIZE: u64 = i64::MAX as u64;
+
+/// A chunk size: hex digits only (no sign, no `0x`), at most
+/// [`MAX_CHUNK_SIZE`]. `None` is a malformed body.
+fn parse_chunk_size(text: &str) -> Option<usize> {
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let size = u64::from_str_radix(text, 16).ok()?;
+    if size > MAX_CHUNK_SIZE {
+        return None;
+    }
+    // On 32-bit targets a size past `usize::MAX` is over any cap anyway.
+    Some(usize::try_from(size).unwrap_or(usize::MAX))
 }
 
 #[cfg(test)]
@@ -515,5 +567,81 @@ mod tests {
         let err = send_with_limit(tcp, &get(port), 8).await.unwrap_err();
         assert!(matches!(err, NetError::BodyTooLarge { limit: 8 }));
         server.await.unwrap();
+    }
+
+    async fn chunked_error(reply: &'static [u8], max_body: usize) -> NetError {
+        let (port, _server) = raw_server(reply).await;
+        let tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        send_with_limit(tcp, &get(port), max_body)
+            .await
+            .unwrap_err()
+    }
+
+    /// GAP-091: chunk sizes near `usize::MAX` used to wrap
+    /// `body.len() + size` past the cap (debug: overflow panic; release:
+    /// `size + 2` wrapped to 0 and `&buf[..size]` panicked).
+    #[tokio::test]
+    async fn huge_chunk_sizes_are_errors_not_panics() {
+        // After a 2-byte chunk, 2^64 - 2 is the exact value that wrapped
+        // both sums to 0 on 64-bit.
+        let e = chunked_error(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\nfffffffffffffffe\r\nxyz",
+            1 << 20,
+        )
+        .await;
+        assert!(
+            matches!(&e, NetError::Http(m) if m.contains("bad chunk size")),
+            "{e}"
+        );
+        // usize::MAX, more hex digits than fit in 64 bits, a sign, nothing.
+        const BAD: [&[u8]; 4] = [
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nxyz",
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n10000000000000000\r\nxyz",
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n+5\r\nhello\r\n0\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\r\n",
+        ];
+        for reply in BAD {
+            let e = chunked_error(reply, 1 << 20).await;
+            assert!(
+                matches!(&e, NetError::Http(m) if m.contains("bad chunk size")),
+                "{e}"
+            );
+        }
+        // The largest size Chrome parses (int64 max) is over the cap.
+        let e = chunked_error(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n7fffffffffffffff\r\nxyz",
+            1 << 20,
+        )
+        .await;
+        assert!(
+            matches!(e, NetError::BodyTooLarge { limit } if limit == 1 << 20),
+            "{e}"
+        );
+    }
+
+    /// GAP-095: a server that accepts and never answers ends at the
+    /// response-head limit instead of hanging.
+    #[tokio::test]
+    async fn silent_server_hits_the_head_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            drop(tcp);
+        });
+        let mut tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let t0 = std::time::Instant::now();
+        let e = send_on_form(
+            &mut tcp,
+            &get(port),
+            1 << 20,
+            false,
+            std::time::Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+        assert!(e.error.to_string().contains("timed out"), "{}", e.error);
+        assert!(t0.elapsed() < std::time::Duration::from_secs(5));
     }
 }

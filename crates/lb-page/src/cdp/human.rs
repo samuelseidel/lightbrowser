@@ -42,6 +42,25 @@ use super::agent::{Agent, DOCUMENT};
 use crate::browser::WorkerState;
 use crate::page::PageState;
 
+/// Largest scroll distance per axis of one wheel gesture (CSS px): about a
+/// thousand viewports. Larger client deltas are an error.
+const MAX_SCROLL_PX: f64 = 1_000_000.0;
+/// Most input events one wheel gesture may replay.
+const MAX_SCROLL_EVENTS: usize = 50_000;
+
+/// The wheel event list grows with the distance, which the client picks.
+fn check_deltas(dx: f64, dy: f64) -> HostResult<()> {
+    if !dx.is_finite() || !dy.is_finite() {
+        return Err(HostError::new("deltaX and deltaY must be finite numbers"));
+    }
+    if dx.abs() > MAX_SCROLL_PX || dy.abs() > MAX_SCROLL_PX {
+        return Err(HostError::new(format!(
+            "deltaX and deltaY must be at most {MAX_SCROLL_PX} px"
+        )));
+    }
+    Ok(())
+}
+
 /// Per-page state, kept on the page's agent.
 #[derive(Default)]
 pub(crate) struct HumanState {
@@ -268,7 +287,9 @@ impl Human {
             if dy.abs() < 1.0 && dx.abs() < 1.0 {
                 break;
             }
-            self.wheel(dx, dy).await?;
+            // A page can be taller than one call may scroll: go part way.
+            let lim = |d: f64| d.clamp(-MAX_SCROLL_PX, MAX_SCROLL_PX);
+            self.wheel(lim(dx), lim(dy)).await?;
             b = self.element(selector)?.1;
         }
         if self.in_view(&b)? {
@@ -287,6 +308,7 @@ impl Human {
 
     /// Wheel input for (dx, dy) at the pointer.
     async fn wheel(&self, dx: f64, dy: f64) -> HostResult<()> {
+        check_deltas(dx, dy)?;
         let mut events = Vec::new();
         if dy.abs() >= 0.5 {
             let dir = if dy > 0.0 {
@@ -313,6 +335,9 @@ impl Human {
                 &self.profile,
                 self.next_seed(),
             ));
+        }
+        if events.len() > MAX_SCROLL_EVENTS {
+            return Err(HostError::new("scroll needs too many input events"));
         }
         self.replay(&events).await
     }
@@ -373,6 +398,9 @@ impl Human {
     }
 
     async fn scroll(&self, s: &HumanScroll) -> HostResult<()> {
+        if s.selector.is_none() {
+            check_deltas(s.delta_x, s.delta_y)?;
+        }
         if let (Some(x), Some(y)) = (s.x, s.y) {
             self.do_move(HumanMove { x, y }).await?;
         }

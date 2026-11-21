@@ -118,7 +118,10 @@ Landed:
   `Engine`, one realm per frame or isolated world, host objects bound from
   `InterfaceSpec`, promises, static ES modules through a loader, heap cap,
   terminate from another thread, named setter/deleter/enumerator
-  interceptors. A panic in a host function becomes a JS error. Chrome's
+  interceptors. A panic in a host function becomes a JS error in debug
+  and test builds only; release builds use `panic = "abort"`, so there
+  it ends the process (after one stderr line from the binary's panic
+  hook naming version, commit, thread and location). Chrome's
   error text, stack format, `Illegal invocation` and native `toString` are
   pinned by tests. V8 crashes above about 1,020 template properties, so
   instance member lists over 960 are copied onto each new instance.
@@ -3122,8 +3125,12 @@ no shaders. Rendering is now done in software by a new crate, `lb-gl`
   completeness rules (equal sizes in WebGL 2 too), blits, `clearBuffer*`,
   `readPixels` (formats, pack alignment, pack buffers). Uniform order is
   ANGLE's (bool uniforms first, samplers last); std140 offsets match.
-- **Results vs Chrome.** 88 of 88 API results equal (errors, uniform round
-  trips, active uniforms, framebuffer status, link logs, readback;
+- **Results vs Chrome.** 193 of 193 API results equal (errors, uniform round
+  trips, active uniforms, framebuffer status, link logs, readback; since
+  2026-11-16 also offsets and sizes the page picks: WebIDL `long long`
+  wrapping, negative is INVALID_VALUE, over 32 bits INVALID_OPERATION,
+  ranges past a buffer's end, `readPixels` sizes that overflow 32 bits,
+  checked before anything is allocated;
   `cargo test -p lb-page --test webgl api_results_equal_chrome`). Nine
   scenes (gradient triangle with and without antialiasing, a
   FingerprintJS-style strip, a mipmapped texture, depth plus blending,
@@ -3132,6 +3139,14 @@ no shaders. Rendering is now done in software by a new crate, `lb-gl`
   per channel; 0-4.3 % of pixels differ by more than 48, all on edges
   (sample pattern) or, for the fractal's hash channel, where `sin` of large
   arguments differs (its iteration-count channel equals Chrome's).
+- **Limits (2026-11-16).** Shaders compile on a short-lived thread with a
+  64 MiB stack; the parser stops at 1100 nesting levels ("memory
+  exhausted", ANGLE's parser stack: 1000 parentheses compile, 10000 do not)
+  and an AST deeper than 256 levels is "Expression too complex.", both as
+  recorded in Chrome (`lb-gl` `tests/logs.rs` `deep_nesting_is_a_compile_error`).
+  Page workers have a 16 MiB stack (`lb_layout::PAGE_STACK`, was the 2 MiB
+  default); elements nested deeper than 512 levels get no layout box, and
+  `DOM.Node` descriptions stop at 256 levels of children.
 - **Noise.** ADR 0014's rule keyed by `webgl_noise_seed`, as before, now on
   real pixels: the drawing buffer and framebuffers a draw rasterized into;
   uploaded or cleared contents read back exactly, as on a GPU (Chrome
@@ -3604,6 +3619,119 @@ Real-clock input now waits the generated gap after each actual dispatch
 (ADR 0042). Fixed deadlines could compress delayed events into a burst,
 including a 9.3 ms press hold observed during baseline verification.
 Virtual-clock replay retains deterministic offsets.
+## Borrowed ideas: what we took from other browsers (2026-11-07)
+
+We studied Camoufox, Scrapling, Obscura, Lightpanda, the Chromium
+automation tools, the open-source detector suites (FingerprintJS/BotD,
+CreepJS, rebrowser's bot detector), the TLS libraries (wreq, curl-impersonate,
+utls) and the hosted and anti-detect browser products. Only ideas and facts
+were used (licences range from MIT to AGPL; no code or data was copied);
+nothing was run from those projects and nothing was pointed at a third-party
+site. The full ledger, with what was left out and why, is in
+[borrowing.md](borrowing.md).
+
+Scope: LightBrowser validates our own detector. We took detector-side work,
+tooling, safety and web-platform conformance. We did not add features whose
+purpose is to avoid detection (see "Not taken" in the ledger).
+
+Seven packages, each implemented on its own branch, checked by independent
+verifiers on rtx-dev (Chrome 153 recordings for browser behaviour), and
+squash-merged on `integrate/borrow`:
+
+| Package | ADR | What |
+|---|---|---|
+| Egress policy | 0044 | `--egress loopback`, `--allow-host`: the internal-use rule enforced per connection, redirects and proxies included; open by default |
+| Extract | 0042 | `fetch --dump markdown`, `links`, `json` |
+| MCP server | 0041 | `lightbrowser mcp`: nine tools over stdio, loopback-only unless `--allow-host` |
+| Detector wave 2 | 0043 | `referer_context_mismatch`, `declared_agent` (RFC 9421 headers), `fleet_fingerprint_reuse`, `beh_path_repeat`, `beh_click_offset_repeat`, `worker_measure_mismatch`, `fonts_overclaim`, `webrtc_candidates` (info) |
+| CDP coverage | 0045 | session history (`goBack`, `navigateToHistoryEntry`), `Page.navigate` referrer, `Audits.enable` and other missing methods, raw CDP replay against Chrome |
+| Performance Timeline | 0046 | navigation, resource, paint, user timing, `PerformanceObserver` |
+| Web-platform items | 0047 | history rate limit, coalesced pointer events, `sourceCapabilities`, StorageManager, speech events |
+
+State at merge time: each package passed its own tests and one to three
+rounds of verification; the verifiers still listed open low and medium
+items per package (their reports are in the branches' ADRs under "Open
+items"). Integration changes: the MCP server's own URL filter was replaced by
+the egress policy; the timeline package's session history was dropped in
+favour of the CDP coverage package's. Checks of the merged tree on rtx-dev (2026-11-07, `integrate/borrow`):
+`cargo fmt --check`, clippy for both families, the whole workspace test
+suite, the Firefox-family tests, the detect-bench unit tests and the
+Playwright suite all pass, except that `perf::worker_shared` (entry order in
+a shared worker's timeline) failed once under parallel load and passes alone
+five times out of five. T-010 over CDP with the wave 2 detector rules scores fp 0 for two
+reference personas (macOS 15 M2, Fedora 42 Wayland). Not run on the merged
+tree: the WPT subset, T-010 for the other six personas and with
+`--input human`, the crawl bench.
+
+Findings about our own code, for the owners:
+- The detector's `cdp_runtime` probe tests a getter path V8 closed in
+  Chrome 137, so it no longer fires on a stock Chrome driven by Playwright.
+  Replacing it is in the backlog.
+- The recorded TLS profile (`profiles/tls/chrome_153_linux.json`) may differ
+  from stock Chrome 153 in ECH GREASE and `server_padding`; re-capture with
+  the documented process before relying on JA4 equality.
+- Puppeteer's default viewport is still refused by the persona checks of
+  ADR 0009 (Playwright's implicit viewport is accepted).
+
+Backlog (defender side, not started): `cdp_runtime` v2, `Sec-Fetch-*` value
+validation, `stack_markers`, `arch_nan`, probes for JS-shim browsers, a TLS
+front so the bench can score JA4 and HTTP/2 against the claimed browser,
+signed-agent (Web Bot Auth) mode, script deadlines and a soak test, an HTTP
+cache. The drafted workflow is `borrow-workflow-3.js` in the session
+scratchpad.
+
+## Network input limits (2026-11-16)
+
+Network input can no longer overflow, exhaust memory or hang a request
+(audit gaps GAP-090, GAP-091, GAP-095; ADR 0049):
+- HTTP/1.1 chunk sizes are parsed with checked arithmetic: more than 64
+  bits or above `i64::MAX` (Chrome's limit) is a bad chunked body, a size
+  past `max_body` is `BodyTooLarge`; no wrap, no panic.
+- `Content-Encoding` (gzip, deflate, br, zstd, stacked) is inflated with
+  the output bounded per layer by `max_body`; a 1 GiB bomb stops at the cap
+  with `BodyTooLarge` and never holds more than the cap plus one 64 KiB
+  buffer.
+- WebSocket payloads are read as they arrive, not allocated from the
+  declared length. A message (frame, fragments or inflated
+  `permessage-deflate` output) over `NetContext::ws_max_message` (64 MiB,
+  `websocket::MAX_MESSAGE`) closes with 1009 and shows Chrome's "Max frame
+  length exceeded" and a 1006 close to the page. Chrome's own frame limit is
+  2^63 - 1, so this cap is ours, not recorded.
+- Time limits (`NetContext::timeouts`, `NetTimeouts`): TLS handshake 30 s
+  and proxy tunnel 30 s (Chrome's connect-job values), response head 300 s
+  after the request is written (Chrome has none; long enough not to cut slow
+  servers), WebSocket opening handshake 240 s (Chrome's). Bodies and open
+  connections have no limit, as in Chrome. Timeouts read as
+  `net::ERR_TIMED_OUT`.
+- `fetch --timeout SECS` bounds the whole load, the navigation up to commit
+  included ("timed out after N s waiting for a response from URL").
+Tests: `lb-net` `tests/bounds.rs` (counting allocator), `tests/timeouts.rs`,
+`h1`/`h2`/`decompress` unit tests, `lightbrowser` `tests/fetch_timeout.rs`.
+
+## CDP server limits and operability (2026-11-16)
+
+`serve` and `mcp` can run as services (ADR 0048).
+
+- Limits (`lb_cdp::ServerConfig`): at most 512 connections (more get HTTP
+  503) and 1000 pages (more get CDP error -32000; `/json/new` gets 503),
+  set with `--max-connections` and `--max-pages`. Each WebSocket client
+  may fall at most 256 MiB behind, or its connection is closed with a
+  stderr line; a single larger reply still goes out when nothing else is
+  queued. WebSocket message and frame limits are named constants (64 and
+  16 MiB, tungstenite's defaults).
+- `/json/new` needs PUT; other methods get Chrome 153's 405.
+- SIGINT and SIGTERM close pages and contexts and exit 0, through a
+  self-pipe with no idle wake-ups. A second signal, or 5 s without
+  finishing (a page stuck in a script), exits with status 130. `mcp`
+  stops even during a tool call.
+- `--log error|warn|info|debug` prints `tracing` events to stderr.
+  `--version --verbose` adds the commit. A panic prints one line before
+  a release build aborts. Run-time stderr writes never panic.
+- Tests: `lb-cdp` `tests/cdp.rs` (caps, queue bound, a large single reply,
+  `/json/new`, Host guard, `createTarget` racing a close) and
+  `bin/lightbrowser/tests/signals.rs` (signals, a stuck page against the
+  deadline, `mcp` during a tool call, a closed stderr with `--log debug`,
+  `--version --verbose`).
 
 ## Risks
 

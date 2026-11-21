@@ -46,6 +46,8 @@ pub struct LoadInfo {
     /// fingerprints these; leaving them at 0 forced `/eb/`.
     pub encoded_body_size: Option<u64>,
     pub decoded_body_size: Option<u64>,
+    /// Page clock ms of the first paint entry.
+    pub first_paint_ms: Option<f64>,
 }
 
 /// Set up a new main-world realm: ICU defaults from the persona, then
@@ -164,10 +166,15 @@ fn load_times(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(), HostError>
     let request = secs(0.0);
     let dcl = li.dcl_ms;
     let load = li.load_ms;
-    let commit = secs(li.commit_ms.unwrap_or(0.0));
-    let first_paint = match (load, dcl) {
-        (Some(l), _) => secs(l + 12.0),
-        (None, Some(d)) => secs(d + 12.0),
+    let commit = if let Some(c) = li.commit_ms {
+        secs(c)
+    } else {
+        secs(dcl.map_or(0.0, |d| (d / 3.0).min(50.0)))
+    };
+    let first_paint = match (li.first_paint_ms, load, dcl) {
+        (Some(p), _, _) => secs(p),
+        (None, Some(l), _) => secs(l + 12.0),
+        (None, None, Some(d)) => secs(d + 12.0),
         _ => 0.0,
     };
     let proto = protocol(w, &li);

@@ -1,6 +1,9 @@
 {
   "private": true,
-  "description": "Playwright tests for lightbrowser serve. Run: node --test tests/playwright/",
+  "description": "Playwright tests for lightbrowser serve. Run: node --test tests/playwright/ (install the pinned Playwright first: npm install --prefix tests/playwright)",
   "type": "module",
-  "main": "all.test.mjs"
+  "main": "all.test.mjs",
+  "dependencies": {
+    "playwright": "1.65.0"
+  }
 }

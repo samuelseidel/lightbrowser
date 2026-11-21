@@ -17,6 +17,7 @@ use url::Url;
 use crate::browser::WorkerState;
 use crate::context::PageError;
 use crate::page::{Life, PageState};
+use crate::session::NavKind;
 use crate::{NavResult, is_html_type, text_document};
 
 /// Parser input is fed in chunks of this size, yielding to the event loop
@@ -110,6 +111,14 @@ pub(crate) struct Target {
     pub post: Option<FormBody>,
     /// Started by trusted user input (`Sec-Fetch-User`).
     pub user_activated: bool,
+    /// How the committed document joins the session history.
+    pub kind: NavKind,
+    /// CDP `Page.TransitionType` of the entry.
+    pub transition: String,
+    /// The referrer `Page.navigate` gave and its policy (`None`: the
+    /// default policy); the request's `Referer` and `document.referrer`
+    /// follow it.
+    pub referrer: Option<(Url, Option<String>)>,
 }
 
 impl Target {
@@ -122,11 +131,41 @@ impl Target {
             reload: false,
             post: None,
             user_activated: false,
+            kind: NavKind::New,
+            transition: "typed".into(),
+            referrer: None,
+        }
+    }
+
+    /// The current document loads again (`Page.reload`, `location.reload()`,
+    /// `history.go(0)`).
+    pub(crate) fn reload(url: Url, bypass_cache: bool) -> Target {
+        Target {
+            kind: if bypass_cache {
+                NavKind::ReloadBypassingCache
+            } else {
+                NavKind::Reload
+            },
+            transition: "reload".into(),
+            ..Target::typed(url)
+        }
+    }
+
+    /// A traversal to the entry `id` of the session history.
+    pub(crate) fn history(url: Url, id: i64) -> Target {
+        Target {
+            kind: NavKind::History(id),
+            ..Target::typed(url)
         }
     }
 
     /// A navigation a document asked for (`location`, form submission).
     pub(crate) fn from_script(nav: lb_webapi::rt::NavRequest, initiator: Url) -> Target {
+        let transition = if nav.post.is_some() {
+            "form_submit"
+        } else {
+            "link"
+        };
         Target {
             url: nav.url,
             initiator: Some(initiator),
@@ -134,6 +173,9 @@ impl Target {
             reload: nav.reload,
             post: nav.post,
             user_activated: nav.user_activated,
+            kind: NavKind::New,
+            transition: transition.into(),
+            referrer: None,
         }
     }
 }
@@ -179,12 +221,32 @@ pub(crate) async fn navigate_committed(
 ) -> Result<NavResult, PageError> {
     let Target {
         url,
-        initiator,
+        mut initiator,
         replace,
         reload,
         post,
-        user_activated,
+        mut user_activated,
+        kind,
+        transition,
+        mut referrer,
     } = target;
+    let is_post = post.is_some();
+    // A reload or traversal makes the request of the entry again: the same
+    // initiator (`Sec-Fetch-Site`) and referrer, as a browser-initiated
+    // navigation (`Sec-Fetch-User`).
+    if initiator.is_none() && referrer.is_none() {
+        let s = page.history.borrow();
+        let entry = match &kind {
+            NavKind::Reload | NavKind::ReloadBypassingCache => s.current_entry(),
+            NavKind::History(id) => s.entries.iter().find(|e| e.id == *id),
+            NavKind::New => None,
+        };
+        if let Some(e) = entry {
+            initiator = e.initiator.clone();
+            referrer = e.referrer.clone();
+            user_activated = true;
+        }
+    }
     // `beforeunload` of the document being left: if the user chose to stay
     // (a dismissed dialog), the navigation stops here.
     if let Some(old) = page.window()
@@ -198,10 +260,29 @@ pub(crate) async fn navigate_committed(
     page.nav_seq.set(seq);
     page.loading.set(true);
     let agent = page.agent();
-    let loader = agent.as_ref().map(|a| a.nav_started(seq));
+    let loader = agent.as_ref().map(|a| {
+        let nav_type = match &kind {
+            NavKind::Reload => "reload",
+            NavKind::ReloadBypassingCache => "reloadBypassingCache",
+            NavKind::History(_) => "historyDifferentDocument",
+            NavKind::New => "differentDocument",
+        };
+        a.nav_started(seq, &url, nav_type)
+    });
+    let tl_type = match &kind {
+        NavKind::Reload | NavKind::ReloadBypassingCache => "reload",
+        NavKind::History(_) => "back_forward",
+        NavKind::New => "navigate",
+    };
+    let nav_start = std::time::Instant::now();
     // The service worker controlling the URL (ADR 0022) and the new
     // document's client id (`resultingClientId`).
-    let sw = crate::sw::navigation_controller(&page.ctx, &url);
+    let bypass_sw = agent.as_ref().is_some_and(|a| a.st.borrow().bypass_sw);
+    let sw = if bypass_sw {
+        None
+    } else {
+        crate::sw::navigation_controller(&page.ctx, &url)
+    };
     let reserved = lb_webapi::rt::sw::uuid4();
 
     // Fetch (about:blank needs none).
@@ -215,15 +296,17 @@ pub(crate) async fn navigate_committed(
             redirected: false,
             protocol: None,
             navigation_redirect_count: 0,
+            timing: None,
         })
     } else {
-        let req = document_request(
+        let mut req = document_request(
             url.clone(),
             Destination::Document,
             initiator.clone(),
             post,
             user_activated,
         );
+        req.referrer = referrer.clone();
         // The document being replaced, as the request's client (Chrome
         // reports it for same-origin navigations such as reloads).
         let replaced = page
@@ -276,9 +359,30 @@ pub(crate) async fn navigate_committed(
     };
 
     // Commit: the old document and realm go away in one step.
-    let history = page.window().map_or(0, |w| w.history_entry_count());
+    page.session_leave();
     page.drop_window(&ws);
-    page.add_history(history.saturating_sub(u32::from(replace)));
+    {
+        let user_typed = page
+            .history
+            .borrow()
+            .current_entry()
+            .filter(|_| matches!(kind, NavKind::Reload | NavKind::ReloadBypassingCache))
+            .map_or_else(|| url.to_string(), |e| e.user_typed.clone());
+        page.history.borrow_mut().commit(
+            &kind,
+            crate::session::Commit {
+                url: &resp.url,
+                requested: &url,
+                user_typed: &user_typed,
+                transition: &transition,
+                doc: seq,
+                replace,
+                post: is_post,
+                initiator: initiator.as_ref(),
+                referrer: referrer.as_ref(),
+            },
+        );
+    }
     let Some((rt, bindings)) = ws.runtime() else {
         let _ = committed.send(Err(PageError::Closed));
         return Err(PageError::Closed);
@@ -296,7 +400,18 @@ pub(crate) async fn navigate_committed(
         .unwrap_or("text/html")
         .trim()
         .to_ascii_lowercase();
-    let w = Window::new_with_clock(
+    let timeline = lb_webapi::rt::NavInfo {
+        timing: resp.timing.clone(),
+        nav_type: tl_type,
+        status: resp.status,
+        headers: resp.headers.clone(),
+        encoded: resp
+            .timing
+            .as_ref()
+            .map_or(resp.body.len() as u64, |t| t.encoded_body_size),
+        decoded: resp.body.len() as u64,
+    };
+    let w = Window::new_at(
         &rt,
         WindowInit {
             url: resp.url.clone(),
@@ -313,27 +428,35 @@ pub(crate) async fn navigate_committed(
             session_storage: page.session_area(&resp.url),
             virtual_time: page.ctx.options().virtual_time,
             wake: page.waker(),
-            referrer: initiator
-                .as_ref()
-                .map(|u| u.to_string())
-                .unwrap_or_default(),
+            referrer: match &referrer {
+                Some((r, policy)) => {
+                    lb_net::header_profile::referrer_with_policy(r, policy.as_deref(), &resp.url)
+                        .unwrap_or_default()
+                }
+                // What the request's `Referer` was (default policy, no
+                // fragment).
+                None => lb_net::header_profile::referrer_for(initiator.as_ref(), &resp.url)
+                    .unwrap_or_default(),
+            },
             content_type: if html { mime } else { "text/html".into() },
             charset,
-            history_len: page.history_len(),
+            history_len: 0,
         },
-        clock,
+        Some(resp.timing.as_ref().map_or(nav_start, |t| t.start)),
     );
+    w.set_session_host(Some(crate::session::host(&page)));
+    w.set_nav_info(timeline);
     {
         let mut info = w.load_info.borrow_mut();
-        info.connection_info = resp.protocol.map(str::to_owned);
+        if info.connection_info.is_none() {
+            info.connection_info = resp.protocol.map(str::to_owned);
+        }
         if info.connection_info.is_none() && resp.url.scheme() == "https" {
             info.connection_info = Some("h2".into());
         }
         info.response_end_ms = Some(response_end_ms);
         info.redirect_count = resp.navigation_redirect_count;
         info.commit_ms = Some(w.clock.now());
-        // Body is post-Content-Encoding. Approximate the wire size until
-        // lb-net exposes the pre-decompress length.
         let decoded = resp.body.len() as u64;
         let encoded = if resp
             .header("content-encoding")
@@ -449,9 +572,13 @@ fn spawn_fetch(
     w: &Rc<Window>,
     url: Url,
     dest: Destination,
+    // Resource Timing: render-blocking, CORS-enabled.
+    (blocking, cors): (bool, bool),
 ) -> JoinHandle<Result<NetResponse, String>> {
     let page = page.clone();
-    let req = NetRequest::get(url, dest, Some(w.url()));
+    let mut req = NetRequest::get(url, dest, Some(w.url()));
+    req.render_blocking = blocking;
+    req.timing_cors = cors;
     w.in_flight.set(w.in_flight.get() + 1);
     let w2 = Rc::downgrade(w);
     let fut = w.net_fetch(req);
@@ -723,6 +850,7 @@ pub(crate) async fn load(
             }
         }
     }
+    w.nav_mark(lb_webapi::rt::NavMark::DomContentLoadedStart);
     with_js(ws, w, |js| {
         fire_event(
             js,
@@ -733,6 +861,7 @@ pub(crate) async fn load(
             false,
         )
     });
+    w.nav_mark(lb_webapi::rt::NavMark::DomContentLoadedEnd);
     doc_event(page, doc, "DOMContentLoaded");
     w.sw_enable_messages();
     w.set_script_waiting_for_sheets(false);
@@ -762,7 +891,9 @@ pub(crate) async fn load(
             false,
             false,
         );
+        w.nav_mark(lb_webapi::rt::NavMark::LoadStart);
         fire_event(js, w, WINDOW_REF, "load", false, false);
+        w.nav_mark(lb_webapi::rt::NavMark::LoadEnd);
         lb_webapi::rt::fire_event_with(
             js,
             w,
@@ -898,7 +1029,10 @@ async fn parser_script(
             );
         }
         (ScriptKind::Classic, Some(Some(url))) => {
-            let h = spawn_fetch(page, w, url, Destination::Script);
+            // A script that stops the parser in the head blocks rendering.
+            let blocking = !is_async && !is_defer && w.with_doc(|d| d.body().is_none());
+            let cors = w.with_doc(|d| d.has_attribute(n, "crossorigin"));
+            let h = spawn_fetch(page, w, url, Destination::Script, (blocking, cors));
             if is_async {
                 w.pending_loads.set(w.pending_loads.get() + 1);
                 let w2 = w.clone();
@@ -931,7 +1065,7 @@ async fn parser_script(
                 None => (doc_url, Source::Inline(script::inline_text(w, n))),
                 Some(Some(u)) => (
                     u.clone(),
-                    Source::Fetch(spawn_fetch(page, w, u, Destination::Script)),
+                    Source::Fetch(spawn_fetch(page, w, u, Destination::Script, (false, true))),
                 ),
                 Some(None) => unreachable!(),
             };
@@ -945,8 +1079,16 @@ async fn parser_script(
                         Source::Fetch(h) => ok_body(&join(h).await)
                             .map(|r| script::script_source(&r.body, r.header("content-type"))),
                     };
-                    if let Some(s) = s {
-                        run_module(&ws2, &p2, &w2, node, &url, s).await;
+                    match s {
+                        Some(s) => run_module(&ws2, &p2, &w2, node, &url, s).await,
+                        // A module script whose fetch failed (a refused
+                        // request included) fires `error`, as the deferred
+                        // path above does.
+                        None => {
+                            if let Some(n) = node {
+                                with_js(&ws2, &w2, |js| script::fire_error(js, &w2, n));
+                            }
+                        }
                     }
                     w2.pending_loads
                         .set(w2.pending_loads.get().saturating_sub(1));
@@ -974,6 +1116,9 @@ async fn run_module(
     url: &Url,
     source: String,
 ) {
+    if w.scripts_disabled() {
+        return;
+    }
     let mut queue: Vec<(Url, String)> = vec![(url.clone(), source.clone())];
     let mut fetched = 0;
     while let Some((base, src)) = queue.pop() {
@@ -985,7 +1130,14 @@ async fn run_module(
                 continue;
             }
             fetched += 1;
-            let r = join(spawn_fetch(page, w, dep.clone(), Destination::Script)).await;
+            let r = join(spawn_fetch(
+                page,
+                w,
+                dep.clone(),
+                Destination::Script,
+                (false, true),
+            ))
+            .await;
             if let Some(resp) = ok_body(&r) {
                 let s = script::script_source(&resp.body, resp.header("content-type"));
                 w.module_map.borrow_mut().insert(dep.to_string(), s.clone());

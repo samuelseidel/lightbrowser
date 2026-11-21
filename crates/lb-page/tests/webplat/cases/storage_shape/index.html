@@ -1,0 +1,47 @@
+<!doctype html><!--LOG--><script>
+// navigator.storage: the shape, estimate() of an origin with nothing
+// stored, persist() and persisted(). The quota itself depends on the disk
+// in principle (Chrome reports usage + 10 GiB for a disk of 10 GiB or
+// more): it is logged as a relation, not as a number.
+function d(o, k) {
+  var x = Object.getOwnPropertyDescriptor(o, k);
+  return x ? Object.keys(x).map(function (n) { return n + '=' + (typeof x[n] == 'function' ? 'fn' : x[n]); }).join(',') : 'none';
+}
+(async function () {
+  log('secure: ' + isSecureContext);
+  t('tag', function () { return Object.prototype.toString.call(navigator.storage); });
+  t('typeof StorageManager', function () { return typeof StorageManager; });
+  t('same object', function () { return navigator.storage === navigator.storage; });
+  t('proto names', function () { return Object.getOwnPropertyNames(StorageManager.prototype).join(); });
+  t('navigator.storage descriptor', function () { return d(Navigator.prototype, 'storage'); });
+  t('own on navigator', function () { return Object.prototype.hasOwnProperty.call(navigator, 'storage'); });
+  t('estimate descriptor', function () { return d(StorageManager.prototype, 'estimate') + ' len=' + StorageManager.prototype.estimate.length; });
+  t('persist len', function () { return StorageManager.prototype.persist.length + ' ' + StorageManager.prototype.persisted.length + ' ' + StorageManager.prototype.getDirectory.length; });
+  t('new StorageManager', function () { return new StorageManager(); });
+  t('estimate is a promise', function () { var p = navigator.storage.estimate(); p.catch(function () {}); return p instanceof Promise; });
+  t('same promise twice', function () { return navigator.storage.estimate() === navigator.storage.estimate(); });
+  var e = await navigator.storage.estimate();
+  log('estimate tag: ' + Object.prototype.toString.call(e));
+  log('estimate keys: ' + Object.keys(e).join() + ' own names: ' + Object.getOwnPropertyNames(e).join());
+  log('types: ' + typeof e.quota + ' ' + typeof e.usage + ' ' + typeof e.usageDetails);
+  log('usage: ' + e.usage + ' integer quota: ' + Number.isInteger(e.quota) + ' quota minus usage: ' + (e.quota - e.usage));
+  log('usageDetails: ' + Object.prototype.toString.call(e.usageDetails) + ' keys=[' + Object.keys(e.usageDetails).join() + ']');
+  log('proto of estimate: ' + (Object.getPrototypeOf(e) === Object.prototype) + ' usageDetails: ' + (Object.getPrototypeOf(e.usageDetails) === Object.prototype));
+  var e2 = await navigator.storage.estimate();
+  log('second estimate equal: ' + (e2.quota === e.quota && e2.usage === e.usage) + ' new object: ' + (e2 !== e));
+  // (A wrong `this` rejects in Chrome with "Failed to execute 'estimate' on
+  // 'StorageManager': Illegal invocation"; the engine's brand check, which
+  // is the same for every interface, throws a bare "Illegal invocation":
+  // not compared.)
+  await a('persisted', function () { return navigator.storage.persisted(); });
+  await a('persist', function () { return navigator.storage.persist(); });
+  await a('persisted after', function () { return navigator.storage.persisted(); });
+  await a('persist again', function () { return navigator.storage.persist(); });
+  await a('permission', async function () {
+    var s = await navigator.permissions.query({ name: 'persistent-storage' });
+    return s.state;
+  });
+  await a('estimate after persist', async function () { var x = await navigator.storage.estimate(); return x.usage + ' ' + (x.quota - x.usage); });
+  end();
+})();
+</script>

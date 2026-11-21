@@ -10,17 +10,44 @@ use std::sync::Arc;
 use lb_net::ClientHelloProfile;
 use lb_persona::{Persona, PersonaProfile};
 
+mod mcp;
+mod ops;
+
 const USAGE: &str = "\
 lightbrowser - headless browser for detection testing
 
 USAGE:
-  lightbrowser --version
+  lightbrowser --version [--verbose]        --verbose adds the commit id
   lightbrowser serve [--port 9222] [--persona FILE] [--remote-allow-origins O]
                     [--profiles-dir DIR] [--insecure] [--workers N]
                     [--proxy URL] [--proxy-bypass-list LIST]
                     [--tcp-profile NAME]
+                    [--egress open|loopback|allowlist] [--allow-host H]...
+                    [--max-pages N] [--max-connections N] [--log LEVEL]
                                             CDP server on 127.0.0.1 for Playwright
-                                            connectOverCDP
+                                            connectOverCDP. --max-pages: open
+                                            pages at most (default 1000; more
+                                            fail with a CDP error);
+                                            --max-connections: client
+                                            connections at most (default 512;
+                                            more get HTTP 503). /json/new
+                                            needs PUT, as in Chrome (GET gets
+                                            405). SIGINT/SIGTERM close pages
+                                            and exit 0; a second signal, or 5 s
+                                            without finishing, exits at once
+                                            (status 130). Same for mcp.
+  lightbrowser mcp [--allow-host ENTRY]... [--persona FILE] [--profiles-dir DIR]
+                  [--insecure] [--proxy URL] [--proxy-bypass-list LIST]
+                  [--timeout SECS] [--log LEVEL]
+                                            Model Context Protocol server on
+                                            stdin/stdout (JSON-RPC lines) so an
+                                            AI agent can drive the browser;
+                                            listens on nothing. Only loopback,
+                                            localhost, *.localhost and *.test
+                                            are visited unless --allow-host adds
+                                            hosts (repeatable; the same entries
+                                            as `serve`, see --allow-host below).
+                                            See ADR 0041.
   lightbrowser fetch <url> [OPTIONS]
   lightbrowser tcp-shim [--queue N] [--tcp-dir DIR] [--no-rules]   (Linux, root)
   lightbrowser validate <persona.json>...   check v1/v2 personas against the
@@ -28,17 +55,21 @@ USAGE:
                                             violation or load error)
   lightbrowser fingerprint-report [--persona P] [--url URL] [--profiles-dir DIR]
                     [--insecure] [--timeout SECS]
+                    [--egress open|loopback|allowlist] [--allow-host H]...
                                             load URL (default about:blank),
                                             compare the live fingerprint
                                             surface with the persona, print
                                             JSON (exit 1 on any mismatch)
 
 FETCH OPTIONS:
-  --dump html|text       print the DOM after scripts ran (html) or its text;
-                         default: none
+  --dump MODE            print the DOM after scripts ran as html, its text,
+                         markdown, its links (URL<TAB>text per line) or a json
+                         summary (url, status, title, headings, links, text,
+                         markdown); default: none
   --wait-until W         load (default) | networkidle | domcontentloaded |
                          commit | <ms> (load, then that many ms more)
-  --timeout SECS         give up waiting after SECS (default 30)
+  --timeout SECS         give up after SECS, waiting for the response
+                         included (default 30)
   --persona P            a persona file (PATH.json), or chrome | firefox for
                          that family's reference persona (default: the
                          compiled family's reference persona)
@@ -57,7 +88,22 @@ FETCH OPTIONS:
                          with their own proxyServer use theirs)
   --proxy-bypass-list L  Chrome's bypass rules (`*.a.com,10.0.0.0/8,<local>`);
                          loopback is never proxied unless L has <-loopback>
+  --egress MODE          which destinations may be connected to (also for
+                         `serve`): open (default, no checks) | loopback
+                         (127.0.0.0/8, ::1, localhost, *.localhost, and the
+                         --allow-host entries) | allowlist (only the entries).
+                         A refused request fails as net::ERR_BLOCKED_BY_CLIENT
+                         and sends nothing: a name that is not allowed is not
+                         even looked up; every resolved address is checked.
+  --allow-host H         add an allowed destination (repeatable): a name glob
+                         (*.lab.test), an IP (10.0.0.5, [fd00::1]) or a CIDR
+                         block (10.0.0.0/8). Needs --egress loopback|allowlist.
+                         A proxy's own address must be allowed too.
   -v, --verbose          print the status line and headers to stderr
+
+SERVE AND MCP OPTIONS:
+  --log LEVEL            print the browser's log events at LEVEL and above to
+                         stderr: error | warn | info | debug (default: none)
 
 TCP-SHIM OPTIONS:
   --queue N              netfilter queue number (default 4100)
@@ -71,11 +117,57 @@ TCP-SHIM OPTIONS:
 Exit code: 0 on 2xx/3xx, 1 on other statuses or errors, 2 on bad usage.
 ";
 
+/// `--egress` and `--allow-host` (ADR 0044), shared by `fetch` and `serve`.
+#[derive(Debug, Default)]
+struct EgressArgs {
+    mode: Option<String>,
+    allow: Vec<String>,
+}
+
+impl EgressArgs {
+    /// `--egress MODE`. Two different modes are a usage error (the last
+    /// one must not silently win and lift a restriction).
+    fn set_mode(&mut self, mode: String) -> Result<(), String> {
+        match &self.mode {
+            Some(prev) if !prev.trim().eq_ignore_ascii_case(mode.trim()) => Err(format!(
+                "--egress given twice with different values ({prev}, {mode})"
+            )),
+            _ => {
+                self.mode = Some(mode);
+                Ok(())
+            }
+        }
+    }
+
+    /// The policy these flags ask for; `None` for the default (open).
+    fn policy(&self) -> Result<Option<Arc<lb_net::EgressPolicy>>, String> {
+        let mode = self.mode.as_deref().unwrap_or("open");
+        let policy = lb_net::EgressPolicy::parse(mode, &self.allow).map_err(|e| {
+            if self.allow.is_empty() {
+                format!("--egress: {e}")
+            } else {
+                format!("--egress/--allow-host: {e} (pass --egress loopback or allowlist)")
+            }
+        })?;
+        Ok((!policy.is_open()).then(|| Arc::new(policy)))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Dump {
     None,
     Html,
     Text,
+    Markdown,
+    Links,
+    Json,
+}
+
+impl Dump {
+    /// The modes made by `lb_page::extract`.
+    fn extracts(self) -> bool {
+        matches!(self, Dump::Markdown | Dump::Links | Dump::Json)
+    }
 }
 
 #[derive(Debug)]
@@ -91,6 +183,7 @@ struct FetchArgs {
     verbose: bool,
     proxy: Option<String>,
     proxy_bypass: Option<String>,
+    egress: EgressArgs,
 }
 
 fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
@@ -107,6 +200,7 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
         verbose: false,
         proxy: None,
         proxy_bypass: None,
+        egress: EgressArgs::default(),
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -126,7 +220,14 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
                 out.dump = match value("--dump")?.as_str() {
                     "html" => Dump::Html,
                     "text" => Dump::Text,
-                    other => return Err(format!("--dump must be html or text, got {other:?}")),
+                    "markdown" => Dump::Markdown,
+                    "links" => Dump::Links,
+                    "json" => Dump::Json,
+                    other => {
+                        return Err(format!(
+                            "--dump must be one of html, text, markdown, links, json, got {other:?}"
+                        ));
+                    }
                 }
             }
             "--persona" => out.persona = Some(value("--persona")?),
@@ -153,6 +254,8 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
             "--insecure" => out.insecure = true,
             "--proxy" => out.proxy = Some(value("--proxy")?),
             "--proxy-bypass-list" => out.proxy_bypass = Some(value("--proxy-bypass-list")?),
+            "--egress" => out.egress.set_mode(value("--egress")?)?,
+            "--allow-host" => out.egress.allow.push(value("--allow-host")?),
             "-v" | "--verbose" => out.verbose = true,
             f if f.starts_with('-') => return Err(format!("unknown option: {f}")),
             _ => {
@@ -163,6 +266,7 @@ fn parse_fetch_args(args: &[String]) -> Result<FetchArgs, String> {
         }
     }
     out.url = url.ok_or("fetch needs a url")?;
+    out.egress.policy()?;
     Ok(out)
 }
 
@@ -318,6 +422,9 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
     {
         ctx.set_proxy(Arc::new(p));
     }
+    if let Some(policy) = args.egress.policy()? {
+        ctx.set_egress(policy);
+    }
     if let Some(id) = tcp_id {
         // profiles/tcp sits next to profiles/tls.
         let tcp_dir = args
@@ -341,6 +448,7 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
         .enable_all()
         .build()
         .map_err(|e| format!("starting runtime: {e}"))?;
+    let requested = url.to_string();
     let loaded = rt.block_on(load_page(&ctx, url, args))?;
     // One page per process: the process ends right after the output, so
     // the runtime is not shut down (nothing is pending; no disk state).
@@ -367,6 +475,17 @@ fn run_fetch(args: &FetchArgs) -> Result<i32, String> {
         Dump::Text => stdout
             .write_all(loaded.text.as_bytes())
             .and_then(|()| stdout.write_all(b"\n")),
+        Dump::Markdown | Dump::Links | Dump::Json => match &loaded.extracted {
+            Some(e) => stdout.write_all(
+                match args.dump {
+                    Dump::Markdown => e.markdown.clone(),
+                    Dump::Links => lb_page::extract::links_dump(e),
+                    _ => lb_page::extract::json_dump(e, &requested, &loaded.url, loaded.status),
+                }
+                .as_bytes(),
+            ),
+            None => return Err("nothing was extracted".into()),
+        },
     };
     // A closed pipe (`| head`) is not an error for us.
     if let Err(e) = written.and_then(|()| stdout.flush())
@@ -386,6 +505,8 @@ struct Loaded {
     headers: Vec<(String, String)>,
     html: String,
     text: String,
+    /// Set for the `--dump markdown | links | json` modes.
+    extracted: Option<lb_page::extract::Extracted>,
 }
 
 /// Load the page and run its scripts (chrome build).
@@ -397,6 +518,12 @@ async fn load_page(
 ) -> Result<Loaded, String> {
     use std::time::Duration;
     let until: lb_page::WaitUntil = args.wait_until.parse()?;
+    // `--timeout` bounds the whole load: the navigation up to commit, then
+    // the wait for `--wait-until`.
+    let now = tokio::time::Instant::now();
+    let deadline = now
+        .checked_add(Duration::from_secs(args.timeout))
+        .unwrap_or_else(|| now + Duration::from_secs(100 * 365 * 24 * 3600));
     let browser = lb_page::Browser::new(lb_page::BrowserOptions {
         workers: 1,
         // One page per process: making the snapshot costs more than it saves.
@@ -408,14 +535,21 @@ async fn load_page(
         .new_page_to_load(ctx)
         .await
         .map_err(|e| e.to_string())?;
-    let nav = page
-        .navigate(url.as_str())
-        .await
-        .map_err(|e| e.to_string())?;
-    match page
-        .wait_for(until, Duration::from_secs(args.timeout))
-        .await
-    {
+    let nav = match tokio::time::timeout_at(deadline, page.navigate(url.as_str())).await {
+        Ok(r) => r.map_err(|e| e.to_string())?,
+        Err(_) => {
+            // The navigation is still running on the worker thread; the
+            // process exits right after this error, so do not wait for it.
+            std::mem::forget(page);
+            std::mem::forget(browser);
+            return Err(format!(
+                "timed out after {} s waiting for a response from {url}",
+                args.timeout
+            ));
+        }
+    };
+    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    match page.wait_for(until, left).await {
         Ok(()) => {}
         Err(lb_page::PageError::Timeout) => eprintln!(
             "warning: timed out waiting for {}; dumping the DOM as it is",
@@ -425,6 +559,11 @@ async fn load_page(
     }
     let html = page.content().await.map_err(|e| e.to_string())?;
     let text = page.text().await.map_err(|e| e.to_string())?;
+    let extracted = if args.dump.extracts() {
+        Some(page.extract().await.map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     for m in page.console_messages().await.unwrap_or_default() {
         if args.verbose || m.level == "error" {
             eprintln!("console.{}: {}", m.level, m.text);
@@ -440,6 +579,7 @@ async fn load_page(
         headers: nav.headers,
         html,
         text,
+        extracted,
     })
 }
 
@@ -449,17 +589,32 @@ async fn load_page(
 async fn load_page(
     ctx: &lb_page::BrowserContext,
     url: url::Url,
-    _args: &FetchArgs,
+    args: &FetchArgs,
 ) -> Result<Loaded, String> {
-    let (resp, doc) = lb_page::load_document(ctx, url)
-        .await
-        .map_err(|e| e.to_string())?;
+    let timeout = std::time::Duration::from_secs(args.timeout);
+    let (resp, doc) =
+        match tokio::time::timeout(timeout, lb_page::load_document(ctx, url.clone())).await {
+            Ok(r) => r.map_err(|e| e.to_string())?,
+            Err(_) => {
+                return Err(format!(
+                    "timed out after {} s waiting for a response from {url}",
+                    args.timeout
+                ));
+            }
+        };
+    let text = lb_webapi::text::document_text(&doc);
+    // No style engine here: only `hidden` and inline styles hide content.
+    let extracted = args
+        .dump
+        .extracts()
+        .then(|| lb_page::extract::extract_document(&doc, &resp.url, text.clone()));
     Ok(Loaded {
         status: resp.status,
         url: resp.url.to_string(),
         headers: resp.headers,
         html: doc.to_html(),
-        text: lb_webapi::text::document_text(&doc),
+        text,
+        extracted,
     })
 }
 
@@ -471,6 +626,7 @@ struct ReportArgs {
     profiles_dir: Option<PathBuf>,
     insecure: bool,
     timeout: u64,
+    egress: EgressArgs,
 }
 
 fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
@@ -500,9 +656,12 @@ fn parse_report_args(args: &[String]) -> Result<ReportArgs, String> {
                     .map_err(|_| "--timeout takes whole seconds".to_string())?
             }
             "--insecure" => out.insecure = true,
+            "--egress" => out.egress.set_mode(value("--egress")?)?,
+            "--allow-host" => out.egress.allow.push(value("--allow-host")?),
             other => return Err(format!("unknown option {other}")),
         }
     }
+    out.egress.policy()?;
     Ok(out)
 }
 
@@ -530,6 +689,9 @@ fn run_report(args: &ReportArgs) -> Result<bool, String> {
         virtual_time: false,
     })
     .map_err(|e| e.to_string())?;
+    if let Some(policy) = args.egress.policy()? {
+        ctx.set_egress(policy);
+    }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -587,6 +749,11 @@ struct ServeArgs {
     proxy_bypass: Option<String>,
     /// Same as `fetch --tcp-profile` (T10): persona | off | profile id.
     tcp_profile: Option<String>,
+    egress: EgressArgs,
+    /// `--max-pages`, `--max-connections`, `--log` (GAP-096, GAP-097).
+    max_pages: Option<usize>,
+    max_connections: Option<usize>,
+    log: Option<tracing::Level>,
 }
 
 fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
@@ -601,6 +768,10 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
         proxy: None,
         proxy_bypass: None,
         tcp_profile: None,
+        egress: EgressArgs::default(),
+        max_pages: None,
+        max_connections: None,
+        log: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -630,6 +801,8 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
             "--proxy" => out.proxy = Some(value("--proxy")?),
             "--proxy-bypass-list" => out.proxy_bypass = Some(value("--proxy-bypass-list")?),
             "--tcp-profile" => out.tcp_profile = Some(value("--tcp-profile")?),
+            "--egress" => out.egress.set_mode(value("--egress")?)?,
+            "--allow-host" => out.egress.allow.push(value("--allow-host")?),
             "--workers" => {
                 out.workers = Some(
                     value("--workers")?
@@ -644,9 +817,22 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
                     .filter(|s| !s.is_empty())
                     .collect()
             }
+            "--max-pages" | "--max-connections" => {
+                let n = value(flag)?
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| format!("{flag} needs a number above 0"))?;
+                match flag {
+                    "--max-pages" => out.max_pages = Some(n),
+                    _ => out.max_connections = Some(n),
+                }
+            }
+            "--log" => out.log = Some(ops::parse_log_level(&value("--log")?)?),
             other => return Err(format!("unknown option: {other}")),
         }
     }
+    out.egress.policy()?;
     Ok(out)
 }
 
@@ -702,7 +888,13 @@ fn run_serve(args: &ServeArgs) -> Result<(), String> {
     let config = lb_cdp::ServerConfig {
         addr: std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
         allow_origins: args.allow_origins.clone(),
+        max_pages: args.max_pages.unwrap_or(lb_cdp::DEFAULT_MAX_PAGES),
+        max_connections: args
+            .max_connections
+            .unwrap_or(lb_cdp::DEFAULT_MAX_CONNECTIONS),
+        ..lb_cdp::ServerConfig::default()
     };
+    ops::init_log(args.log);
     serve_with(persona, tls_dir, args, config)
 }
 
@@ -754,13 +946,17 @@ fn serve_with(
     if let Some(n) = args.workers {
         opts.workers = n.max(1);
     }
+    opts.egress = args.egress.policy()?;
     let host = std::rc::Rc::new(lb_page::CdpHost::new(opts)?);
     eprintln!("persona {label}");
+    let stop = ops::stop_signal();
+    // On SIGINT/SIGTERM `run_until` closes pages and contexts; dropping the
+    // host at the end of `block_on_local` joins the worker threads.
     lb_cdp::block_on_local(async move {
         let server = lb_cdp::Server::bind(config, host).await?;
         // Same line Chrome prints; launchers wait for it.
         eprintln!("\nDevTools listening on {}", server.browser_ws_url());
-        server.run().await
+        server.run_until(stop).await
     })
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())
@@ -772,16 +968,30 @@ fn serve_with(
 fn serve_with(
     persona: PersonaProfile,
     _tls_dir: PathBuf,
-    _args: &ServeArgs,
+    args: &ServeArgs,
     config: lb_cdp::ServerConfig,
 ) -> Result<(), String> {
+    // The mock page host loads loopback URLs only, which is at least as
+    // strict as `open` and `loopback`; an allowlist could not be honoured
+    // (it would not even allow all of loopback), so it is refused rather
+    // than accepted and ignored (ADR 0044).
+    if let Some(p) = args.egress.policy()?
+        && p.mode() == lb_net::EgressMode::AllowList
+    {
+        return Err(
+            "--egress allowlist is not supported by the firefox build's serve (its mock page \
+             host loads loopback URLs only)"
+                .into(),
+        );
+    }
     let label = persona.profile_id.clone();
     let host = std::rc::Rc::new(lb_cdp::mock::MockHost::new(persona));
     eprintln!("page host: MOCK (no JS engine in the firefox build yet); persona {label}");
+    let stop = ops::stop_signal();
     lb_cdp::block_on_local(async move {
         let server = lb_cdp::Server::bind(config, host).await?;
         eprintln!("\nDevTools listening on {}", server.browser_ws_url());
-        server.run().await
+        server.run_until(stop).await
     })
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())
@@ -805,10 +1015,10 @@ fn run_validate(paths: &[String]) -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    ops::install_panic_hook();
     match args.first().map(String::as_str) {
         Some("--version" | "-V") => {
-            let family = lb_js::COMPILED_FAMILY.map_or("none", |f| f.as_str());
-            println!("lightbrowser {} ({family})", env!("CARGO_PKG_VERSION"));
+            ops::print_version(args[1..].iter().any(|a| a == "--verbose" || a == "-v"));
             ExitCode::SUCCESS
         }
         Some("fetch") => {
@@ -866,6 +1076,27 @@ fn main() -> ExitCode {
                 }
             };
             match run_serve(&parsed) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        Some("mcp") => {
+            if args[1..].iter().any(|a| a == "--help" || a == "-h") {
+                print!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            let parsed = match mcp::parse_args(&args[1..]) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("error: {e}\n");
+                    eprint!("{USAGE}");
+                    return ExitCode::from(2);
+                }
+            };
+            match mcp::run(&parsed) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("error: {e}");
@@ -1010,6 +1241,76 @@ mod tests {
         assert_eq!(a(&["u"]).unwrap().wait_until, "load");
         assert!(a(&["u", "--wait-until", "500"]).is_ok());
         assert!(a(&["u", "--wait-until", "soon"]).is_err());
+    }
+
+    #[test]
+    fn parses_egress_flags() {
+        let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Default: open, no policy.
+        let f = parse_fetch_args(&strs(&["http://x/"])).unwrap();
+        assert!(f.egress.policy().unwrap().is_none());
+        let f = parse_fetch_args(&strs(&["http://x/", "--egress", "open"])).unwrap();
+        assert!(f.egress.policy().unwrap().is_none());
+        // Loopback with entries, both flag spellings, for fetch and serve.
+        let f = parse_fetch_args(&strs(&[
+            "http://x/",
+            "--egress=loopback",
+            "--allow-host",
+            "10.0.0.0/8",
+            "--allow-host=*.lab.test",
+        ]))
+        .unwrap();
+        let p = f.egress.policy().unwrap().unwrap();
+        assert_eq!(p.mode(), lb_net::EgressMode::Loopback);
+        assert!(p.check_name("10.1.1.1").is_ok() && p.check_name("a.lab.test").is_ok());
+        assert!(p.check_name("example.com").is_err());
+        let s =
+            parse_serve_args(&strs(&["--egress", "allowlist", "--allow-host", "[::1]"])).unwrap();
+        let p = s.egress.policy().unwrap().unwrap();
+        assert_eq!(p.mode(), lb_net::EgressMode::AllowList);
+        assert!(p.check_name("127.0.0.1").is_err() && p.check_name("::1").is_ok());
+        // Mistakes are usage errors.
+        assert!(parse_fetch_args(&strs(&["u", "--egress", "closed"])).is_err());
+        assert!(parse_fetch_args(&strs(&["u", "--allow-host", "a.test"])).is_err());
+        assert!(parse_serve_args(&strs(&["--egress", "open", "--allow-host", "a.test"])).is_err());
+        assert!(
+            parse_serve_args(&strs(&["--egress", "loopback", "--allow-host", "a:80"])).is_err()
+        );
+        assert!(parse_serve_args(&strs(&["--egress"])).is_err());
+        // Two different modes must not let the last one lift the first.
+        assert!(
+            parse_fetch_args(&strs(&["u", "--egress", "loopback", "--egress", "open"])).is_err()
+        );
+        assert!(parse_serve_args(&strs(&["--egress=open", "--egress", "loopback"])).is_err());
+        assert!(parse_serve_args(&strs(&["--egress=loopback", "--egress", "Loopback"])).is_ok());
+        // An entry that holds every address is refused like `*`.
+        for e in ["0.0.0.0/0", "::/0", "*"] {
+            assert!(
+                parse_serve_args(&strs(&["--egress", "loopback", "--allow-host", e])).is_err(),
+                "{e}"
+            );
+        }
+        // A name pinned to addresses.
+        let s = parse_serve_args(&strs(&[
+            "--egress",
+            "loopback",
+            "--allow-host",
+            "a.lab.test@10.0.0.0/8",
+        ]))
+        .unwrap();
+        assert!(
+            s.egress
+                .policy()
+                .unwrap()
+                .unwrap()
+                .check_name("a.lab.test")
+                .is_ok()
+        );
+        // `fingerprint-report` takes the same flags.
+        let r = parse_report_args(&strs(&["--url", "http://x/", "--egress", "loopback"])).unwrap();
+        assert!(r.egress.policy().unwrap().is_some());
+        assert!(parse_report_args(&strs(&["--allow-host", "a.test"])).is_err());
+        assert!(parse_report_args(&strs(&["--egress", "nope"])).is_err());
     }
 
     #[test]

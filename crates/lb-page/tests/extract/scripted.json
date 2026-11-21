@@ -1,0 +1,29 @@
+{
+  "url": "http://{HOST}/scripted.html",
+  "final_url": "http://{HOST}/scripted.html",
+  "status": 200,
+  "title": "Scripted title",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Built by script"
+    }
+  ],
+  "links": [
+    {
+      "url": "http://{HOST}/alpha",
+      "text": "alpha",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/beta",
+      "text": "beta",
+      "rel": ""
+    }
+  ],
+  "text": "Built by script\nalpha\nbeta",
+  "markdown": "# Built by script\n\n- [alpha](http://{HOST}/alpha)\n- [beta](http://{HOST}/beta)\n"
+}

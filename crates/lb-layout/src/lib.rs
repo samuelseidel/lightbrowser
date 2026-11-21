@@ -28,6 +28,12 @@ mod fonts;
 mod text;
 mod tree;
 
+/// Stack size for threads that lay out pages (lb-page's page workers).
+/// Layout recurses per box level, up to 512 levels (the box depth cap in
+/// `build.rs`); a debug build needs about 9 KiB per level to build boxes
+/// alone. Only reserved: a thread touches what it uses.
+pub const PAGE_STACK: usize = 16 << 20;
+
 pub use ax::{AxNode, AxStates, AxTree, Checked};
 pub use display::{DisplayItem, DisplayKind, DisplayList, DisplayStep, TextLine};
 pub use engine::{BoxModel, LayoutBase, LayoutEngine, LayoutStats, Rect, ScrollAlign};

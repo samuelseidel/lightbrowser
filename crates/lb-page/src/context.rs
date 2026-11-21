@@ -73,6 +73,9 @@ struct Shared {
     /// The context's TCP/IP SYN profile (ADR 0031): set once, before the
     /// first request (`fetch --tcp-profile`). `None` sends the host's SYN.
     tcp_profile: std::sync::OnceLock<Arc<lb_net::tcpfp::TcpProfile>>,
+    /// The context's egress policy (ADR 0044): set once, before the first
+    /// request (`serve`/`fetch` `--egress`). Unset means open.
+    egress: std::sync::OnceLock<Arc<lb_net::EgressPolicy>>,
     /// Permission states a CDP client set (`Browser.grantPermissions`).
     permissions: lb_webapi::host::SharedPermissions,
     /// IndexedDB databases of every origin, in memory (ADR 0028), chrome
@@ -191,6 +194,7 @@ impl BrowserContext {
             connections: ConnectionPool::new(),
             proxy: std::sync::OnceLock::new(),
             tcp_profile: std::sync::OnceLock::new(),
+            egress: std::sync::OnceLock::new(),
             permissions: Default::default(),
             #[cfg(feature = "chrome")]
             idb: Default::default(),
@@ -285,6 +289,27 @@ impl BrowserContext {
         Ok(())
     }
 
+    /// Restrict this context's network to `policy` (ADR 0044): page and
+    /// worker requests, service worker fetches, WebSockets, favicons and
+    /// the proxy hop all go through it; a refused request fails as blocked
+    /// (`net::ERR_BLOCKED_BY_CLIENT`) and never leaves the machine. Only
+    /// the first call counts; call it before the first request.
+    pub fn set_egress(&self, policy: Arc<lb_net::EgressPolicy>) {
+        let _ = self.0.egress.set(policy);
+    }
+
+    /// The context's egress policy, if one was set.
+    pub fn egress(&self) -> Option<&Arc<lb_net::EgressPolicy>> {
+        self.0.egress.get()
+    }
+
+    /// Answer the name lookups of this context's connections from `hook`
+    /// first (a hosts file that needs no root). For tests.
+    #[doc(hidden)]
+    pub fn set_resolve_hook(&self, hook: Option<Arc<lb_net::pool::ResolveHook>>) {
+        self.0.connections.set_resolve_hook(hook);
+    }
+
     /// Permission states a CDP client set for this context.
     pub fn permissions(&self) -> &lb_webapi::host::SharedPermissions {
         &self.0.permissions
@@ -334,6 +359,9 @@ impl BrowserContext {
         net.pool = Some(self.0.connections.clone());
         net.proxy = self.0.proxy.get().cloned();
         net.tcp_profile = self.0.tcp_profile.get().cloned();
+        if let Some(e) = self.0.egress.get() {
+            net.egress = Arc::clone(e);
+        }
         Ok(net)
     }
 
@@ -378,10 +406,10 @@ impl BrowserContext {
         &self,
         req: NetRequest,
         top_frame: Option<Url>,
-    ) -> Result<NetResponse, Result<lb_net::ProxyChallenge, String>> {
+    ) -> Result<(NetResponse, Vec<RedirectHop>), Result<lb_net::ProxyChallenge, String>> {
         self.fetch_raw(req, None, top_frame)
             .await
-            .map(|(r, _)| r)
+            .map(|(r, t)| (r, t.redirects))
             .map_err(|e| match e {
                 Ok(lb_net::NetError::ProxyAuth(ch)) => Ok(ch),
                 Ok(e) => Err(e.to_string()),
@@ -437,6 +465,7 @@ impl BrowserContext {
         } else {
             0
         };
+        let timing = Some(Box::new(net_timing(&resp.timing, resp.version)));
         let trace = FetchTrace {
             redirects: resp.redirects,
             method: resp.method.to_string(),
@@ -456,6 +485,7 @@ impl BrowserContext {
                     lb_net::HttpVersion::Http2 => "h2",
                 }),
                 url: resp.final_url,
+                timing,
             },
             trace,
         ))
@@ -501,6 +531,37 @@ impl BrowserContext {
     }
 }
 
+/// lb-net's measurements as the page layer's type.
+fn net_timing(t: &lb_net::FetchTiming, version: lb_net::HttpVersion) -> lb_webapi::host::NetTiming {
+    use lb_webapi::host::{NetConnTiming, NetTiming};
+    NetTiming {
+        start: t.start,
+        redirect: t.redirect,
+        redirects: t
+            .redirects
+            .iter()
+            .map(|r| (r.url.clone(), r.timing_allow_origin.clone()))
+            .collect(),
+        fetch_start: t.fetch_start,
+        conn: t.conn.map(|c| NetConnTiming {
+            dns_start: c.dns_start,
+            dns_end: c.dns_end,
+            connect_start: c.connect_start,
+            secure_start: c.secure_start,
+            connect_end: c.connect_end,
+        }),
+        request_start: t.request_start,
+        response_start: t.response_start,
+        response_end: t.response_end,
+        encoded_body_size: t.encoded_body_size,
+        decoded_body_size: t.decoded_body_size,
+        protocol: match version {
+            lb_net::HttpVersion::Http2 => "h2",
+            lb_net::HttpVersion::Http1 => "http/1.1",
+        },
+    }
+}
+
 /// The header-set selector for a page request.
 fn request_meta(req: &NetRequest, kind: Option<RequestKind>) -> RequestMeta {
     let kind = kind.unwrap_or(match req.destination {
@@ -515,6 +576,13 @@ fn request_meta(req: &NetRequest, kind: Option<RequestKind>) -> RequestMeta {
     let mut meta = RequestMeta::new(kind, req.initiator.clone());
     meta.mode = req.mode.to_owned();
     meta.user_activated |= req.user_activated;
+    meta.referrer =
+        req.referrer
+            .as_ref()
+            .map(|(url, policy)| lb_net::header_profile::ReferrerOverride {
+                url: url.clone(),
+                policy: policy.clone(),
+            });
     meta.form_post = matches!(kind, RequestKind::Document | RequestKind::Iframe)
         && req.method.eq_ignore_ascii_case("POST");
     meta

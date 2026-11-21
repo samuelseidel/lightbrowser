@@ -210,6 +210,7 @@ impl Browser {
         let idle = self.opts.idle_release;
         let t = std::thread::Builder::new()
             .name(format!("lb-worker-{i}"))
+            .stack_size(lb_layout::PAGE_STACK)
             .spawn(move || worker_main(rx, count, max_heap, snapshot, idle))
             .map_err(|e| PageError::Setup(e.to_string()))?;
         Ok((handle, t))

@@ -12,7 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const [h1Port, h2Port, exe = '/opt/pw-browsers/chromium'] = process.argv.slice(2);
+const [h1Port, h2Port, exe = process.env.LB_CHROME || process.env.CHROME || '/opt/pw-browsers/chromium'] = process.argv.slice(2);
 const H1 = `http://127.0.0.1:${h1Port}`;
 const H2 = `https://fptest.localhost:${h2Port}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

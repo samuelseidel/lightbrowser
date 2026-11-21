@@ -1,0 +1,18 @@
+{
+  "url": "http://{HOST}/whitespace.html",
+  "final_url": "http://{HOST}/whitespace.html",
+  "status": 200,
+  "title": "Whitespace",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Whitespace test"
+    }
+  ],
+  "links": [],
+  "text": "Whitespace test\nLeading and multiple spaces and tabs\nnon breaking  spaces and a space\na b cd e\ntext in div span more\n\none\n\ntwo",
+  "markdown": "# Whitespace test\n\nLeading and multiple spaces and tabs\n\nnon breaking  spaces and a space\n\na b c**d** *e*\n\ntext in div span more\n\none\n\ntwo\n"
+}

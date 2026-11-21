@@ -54,11 +54,13 @@ use tokio::sync::oneshot;
 use url::Url;
 
 use crate::HttpVersion;
+use crate::egress::EgressPolicy;
 use crate::error::NetError;
 use crate::header_profile::{RequestKind, RequestMeta};
 use crate::profile::ClientHelloProfile;
 use crate::proxy::Proxy;
 use crate::tcpfp::{self, TcpProfile};
+use crate::timing::ConnTiming;
 use crate::tls::{SessionCache, SessionKey, TlsConnector};
 
 /// Chrome's limit of sockets per group (`kMaxSocketsPerGroup`).
@@ -98,16 +100,28 @@ pub fn net_runtime() -> &'static Handle {
     })
 }
 
+/// A name-to-addresses override that runs before DNS: `Some` answers the
+/// lookup, `None` falls through to the resolver. For tests (a hosts file
+/// that needs no root) and tools that pin names; it sees only names the
+/// egress policy let through.
+pub type ResolveHook = dyn Fn(&str) -> Option<Vec<std::net::IpAddr>> + Send + Sync;
+
 /// DNS and TCP connect. The resolver is built on first use.
 #[derive(Default)]
 pub(crate) struct Dialer {
     resolver: OnceLock<Option<hickory_resolver::TokioResolver>>,
+    hook: Mutex<Option<Arc<ResolveHook>>>,
 }
 
 impl Dialer {
+    pub(crate) fn set_hook(&self, hook: Option<Arc<ResolveHook>>) {
+        *self.hook.lock().unwrap_or_else(|e| e.into_inner()) = hook;
+    }
+
     /// Resolve `host` (no brackets) to socket addresses. IP literals skip
     /// DNS. Uses hickory with the system configuration and falls back to
-    /// the platform resolver (`getaddrinfo`).
+    /// the platform resolver (`getaddrinfo`). Callers go through
+    /// [`connect`](Self::connect), which runs the egress policy first.
     pub(crate) async fn resolve(
         &self,
         host: &str,
@@ -116,6 +130,13 @@ impl Dialer {
         use std::net::{IpAddr, SocketAddr};
         if let Ok(ip) = host.parse::<IpAddr>() {
             return Ok(vec![SocketAddr::new(ip, port)]);
+        }
+        let hook = self.hook.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(ips) = hook.and_then(|h| h(host)) {
+            return Ok(ips
+                .into_iter()
+                .map(|ip| SocketAddr::new(ip, port))
+                .collect());
         }
         let resolver =
             self.resolver
@@ -150,13 +171,50 @@ impl Dialer {
     /// Resolve and connect, trying each address in turn. With a TCP profile
     /// (ADR 0031) the SYN carries the profile's values; `None` sends the
     /// host's own SYN.
+    ///
+    /// Every TCP connection of the stack starts here (proxies included), so
+    /// this is where the egress policy (ADR 0044) is enforced for good: the
+    /// name is checked before any DNS query, each resolved address before
+    /// its SYN. Addresses the policy refuses are dropped; when none is left
+    /// the connection fails as blocked.
     pub(crate) async fn connect(
         &self,
         host: &str,
         port: u16,
         tcp: Option<&TcpProfile>,
+        egress: &EgressPolicy,
     ) -> Result<TcpStream, NetError> {
-        let addrs = self.resolve(host, port).await?;
+        Ok(self.connect_timed(host, port, tcp, egress).await?.0)
+    }
+
+    /// [`Dialer::connect`], also telling when the DNS lookup started and
+    /// ended, and when the TCP connect ended.
+    pub(crate) async fn connect_timed(
+        &self,
+        host: &str,
+        port: u16,
+        tcp: Option<&TcpProfile>,
+        egress: &EgressPolicy,
+    ) -> Result<(TcpStream, Instant, Instant, Instant), NetError> {
+        egress.check_name(host)?;
+        let dns_start = Instant::now();
+        let mut addrs = self.resolve(host, port).await?;
+        let dns_end = Instant::now();
+        if !egress.is_open() {
+            let mut refused = None;
+            addrs.retain(|a| match egress.check_resolved(host, a.ip()) {
+                Ok(()) => true,
+                Err(e) => {
+                    refused.get_or_insert(e);
+                    false
+                }
+            });
+            if let Some(e) = refused
+                && addrs.is_empty()
+            {
+                return Err(e.into());
+            }
+        }
         let mut last = None;
         for addr in addrs {
             let connect = tcpfp::connect(addr, tcp);
@@ -164,7 +222,7 @@ impl Dialer {
                 Ok(Ok(tcp)) => {
                     // Small writes (h2 preface, request headers) should not wait.
                     let _ = tcp.set_nodelay(true);
-                    return Ok(tcp);
+                    return Ok((tcp, dns_start, dns_end, Instant::now()));
                 }
                 Ok(Err(e)) => last = Some(e),
                 Err(_) => {
@@ -246,6 +304,8 @@ impl AsyncWrite for Stream {
 pub struct Conn {
     pub id: u64,
     pub stream: Stream,
+    /// How the connection was set up (Resource Timing).
+    pub timing: Box<crate::timing::ConnTiming>,
 }
 
 /// A usable HTTP/2 session.
@@ -421,6 +481,10 @@ pub(crate) struct ConnectParams {
     pub(crate) user_agent: Arc<str>,
     /// The context's TCP/IP SYN profile (ADR 0031), for direct connections.
     pub(crate) tcp_profile: Option<Arc<TcpProfile>>,
+    /// The context's egress policy (ADR 0044).
+    pub(crate) egress: Arc<EgressPolicy>,
+    /// The context's TLS, proxy and response-head time limits.
+    pub(crate) timeouts: crate::fetch::NetTimeouts,
 }
 
 struct Inner {
@@ -480,9 +544,23 @@ impl ConnectionPool {
         self.inner.inline.load(Ordering::Relaxed)
     }
 
+    /// Answer name lookups of this pool's connections from `hook` first
+    /// (see [`ResolveHook`]). For tests.
+    #[doc(hidden)]
+    pub fn set_resolve_hook(&self, hook: Option<Arc<ResolveHook>>) {
+        self.inner.dialer.set_hook(hook);
+    }
+
     /// Connections opened so far (TCP connects that succeeded).
     pub fn opened(&self) -> u64 {
         self.inner.next_id.load(Ordering::Relaxed) - 1
+    }
+
+    /// Origin groups the pool holds state for (tests: a refused origin
+    /// never gets one).
+    #[doc(hidden)]
+    pub fn groups(&self) -> usize {
+        self.lock().groups.len()
     }
 
     /// TLS sessions cached for `key` (tests).
@@ -530,6 +608,13 @@ impl ConnectionPool {
         urgency: u8,
         params: &ConnectParams,
     ) -> Result<Lease, NetError> {
+        // A refused origin never gets a group (ADR 0044): no entry, no
+        // waiter, no connect, and so no TLS session either.
+        if params.proxy.is_some() {
+            params.egress.check_remote_name(&key.host)?;
+        } else {
+            params.egress.check_name(&key.host)?;
+        }
         let rx = {
             let mut st = self.lock();
             let now = Instant::now();
@@ -633,18 +718,43 @@ impl ConnectionPool {
         } else {
             None
         };
-        let tcp = match &params.proxy {
+        let t0 = Instant::now();
+        let (tcp, mut timing) = match &params.proxy {
             // Forward requests: the connection goes to the proxy itself.
             Some(p) if p.kind == crate::proxy::ProxyKind::Http && !key.https => {
-                p.dial(&self.inner.dialer).await?
+                let tcp = p.dial(&self.inner.dialer, &params.egress).await?;
+                (tcp, ConnTiming::whole(t0, Instant::now()))
             }
             Some(p) => {
-                p.tunnel(&self.inner.dialer, host, key.port, &params.user_agent)
-                    .await?
+                let tcp = p
+                    .tunnel(
+                        &self.inner.dialer,
+                        &params.egress,
+                        host,
+                        key.port,
+                        &params.user_agent,
+                        params.timeouts.proxy_handshake,
+                    )
+                    .await?;
+                (tcp, ConnTiming::whole(t0, Instant::now()))
             }
             None => {
                 let tcp = params.tcp_profile.as_deref();
-                self.inner.dialer.connect(host, key.port, tcp).await?
+                let (tcp, dns_start, dns_end, end) = self
+                    .inner
+                    .dialer
+                    .connect_timed(host, key.port, tcp, &params.egress)
+                    .await?;
+                (
+                    tcp,
+                    ConnTiming {
+                        dns_start,
+                        dns_end,
+                        connect_start: dns_end,
+                        secure_start: None,
+                        connect_end: end,
+                    },
+                )
             }
         };
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
@@ -653,17 +763,24 @@ impl ConnectionPool {
                 Conn {
                     id,
                     stream: Stream::Plain(tcp),
+                    timing: Box::new(timing),
                 },
                 HttpVersion::Http1,
             )),
             Some(c) => {
-                let (s, version) = c
-                    .connect_resuming(host, tcp, Some(&key.session_key()))
-                    .await?;
+                timing.secure_start = Some(Instant::now());
+                let (s, version) = crate::tls::handshake_within(
+                    params.timeouts.tls_handshake,
+                    host,
+                    c.connect_resuming(host, tcp, Some(&key.session_key())),
+                )
+                .await?;
+                timing.connect_end = Instant::now();
                 Ok((
                     Conn {
                         id,
                         stream: Stream::Tls(Box::new(s)),
+                        timing: Box::new(timing),
                     },
                     version,
                 ))
@@ -906,6 +1023,7 @@ fn close_oldest_idle(st: &mut State) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
@@ -950,5 +1068,75 @@ mod tests {
                 partition: "http://127.0.0.1 same_site".into(),
             }
         );
+    }
+
+    fn params(egress: EgressPolicy, proxy: Option<Arc<Proxy>>) -> ConnectParams {
+        let path = format!(
+            "{}/../../profiles/tls/chrome_153_linux.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let profile =
+            ClientHelloProfile::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
+        ConnectParams {
+            profile: Arc::new(profile),
+            insecure: true,
+            proxy,
+            user_agent: Arc::from("test"),
+            tcp_profile: None,
+            egress: Arc::new(egress),
+            timeouts: crate::fetch::NetTimeouts::default(),
+        }
+    }
+
+    fn key(host: &str, https: bool) -> GroupKey {
+        GroupKey {
+            https,
+            host: host.into(),
+            port: if https { 443 } else { 80 },
+            partition: String::new(),
+        }
+    }
+
+    /// The pool's own egress check (ADR 0044), called directly so the check
+    /// in `fetch_once_inner` is not what refuses: a refused origin gets no
+    /// group, no waiter, no connect attempt and no name lookup.
+    #[tokio::test]
+    async fn acquire_refuses_before_making_a_group() {
+        let pool = ConnectionPool::new();
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let l2 = Arc::clone(&lookups);
+        pool.set_resolve_hook(Some(Arc::new(move |_| {
+            l2.fetch_add(1, Ordering::SeqCst);
+            None
+        })));
+        for k in [
+            key("example.test", false),
+            key("example.test", true),
+            key("10.1.2.3", false),
+            key("[2001:db8::1]", true),
+        ] {
+            let r = pool
+                .acquire(&k, 0, &params(EgressPolicy::loopback(), None))
+                .await;
+            assert!(matches!(r, Err(NetError::Blocked(_))), "{}", k.host);
+            assert_eq!(pool.groups(), 0, "{} got a pool group", k.host);
+        }
+        // Through a proxy the name check is the stricter one: `localhost`
+        // is not vouched for there (the proxy resolves it).
+        let proxy = Arc::new(
+            crate::proxy::Proxy::parse("127.0.0.1:9", Some("<-loopback>"))
+                .unwrap()
+                .unwrap(),
+        );
+        let r = pool
+            .acquire(
+                &key("a.localhost", false),
+                0,
+                &params(EgressPolicy::loopback(), Some(proxy)),
+            )
+            .await;
+        assert!(matches!(r, Err(NetError::Blocked(_))));
+        assert_eq!(pool.groups(), 0);
+        assert_eq!((pool.opened(), lookups.load(Ordering::SeqCst)), (0, 0));
     }
 }

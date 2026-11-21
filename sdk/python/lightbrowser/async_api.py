@@ -138,6 +138,7 @@ class AsyncBrowser:
         profiles_dir: str | os.PathLike[str] | None = None,
         workers: int | None = None,
         tcp_profile: str | None = None,
+        egress: str | Sequence[str] | None = "loopback",
         extra_args: Sequence[str] = (),
         startup_timeout: float = 60.0,
         validate: bool = True,
@@ -146,7 +147,7 @@ class AsyncBrowser:
         self._plan: LaunchPlan | None = plan_launch(
             persona=persona, executable_path=executable_path, port=port, insecure=insecure,
             profiles_dir=profiles_dir, workers=workers, tcp_profile=tcp_profile,
-            extra_args=extra_args, validate=validate,
+            extra_args=extra_args, validate=validate, egress=egress,
         )
         self.persona: Persona | None = self._plan.persona
         self._startup_timeout = startup_timeout

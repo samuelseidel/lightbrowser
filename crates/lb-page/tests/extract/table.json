@@ -1,0 +1,24 @@
+{
+  "url": "http://{HOST}/table.html",
+  "final_url": "http://{HOST}/table.html",
+  "status": 200,
+  "title": "Tables",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Tables"
+    }
+  ],
+  "links": [
+    {
+      "url": "http://{HOST}/w",
+      "text": "cell",
+      "rel": ""
+    }
+  ],
+  "text": "Tables\nName\tQty\tPrice\nApple | green\t3\t$1.20\nPear\t12\ta|b\nWide cell\nShort",
+  "markdown": "# Tables\n\n| Name | Qty | Price |\n| --- | :---: | ---: |\n| Apple \\| green | 3 | $1.20 |\n| *Pear* | 12 | `a\\|b` |\n| Wide [cell](http://{HOST}/w) |  |  |\n| Short |  |  |\n"
+}

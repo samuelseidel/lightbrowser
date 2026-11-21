@@ -1,0 +1,13 @@
+{
+  "url": "http://{HOST}/plain.txt",
+  "final_url": "http://{HOST}/plain.txt",
+  "status": 200,
+  "title": "",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [],
+  "links": [],
+  "text": "line one\nline two <b>not markup</b>",
+  "markdown": "```\nline one\n  line two <b>not markup</b>\n```\n"
+}

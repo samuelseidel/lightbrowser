@@ -1,0 +1,5 @@
+<script>var L=[];function log(s){L.push(String(s))}function end(){log('end')}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function err(e){return e&&e.name!==undefined?(Object.prototype.toString.call(e)+' '+e.name+': '+e.message+(e.code!==undefined?' code='+e.code:'')):'value '+String(e)}
+function t(n,f){try{log(n+': '+f())}catch(e){log(n+' threw '+err(e))}}
+async function a(n,f){try{log(n+': '+await f())}catch(e){log(n+' rejected '+err(e))}}</script>

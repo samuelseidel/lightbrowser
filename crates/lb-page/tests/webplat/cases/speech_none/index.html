@@ -1,0 +1,127 @@
+<!doctype html><!--LOG--><body style="margin:0"><button id=b style="display:block;width:100px;height:40px" onclick="phase2()">go</button><script>
+// speechSynthesis.speak() with no voice installed (Chrome 153 on Linux
+// has none here): which events fire, with which error codes, and the
+// speaking / pending / paused flags, without a user activation (page
+// load) and with one (a click through CDP). Phases are driven by
+// steps.json: the click, then final().
+var ss = speechSynthesis, utt = {};
+function flags(n) { log(n + ': speaking=' + ss.speaking + ' pending=' + ss.pending + ' paused=' + ss.paused); }
+function mk(label, text, init) {
+  var u = new SpeechSynthesisUtterance(text);
+  Object.keys(init || {}).forEach(function (k) { u[k] = init[k]; });
+  ['start', 'end', 'error', 'pause', 'resume', 'boundary', 'mark'].forEach(function (type) {
+    u.addEventListener(type, function (e) {
+      log(label + ' ' + e.type + ' ' + Object.prototype.toString.call(e) + ' utterance=' + (e.utterance === u) + ' target=' + (e.target === u)
+        + ' charIndex=' + e.charIndex + ' charLength=' + e.charLength + ' elapsedTime=' + (e.elapsedTime >= 0 ? 'ok' : e.elapsedTime) + ' name=' + e.name
+        + (type == 'error' ? ' error=' + e.error : '') + ' trusted=' + e.isTrusted + ' bubbles=' + e.bubbles + ' cancelable=' + e.cancelable
+        + ' speaking=' + ss.speaking + ' pending=' + ss.pending + ' paused=' + ss.paused);
+    });
+  });
+  return u;
+}
+function shape() {
+  log('voices: ' + ss.getVoices().length + ' ' + Object.prototype.toString.call(ss.getVoices()) + ' same array: ' + (ss.getVoices() === ss.getVoices()));
+  log('SpeechSynthesis: ' + Object.getOwnPropertyNames(SpeechSynthesis.prototype).sort().join());
+  log('Utterance: ' + Object.getOwnPropertyNames(SpeechSynthesisUtterance.prototype).sort().join());
+  log('Event: ' + Object.getOwnPropertyNames(SpeechSynthesisEvent.prototype).sort().join() + ' / ' + Object.getOwnPropertyNames(SpeechSynthesisErrorEvent.prototype).sort().join());
+  var u = new SpeechSynthesisUtterance();
+  log('defaults: text=[' + u.text + '] lang=[' + u.lang + '] voice=' + u.voice + ' volume=' + u.volume + ' rate=' + u.rate + ' pitch=' + u.pitch);
+  var v = new SpeechSynthesisUtterance('x');
+  v.rate = 100; v.pitch = -1; v.volume = 3; v.lang = 'de-DE';
+  log('set: text=[' + v.text + '] rate=' + v.rate + ' pitch=' + v.pitch + ' volume=' + v.volume + ' lang=' + v.lang);
+  var v2 = new SpeechSynthesisUtterance('y');
+  v2.rate = 0.01; v2.pitch = 5; v2.volume = -1;
+  log('clamped: rate=' + v2.rate + ' pitch=' + v2.pitch + ' volume=' + v2.volume);
+  v2.rate = 0.3; v2.pitch = 1.1; v2.volume = 0.7;
+  log('float32: rate=' + v2.rate + ' pitch=' + v2.pitch + ' volume=' + v2.volume);
+  v2.rate = '2'; v2.pitch = null; v2.volume = true;
+  log('converted: rate=' + v2.rate + ' pitch=' + v2.pitch + ' volume=' + v2.volume);
+  t('rate NaN', function () { v2.rate = NaN; return v2.rate; });
+  t('rate Infinity', function () { v2.pitch = Infinity; return v2.pitch; });
+  t('voice = {}', function () { v2.voice = {}; return v2.voice; });
+  t('voice = null', function () { v2.voice = null; return v2.voice; });
+  t('text = 12', function () { v2.text = 12; return typeof v2.text + ' ' + v2.text; });
+  t('ctor undefined', function () { return '[' + new SpeechSynthesisUtterance(undefined).text + ']'; });
+  t('ctor null', function () { return '[' + new SpeechSynthesisUtterance(null).text + ']'; });
+  t('call without new', function () { return SpeechSynthesisUtterance('x'); });
+  t('chain', function () { return Object.prototype.toString.call(v2) + ' ' + (v2 instanceof EventTarget) + ' ' + (Object.getPrototypeOf(SpeechSynthesisUtterance.prototype) === EventTarget.prototype); });
+  t('handler', function () { var f = function () {}; v2.onstart = f; var r = v2.onstart === f; v2.onstart = 5; return r + ' ' + v2.onstart; });
+  t('event chain', function () { return (Object.getPrototypeOf(SpeechSynthesisEvent.prototype) === Event.prototype) + ' ' + (Object.getPrototypeOf(SpeechSynthesisErrorEvent.prototype) === SpeechSynthesisEvent.prototype); });
+  t('speak()', function () { return ss.speak(); });
+  t('speak(1)', function () { return ss.speak(1); });
+  t('speak({})', function () { return ss.speak({}); });
+  t('new SpeechSynthesisEvent', function () { return new SpeechSynthesisEvent('start'); });
+  t('new SpeechSynthesisEvent with init', function () { var e = new SpeechSynthesisEvent('start', { utterance: v, charIndex: 3, elapsedTime: 4, name: 'n' }); return e.charIndex + ' ' + e.elapsedTime + ' ' + e.name + ' ' + (e.utterance === v) + ' ' + e.charLength; });
+  t('Event {}', function () { return new SpeechSynthesisEvent('start', {}); });
+  t('Event bad utterance', function () { return new SpeechSynthesisEvent('start', { utterance: 1 }); });
+  t('Event defaults', function () { var e = new SpeechSynthesisEvent('end', { utterance: v }); return [e.charIndex, e.charLength, e.elapsedTime, e.name, e.bubbles, e.cancelable, e.isTrusted, e.target].join(); });
+  t('ErrorEvent {}', function () { return new SpeechSynthesisErrorEvent('error', {}); });
+  t('ErrorEvent no utterance', function () { return new SpeechSynthesisErrorEvent('error', { error: 'canceled' }); });
+  t('ErrorEvent no dict', function () { return new SpeechSynthesisErrorEvent('error'); });
+  t('ErrorEvent codes', function () { return ['canceled', 'interrupted', 'audio-busy', 'audio-hardware', 'network', 'synthesis-unavailable', 'synthesis-failed', 'language-unavailable', 'voice-unavailable', 'text-too-long', 'invalid-argument', 'not-allowed'].map(function (c) { return new SpeechSynthesisErrorEvent('error', { utterance: v, error: c }).error; }).join(); });
+  t('ErrorEvent init values', function () { var e = new SpeechSynthesisErrorEvent('error', { utterance: v, error: 'interrupted', charIndex: 2, elapsedTime: 1.5, name: 'z', bubbles: true }); return [e.error, e.charIndex, e.elapsedTime, e.name, e.bubbles, e.constructor.name].join(); });
+  t('new SpeechSynthesisErrorEvent', function () { return new SpeechSynthesisErrorEvent('error', { utterance: v, error: 'canceled' }).error; });
+  t('error event without error', function () { return new SpeechSynthesisErrorEvent('error', { utterance: v }); });
+  t('error event bad error', function () { return new SpeechSynthesisErrorEvent('error', { utterance: v, error: 'nope' }); });
+  t('cancel/pause/resume return', function () { var r = [ss.cancel(), ss.pause(), ss.resume()]; return r.map(String).join(); });
+  flags('after pause and resume with nothing to say');
+}
+(async function () {
+  shape();
+  await sleep(100);
+  flags('start');
+  log('--- speak at load, no activation');
+  utt.a = mk('a', 'hello world');
+  ss.speak(utt.a);
+  flags('right after speak');
+  await sleep(1500);
+  flags('1.5 s later');
+  log('--- waiting for the click');
+})();
+async function phase2() {
+  log('--- speak in a click');
+  utt.b = mk('b', 'hello world');
+  ss.speak(utt.b);
+  flags('right after speak');
+  await sleep(1500);
+  flags('1.5 s later');
+  log('--- two queued, then cancel');
+  utt.c = mk('c', 'one');
+  utt.d = mk('d', 'two');
+  ss.speak(utt.c);
+  ss.speak(utt.d);
+  flags('right after the two speaks');
+  await sleep(0);
+  flags('next task');
+  ss.cancel();
+  flags('right after cancel');
+  await sleep(1500);
+  flags('1.5 s after cancel');
+  log('--- pause and resume with something queued');
+  utt.e = mk('e', 'paused text');
+  ss.pause();
+  flags('pause');
+  ss.speak(utt.e);
+  flags('speak while paused');
+  await sleep(1000);
+  flags('1 s later');
+  ss.resume();
+  flags('resume');
+  await sleep(1500);
+  flags('1.5 s after resume');
+  ss.cancel();
+  log('--- empty text, and a long one');
+  utt.f = mk('f', '');
+  ss.speak(utt.f);
+  await sleep(1000);
+  flags('after empty');
+  utt.g = mk('g', 'word '.repeat(300));
+  ss.speak(utt.g);
+  await sleep(1000);
+  flags('after long');
+  ss.cancel();
+  await sleep(500);
+  flags('end');
+  end();
+}
+</script>
