@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field notes: a common page</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .card { border: 1px solid #ccd; border-radius: 6px; padding: 8px; }
+  .row { display: flex; justify-content: space-between; align-items: center; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #eee; padding: 4px 6px; text-align: right; }
+  .hidden { display: none; }
+</style>
+<script src="common.js" defer></script>
+</head>
+<body>
+<header class="row"><a href="#">Field notes</a><nav><a href="#a">Notes</a> <a href="#b">Data</a> <a href="#c">Contact</a></nav></header>
+<main>
+  <article id="a">
+    <h1>Weather station notes</h1>
+    <p>Readings from a small station: temperature, pressure and wind, taken
+    every hour and kept for a week. <em>Values</em> are in metric units.</p>
+    <figure><img src="pic.png" alt="chart" width="160" height="100"><figcaption>Last week</figcaption></figure>
+    <p><img src="pic.jpg" alt="photo"> <img src="pic.gif" alt="icon"> <img src="pic.webp" alt="map"></p>
+    <ul id="list"></ul>
+  </article>
+  <section id="b">
+    <h2>Readings</h2>
+    <table><thead><tr><th>Hour</th><th>Temp</th><th>Pressure</th><th>Wind</th></tr></thead><tbody id="rows"></tbody></table>
+    <div class="cards" id="cards"></div>
+  </section>
+  <section id="c">
+    <h2>Contact</h2>
+    <form id="f" action="#">
+      <label>Name <input name="name" value="Ann"></label>
+      <label>Mail <input type="email" name="mail"></label>
+      <label>Topic <select name="topic"><option>General</option><option selected>Data</option></select></label>
+      <label><input type="checkbox" name="copy" checked> Copy</label>
+      <textarea name="msg">Hello</textarea>
+      <button type="submit">Send</button>
+    </form>
+  </section>
+</main>
+<footer class="row"><span id="stamp"></span><span id="count"></span></footer>
+<script>
+  const rows = document.getElementById('rows');
+  const data = [];
+  for (let h = 0; h < 24; h++) {
+    data.push({ hour: h, temp: 12 + Math.sin(h / 4) * 6, press: 1013 + Math.cos(h / 5) * 4, wind: (h * 7) % 13 });
+  }
+  data.sort((a, b) => b.temp - a.temp);
+  for (const d of data) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${String(d.hour).padStart(2, '0')}:00</td><td>${d.temp.toFixed(1)}</td><td>${d.press.toFixed(0)}</td><td>${d.wind}</td>`;
+    rows.appendChild(tr);
+  }
+  const fmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+  const list = document.getElementById('list');
+  ['North', 'east', 'SOUTH', 'west'].map((s) => s.toLowerCase()).forEach((s, i) => {
+    const li = document.createElement('li');
+    li.textContent = s.replace(/^\w/, (c) => c.toUpperCase()) + ': ' + fmt.format(i * 1.25);
+    li.classList.add('dir');
+    list.append(li);
+  });
+  document.getElementById('stamp').textContent = new Date(2026, 0, 2, 3, 4).toLocaleString('en-US');
+  const json = JSON.parse(JSON.stringify({ data: data.slice(0, 3), seen: new Set([1, 2]).size }));
+  document.getElementById('count').textContent = json.data.length + ' / ' + json.seen;
+</script>
+</body>
+</html>

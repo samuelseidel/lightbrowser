@@ -1,0 +1,180 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "a0d4f8b2-6e1c-4a7d-b9f3-c5e8a1d4f7b0",
+  "profile_name": "Ubuntu 22.04 LTS \u2014 Intel Iris Xe \u2014 1080p",
+  "created_at": "2026-02-24T00:00:00Z",
+  "tags": [
+    "linux",
+    "ubuntu",
+    "ubuntu22",
+    "intel",
+    "iris_xe",
+    "integrated",
+    "1080p",
+    "reference"
+  ],
+  "adversarial": false,
+  "os": {
+    "name": "Linux",
+    "version": "Ubuntu 22.04 LTS",
+    "build": "5.15.0-91-generic",
+    "platform": "Linux x86_64",
+    "architecture": "x86_64"
+  },
+  "browser": {
+    "name": "Firefox",
+    "version": "128.0",
+    "build_id": "20181001000000",
+    "user_agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "accept_language": "en-US,en;q=0.5",
+    "do_not_track": null,
+    "cookie_enabled": true,
+    "java_enabled": false,
+    "pdf_viewer_enabled": true,
+    "product": "Gecko",
+    "product_sub": "20100101",
+    "vendor": "",
+    "vendor_sub": "",
+    "oscpu": "Linux x86_64",
+    "app_name": "Netscape",
+    "app_code_name": "Mozilla",
+    "app_version": "5.0 (X11)"
+  },
+  "hardware": {
+    "hardware_concurrency": 8,
+    "device_memory": 16,
+    "max_touch_points": 0,
+    "gpu": {
+      "vendor": "Mozilla",
+      "renderer": "Mozilla",
+      "vendor_unmasked": "Intel Open Source Technology Center",
+      "renderer_unmasked": "Mesa Intel(R) Xe Graphics (TGL GT2)"
+    }
+  },
+  "screen": {
+    "width": 1920,
+    "height": 1080,
+    "avail_width": 1920,
+    "avail_height": 1053,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.0,
+    "inner_width": 1920,
+    "inner_height": 969,
+    "outer_width": 1920,
+    "outer_height": 1053,
+    "avail_top": 0,
+    "avail_left": 0
+  },
+  "locale": {
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "timezone": "America/New_York",
+    "timezone_offset": 300
+  },
+  "network": {
+    "connection_type": "4g",
+    "downlink": 10,
+    "rtt": 50,
+    "save_data": false
+  },
+  "fingerprint_seeds": {
+    "canvas_seed": "2e6c0b4f8d1a5e9c3b7f0d4a8e2c6b1f",
+    "webgl_noise_seed": "b5d9f3a7e1c4b8d2f6a0e3c7b1d5f9a4",
+    "audio_seed": "4a8d2f6c0b3e7a1d5f9c2b6e0a4d8f3c"
+  },
+  "webgl": {
+    "version": "WebGL 2.0 (OpenGL ES 3.0 Mesa 22.0.5)",
+    "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Mesa 22.0.5)",
+    "extensions": [
+      "EXT_color_buffer_float",
+      "EXT_color_buffer_half_float",
+      "EXT_disjoint_timer_query",
+      "EXT_float_blend",
+      "EXT_frag_depth",
+      "EXT_shader_texture_lod",
+      "EXT_sRGB",
+      "EXT_texture_compression_rgtc",
+      "EXT_texture_filter_anisotropic",
+      "EXT_texture_norm16",
+      "KHR_parallel_shader_compile",
+      "MOZ_debug",
+      "OES_draw_buffers_indexed",
+      "OES_element_index_uint",
+      "OES_fbo_render_mipmap",
+      "OES_standard_derivatives",
+      "OES_texture_float",
+      "OES_texture_float_linear",
+      "OES_texture_half_float",
+      "OES_texture_half_float_linear",
+      "OES_vertex_array_object",
+      "WEBGL_color_buffer_float",
+      "WEBGL_compressed_texture_s3tc",
+      "WEBGL_debug_renderer_info",
+      "WEBGL_debug_shaders",
+      "WEBGL_depth_texture",
+      "WEBGL_draw_buffers",
+      "WEBGL_explicit_present",
+      "WEBGL_lose_context",
+      "WEBGL_multi_draw"
+    ],
+    "parameters": {
+      "MAX_TEXTURE_SIZE": 16384,
+      "MAX_VIEWPORT_DIMS": [
+        16384,
+        16384
+      ],
+      "MAX_VERTEX_ATTRIBS": 16,
+      "MAX_VERTEX_UNIFORM_VECTORS": 4096,
+      "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+      "MAX_VARYING_VECTORS": 32,
+      "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 192,
+      "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+      "MAX_TEXTURE_IMAGE_UNITS": 32,
+      "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+      "MAX_RENDERBUFFER_SIZE": 16384,
+      "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+      "MAX_FRAGMENT_UNIFORM_COMPONENTS": 4096,
+      "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+      "MAX_3D_TEXTURE_SIZE": 2048,
+      "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 128,
+      "MAX_UNIFORM_BUFFER_BINDINGS": 72,
+      "MAX_UNIFORM_BLOCK_SIZE": 65536,
+      "MAX_COMBINED_UNIFORM_BLOCKS": 72,
+      "MAX_SAMPLES": 16,
+      "ALIASED_LINE_WIDTH_RANGE": [
+        1,
+        7
+      ],
+      "ALIASED_POINT_SIZE_RANGE": [
+        1,
+        255
+      ]
+    }
+  },
+  "fonts": {
+    "available": [
+      "Cantarell",
+      "DejaVu Sans",
+      "DejaVu Sans Mono",
+      "DejaVu Serif",
+      "FreeMono",
+      "FreeSans",
+      "FreeSerif",
+      "Liberation Mono",
+      "Liberation Sans",
+      "Liberation Serif",
+      "Noto Sans",
+      "Noto Serif",
+      "Ubuntu"
+    ]
+  },
+  "tls": {
+    "profile_id": "firefox_128_linux",
+    "ja3": "579ccef312d18482fc42e2b822ca2430",
+    "ja3s_note": "Firefox 128 on Ubuntu 22.04 TLS 1.3 client hello. Cipher order: TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_AES_256_GCM_SHA384. Extensions include compress_certificate (brotli), supported_versions (1.3, 1.2), key_share (x25519), psk_key_exchange_modes, session_ticket."
+  }
+}

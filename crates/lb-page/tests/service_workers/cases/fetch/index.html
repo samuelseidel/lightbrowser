@@ -1,0 +1,38 @@
+<!doctype html><title>fetch</title><!--LOG-->
+<script>
+var n = load(), sw = navigator.serviceWorker;
+function show(name, r) {
+  return r.text().then(function (t) {
+    log(name + ' ' + r.status + ' "' + r.statusText + '" ' + r.type + ' url=' + rel(r.url) + ' redirected=' + r.redirected + ' ct=' + r.headers.get('content-type') + ' x=' + r.headers.get('x-a') + ' body=' + t.trim());
+  });
+}
+function f(name, init) {
+  return fetch(name, init).then(function (r) { return show(name, r) }, function (e) { log(name + ' rejected ' + e.name + ': ' + e.message) });
+}
+if (n === 0) {
+  sw.register('sw.js').then(function () { return sw.ready }).then(again);
+} else {
+  log('controlled ' + !!sw.controller);
+  f('synth.txt').then(function () { return f('pass.txt') }).then(function () { return f('net.txt') })
+    .then(function () { return f('later.txt') }).then(function () { return f('reject.txt') })
+    .then(function () { return f('json') }).then(function () { return f('redirect') })
+    .then(function () { return f('error') }).then(function () { return f('echo.txt?q=1', { method: 'POST', body: 'hello', headers: { 'X-B': '2' } }) })
+    .then(function () {
+      return new Promise(function (res) {
+        var x = new XMLHttpRequest(); x.open('GET', 'synth.txt'); x.onload = function () { log('xhr ' + x.status + ' ' + x.responseText); res() }; x.send();
+      });
+    })
+    .then(function () {
+      return new Promise(function (res) {
+        var s = document.createElement('script'); s.src = 'gen.js'; s.onload = res; s.onerror = function () { log('gen.js error'); res() }; document.head.appendChild(s);
+      });
+    })
+    .then(function () {
+      return new Promise(function (res) {
+        var fr = document.createElement('iframe'); fr.src = 'frame.html'; fr.onload = res; document.body.appendChild(fr);
+      });
+    })
+    .then(function () { return swlog(sw.controller) }).then(end);
+}
+</script>
+<body></body>

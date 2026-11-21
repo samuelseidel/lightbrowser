@@ -1,0 +1,3982 @@
+{
+ "sid": "cde958eacae70709",
+ "created": 1793659905.9350893,
+ "documents": [
+  {
+   "t": 1793659905.9350917,
+   "path": "/shop",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Accept-Encoding"
+   ],
+   "headers": {
+    "host": "127.0.0.1:8765",
+    "connection": "keep-alive",
+    "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-fetch-site": "none",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": false,
+   "scheme": "http"
+  },
+  {
+   "t": 1793659912.6912265,
+   "path": "/search?q=jacket",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "headers": {
+    "host": "127.0.0.1:8765",
+    "connection": "keep-alive",
+    "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "referer": "http://127.0.0.1:8765/shop",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": true,
+   "scheme": "http"
+  }
+ ],
+ "requests": [
+  {
+   "t": 1793659905.945397,
+   "path": "/static/style.css",
+   "kind": "css",
+   "since_doc_ms": 10.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9464917,
+   "path": "/img/p0.svg",
+   "kind": "img",
+   "since_doc_ms": 11.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9468386,
+   "path": "/img/p1.svg",
+   "kind": "img",
+   "since_doc_ms": 11.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.947174,
+   "path": "/collector.js",
+   "kind": "js",
+   "since_doc_ms": 12.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9513412,
+   "path": "/img/p2.svg",
+   "kind": "img",
+   "since_doc_ms": 16.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9515402,
+   "path": "/img/p4.svg",
+   "kind": "img",
+   "since_doc_ms": 16.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9520063,
+   "path": "/img/p3.svg",
+   "kind": "img",
+   "since_doc_ms": 16.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.952751,
+   "path": "/static/app.js",
+   "kind": "js",
+   "since_doc_ms": 17.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.953019,
+   "path": "/img/p5.svg",
+   "kind": "img",
+   "since_doc_ms": 17.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.953526,
+   "path": "/img/p6.svg",
+   "kind": "img",
+   "since_doc_ms": 18.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9538095,
+   "path": "/img/p7.svg",
+   "kind": "img",
+   "since_doc_ms": 18.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9884355,
+   "path": "/img/p8.svg",
+   "kind": "img",
+   "since_doc_ms": 53.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9928832,
+   "path": "/img/p9.svg",
+   "kind": "img",
+   "since_doc_ms": 57.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9931104,
+   "path": "/img/p10.svg",
+   "kind": "img",
+   "since_doc_ms": 58,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659905.9965353,
+   "path": "/img/p11.svg",
+   "kind": "img",
+   "since_doc_ms": 61.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659906.0822926,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 147.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659909.0768082,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 3141.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.704779,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 13.6,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.7074716,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 16.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.710226,
+   "path": "/static/style.css",
+   "kind": "css",
+   "since_doc_ms": 19,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.7118344,
+   "path": "/collector.js",
+   "kind": "js",
+   "since_doc_ms": 20.6,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.7120495,
+   "path": "/img/p3.svg",
+   "kind": "img",
+   "since_doc_ms": 20.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.7122514,
+   "path": "/img/p6.svg",
+   "kind": "img",
+   "since_doc_ms": 21,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.71359,
+   "path": "/static/app.js",
+   "kind": "js",
+   "since_doc_ms": 22.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659912.7625995,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 71.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659915.7631934,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 3072,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659917.511218,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 4820,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793659917.5145676,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 4823.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-platform",
+    "User-Agent",
+    "sec-ch-ua",
+    "Content-Type",
+    "sec-ch-ua-mobile",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  }
+ ],
+ "pages": {
+  "3f46257f7627c4": {
+   "url": "/shop",
+   "seq": 4,
+   "reason": "hidden",
+   "received": 1793659912.7075298,
+   "t": 6770,
+   "probes": {
+    "webdriver": {
+     "id": "webdriver",
+     "cat": "automation",
+     "value": true,
+     "suspicious": true,
+     "weight": 90
+    },
+    "webdriver_tamper": {
+     "id": "webdriver_tamper",
+     "cat": "automation",
+     "value": {
+      "reasons": [],
+      "index": 22
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "ua_headless": {
+     "id": "ua_headless",
+     "cat": "automation",
+     "value": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+     "suspicious": true,
+     "weight": 95
+    },
+    "automation_keys": {
+     "id": "automation_keys",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 90
+    },
+    "extra_globals": {
+     "id": "extra_globals",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 30
+    },
+    "chrome_object": {
+     "id": "chrome_object",
+     "cat": "consistency",
+     "value": {
+      "present": false,
+      "keys": null,
+      "runtime": false
+     },
+     "suspicious": true,
+     "weight": 40
+    },
+    "plugins": {
+     "id": "plugins",
+     "cat": "consistency",
+     "value": {
+      "plugins": 0,
+      "mimeTypes": 0,
+      "names": [],
+      "shape": true,
+      "pdfViewerEnabled": false
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "languages": {
+     "id": "languages",
+     "cat": "consistency",
+     "value": {
+      "languages": [
+       "en-US"
+      ],
+      "acceptLanguage": "",
+      "reasons": [
+       "no Accept-Language header"
+      ]
+     },
+     "suspicious": true,
+     "weight": 40
+    },
+    "outer_size_zero": {
+     "id": "outer_size_zero",
+     "cat": "automation",
+     "value": {
+      "outerWidth": 1280,
+      "outerHeight": 720,
+      "innerWidth": 1280,
+      "innerHeight": 720
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "window_frame_absent": {
+     "id": "window_frame_absent",
+     "cat": "consistency",
+     "value": {
+      "dw": 0,
+      "dh": 0
+     },
+     "suspicious": true,
+     "weight": 25
+    },
+    "screen_sanity": {
+     "id": "screen_sanity",
+     "cat": "consistency",
+     "value": {
+      "width": 1280,
+      "height": 720,
+      "availWidth": 1280,
+      "availHeight": 720,
+      "colorDepth": 24,
+      "dpr": 1,
+      "innerWidth": 1280,
+      "innerHeight": 720,
+      "reasons": [
+       "viewport equals screen"
+      ]
+     },
+     "suspicious": true,
+     "weight": 35
+    },
+    "screen_no_taskbar": {
+     "id": "screen_no_taskbar",
+     "cat": "consistency",
+     "value": {
+      "availHeight": 720,
+      "height": 720
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "ua_ch_headless": {
+     "id": "ua_ch_headless",
+     "cat": "automation",
+     "value": {
+      "brands": [
+       "HeadlessChrome",
+       "Not_A Brand",
+       "Chromium"
+      ],
+      "header": [
+       "HeadlessChrome",
+       "Not_A Brand",
+       "Chromium"
+      ]
+     },
+     "suspicious": true,
+     "weight": 90
+    },
+    "ua_ch_mismatch": {
+     "id": "ua_ch_mismatch",
+     "cat": "consistency",
+     "value": {
+      "brands": [
+       "HeadlessChrome;153",
+       "Not_A Brand;8",
+       "Chromium;153"
+      ],
+      "platform": "Linux",
+      "mobile": false,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "webgl_params": {
+     "id": "webgl_params",
+     "cat": "fingerprint",
+     "value": {
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "paramHash": "148e9c258a709f",
+      "extHash": "2468ad32885c9",
+      "extensions": 35
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "webgl_software": {
+     "id": "webgl_software",
+     "cat": "fingerprint",
+     "value": {
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "webgl_os_mismatch": {
+     "id": "webgl_os_mismatch",
+     "cat": "consistency",
+     "value": {
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "os": "linux",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "canvas": {
+     "id": "canvas",
+     "cat": "fingerprint",
+     "value": {
+      "hash": "1429016680f708",
+      "stable": true,
+      "solidExact": true
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "fonts": {
+     "id": "fonts",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "detected": {
+       "windows": [
+        "Segoe UI",
+        "Calibri",
+        "Cambria",
+        "MS Gothic"
+       ],
+       "mac": [
+        "Helvetica Neue"
+       ],
+       "linux": [
+        "DejaVu Sans",
+        "Liberation Sans",
+        "FreeSans",
+        "Noto Color Emoji"
+       ],
+       "common": [
+        "Arial",
+        "Times New Roman",
+        "Courier New"
+       ]
+      },
+      "hash": "138ce09eeb75ac",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "hardware": {
+     "id": "hardware",
+     "cat": "consistency",
+     "value": {
+      "hardwareConcurrency": 4,
+      "deviceMemory": 16,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "timezone_mismatch": {
+     "id": "timezone_mismatch",
+     "cat": "consistency",
+     "value": {
+      "tz": "UTC",
+      "locale": "en-US",
+      "intlOffset": 0,
+      "dateOffset": 0
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "timezone_utc": {
+     "id": "timezone_utc",
+     "cat": "consistency",
+     "value": "UTC",
+     "suspicious": true,
+     "weight": 10
+    },
+    "locale_mismatch": {
+     "id": "locale_mismatch",
+     "cat": "consistency",
+     "value": {
+      "intl": "en-US",
+      "navigator": "en-US"
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "perf_now_resolution": {
+     "id": "perf_now_resolution",
+     "cat": "consistency",
+     "value": {
+      "stepMs": 0.1,
+      "crossOriginIsolated": false
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "native_functions": {
+     "id": "native_functions",
+     "cat": "automation",
+     "value": {
+      "checked": 39,
+      "bad": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "property_order": {
+     "id": "property_order",
+     "cat": "automation",
+     "value": {
+      "navigatorHash": "d6e85f68daeac",
+      "windowHash": "14f2c9bcea00ee",
+      "windowCount": 1225,
+      "strays": []
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "has_focus": {
+     "id": "has_focus",
+     "cat": "automation",
+     "value": {
+      "hasFocus": true,
+      "visibility": "visible"
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "iframe_mismatch": {
+     "id": "iframe_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "stack_engine": {
+     "id": "stack_engine",
+     "cat": "consistency",
+     "value": {
+      "engine": "v8",
+      "sample": "Error: lb |     at lbStackSample (http://127.0.0.1:8765/collector.js?s=cde958eacae70709:722:37)"
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "stack_hooked": {
+     "id": "stack_hooked",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "connection": {
+     "id": "connection",
+     "cat": "consistency",
+     "value": {
+      "effectiveType": "4g",
+      "rtt": 0,
+      "downlink": 10,
+      "saveData": false
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "cdp_runtime": {
+     "id": "cdp_runtime",
+     "cat": "automation",
+     "value": {
+      "errorStackGetter": false,
+      "nodeIdGetter": false
+     },
+     "suspicious": false,
+     "weight": 80
+    },
+    "notification_permission": {
+     "id": "notification_permission",
+     "cat": "consistency",
+     "value": {
+      "notification": "denied",
+      "permissions": "prompt"
+     },
+     "suspicious": true,
+     "weight": 50
+    },
+    "battery": {
+     "id": "battery",
+     "cat": "consistency",
+     "value": {
+      "charging": true,
+      "level": 1,
+      "chargingTime": 0,
+      "dischargingTime": null
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "audio": {
+     "id": "audio",
+     "cat": "fingerprint",
+     "value": {
+      "sum": 124.04347776696522,
+      "hash": "99b43bc461c4e",
+      "stable": true
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "worker_mismatch": {
+     "id": "worker_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "beh_counts": {
+     "id": "beh_counts",
+     "cat": "behavior",
+     "value": {
+      "counts": {
+       "mousemove": 119,
+       "wheel": 3,
+       "scroll": 3,
+       "mousedown": 2,
+       "mouseup": 2,
+       "click": 3,
+       "keydown": 7,
+       "input": 6,
+       "keyup": 6,
+       "visibilitychange": 1
+      },
+      "untrusted": 0,
+      "dwellMs": 6770
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "beh_untrusted": {
+     "id": "beh_untrusted",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 70
+    },
+    "beh_ttfi": {
+     "id": "beh_ttfi",
+     "cat": "behavior",
+     "value": {
+      "ttfi": 1203.3,
+      "afterLoad": 1062
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_click_hold": {
+     "id": "beh_click_hold",
+     "cat": "behavior",
+     "value": {
+      "median": 94.05000000000018,
+      "n": 2
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "beh_click_center": {
+     "id": "beh_click_center",
+     "cat": "behavior",
+     "value": {
+      "centred": 0,
+      "clicks": 2
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "beh_click_no_path": {
+     "id": "beh_click_no_path",
+     "cat": "behavior",
+     "value": {
+      "bare": 0,
+      "clicks": 2
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_mouse_linear": {
+     "id": "beh_mouse_linear",
+     "cat": "behavior",
+     "value": {
+      "pathPx": 2393,
+      "straightPx": 819,
+      "ratio": 0.34
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_mouse_velocity": {
+     "id": "beh_mouse_velocity",
+     "cat": "behavior",
+     "value": [
+      1.55,
+      3.44,
+      2.78
+     ],
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_movement_zero": {
+     "id": "beh_movement_zero",
+     "cat": "behavior",
+     "value": {
+      "moved": 117,
+      "zeroDelta": 0
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "beh_wheel_pattern": {
+     "id": "beh_wheel_pattern",
+     "cat": "behavior",
+     "value": {
+      "n": 3,
+      "big": 0,
+      "sameDelta": false,
+      "gapCv": 0.207
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "beh_scroll_no_input": {
+     "id": "beh_scroll_no_input",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_typing_no_keys": {
+     "id": "beh_typing_no_keys",
+     "cat": "behavior",
+     "value": {
+      "inputs": 0,
+      "maxChunk": 1
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "beh_key_rhythm": {
+     "id": "beh_key_rhythm",
+     "cat": "behavior",
+     "value": {
+      "n": 6,
+      "median": 160.9000000000001,
+      "spread": 0.11199999999999999
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_key_dwell": {
+     "id": "beh_key_dwell",
+     "cat": "behavior",
+     "value": {
+      "n": 6,
+      "median": 91.65000000000009,
+      "spread": 0.29600000000000004
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_input_without_focus": {
+     "id": "beh_input_without_focus",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 30
+    }
+   },
+   "trace": [
+    {
+     "t": 11,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 0,
+     "y": 0,
+     "mx": 0,
+     "my": 0
+    },
+    {
+     "t": 142.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 640,
+     "y": 380,
+     "mx": 640,
+     "my": 380
+    },
+    {
+     "t": 164.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 641,
+     "y": 380,
+     "mx": 1,
+     "my": 0
+    },
+    {
+     "t": 191.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 642,
+     "y": 380,
+     "mx": 1,
+     "my": 0
+    },
+    {
+     "t": 207.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 644,
+     "y": 381,
+     "mx": 2,
+     "my": 1
+    },
+    {
+     "t": 226,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 647,
+     "y": 381,
+     "mx": 3,
+     "my": 0
+    },
+    {
+     "t": 241.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 651,
+     "y": 381,
+     "mx": 4,
+     "my": 0
+    },
+    {
+     "t": 260.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 657,
+     "y": 383,
+     "mx": 6,
+     "my": 2
+    },
+    {
+     "t": 276.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 664,
+     "y": 385,
+     "mx": 7,
+     "my": 2
+    },
+    {
+     "t": 296.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 672,
+     "y": 386,
+     "mx": 8,
+     "my": 1
+    },
+    {
+     "t": 314.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 680,
+     "y": 386,
+     "mx": 8,
+     "my": 0
+    },
+    {
+     "t": 329.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 688,
+     "y": 388,
+     "mx": 8,
+     "my": 2
+    },
+    {
+     "t": 345.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 696,
+     "y": 390,
+     "mx": 8,
+     "my": 2
+    },
+    {
+     "t": 363.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 704,
+     "y": 392,
+     "mx": 8,
+     "my": 2
+    },
+    {
+     "t": 380.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 710,
+     "y": 394,
+     "mx": 6,
+     "my": 2
+    },
+    {
+     "t": 397,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 716,
+     "y": 397,
+     "mx": 6,
+     "my": 3
+    },
+    {
+     "t": 415.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 721,
+     "y": 398,
+     "mx": 5,
+     "my": 1
+    },
+    {
+     "t": 433.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 725,
+     "y": 402,
+     "mx": 4,
+     "my": 4
+    },
+    {
+     "t": 451.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 727,
+     "y": 404,
+     "mx": 2,
+     "my": 2
+    },
+    {
+     "t": 465.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 727,
+     "y": 406,
+     "mx": 0,
+     "my": 2
+    },
+    {
+     "t": 485,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 726,
+     "y": 408,
+     "mx": -1,
+     "my": 2
+    },
+    {
+     "t": 501.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 725,
+     "y": 410,
+     "mx": -1,
+     "my": 2
+    },
+    {
+     "t": 519.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 723,
+     "y": 412,
+     "mx": -2,
+     "my": 2
+    },
+    {
+     "t": 537.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 720,
+     "y": 413,
+     "mx": -3,
+     "my": 1
+    },
+    {
+     "t": 555.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 717,
+     "y": 414,
+     "mx": -3,
+     "my": 1
+    },
+    {
+     "t": 571,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 713,
+     "y": 416,
+     "mx": -4,
+     "my": 2
+    },
+    {
+     "t": 587.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 709,
+     "y": 418,
+     "mx": -4,
+     "my": 2
+    },
+    {
+     "t": 607.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 707,
+     "y": 419,
+     "mx": -2,
+     "my": 1
+    },
+    {
+     "t": 626.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 704,
+     "y": 419,
+     "mx": -3,
+     "my": 0
+    },
+    {
+     "t": 658.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 702,
+     "y": 420,
+     "mx": -2,
+     "my": 1
+    },
+    {
+     "t": 678,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 701,
+     "y": 419,
+     "mx": -1,
+     "my": -1
+    },
+    {
+     "t": 694.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 701,
+     "y": 420,
+     "mx": 0,
+     "my": 1
+    },
+    {
+     "t": 713.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 700,
+     "y": 420,
+     "mx": -1,
+     "my": 0
+    },
+    {
+     "t": 731.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 701,
+     "y": 420,
+     "mx": 1,
+     "my": 0
+    },
+    {
+     "t": 1203.3,
+     "type": "wheel",
+     "tr": 1,
+     "x": 701,
+     "y": 420,
+     "dx": 0,
+     "dy": 100,
+     "dm": 0
+    },
+    {
+     "t": 1209.1,
+     "type": "scroll",
+     "tr": 1,
+     "sy": 100
+    },
+    {
+     "t": 1258.4,
+     "type": "wheel",
+     "tr": 1,
+     "x": 701,
+     "y": 420,
+     "dx": 0,
+     "dy": 100,
+     "dm": 0
+    },
+    {
+     "t": 1259.5,
+     "type": "scroll",
+     "tr": 1,
+     "sy": 200
+    },
+    {
+     "t": 1342.3,
+     "type": "wheel",
+     "tr": 1,
+     "x": 701,
+     "y": 420,
+     "dx": 0,
+     "dy": 100,
+     "dm": 0
+    },
+    {
+     "t": 1359.1,
+     "type": "scroll",
+     "tr": 1,
+     "sy": 300
+    },
+    {
+     "t": 2107.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 699,
+     "y": 420,
+     "mx": -2,
+     "my": 0
+    },
+    {
+     "t": 2124.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 700,
+     "y": 420,
+     "mx": 1,
+     "my": 0
+    },
+    {
+     "t": 2143.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 698,
+     "y": 421,
+     "mx": -2,
+     "my": 1
+    },
+    {
+     "t": 2161.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 696,
+     "y": 422,
+     "mx": -2,
+     "my": 1
+    },
+    {
+     "t": 2179.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 695,
+     "y": 423,
+     "mx": -1,
+     "my": 1
+    },
+    {
+     "t": 2196,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 690,
+     "y": 424,
+     "mx": -5,
+     "my": 1
+    },
+    {
+     "t": 2214.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 685,
+     "y": 426,
+     "mx": -5,
+     "my": 2
+    },
+    {
+     "t": 2231,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 679,
+     "y": 430,
+     "mx": -6,
+     "my": 4
+    },
+    {
+     "t": 2250.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 671,
+     "y": 433,
+     "mx": -8,
+     "my": 3
+    },
+    {
+     "t": 2269.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 662,
+     "y": 437,
+     "mx": -9,
+     "my": 4
+    },
+    {
+     "t": 2287.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 651,
+     "y": 441,
+     "mx": -11,
+     "my": 4
+    },
+    {
+     "t": 2303.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 638,
+     "y": 447,
+     "mx": -13,
+     "my": 6
+    },
+    {
+     "t": 2322.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 624,
+     "y": 452,
+     "mx": -14,
+     "my": 5
+    },
+    {
+     "t": 2339.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 609,
+     "y": 458,
+     "mx": -15,
+     "my": 6
+    },
+    {
+     "t": 2357.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 593,
+     "y": 465,
+     "mx": -16,
+     "my": 7
+    },
+    {
+     "t": 2376.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 574,
+     "y": 472,
+     "mx": -19,
+     "my": 7
+    },
+    {
+     "t": 2410.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 555,
+     "y": 479,
+     "mx": -19,
+     "my": 7
+    },
+    {
+     "t": 2429.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 534,
+     "y": 487,
+     "mx": -21,
+     "my": 8
+    },
+    {
+     "t": 2447.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 511,
+     "y": 494,
+     "mx": -23,
+     "my": 7
+    },
+    {
+     "t": 2464.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 488,
+     "y": 502,
+     "mx": -23,
+     "my": 8
+    },
+    {
+     "t": 2483.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 466,
+     "y": 511,
+     "mx": -22,
+     "my": 9
+    },
+    {
+     "t": 2501.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 442,
+     "y": 518,
+     "mx": -24,
+     "my": 7
+    },
+    {
+     "t": 2517,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 419,
+     "y": 526,
+     "mx": -23,
+     "my": 8
+    },
+    {
+     "t": 2534,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 393,
+     "y": 535,
+     "mx": -26,
+     "my": 9
+    },
+    {
+     "t": 2549.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 371,
+     "y": 541,
+     "mx": -22,
+     "my": 6
+    },
+    {
+     "t": 2569,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 347,
+     "y": 549,
+     "mx": -24,
+     "my": 8
+    },
+    {
+     "t": 2586,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 326,
+     "y": 555,
+     "mx": -21,
+     "my": 6
+    },
+    {
+     "t": 2603,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 304,
+     "y": 562,
+     "mx": -22,
+     "my": 7
+    },
+    {
+     "t": 2621.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 285,
+     "y": 568,
+     "mx": -19,
+     "my": 6
+    },
+    {
+     "t": 2638,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 267,
+     "y": 573,
+     "mx": -18,
+     "my": 5
+    },
+    {
+     "t": 2653.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 251,
+     "y": 577,
+     "mx": -16,
+     "my": 4
+    },
+    {
+     "t": 2669.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 237,
+     "y": 581,
+     "mx": -14,
+     "my": 4
+    },
+    {
+     "t": 2684.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 224,
+     "y": 584,
+     "mx": -13,
+     "my": 3
+    },
+    {
+     "t": 2703.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 215,
+     "y": 588,
+     "mx": -9,
+     "my": 4
+    },
+    {
+     "t": 2721,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 206,
+     "y": 590,
+     "mx": -9,
+     "my": 2
+    },
+    {
+     "t": 2737.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 200,
+     "y": 591,
+     "mx": -6,
+     "my": 1
+    },
+    {
+     "t": 2752.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 196,
+     "y": 593,
+     "mx": -4,
+     "my": 2
+    },
+    {
+     "t": 2768.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 192,
+     "y": 594,
+     "mx": -4,
+     "my": 1
+    },
+    {
+     "t": 2784.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 191,
+     "y": 594,
+     "mx": -1,
+     "my": 0
+    },
+    {
+     "t": 2799.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 191,
+     "y": 594,
+     "mx": 0,
+     "my": 0
+    },
+    {
+     "t": 2817.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 190,
+     "y": 594,
+     "mx": -1,
+     "my": 0
+    },
+    {
+     "t": 3000.9,
+     "type": "mousedown",
+     "tr": 1,
+     "x": 190,
+     "y": 594,
+     "b": 0,
+     "d": 1,
+     "tg": "#add-3",
+     "cx": 7,
+     "cy": 4.3,
+     "w": 112.1,
+     "h": 38,
+     "f": 1
+    },
+    {
+     "t": 3081.9,
+     "type": "mouseup",
+     "tr": 1,
+     "x": 190,
+     "y": 594,
+     "b": 0,
+     "d": 1,
+     "tg": "#add-3",
+     "cx": 7,
+     "cy": 4.3,
+     "w": 112.1,
+     "h": 38,
+     "f": 1
+    },
+    {
+     "t": 3081.9,
+     "type": "click",
+     "tr": 1,
+     "x": 190,
+     "y": 594,
+     "b": 0,
+     "d": 1,
+     "tg": "#add-3",
+     "cx": 7,
+     "cy": 4.3,
+     "w": 112.1,
+     "h": 38,
+     "f": 1
+    },
+    {
+     "t": 3883.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 191,
+     "y": 594,
+     "mx": 1,
+     "my": 0
+    },
+    {
+     "t": 3900,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 192,
+     "y": 594,
+     "mx": 1,
+     "my": 0
+    },
+    {
+     "t": 3917.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 192,
+     "y": 593,
+     "mx": 0,
+     "my": -1
+    },
+    {
+     "t": 3935.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 195,
+     "y": 591,
+     "mx": 3,
+     "my": -2
+    },
+    {
+     "t": 3951.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 199,
+     "y": 587,
+     "mx": 4,
+     "my": -4
+    },
+    {
+     "t": 3970.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 204,
+     "y": 582,
+     "mx": 5,
+     "my": -5
+    },
+    {
+     "t": 3989,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 212,
+     "y": 576,
+     "mx": 8,
+     "my": -6
+    },
+    {
+     "t": 4005.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 221,
+     "y": 568,
+     "mx": 9,
+     "my": -8
+    },
+    {
+     "t": 4022.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 234,
+     "y": 558,
+     "mx": 13,
+     "my": -10
+    },
+    {
+     "t": 4037.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 248,
+     "y": 546,
+     "mx": 14,
+     "my": -12
+    },
+    {
+     "t": 4055.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 264,
+     "y": 533,
+     "mx": 16,
+     "my": -13
+    },
+    {
+     "t": 4072.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 282,
+     "y": 519,
+     "mx": 18,
+     "my": -14
+    },
+    {
+     "t": 4087.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 303,
+     "y": 502,
+     "mx": 21,
+     "my": -17
+    },
+    {
+     "t": 4104.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 324,
+     "y": 484,
+     "mx": 21,
+     "my": -18
+    },
+    {
+     "t": 4123.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 349,
+     "y": 465,
+     "mx": 25,
+     "my": -19
+    },
+    {
+     "t": 4138.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 376,
+     "y": 445,
+     "mx": 27,
+     "my": -20
+    },
+    {
+     "t": 4157.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 404,
+     "y": 422,
+     "mx": 28,
+     "my": -23
+    },
+    {
+     "t": 4174,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 433,
+     "y": 400,
+     "mx": 29,
+     "my": -22
+    },
+    {
+     "t": 4193.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 464,
+     "y": 377,
+     "mx": 31,
+     "my": -23
+    },
+    {
+     "t": 4226.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 496,
+     "y": 354,
+     "mx": 32,
+     "my": -23
+    },
+    {
+     "t": 4243.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 529,
+     "y": 330,
+     "mx": 33,
+     "my": -24
+    },
+    {
+     "t": 4260.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 563,
+     "y": 305,
+     "mx": 34,
+     "my": -25
+    },
+    {
+     "t": 4279.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 597,
+     "y": 282,
+     "mx": 34,
+     "my": -23
+    },
+    {
+     "t": 4295.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 632,
+     "y": 259,
+     "mx": 35,
+     "my": -23
+    },
+    {
+     "t": 4312.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 665,
+     "y": 235,
+     "mx": 33,
+     "my": -24
+    },
+    {
+     "t": 4331.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 698,
+     "y": 212,
+     "mx": 33,
+     "my": -23
+    },
+    {
+     "t": 4350,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 731,
+     "y": 191,
+     "mx": 33,
+     "my": -21
+    },
+    {
+     "t": 4365.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 762,
+     "y": 171,
+     "mx": 31,
+     "my": -20
+    },
+    {
+     "t": 4380.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 793,
+     "y": 152,
+     "mx": 31,
+     "my": -19
+    },
+    {
+     "t": 4395.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 821,
+     "y": 133,
+     "mx": 28,
+     "my": -19
+    },
+    {
+     "t": 4410.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 848,
+     "y": 116,
+     "mx": 27,
+     "my": -17
+    },
+    {
+     "t": 4428.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 872,
+     "y": 101,
+     "mx": 24,
+     "my": -15
+    },
+    {
+     "t": 4446.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 894,
+     "y": 88,
+     "mx": 22,
+     "my": -13
+    },
+    {
+     "t": 4463,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 914,
+     "y": 75,
+     "mx": 20,
+     "my": -13
+    },
+    {
+     "t": 4482.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 931,
+     "y": 64,
+     "mx": 17,
+     "my": -11
+    },
+    {
+     "t": 4497,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 946,
+     "y": 56,
+     "mx": 15,
+     "my": -8
+    },
+    {
+     "t": 4513.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 958,
+     "y": 48,
+     "mx": 12,
+     "my": -8
+    },
+    {
+     "t": 4531.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 968,
+     "y": 42,
+     "mx": 10,
+     "my": -6
+    },
+    {
+     "t": 4546.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 974,
+     "y": 38,
+     "mx": 6,
+     "my": -4
+    },
+    {
+     "t": 4562.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 980,
+     "y": 35,
+     "mx": 6,
+     "my": -3
+    },
+    {
+     "t": 4578.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 983,
+     "y": 33,
+     "mx": 3,
+     "my": -2
+    },
+    {
+     "t": 4594.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 985,
+     "y": 33,
+     "mx": 2,
+     "my": 0
+    },
+    {
+     "t": 4611.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 986,
+     "y": 31,
+     "mx": 1,
+     "my": -2
+    },
+    {
+     "t": 4628.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 985,
+     "y": 32,
+     "mx": -1,
+     "my": 1
+    },
+    {
+     "t": 4761.2,
+     "type": "mousedown",
+     "tr": 1,
+     "x": 985,
+     "y": 32,
+     "b": 0,
+     "d": 1,
+     "tg": "#q",
+     "cx": -48.9,
+     "cy": 1,
+     "w": 270,
+     "h": 38,
+     "f": 1
+    },
+    {
+     "t": 4868.3,
+     "type": "mouseup",
+     "tr": 1,
+     "x": 985,
+     "y": 32,
+     "b": 0,
+     "d": 1,
+     "tg": "#q",
+     "cx": -48.9,
+     "cy": 1,
+     "w": 270,
+     "h": 38,
+     "f": 1
+    },
+    {
+     "t": 4868.3,
+     "type": "click",
+     "tr": 1,
+     "x": 985,
+     "y": 32,
+     "b": 0,
+     "d": 1,
+     "tg": "#q",
+     "cx": -48.9,
+     "cy": 1,
+     "w": 270,
+     "h": 38,
+     "f": 1
+    },
+    {
+     "t": 5225.3,
+     "type": "keydown",
+     "tr": 1,
+     "k": "j",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5226.1,
+     "type": "input",
+     "tr": 1,
+     "it": "insertText",
+     "dl": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5328.8,
+     "type": "keyup",
+     "tr": 1,
+     "k": "j",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5398.3,
+     "type": "keydown",
+     "tr": 1,
+     "k": "a",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5398.8,
+     "type": "input",
+     "tr": 1,
+     "it": "insertText",
+     "dl": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5528.1,
+     "type": "keyup",
+     "tr": 1,
+     "k": "a",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5620.4,
+     "type": "keydown",
+     "tr": 1,
+     "k": "c",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5620.9,
+     "type": "input",
+     "tr": 1,
+     "it": "insertText",
+     "dl": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5700.2,
+     "type": "keyup",
+     "tr": 1,
+     "k": "c",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5762.3,
+     "type": "keydown",
+     "tr": 1,
+     "k": "k",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5762.6,
+     "type": "input",
+     "tr": 1,
+     "it": "insertText",
+     "dl": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5832.8,
+     "type": "keyup",
+     "tr": 1,
+     "k": "k",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5906.2,
+     "type": "keydown",
+     "tr": 1,
+     "k": "e",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5906.6,
+     "type": "input",
+     "tr": 1,
+     "it": "insertText",
+     "dl": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 5963.8,
+     "type": "keyup",
+     "tr": 1,
+     "k": "e",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 6055,
+     "type": "keydown",
+     "tr": 1,
+     "k": "t",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 6055.3,
+     "type": "input",
+     "tr": 1,
+     "it": "insertText",
+     "dl": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 6179.7,
+     "type": "keyup",
+     "tr": 1,
+     "k": "t",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 6753.9,
+     "type": "keydown",
+     "tr": 1,
+     "k": "Enter",
+     "rp": 0,
+     "f": 1,
+     "tg": "#q"
+    },
+    {
+     "t": 6754.3,
+     "type": "click",
+     "tr": 1,
+     "x": 0,
+     "y": 0,
+     "b": 0,
+     "d": 0,
+     "tg": "#search-btn",
+     "cx": -1215.5,
+     "cy": -31,
+     "w": 81.1,
+     "h": 38,
+     "f": 1
+    },
+    {
+     "t": 6770.2,
+     "type": "visibilitychange",
+     "tr": 1,
+     "v": "hidden"
+    }
+   ]
+  },
+  "39029db176420e": {
+   "url": "/search?q=jacket",
+   "seq": 4,
+   "reason": "hidden",
+   "received": 1793659917.51463,
+   "t": 4822,
+   "probes": {
+    "webdriver": {
+     "id": "webdriver",
+     "cat": "automation",
+     "value": true,
+     "suspicious": true,
+     "weight": 90
+    },
+    "webdriver_tamper": {
+     "id": "webdriver_tamper",
+     "cat": "automation",
+     "value": {
+      "reasons": [],
+      "index": 22
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "ua_headless": {
+     "id": "ua_headless",
+     "cat": "automation",
+     "value": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+     "suspicious": true,
+     "weight": 95
+    },
+    "automation_keys": {
+     "id": "automation_keys",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 90
+    },
+    "extra_globals": {
+     "id": "extra_globals",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 30
+    },
+    "chrome_object": {
+     "id": "chrome_object",
+     "cat": "consistency",
+     "value": {
+      "present": false,
+      "keys": null,
+      "runtime": false
+     },
+     "suspicious": true,
+     "weight": 40
+    },
+    "plugins": {
+     "id": "plugins",
+     "cat": "consistency",
+     "value": {
+      "plugins": 0,
+      "mimeTypes": 0,
+      "names": [],
+      "shape": true,
+      "pdfViewerEnabled": false
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "languages": {
+     "id": "languages",
+     "cat": "consistency",
+     "value": {
+      "languages": [
+       "en-US"
+      ],
+      "acceptLanguage": "",
+      "reasons": [
+       "no Accept-Language header"
+      ]
+     },
+     "suspicious": true,
+     "weight": 40
+    },
+    "outer_size_zero": {
+     "id": "outer_size_zero",
+     "cat": "automation",
+     "value": {
+      "outerWidth": 1280,
+      "outerHeight": 720,
+      "innerWidth": 1280,
+      "innerHeight": 720
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "window_frame_absent": {
+     "id": "window_frame_absent",
+     "cat": "consistency",
+     "value": {
+      "dw": 0,
+      "dh": 0
+     },
+     "suspicious": true,
+     "weight": 25
+    },
+    "screen_sanity": {
+     "id": "screen_sanity",
+     "cat": "consistency",
+     "value": {
+      "width": 1280,
+      "height": 720,
+      "availWidth": 1280,
+      "availHeight": 720,
+      "colorDepth": 24,
+      "dpr": 1,
+      "innerWidth": 1280,
+      "innerHeight": 720,
+      "reasons": [
+       "viewport equals screen"
+      ]
+     },
+     "suspicious": true,
+     "weight": 35
+    },
+    "screen_no_taskbar": {
+     "id": "screen_no_taskbar",
+     "cat": "consistency",
+     "value": {
+      "availHeight": 720,
+      "height": 720
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "ua_ch_headless": {
+     "id": "ua_ch_headless",
+     "cat": "automation",
+     "value": {
+      "brands": [
+       "HeadlessChrome",
+       "Not_A Brand",
+       "Chromium"
+      ],
+      "header": [
+       "HeadlessChrome",
+       "Not_A Brand",
+       "Chromium"
+      ]
+     },
+     "suspicious": true,
+     "weight": 90
+    },
+    "ua_ch_mismatch": {
+     "id": "ua_ch_mismatch",
+     "cat": "consistency",
+     "value": {
+      "brands": [
+       "HeadlessChrome;153",
+       "Not_A Brand;8",
+       "Chromium;153"
+      ],
+      "platform": "Linux",
+      "mobile": false,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "webgl_params": {
+     "id": "webgl_params",
+     "cat": "fingerprint",
+     "value": {
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "paramHash": "148e9c258a709f",
+      "extHash": "2468ad32885c9",
+      "extensions": 35
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "webgl_software": {
+     "id": "webgl_software",
+     "cat": "fingerprint",
+     "value": {
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "webgl_os_mismatch": {
+     "id": "webgl_os_mismatch",
+     "cat": "consistency",
+     "value": {
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "os": "linux",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "canvas": {
+     "id": "canvas",
+     "cat": "fingerprint",
+     "value": {
+      "hash": "1429016680f708",
+      "stable": true,
+      "solidExact": true
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "fonts": {
+     "id": "fonts",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "detected": {
+       "windows": [
+        "Segoe UI",
+        "Calibri",
+        "Cambria",
+        "MS Gothic"
+       ],
+       "mac": [
+        "Helvetica Neue"
+       ],
+       "linux": [
+        "DejaVu Sans",
+        "Liberation Sans",
+        "FreeSans",
+        "Noto Color Emoji"
+       ],
+       "common": [
+        "Arial",
+        "Times New Roman",
+        "Courier New"
+       ]
+      },
+      "hash": "138ce09eeb75ac",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "hardware": {
+     "id": "hardware",
+     "cat": "consistency",
+     "value": {
+      "hardwareConcurrency": 4,
+      "deviceMemory": 16,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "timezone_mismatch": {
+     "id": "timezone_mismatch",
+     "cat": "consistency",
+     "value": {
+      "tz": "UTC",
+      "locale": "en-US",
+      "intlOffset": 0,
+      "dateOffset": 0
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "timezone_utc": {
+     "id": "timezone_utc",
+     "cat": "consistency",
+     "value": "UTC",
+     "suspicious": true,
+     "weight": 10
+    },
+    "locale_mismatch": {
+     "id": "locale_mismatch",
+     "cat": "consistency",
+     "value": {
+      "intl": "en-US",
+      "navigator": "en-US"
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "perf_now_resolution": {
+     "id": "perf_now_resolution",
+     "cat": "consistency",
+     "value": {
+      "stepMs": 0.1,
+      "crossOriginIsolated": false
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "native_functions": {
+     "id": "native_functions",
+     "cat": "automation",
+     "value": {
+      "checked": 39,
+      "bad": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "property_order": {
+     "id": "property_order",
+     "cat": "automation",
+     "value": {
+      "navigatorHash": "d6e85f68daeac",
+      "windowHash": "14f2c9bcea00ee",
+      "windowCount": 1225,
+      "strays": []
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "has_focus": {
+     "id": "has_focus",
+     "cat": "automation",
+     "value": {
+      "hasFocus": true,
+      "visibility": "visible"
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "iframe_mismatch": {
+     "id": "iframe_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "stack_engine": {
+     "id": "stack_engine",
+     "cat": "consistency",
+     "value": {
+      "engine": "v8",
+      "sample": "Error: lb |     at lbStackSample (http://127.0.0.1:8765/collector.js?s=cde958eacae70709:722:37)"
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "stack_hooked": {
+     "id": "stack_hooked",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "connection": {
+     "id": "connection",
+     "cat": "consistency",
+     "value": {
+      "effectiveType": "4g",
+      "rtt": 0,
+      "downlink": 10,
+      "saveData": false
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "cdp_runtime": {
+     "id": "cdp_runtime",
+     "cat": "automation",
+     "value": {
+      "errorStackGetter": false,
+      "nodeIdGetter": false
+     },
+     "suspicious": false,
+     "weight": 80
+    },
+    "notification_permission": {
+     "id": "notification_permission",
+     "cat": "consistency",
+     "value": {
+      "notification": "denied",
+      "permissions": "prompt"
+     },
+     "suspicious": true,
+     "weight": 50
+    },
+    "battery": {
+     "id": "battery",
+     "cat": "consistency",
+     "value": {
+      "charging": true,
+      "level": 1,
+      "chargingTime": 0,
+      "dischargingTime": null
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "audio": {
+     "id": "audio",
+     "cat": "fingerprint",
+     "value": {
+      "sum": 124.04347776696522,
+      "hash": "99b43bc461c4e",
+      "stable": true
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "worker_mismatch": {
+     "id": "worker_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "beh_counts": {
+     "id": "beh_counts",
+     "cat": "behavior",
+     "value": {
+      "counts": {
+       "keyup": 1,
+       "mousemove": 69,
+       "visibilitychange": 1
+      },
+      "untrusted": 0,
+      "dwellMs": 4822
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "beh_untrusted": {
+     "id": "beh_untrusted",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 70
+    },
+    "beh_ttfi": {
+     "id": "beh_ttfi",
+     "cat": "behavior",
+     "value": {
+      "ttfi": null,
+      "afterLoad": null
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_click_hold": {
+     "id": "beh_click_hold",
+     "cat": "behavior",
+     "value": {
+      "median": null,
+      "n": 0
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "beh_click_center": {
+     "id": "beh_click_center",
+     "cat": "behavior",
+     "value": {
+      "centred": 0,
+      "clicks": 0
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "beh_click_no_path": {
+     "id": "beh_click_no_path",
+     "cat": "behavior",
+     "value": {
+      "bare": 0,
+      "clicks": 0
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_mouse_linear": {
+     "id": "beh_mouse_linear",
+     "cat": "behavior",
+     "value": {
+      "pathPx": 479,
+      "straightPx": 0,
+      "ratio": 0
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_mouse_velocity": {
+     "id": "beh_mouse_velocity",
+     "cat": "behavior",
+     "value": [
+      1.87,
+      1.54
+     ],
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_movement_zero": {
+     "id": "beh_movement_zero",
+     "cat": "behavior",
+     "value": {
+      "moved": 67,
+      "zeroDelta": 0
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "beh_wheel_pattern": {
+     "id": "beh_wheel_pattern",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "big": 0,
+      "sameDelta": false,
+      "gapCv": null
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "beh_scroll_no_input": {
+     "id": "beh_scroll_no_input",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_typing_no_keys": {
+     "id": "beh_typing_no_keys",
+     "cat": "behavior",
+     "value": {
+      "inputs": 0,
+      "maxChunk": 0
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "beh_key_rhythm": {
+     "id": "beh_key_rhythm",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "median": null,
+      "spread": null
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_key_dwell": {
+     "id": "beh_key_dwell",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "median": null,
+      "spread": null
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_input_without_focus": {
+     "id": "beh_input_without_focus",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 30
+    }
+   },
+   "trace": [
+    {
+     "t": 121.4,
+     "type": "keyup",
+     "tr": 1,
+     "k": "Enter",
+     "rp": 0,
+     "f": 1,
+     "tg": "body"
+    },
+    {
+     "t": 122.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 500,
+     "y": 301,
+     "mx": 0,
+     "my": 0
+    },
+    {
+     "t": 153.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 500,
+     "y": 300,
+     "mx": 0,
+     "my": -1
+    },
+    {
+     "t": 169.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 501,
+     "y": 302,
+     "mx": 1,
+     "my": 2
+    },
+    {
+     "t": 186.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 504,
+     "y": 302,
+     "mx": 3,
+     "my": 0
+    },
+    {
+     "t": 202.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 506,
+     "y": 304,
+     "mx": 2,
+     "my": 2
+    },
+    {
+     "t": 218.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 510,
+     "y": 306,
+     "mx": 4,
+     "my": 2
+    },
+    {
+     "t": 237.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 515,
+     "y": 310,
+     "mx": 5,
+     "my": 4
+    },
+    {
+     "t": 253.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 522,
+     "y": 313,
+     "mx": 7,
+     "my": 3
+    },
+    {
+     "t": 270.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 532,
+     "y": 317,
+     "mx": 10,
+     "my": 4
+    },
+    {
+     "t": 286.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 540,
+     "y": 323,
+     "mx": 8,
+     "my": 6
+    },
+    {
+     "t": 305.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 550,
+     "y": 329,
+     "mx": 10,
+     "my": 6
+    },
+    {
+     "t": 321.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 562,
+     "y": 335,
+     "mx": 12,
+     "my": 6
+    },
+    {
+     "t": 337.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 575,
+     "y": 341,
+     "mx": 13,
+     "my": 6
+    },
+    {
+     "t": 356.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 587,
+     "y": 346,
+     "mx": 12,
+     "my": 5
+    },
+    {
+     "t": 372.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 600,
+     "y": 351,
+     "mx": 13,
+     "my": 5
+    },
+    {
+     "t": 390.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 614,
+     "y": 356,
+     "mx": 14,
+     "my": 5
+    },
+    {
+     "t": 409.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 628,
+     "y": 361,
+     "mx": 14,
+     "my": 5
+    },
+    {
+     "t": 426.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 641,
+     "y": 366,
+     "mx": 13,
+     "my": 5
+    },
+    {
+     "t": 443.4,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 654,
+     "y": 369,
+     "mx": 13,
+     "my": 3
+    },
+    {
+     "t": 458.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 667,
+     "y": 372,
+     "mx": 13,
+     "my": 3
+    },
+    {
+     "t": 476.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 678,
+     "y": 374,
+     "mx": 11,
+     "my": 2
+    },
+    {
+     "t": 491.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 689,
+     "y": 374,
+     "mx": 11,
+     "my": 0
+    },
+    {
+     "t": 510.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 700,
+     "y": 375,
+     "mx": 11,
+     "my": 1
+    },
+    {
+     "t": 529.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 710,
+     "y": 374,
+     "mx": 10,
+     "my": -1
+    },
+    {
+     "t": 544.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 718,
+     "y": 374,
+     "mx": 8,
+     "my": 0
+    },
+    {
+     "t": 559.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 726,
+     "y": 373,
+     "mx": 8,
+     "my": -1
+    },
+    {
+     "t": 574.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 733,
+     "y": 371,
+     "mx": 7,
+     "my": -2
+    },
+    {
+     "t": 591.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 738,
+     "y": 369,
+     "mx": 5,
+     "my": -2
+    },
+    {
+     "t": 610.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 744,
+     "y": 367,
+     "mx": 6,
+     "my": -2
+    },
+    {
+     "t": 626.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 749,
+     "y": 365,
+     "mx": 5,
+     "my": -2
+    },
+    {
+     "t": 644.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 753,
+     "y": 364,
+     "mx": 4,
+     "my": -1
+    },
+    {
+     "t": 664,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 754,
+     "y": 363,
+     "mx": 1,
+     "my": -1
+    },
+    {
+     "t": 682,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 758,
+     "y": 362,
+     "mx": 4,
+     "my": -1
+    },
+    {
+     "t": 699.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 758,
+     "y": 361,
+     "mx": 0,
+     "my": -1
+    },
+    {
+     "t": 719,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 759,
+     "y": 361,
+     "mx": 1,
+     "my": 0
+    },
+    {
+     "t": 738,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 759,
+     "y": 361,
+     "mx": 0,
+     "my": 0
+    },
+    {
+     "t": 769.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 759,
+     "y": 360,
+     "mx": 0,
+     "my": -1
+    },
+    {
+     "t": 788.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 760,
+     "y": 359,
+     "mx": 1,
+     "my": -1
+    },
+    {
+     "t": 806.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 760,
+     "y": 360,
+     "mx": 0,
+     "my": 1
+    },
+    {
+     "t": 824.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 761,
+     "y": 361,
+     "mx": 1,
+     "my": 1
+    },
+    {
+     "t": 842.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 762,
+     "y": 362,
+     "mx": 1,
+     "my": 1
+    },
+    {
+     "t": 858.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 763,
+     "y": 364,
+     "mx": 1,
+     "my": 2
+    },
+    {
+     "t": 873.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 767,
+     "y": 368,
+     "mx": 4,
+     "my": 4
+    },
+    {
+     "t": 891.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 771,
+     "y": 372,
+     "mx": 4,
+     "my": 4
+    },
+    {
+     "t": 905.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 777,
+     "y": 377,
+     "mx": 6,
+     "my": 5
+    },
+    {
+     "t": 921.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 784,
+     "y": 384,
+     "mx": 7,
+     "my": 7
+    },
+    {
+     "t": 939.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 792,
+     "y": 392,
+     "mx": 8,
+     "my": 8
+    },
+    {
+     "t": 954.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 798,
+     "y": 402,
+     "mx": 6,
+     "my": 10
+    },
+    {
+     "t": 971.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 806,
+     "y": 411,
+     "mx": 8,
+     "my": 9
+    },
+    {
+     "t": 988.6,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 814,
+     "y": 421,
+     "mx": 8,
+     "my": 10
+    },
+    {
+     "t": 1005.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 821,
+     "y": 431,
+     "mx": 7,
+     "my": 10
+    },
+    {
+     "t": 1022.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 826,
+     "y": 442,
+     "mx": 5,
+     "my": 11
+    },
+    {
+     "t": 1037.5,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 830,
+     "y": 451,
+     "mx": 4,
+     "my": 9
+    },
+    {
+     "t": 1052.7,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 835,
+     "y": 461,
+     "mx": 5,
+     "my": 10
+    },
+    {
+     "t": 1068.8,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 837,
+     "y": 471,
+     "mx": 2,
+     "my": 10
+    },
+    {
+     "t": 1086.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 838,
+     "y": 479,
+     "mx": 1,
+     "my": 8
+    },
+    {
+     "t": 1106.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 839,
+     "y": 487,
+     "mx": 1,
+     "my": 8
+    },
+    {
+     "t": 1125.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 837,
+     "y": 493,
+     "mx": -2,
+     "my": 6
+    },
+    {
+     "t": 1142.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 836,
+     "y": 500,
+     "mx": -1,
+     "my": 7
+    },
+    {
+     "t": 1159,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 833,
+     "y": 504,
+     "mx": -3,
+     "my": 4
+    },
+    {
+     "t": 1177.9,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 831,
+     "y": 509,
+     "mx": -2,
+     "my": 5
+    },
+    {
+     "t": 1195,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 828,
+     "y": 512,
+     "mx": -3,
+     "my": 3
+    },
+    {
+     "t": 1211.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 826,
+     "y": 514,
+     "mx": -2,
+     "my": 2
+    },
+    {
+     "t": 1227.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 823,
+     "y": 516,
+     "mx": -3,
+     "my": 2
+    },
+    {
+     "t": 1246.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 821,
+     "y": 518,
+     "mx": -2,
+     "my": 2
+    },
+    {
+     "t": 1265.3,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 821,
+     "y": 519,
+     "mx": 0,
+     "my": 1
+    },
+    {
+     "t": 1284.1,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 820,
+     "y": 520,
+     "mx": -1,
+     "my": 1
+    },
+    {
+     "t": 1301.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 820,
+     "y": 519,
+     "mx": 0,
+     "my": -1
+    },
+    {
+     "t": 1317.2,
+     "type": "mousemove",
+     "tr": 1,
+     "x": 820,
+     "y": 520,
+     "mx": 0,
+     "my": 1
+    },
+    {
+     "t": 4821.4,
+     "type": "visibilitychange",
+     "tr": 1,
+     "v": "hidden"
+    }
+   ]
+  }
+ },
+ "beacons": 8,
+ "user_agents": [
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36"
+ ],
+ "tls": [],
+ "scenario": "T-020 human-replay"
+}

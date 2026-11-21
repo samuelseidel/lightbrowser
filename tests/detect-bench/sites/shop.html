@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.ico?s={{SID}}">
+<link rel="stylesheet" href="/static/style.css?s={{SID}}">
+<script type="application/json" id="lb-ctx">{{CTX}}</script>
+<script src="/collector.js?s={{SID}}" defer></script>
+<script src="/static/app.js?s={{SID}}" defer></script>
+<title>Northwind Outfitters | Shop</title>
+</head>
+<body>
+<header class="top">
+  <a class="logo" href="/shop">Northwind Outfitters</a>
+  <nav><a href="/shop">Shop</a><a href="/news">Journal</a><a href="/search">Search</a><a href="/login">Sign in</a></nav>
+  <form class="search" action="/search" method="get" role="search">
+    <input id="q" name="q" type="search" placeholder="Search products" autocomplete="off" aria-label="Search products">
+    <button id="search-btn" type="submit">Search</button>
+  </form>
+</header>
+<main class="shop">
+  <section class="hero"><h1>Autumn collection</h1><p>{{COUNT}} products, free returns within 30 days.</p></section>
+  <div class="layout">
+    <section class="grid" id="products" aria-label="Products">
+{{PRODUCTS}}
+    </section>
+    <aside class="cart" aria-label="Cart">
+      <h2>Your cart</h2>
+      <form id="cart-form" action="/cart" method="post">
+        <ul id="cart-items"><li class="empty">Your cart is empty.</li></ul>
+        <label>Quantity <input id="qty" name="qty" type="number" min="1" value="1"></label>
+        <label>Gift note <textarea id="note" name="note" rows="2"></textarea></label>
+        <input type="hidden" id="cart-ids" name="ids" value="">
+        <p class="total">Total: <span id="cart-total">$0.00</span></p>
+        <button id="checkout" type="submit">Checkout</button>
+      </form>
+    </aside>
+  </div>
+</main>
+<footer class="foot"><p>Northwind Outfitters is a local test site. All data is fake.</p></footer>
+</body>
+</html>

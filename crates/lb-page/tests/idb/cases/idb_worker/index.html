@@ -1,0 +1,19 @@
+<!doctype html><!--LOG--><script>
+(async function(){
+  await fresh('wk');
+  var r = indexedDB.open('wk', 1);
+  r.onupgradeneeded = function(){ r.result.createObjectStore('s'); };
+  var db = await req(r);
+  var tx = db.transaction('s', 'readwrite');
+  tx.objectStore('s').put({from:'page', d:new Date(7)}, 'p');
+  await done(tx);
+  db.onversionchange = function(e){ log('page versionchange '+e.oldVersion+'->'+e.newVersion); db.close(); };
+  var w = new Worker('worker.js');
+  var msgs = await new Promise(function(res){ var got=[]; w.onmessage=function(e){ got.push(e.data); if(e.data==='end') res(got); }; w.onerror=function(e){ got.push('worker error '+e.message); res(got); }; });
+  msgs.forEach(function(m){ log('worker: '+m); });
+  var db2 = await req(indexedDB.open('wk'));
+  log('page sees '+db2.version+' '+show(await req(db2.transaction('s').objectStore('s').get('w'))));
+  db2.close();
+  end();
+})();
+</script>

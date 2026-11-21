@@ -1,0 +1,30 @@
+<!doctype html><!--LOG--><style>
+body { margin: 0; font-size: 10px }
+span { color: rgb(1, 1, 1) }
+#host { width: 300px }
+.out { color: rgb(2, 2, 2) }
+</style><body><div id=host><span id=a slot=top class=out>A</span><span id=b>B</span><span id=u slot=nowhere>U</span></div>
+<div id=dhost><template shadowrootmode=open><style>:host { display: block; height: 20px; color: rgb(7, 7, 7) } p { margin: 0 }</style><p id=dp>declarative</p></template></div>
+<script>
+var host = document.getElementById('host');
+var sr = host.attachShadow({ mode: 'open' });
+sr.innerHTML = '<style>:host { display: block; padding: 5px; color: rgb(3, 3, 3); width: 100px } :host(.big) { font-size: 20px } ::slotted(span) { color: rgb(4, 4, 4); display: block; height: 11px } ::slotted(.out) { background-color: rgb(5, 5, 5) } span { color: rgb(6, 6, 6) } .out { color: rgb(9, 9, 9) } div { height: 7px } #wrap > slot { color: rgb(8, 8, 8) }</style>'
+  + '<div id=top><slot name=top></slot></div><span id=inner class=out>I</span><div id=wrap><slot id=def></slot></div>';
+var cs = (e, p) => getComputedStyle(e).getPropertyValue(p);
+var a = document.getElementById('a'), b = document.getElementById('b'), u = document.getElementById('u');
+var inner = sr.getElementById('inner'), top_ = sr.getElementById('top'), def = sr.getElementById('def');
+t('host', () => [cs(host, 'display'), cs(host, 'padding-top'), cs(host, 'color'), cs(host, 'width'), cs(host, 'font-size')].join());
+host.className = 'big';
+t('host(.big)', () => cs(host, 'font-size'));
+t('slotted a', () => [cs(a, 'color'), cs(a, 'display'), cs(a, 'height'), cs(a, 'background-color'), cs(a, 'font-size')].join());
+t('slotted b', () => [cs(b, 'color'), cs(b, 'display'), cs(b, 'background-color')].join());
+t('unslotted u', () => [cs(u, 'color'), cs(u, 'display')].join());
+t('inner', () => [cs(inner, 'color'), cs(inner, 'font-size')].join());
+t('slot', () => [cs(def, 'display'), cs(def, 'color')].join());
+t('rects', () => [a, b, u, top_, def, host].map(e => { var r = e.getBoundingClientRect(); return d(e) + ':' + r.x + ',' + r.y + ',' + r.width + 'x' + r.height; }).join(' ') + ' inner:' + inner.getBoundingClientRect().x + ',' + inner.getBoundingClientRect().y);
+t('offset', () => [a.offsetWidth, a.offsetHeight, u.offsetWidth, d(a.offsetParent), d(inner.offsetParent), inner.offsetTop].join());
+var dhost = document.getElementById('dhost');
+t('declarative', () => [cs(dhost, 'height'), cs(dhost.shadowRoot.getElementById('dp'), 'color'), dhost.shadowRoot.getElementById('dp').getBoundingClientRect().height > 0].join());
+t('checkVisibility', () => [a.checkVisibility(), u.checkVisibility(), inner.checkVisibility()].join());
+end();
+</script>

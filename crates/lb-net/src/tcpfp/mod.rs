@@ -1,5 +1,5 @@
 //! TCP/IP stack fingerprint: make a connection's first packet look like it
-//! came from Windows, macOS or Linux (ADR 0007).
+//! came from Windows, macOS or Linux (ADR 0031).
 //!
 //! Servers can fingerprint the operating system from the SYN alone: IP TTL,
 //! DF bit, TCP window, and which options appear in which order (p0f, JA4T).

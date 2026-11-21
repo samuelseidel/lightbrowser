@@ -19,9 +19,8 @@ libc = "0.2"
 
 # HTTP
 http = "1"
-hyper = { version = "1", features = ["client", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
-http-body-util = "0.1"
+# Response head parser for our own HTTP/1.1 transport (h1.rs).
+httparse = "1"
 # h2 is replaced by the vendored fork via [patch.crates-io] in the workspace
 # Cargo.toml once that fork exists (M1, task 3).
 h2 = "0.4"

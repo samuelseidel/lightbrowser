@@ -47,7 +47,16 @@
 //! - **key_share groups**: BoringSSL picks them (first group, plus the second
 //!   one when the first is post-quantum). Firefox sends x25519 + P-256; the
 //!   profile has no field for this yet.
-//! - **pre_shared_key (41)**: no client session cache yet, so no resumption.
+//! - **pre_shared_key (41)**: sent on resumption, as Chrome does, only by a
+//!   connector made with [`TlsConnector::with_sessions`] (the connection
+//!   pool's, ADR 0018). Firefox's resumed ClientHello is not checked.
+//!
+//! Session resumption (ADR 0018) follows Chrome's `SSLClientSessionCache`:
+//! sessions are kept per [`SessionKey`] (host, port and the connection
+//! pool's partition), at most two per key, newest first; a TLS 1.3 session
+//! is used once. BoringSSL then adds `pre_shared_key` as the last
+//! extension, which is what Chrome 153 sends (checked with `lb-fptest` on
+//! loopback). No early data, as in Chrome.
 //!
 //! Certificate verification is on by default against the system roots
 //! BoringSSL finds through its default verify paths. Set
@@ -57,9 +66,14 @@
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
+
+use boring::ex_data::Index;
 use boring::ssl::{
-    CertificateCompressionAlgorithm, CertificateCompressor, ConnectConfiguration, SslConnector,
-    SslMethod, SslOptions, SslVerifyMode, SslVersion,
+    CertificateCompressionAlgorithm, CertificateCompressor, ConnectConfiguration, Ssl,
+    SslConnector, SslMethod, SslOptions, SslSession, SslSessionCacheMode, SslVerifyMode,
+    SslVersion,
 };
 use foreign_types::ForeignTypeRef;
 use tokio::net::TcpStream;
@@ -77,6 +91,61 @@ const EXT_SCT: u16 = 18;
 const EXT_SERVER_PADDING: u16 = 4832;
 const EXT_TRUST_ANCHORS: u16 = 51764;
 
+/// Sessions kept per key (Chrome: `SSLClientSessionCache::Entry` holds two).
+const SESSIONS_PER_KEY: usize = 2;
+/// Keys kept before the cache is cleared (Chrome's cache holds 1024).
+const MAX_SESSION_KEYS: usize = 1024;
+
+/// What a TLS session is cached under: Chrome keys its client session cache
+/// by server (host and port) and network partition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SessionKey {
+    pub host: String,
+    pub port: u16,
+    /// The connection pool's partition (`crate::pool`), empty when none.
+    pub partition: String,
+}
+
+/// Client session cache of one browser context (memory only).
+#[derive(Default)]
+pub struct SessionCache {
+    map: Mutex<HashMap<SessionKey, VecDeque<SslSession>>>,
+}
+
+impl SessionCache {
+    fn insert(&self, key: SessionKey, session: SslSession) {
+        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() >= MAX_SESSION_KEYS && !map.contains_key(&key) {
+            map.clear();
+        }
+        let list = map.entry(key).or_default();
+        list.push_front(session);
+        list.truncate(SESSIONS_PER_KEY);
+    }
+
+    /// The newest session for `key`; a TLS 1.3 one is removed (single use).
+    fn lookup(&self, key: &SessionKey) -> Option<SslSession> {
+        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        let list = map.get_mut(key)?;
+        let s = list.front()?;
+        let s = if s.protocol_version() == SslVersion::TLS1_3 {
+            list.pop_front()
+        } else {
+            Some(s.clone())
+        };
+        if list.is_empty() {
+            map.remove(key);
+        }
+        s
+    }
+
+    /// Sessions cached for `key` (tests).
+    pub fn count(&self, key: &SessionKey) -> usize {
+        let map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(key).map_or(0, VecDeque::len)
+    }
+}
+
 /// A reusable TLS configuration derived from one profile.
 pub struct TlsConnector {
     profile: Arc<ClientHelloProfile>,
@@ -90,12 +159,35 @@ pub struct TlsConnector {
     /// Skip certificate chain and hostname checks. Only for our local test
     /// servers with self-signed certificates. Default `false`.
     pub danger_accept_invalid_certs: bool,
+    /// Session cache and the `SSL` ex-data slot that carries each
+    /// connection's key to the new-session callback.
+    sessions: Option<(Arc<SessionCache>, Index<Ssl, SessionKey>)>,
 }
 
 impl TlsConnector {
     pub fn new(profile: Arc<ClientHelloProfile>) -> Result<Self, NetError> {
+        Self::build(profile, None)
+    }
+
+    /// Like [`new`](Self::new), with TLS session resumption through `cache`
+    /// for connections made with [`connect_resuming`](Self::connect_resuming).
+    pub fn with_sessions(
+        profile: Arc<ClientHelloProfile>,
+        cache: Arc<SessionCache>,
+    ) -> Result<Self, NetError> {
+        Self::build(profile, Some(cache))
+    }
+
+    fn build(
+        profile: Arc<ClientHelloProfile>,
+        cache: Option<Arc<SessionCache>>,
+    ) -> Result<Self, NetError> {
         let mut gaps = Vec::new();
-        let connector = build_connector(&profile, &mut gaps)?;
+        let sessions = match cache {
+            Some(c) => Some((c, Ssl::new_ex_index::<SessionKey>()?)),
+            None => None,
+        };
+        let connector = build_connector(&profile, &mut gaps, sessions.as_ref())?;
 
         let mut alps = Vec::new();
         for proto in &profile.alps_protocols {
@@ -123,6 +215,7 @@ impl TlsConnector {
             server_padding,
             gaps,
             danger_accept_invalid_certs: false,
+            sessions,
         })
     }
 
@@ -155,7 +248,28 @@ impl TlsConnector {
         host: &str,
         tcp: TcpStream,
     ) -> Result<(tokio_boring::SslStream<TcpStream>, HttpVersion), NetError> {
-        let config = self.configure()?;
+        self.connect_resuming(host, tcp, None).await
+    }
+
+    /// [`connect`](Self::connect), offering the newest cached session for
+    /// `key` and caching the sessions the server sends under it. Without a
+    /// cache ([`new`](Self::new)) `key` is ignored.
+    pub async fn connect_resuming(
+        &self,
+        host: &str,
+        tcp: TcpStream,
+        key: Option<&SessionKey>,
+    ) -> Result<(tokio_boring::SslStream<TcpStream>, HttpVersion), NetError> {
+        let mut config = self.configure(false)?;
+        if let (Some((cache, index)), Some(key)) = (&self.sessions, key) {
+            if let Some(session) = cache.lookup(key) {
+                // SAFETY: `session` is a valid session made by this
+                // `SSL_CTX` (its new-session callback stored it); BoringSSL
+                // takes its own reference.
+                unsafe { config.set_session(&session)? };
+            }
+            config.set_ex_data(*index, key.clone());
+        }
         let host = host.trim_start_matches('[').trim_end_matches(']');
         let stream = tokio_boring::connect(config, host, tcp)
             .await
@@ -167,21 +281,41 @@ impl TlsConnector {
         Ok((stream, version))
     }
 
+    /// A handshake whose ALPN offers `http/1.1` alone (Chrome's WebSocket
+    /// connections), otherwise the profile's ClientHello. As captured from
+    /// Chrome 153 on loopback (`wss:`), such a ClientHello also lacks ALPS
+    /// (17613, only for `h2`) and `server_padding` (4832).
+    pub async fn connect_http1_only(
+        &self,
+        host: &str,
+        tcp: TcpStream,
+    ) -> Result<(tokio_boring::SslStream<TcpStream>, HttpVersion), NetError> {
+        let mut config = self.configure(true)?;
+        config.set_alpn_protos(b"\x08http/1.1")?;
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        let stream = tokio_boring::connect(config, host, tcp)
+            .await
+            .map_err(|e| NetError::Tls(format!("handshake with {host}: {e}")))?;
+        Ok((stream, HttpVersion::Http1))
+    }
+
     /// Per-connection settings that BoringSSL only exposes on `SSL`.
-    fn configure(&self) -> Result<ConnectConfiguration, NetError> {
+    /// `h1_only`: a connection that offers `http/1.1` alone (no ALPS, no
+    /// `server_padding`).
+    fn configure(&self, h1_only: bool) -> Result<ConnectConfiguration, NetError> {
         let mut config = self.connector.configure()?;
         if self.danger_accept_invalid_certs {
             config.set_verify(SslVerifyMode::NONE);
             config.set_verify_hostname(false);
         }
         config.set_enable_ech_grease(self.profile.ech_grease);
-        if let Some(n) = self.server_padding {
+        if let Some(n) = self.server_padding.filter(|_| !h1_only) {
             let ssl = ForeignTypeRef::as_ptr(&*config);
             // SAFETY: `ssl` is a valid, live SSL owned by `config`. The call
             // only stores the integer. `boring` 5.x does not wrap it.
             unsafe { boring_sys::SSL_set_server_padding_request(ssl, n) };
         }
-        if !self.alps.is_empty() {
+        if !self.alps.is_empty() && !h1_only {
             let ssl = ForeignTypeRef::as_ptr(&*config);
             // SAFETY: `ssl` is a valid, live SSL owned by `config` for the
             // whole block. BoringSSL copies `proto` and `settings` before
@@ -212,6 +346,7 @@ impl TlsConnector {
 fn build_connector(
     p: &ClientHelloProfile,
     gaps: &mut Vec<String>,
+    sessions: Option<&(Arc<SessionCache>, Index<Ssl, SessionKey>)>,
 ) -> Result<SslConnector, NetError> {
     // Verifies peers against the default verify paths (system roots).
     let mut b = SslConnector::builder(SslMethod::tls())?;
@@ -332,6 +467,16 @@ fn build_connector(
         }
     }
 
+    if let Some((cache, index)) = sessions {
+        // As Chrome: client-side caching with a new-session callback.
+        b.set_session_cache_mode(SslSessionCacheMode::CLIENT);
+        let (cache, index) = (Arc::clone(cache), *index);
+        b.set_new_session_callback(move |ssl, session| {
+            if let Some(key) = ssl.ex_data(index) {
+                cache.insert(key.clone(), session);
+            }
+        });
+    }
     Ok(b.build())
 }
 
@@ -434,6 +579,25 @@ fn sigalg_name(id: u16) -> Option<&'static str> {
     })
 }
 
+/// A TLS handshake `fut` with `host` that must finish within `limit`
+/// ([`crate::fetch::NetTimeouts::tls_handshake`]).
+pub(crate) async fn handshake_within<T>(
+    limit: std::time::Duration,
+    host: &str,
+    fut: impl std::future::Future<Output = Result<T, NetError>>,
+) -> Result<T, NetError> {
+    crate::fetch::within(limit, fut, || handshake_timed_out(host, limit)).await
+}
+
+/// The error of a TLS handshake with `host` that took longer than `limit`.
+/// Its text says "timed out", which lb-page reports as `net::ERR_TIMED_OUT`.
+pub fn handshake_timed_out(host: &str, limit: std::time::Duration) -> NetError {
+    NetError::Tls(format!(
+        "handshake with {host} timed out ({} s)",
+        limit.as_secs_f64()
+    ))
+}
+
 /// Decompress-only brotli for `compress_certificate`. The client never
 /// compresses its own certificate.
 struct BrotliDecompressor;
@@ -461,8 +625,35 @@ impl CertificateCompressor for ZlibDecompressor {
     }
 }
 
-fn copy_all<R: Read, W: Write>(mut r: R, w: &mut W) -> io::Result<()> {
-    io::copy(&mut r, w).map(|_| ())
+/// The largest uncompressed length a `CompressedCertificate` can declare
+/// (a 24-bit field, RFC 8879).
+const MAX_CERT_UNCOMPRESSED: u64 = (1 << 24) - 1;
+
+/// Decompress a certificate into `w`, at most [`MAX_CERT_UNCOMPRESSED`]
+/// bytes.
+///
+/// BoringSSL already bounds this: it refuses a declared length above
+/// `max_cert_list` before calling us (`tls13_both.cc`), `boring` hands us a
+/// writer over a buffer of exactly the declared length (a full buffer
+/// fails the write) and BoringSSL checks the length afterwards. The trait
+/// does not tell us the declared length, so the bound here is the most any
+/// peer can declare; it keeps a decompressor from running on for ever if
+/// the writer ever stops limiting it.
+fn copy_all<R: Read, W: Write>(r: R, w: &mut W) -> io::Result<()> {
+    copy_bounded(r, w, MAX_CERT_UNCOMPRESSED)
+}
+
+/// Copy at most `limit` bytes from `r` to `w`: read `limit + 1` at most and
+/// fail if that many came out.
+fn copy_bounded<R: Read, W: Write>(r: R, w: &mut W, limit: u64) -> io::Result<()> {
+    let n = io::copy(&mut r.take(limit.saturating_add(1)), w)?;
+    if n > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "decompressed certificate is longer than declared",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -530,7 +721,9 @@ mod tests {
     }
 
     fn u16_list(b: &[u8]) -> Vec<u16> {
-        b.chunks_exact(2)
+        b.as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
             .collect()
     }
@@ -760,5 +953,51 @@ mod tests {
         let h = capture(&c, "127.0.0.1").await;
         assert_eq!(h.sni, None);
         assert!(!h.extensions.contains(&0));
+    }
+
+    /// A zlib stream of `mib` MiB of zeros, a few KiB long: one
+    /// sync-flushed 1 MiB run repeated (the trailer is left off; a bounded
+    /// reader stops long before it).
+    fn zlib_bomb(mib: usize) -> Vec<u8> {
+        use flate2::{Compress, Compression, FlushCompress};
+        let mut c = Compress::new(Compression::best(), false);
+        let mut run = Vec::with_capacity(64 * 1024);
+        c.compress_vec(&vec![0u8; 1 << 20], &mut run, FlushCompress::Sync)
+            .unwrap();
+        let mut out = vec![0x78, 0xda];
+        for _ in 0..mib {
+            out.extend_from_slice(&run);
+        }
+        out
+    }
+
+    /// Certificate decompression stops at the bound: at most `limit + 1`
+    /// bytes are written, then an error.
+    #[test]
+    fn cert_decompression_is_bounded() {
+        let bomb = zlib_bomb(4);
+        let mut out = Vec::new();
+        let r = copy_bounded(flate2::read::ZlibDecoder::new(&bomb[..]), &mut out, 1000);
+        assert!(r.is_err());
+        assert_eq!(out.len(), 1001);
+        // Exactly the declared length is fine.
+        let one = zlib_bomb(1);
+        let mut full = Vec::new();
+        let mut d = flate2::read::ZlibDecoder::new(&one[..]);
+        let mut first = vec![0u8; 1 << 20];
+        d.read_exact(&mut first).unwrap();
+        copy_bounded(&first[..], &mut full, 1 << 20).unwrap();
+        assert_eq!(full.len(), 1 << 20);
+        // The helper the compressors use stops at the 24-bit maximum: a
+        // 32 MiB bomb into an unbounded writer (the old `io::copy` wrote
+        // all 32 MiB).
+        let big = zlib_bomb(32);
+        let mut sink = Vec::new();
+        assert!(ZlibDecompressor.decompress(&big, &mut sink).is_err());
+        assert!(
+            sink.len() as u64 <= MAX_CERT_UNCOMPRESSED + 1,
+            "{}",
+            sink.len()
+        );
     }
 }

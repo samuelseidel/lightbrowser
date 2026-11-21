@@ -1,0 +1,271 @@
+{
+  "format": 1,
+  "note": "Logical CPU counts (navigator.hardwareConcurrency) and RAM (deviceMemory: Chrome 153 reports the power of two at or below the RAM, 16 seen on a 15 GB machine). Apple chips: every configuration Apple sells; first macOS is what the chip shipped with. Only values up to 16 are used: 32 is allowed by rule R25 but was not observed.",
+  "desktop": {
+    "threads": [
+      [
+        4,
+        1
+      ],
+      [
+        6,
+        1
+      ],
+      [
+        8,
+        2
+      ],
+      [
+        12,
+        4
+      ],
+      [
+        16,
+        4
+      ],
+      [
+        20,
+        2
+      ],
+      [
+        24,
+        1
+      ],
+      [
+        32,
+        1
+      ]
+    ],
+    "device_memory": [
+      [
+        8,
+        3
+      ],
+      [
+        16,
+        5
+      ]
+    ]
+  },
+  "laptop": {
+    "threads": [
+      [
+        8,
+        3
+      ],
+      [
+        12,
+        3
+      ],
+      [
+        16,
+        2
+      ]
+    ],
+    "device_memory": [
+      [
+        8,
+        3
+      ],
+      [
+        16,
+        4
+      ]
+    ]
+  },
+  "apple": [
+    {
+      "chip": "M1",
+      "threads": [
+        8
+      ],
+      "min_macos": 11,
+      "device_memory": [
+        8,
+        16
+      ],
+      "models": [
+        "mba13_m1",
+        "mini"
+      ]
+    },
+    {
+      "chip": "M1 Pro",
+      "threads": [
+        8,
+        10
+      ],
+      "min_macos": 12,
+      "device_memory": [
+        16
+      ],
+      "models": [
+        "mbp14",
+        "mbp16"
+      ]
+    },
+    {
+      "chip": "M2",
+      "threads": [
+        8
+      ],
+      "min_macos": 12,
+      "device_memory": [
+        8,
+        16
+      ],
+      "models": [
+        "mba13",
+        "mini"
+      ]
+    },
+    {
+      "chip": "M2 Pro",
+      "threads": [
+        10,
+        12
+      ],
+      "min_macos": 13,
+      "device_memory": [
+        16
+      ],
+      "models": [
+        "mbp14",
+        "mbp16",
+        "mini"
+      ]
+    },
+    {
+      "chip": "M3",
+      "threads": [
+        8
+      ],
+      "min_macos": 14,
+      "device_memory": [
+        8,
+        16
+      ],
+      "models": [
+        "mba13",
+        "mbp14"
+      ]
+    },
+    {
+      "chip": "M3 Pro",
+      "threads": [
+        11,
+        12
+      ],
+      "min_macos": 14,
+      "device_memory": [
+        16
+      ],
+      "models": [
+        "mbp14",
+        "mbp16"
+      ]
+    },
+    {
+      "chip": "M3 Max",
+      "threads": [
+        14,
+        16
+      ],
+      "min_macos": 14,
+      "device_memory": [
+        16
+      ],
+      "models": [
+        "mbp14",
+        "mbp16"
+      ]
+    },
+    {
+      "chip": "M4",
+      "threads": [
+        10
+      ],
+      "min_macos": 15,
+      "device_memory": [
+        16
+      ],
+      "models": [
+        "mba13",
+        "mbp14",
+        "mini"
+      ]
+    },
+    {
+      "chip": "M4 Pro",
+      "threads": [
+        12,
+        14
+      ],
+      "min_macos": 15,
+      "device_memory": [
+        16
+      ],
+      "models": [
+        "mbp14",
+        "mbp16",
+        "mini"
+      ]
+    },
+    {
+      "chip": "M4 Max",
+      "threads": [
+        14,
+        16
+      ],
+      "min_macos": 15,
+      "device_memory": [
+        16
+      ],
+      "models": [
+        "mbp14",
+        "mbp16"
+      ]
+    }
+  ],
+  "intel_mac": [
+    {
+      "model": "MacBook Air 2020 (Intel)",
+      "threads": [
+        4,
+        8
+      ],
+      "gpu": "Intel(R) Iris(TM) Plus Graphics",
+      "screen": "mba13_intel",
+      "max_macos": 15,
+      "device_memory": [
+        8,
+        16
+      ]
+    },
+    {
+      "model": "MacBook Pro 13-inch 2020 (Intel)",
+      "threads": [
+        8
+      ],
+      "gpu": "Intel(R) Iris(TM) Plus Graphics",
+      "screen": "mbp13_intel",
+      "max_macos": 26,
+      "device_memory": [
+        16
+      ]
+    },
+    {
+      "model": "MacBook Pro 16-inch 2019",
+      "threads": [
+        12,
+        16
+      ],
+      "gpu": "Intel(R) UHD Graphics 630",
+      "screen": "mbp16_intel",
+      "max_macos": 26,
+      "device_memory": [
+        16
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+<!doctype html><title>claim</title><!--LOG-->
+<script>
+var n = load(), sw = navigator.serviceWorker;
+log('load ' + n + ' controller ' + (sw.controller && sw.controller.state));
+sw.addEventListener('controllerchange', function (e) {
+  log('controllerchange ' + e.constructor.name + ' ' + rel(sw.controller.scriptURL) + ' ' + sw.controller.state);
+});
+if (n === 0) {
+  sw.register('sw.js').then(function (reg) {
+    var w = reg.installing;
+    w.onstatechange = function () { log('statechange ' + w.state + ' controller=' + !!sw.controller) };
+    return sw.ready;
+  }).then(function (r) {
+    log('ready controller=' + !!sw.controller);
+    return new Promise(function (r) { setTimeout(r, 100) });
+  }).then(function () {
+    return fetch('data.txt').then(function (r) { return r.text() });
+  }).then(function (t) {
+    log('fetch ' + t.trim());
+    return swlog(sw.controller);
+  }).then(again);
+} else {
+  fetch('data.txt').then(function (r) { return r.text() }).then(function (t) { log('fetch ' + t.trim()); return swlog(sw.controller) }).then(end);
+}
+</script>

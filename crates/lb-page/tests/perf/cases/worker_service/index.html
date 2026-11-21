@@ -1,0 +1,18 @@
+<!doctype html><html><head><title>service worker</title></head><body>
+<!--LOG-->
+<script>
+addEventListener('load',async function(){
+  await sleep(300);
+  var before=performance.getEntriesByType('resource').length;
+  var reg=await navigator.serviceWorker.register('sw.js?x='+XP,{scope:'/worker_service/'});
+  var sw=reg.installing||reg.waiting||reg.active;
+  await new Promise(function(r){if(sw.state==='activated')return r();sw.addEventListener('statechange',function(){if(sw.state==='activated')r()})});
+  var msg=await new Promise(function(r){navigator.serviceWorker.onmessage=function(e){r(e.data)};sw.postMessage('go')});
+  log(msg);
+  await sleep(100);
+  var added=performance.getEntriesByType('resource').slice(before).filter(function(e){return !/favicon/.test(e.name)});
+  log('page timeline '+added.map(res).join(' ; '));
+  await reg.unregister();
+  end();
+});
+</script></body></html>

@@ -1,0 +1,41 @@
+<!doctype html><!--LOG--><script>
+var t0 = t; t = function (n, f) { t0(n, function () { try { return f(); } catch (e) { if (e.message) throw new DOMException(e.message.replace(/blob:[^']*/, 'blob:URL'), e.name); throw e; } }); };
+function hdrs(h) { var o = []; h.forEach((v, k) => o.push(k + '=' + v)); return o.join(';'); }
+(async () => {
+  var b = new Blob(['héllo ', 'blob'], { type: 'Text/Plain;charset=utf-8' });
+  var u = URL.createObjectURL(b);
+  log('url ' + /^blob:http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}$/.test(u));
+  await a('fetch', async () => { var r = await fetch(u); return [r.status, JSON.stringify(r.statusText), r.ok, r.type, r.url == u, r.redirected, hdrs(r.headers), await r.text()].join(' '); });
+  await a('fetch arrayBuffer', async () => hex(await (await fetch(u)).arrayBuffer()));
+  await a('fetch blob', async () => { var x = await (await fetch(u)).blob(); return x.size + ' ' + x.type; });
+  await a('fetch POST', () => fetch(u, { method: 'POST', body: 'x' }));
+  await a('fetch HEAD', async () => { var r = await fetch(u, { method: 'HEAD' }); return r.status; });
+  await a('fetch Request', async () => { var r = await fetch(new Request(u)); return r.status + ' ' + await r.text(); });
+  await a('fetch range', async () => { var r = await fetch(u, { headers: { Range: 'bytes=1-3' } }); return r.status + ' ' + JSON.stringify(r.statusText) + ' ' + hdrs(r.headers) + ' ' + await r.text(); });
+  var e = URL.createObjectURL(new Blob([]));
+  await a('fetch empty', async () => { var r = await fetch(e); return r.status + ' ' + hdrs(r.headers) + ' ' + JSON.stringify(await r.text()); });
+  var bin = URL.createObjectURL(new Blob([new Uint8Array([0, 255, 128])], { type: 'application/x-thing' }));
+  await a('fetch binary', async () => hex(await (await fetch(bin)).arrayBuffer()));
+  await a('xhr async', () => new Promise(res => { var x = new XMLHttpRequest(); var ev = []; x.onreadystatechange = () => ev.push('rs' + x.readyState); x.onload = () => ev.push('load'); x.onloadend = () => res(ev.join(',') + ' ' + x.status + ' ' + JSON.stringify(x.statusText) + ' ' + JSON.stringify(x.getAllResponseHeaders()) + ' ' + x.responseText + ' ' + (x.responseURL == u)); x.open('GET', u); x.send(); }));
+  await a('xhr arraybuffer', () => new Promise(res => { var x = new XMLHttpRequest(); x.responseType = 'arraybuffer'; x.onload = () => res(hex(x.response)); x.open('GET', bin); x.send(); }));
+  await a('xhr blob', () => new Promise(res => { var x = new XMLHttpRequest(); x.responseType = 'blob'; x.onload = () => res(x.response.size + ' ' + x.response.type); x.open('GET', u); x.send(); }));
+  t('xhr sync', () => { var x = new XMLHttpRequest(); var ev = []; x.onreadystatechange = () => ev.push('rs' + x.readyState); x.onload = () => ev.push('load'); x.onloadend = () => ev.push('loadend'); x.open('GET', u, false); x.send(); return ev.join(',') + ' ' + x.status + ' ' + x.responseText; });
+  t('xhr sync POST', () => { var x = new XMLHttpRequest(); x.open('POST', u, false); x.send('a'); return x.status; });
+  URL.revokeObjectURL(u);
+  await a('fetch revoked', () => fetch(u));
+  await a('xhr revoked', () => new Promise(res => { var x = new XMLHttpRequest(); var ev = []; x.onreadystatechange = () => ev.push('rs' + x.readyState); x.onerror = () => ev.push('error'); x.onloadend = () => res(ev.join(',') + ' ' + x.status); x.open('GET', u); x.send(); }));
+  t('xhr sync revoked', () => { var x = new XMLHttpRequest(); x.open('GET', u, false); x.send(); return x.status; });
+  await a('fetch bogus blob', () => fetch('blob:http://127.0.0.1/nope'));
+  await a('fetch data', async () => { var r = await fetch('data:text/plain;base64,aGk='); return [r.status, JSON.stringify(r.statusText), r.type, hdrs(r.headers), await r.text()].join(' '); });
+  await a('fetch data plain', async () => { var r = await fetch('data:,a%20b'); return [r.status, hdrs(r.headers), await r.text()].join(' '); });
+  await a('xhr data', () => new Promise(res => { var x = new XMLHttpRequest(); x.onload = () => res(x.status + ' ' + JSON.stringify(x.getAllResponseHeaders()) + ' ' + x.responseText); x.open('GET', 'data:text/html,<b>x</b>'); x.send(); }));
+  var w = new Worker(URL.createObjectURL(new Blob([`
+    var u = URL.createObjectURL(new Blob(['in worker'], { type: 'text/x' }));
+    fetch(u).then(r => r.text()).then(t => {
+      var x = new XMLHttpRequest(); x.open('GET', u, false); x.send();
+      postMessage(t + ' | ' + x.status + ' ' + x.responseText + ' ' + x.getResponseHeader('content-type'));
+    });
+  `])));
+  w.onmessage = e => { log('worker ' + e.data); end(); };
+})();
+</script>

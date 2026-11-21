@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.ico?s={{SID}}">
+<link rel="stylesheet" href="/static/style.css?s={{SID}}">
+<script type="application/json" id="lb-ctx">{{CTX}}</script>
+<script src="/collector.js?s={{SID}}" defer></script>
+<script src="/static/app.js?s={{SID}}" defer></script>
+<title>Search | Northwind Outfitters</title>
+</head>
+<body>
+<header class="top">
+  <a class="logo" href="/shop">Northwind Outfitters</a>
+  <nav><a href="/shop">Shop</a><a href="/news">Journal</a><a href="/search">Search</a><a href="/login">Sign in</a></nav>
+  <form class="search" action="/search" method="get" role="search">
+    <input id="q" name="q" type="search" placeholder="Search products" autocomplete="off" aria-label="Search products">
+    <button id="search-btn" type="submit">Search</button>
+  </form>
+</header>
+<main class="search-page">
+  <h1>Search</h1>
+  <form class="big-search" action="/search" method="get">
+    <input id="q2" name="q" type="search" value="{{Q}}" placeholder="Try: jacket, bags, shoes" aria-label="Search">
+    <button id="search-btn2" type="submit">Search</button>
+  </form>
+  <p class="query">Results for <strong>{{Q}}</strong></p>
+  <section class="grid" id="results" aria-label="Results">
+{{PRODUCTS}}
+  </section>
+</main>
+<footer class="foot"><p>Northwind Outfitters is a local test site. All data is fake.</p></footer>
+</body>
+</html>

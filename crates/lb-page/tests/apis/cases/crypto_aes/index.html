@@ -1,0 +1,50 @@
+<!doctype html><!--LOG--><script>
+var S = crypto.subtle;
+function k(key) { return [key.type, key.extractable, JSON.stringify(key.algorithm), key.usages.join('/')].join(' '); }
+(async () => {
+  var k16 = unhex('000102030405060708090a0b0c0d0e0f'), k32 = unhex('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f');
+  var iv12 = unhex('00112233445566778899aabb'), iv16 = unhex('00112233445566778899aabbccddeeff');
+  var pt = enc('The quick brown fox jumps over the lazy dog');
+  for (const raw of [k16, k32]) {
+    var bits = raw.length * 8;
+    var gcm = await S.importKey('raw', raw, 'AES-GCM', true, ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']);
+    log('gcm' + bits + ' ' + k(gcm));
+    for (const p of [{ name: 'AES-GCM', iv: iv12 }, { name: 'AES-GCM', iv: iv12, additionalData: enc('aad') }, { name: 'AES-GCM', iv: iv12, tagLength: 96 }, { name: 'AES-GCM', iv: iv16, tagLength: 32 }]) {
+      await a('gcm' + bits + ' enc ' + (p.additionalData ? 'aad ' : '') + p.iv.length + ' ' + p.tagLength, async () => { var c = await S.encrypt(p, gcm, pt); var d = await S.decrypt(p, gcm, c); return hex(c) + ' ' + new TextDecoder().decode(d); });
+    }
+    await a('gcm' + bits + ' bad tag', async () => { var c = new Uint8Array(await S.encrypt({ name: 'AES-GCM', iv: iv12 }, gcm, pt)); c[0] ^= 1; return S.decrypt({ name: 'AES-GCM', iv: iv12 }, gcm, c); });
+    await a('gcm' + bits + ' tag 100', () => S.encrypt({ name: 'AES-GCM', iv: iv12, tagLength: 100 }, gcm, pt));
+    await a('gcm' + bits + ' empty iv', () => S.encrypt({ name: 'AES-GCM', iv: new Uint8Array(0) }, gcm, pt));
+    await a('gcm' + bits + ' no iv', () => S.encrypt({ name: 'AES-GCM' }, gcm, pt));
+    await a('gcm' + bits + ' short ct', () => S.decrypt({ name: 'AES-GCM', iv: iv12 }, gcm, new Uint8Array(8)));
+    log('gcm' + bits + ' jwk ' + JSON.stringify(await S.exportKey('jwk', gcm)));
+    var cbc = await S.importKey('raw', raw, { name: 'AES-CBC' }, true, ['encrypt', 'decrypt']);
+    await a('cbc' + bits, async () => { var c = await S.encrypt({ name: 'AES-CBC', iv: iv16 }, cbc, pt); var d = await S.decrypt({ name: 'AES-CBC', iv: iv16 }, cbc, c); return hex(c) + ' ' + new TextDecoder().decode(d); });
+    await a('cbc' + bits + ' empty', async () => hex(await S.encrypt({ name: 'AES-CBC', iv: iv16 }, cbc, new Uint8Array(0))));
+    await a('cbc' + bits + ' iv 12', () => S.encrypt({ name: 'AES-CBC', iv: iv12 }, cbc, pt));
+    await a('cbc' + bits + ' bad pad', () => S.decrypt({ name: 'AES-CBC', iv: iv16 }, cbc, new Uint8Array(16)));
+    await a('cbc' + bits + ' partial', () => S.decrypt({ name: 'AES-CBC', iv: iv16 }, cbc, new Uint8Array(15)));
+    log('cbc' + bits + ' jwk ' + JSON.stringify(await S.exportKey('jwk', cbc)));
+    var ctr = await S.importKey('raw', raw, 'AES-CTR', true, ['encrypt', 'decrypt']);
+    for (const len of [64, 128, 8])
+      await a('ctr' + bits + ' ' + len, async () => { var c = await S.encrypt({ name: 'AES-CTR', counter: iv16, length: len }, ctr, pt); var d = await S.decrypt({ name: 'AES-CTR', counter: iv16, length: len }, ctr, c); return hex(c) + ' ' + new TextDecoder().decode(d); });
+    await a('ctr' + bits + ' wrap', async () => hex(await S.encrypt({ name: 'AES-CTR', counter: unhex('ffffffffffffffffffffffffffffffff'), length: 128 }, ctr, pt)));
+    await a('ctr' + bits + ' len 0', () => S.encrypt({ name: 'AES-CTR', counter: iv16, length: 0 }, ctr, pt));
+    await a('ctr' + bits + ' len 129', () => S.encrypt({ name: 'AES-CTR', counter: iv16, length: 129 }, ctr, pt));
+    await a('ctr' + bits + ' counter 8', () => S.encrypt({ name: 'AES-CTR', counter: iv12.slice(0, 8), length: 64 }, ctr, pt));
+    await a('ctr' + bits + ' wrong alg', () => S.encrypt({ name: 'AES-CBC', iv: iv16 }, ctr, pt));
+    log('ctr' + bits + ' jwk ' + JSON.stringify(await S.exportKey('jwk', ctr)));
+  }
+  await a('raw 24', async () => k(await S.importKey('raw', unhex('000102030405060708090a0b0c0d0e0f1011121314151617'), 'AES-GCM', true, ['encrypt'])));
+  await a('raw 20', () => S.importKey('raw', new Uint8Array(20), 'AES-GCM', true, ['encrypt']));
+  await a('aes sign usage', () => S.importKey('raw', k16, 'AES-GCM', true, ['sign']));
+  await a('aes-kw', async () => k(await S.importKey('raw', k16, 'AES-KW', true, ['wrapKey', 'unwrapKey'])));
+  await a('jwk A128GCM', async () => k(await S.importKey('jwk', { kty: 'oct', k: 'AAECAwQFBgcICQoLDA0ODw', alg: 'A128GCM' }, 'AES-GCM', true, ['encrypt'])));
+  await a('jwk A256GCM wrong len', () => S.importKey('jwk', { kty: 'oct', k: 'AAECAwQFBgcICQoLDA0ODw', alg: 'A256GCM' }, 'AES-GCM', true, ['encrypt']));
+  for (const l of [128, 192, 256, 64])
+    await a('gen ' + l, async () => { var g = await S.generateKey({ name: 'AES-GCM', length: l }, false, ['encrypt']); return k(g); });
+  await a('gen no length', () => S.generateKey({ name: 'AES-CBC' }, false, ['encrypt']));
+  await a('gen ctr', async () => { var g = await S.generateKey({ name: 'AES-CTR', length: 128 }, true, ['decrypt', 'encrypt']); return k(g) + ' ' + (await S.exportKey('raw', g)).byteLength; });
+  end();
+})();
+</script>

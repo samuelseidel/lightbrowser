@@ -1,0 +1,64 @@
+{
+  "url": "http://{HOST}/links_base.html",
+  "final_url": "http://{HOST}/links_base.html",
+  "status": 200,
+  "title": "Links",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Links"
+    }
+  ],
+  "links": [
+    {
+      "url": "http://{HOST}/docs/guide/intro.html",
+      "text": "the intro",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/docs/ref/api.html#top",
+      "text": "the API reference",
+      "rel": "noopener nofollow"
+    },
+    {
+      "url": "http://cdn.example.org/lib.js",
+      "text": "a CDN file",
+      "rel": ""
+    },
+    {
+      "url": "mailto:team@example.org",
+      "text": "mail us",
+      "rel": ""
+    },
+    {
+      "url": "https://example.com/a(b)",
+      "text": "paren",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/docs/guide/intro.html",
+      "text": "other text",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/abs/path?q=1&r=2",
+      "text": "absolute path",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/docs/guide/",
+      "text": "empty href",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/docs/guide/x%20y.html",
+      "text": "space in href",
+      "rel": ""
+    }
+  ],
+  "text": "Links\nSee the intro, the API reference and a CDN file.\nsame page js link js 2 mail us paren no href\nthe intro other text absolute path empty href\nspace in href",
+  "markdown": "# Links\n\nSee [the intro](http://{HOST}/docs/guide/intro.html), [the **API** reference](http://{HOST}/docs/ref/api.html#top) and [a CDN file](http://cdn.example.org/lib.js).\n\n[same page](http://{HOST}/docs/guide/#section) js link js 2 [mail us](mailto:team@example.org) [paren](https://example.com/a\\(b\\)) no href\n\n[the intro](http://{HOST}/docs/guide/intro.html) [other text](http://{HOST}/docs/guide/intro.html) [absolute path](http://{HOST}/abs/path?q=1&r=2) [empty href](http://{HOST}/docs/guide/)\n\n- [space in href](http://{HOST}/docs/guide/x%20y.html)\n"
+}

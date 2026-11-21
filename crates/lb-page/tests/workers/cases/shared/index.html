@@ -1,0 +1,15 @@
+<!doctype html><title>shared</title><!--LOG-->
+<script>
+var a = new SharedWorker('sw.js', 'n1');
+log('sw ' + Object.prototype.toString.call(a) + ' ' + Object.prototype.toString.call(a.port) + ' ' + (a.port === a.port) + ' keys ' + Object.getOwnPropertyNames(SharedWorker.prototype).join());
+a.port.onmessage = function (e) {
+  log('a ' + e.data);
+  var b = new SharedWorker('sw.js', {name: 'n1'});
+  b.port.addEventListener('message', function (e) {
+    log('b ' + e.data);
+    var c = new SharedWorker('sw.js', 'other');
+    c.port.onmessage = function (e) { log('c ' + e.data); end(); };
+  });
+  b.port.start();
+};
+</script>

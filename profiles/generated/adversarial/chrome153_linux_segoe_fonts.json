@@ -1,0 +1,358 @@
+{
+  "schema_version": "2.0",
+  "profile_id": "ad153000-0000-4000-8000-000000000004",
+  "profile_name": "ADVERSARIAL (R21_FONTS_OS): Ubuntu persona with Windows fonts (Segoe UI, Consolas, Segoe UI Emoji)",
+  "created_at": "2026-11-03T00:00:00Z",
+  "tags": [
+    "chrome",
+    "chrome153",
+    "linux",
+    "ubuntu",
+    "ubuntu24.04",
+    "x11",
+    "intel",
+    "uhd630",
+    "1080p",
+    "adversarial",
+    "r21"
+  ],
+  "adversarial": true,
+  "os": {
+    "name": "Linux",
+    "version": "Ubuntu 24.04 LTS",
+    "build": "6.8.0-87-generic",
+    "platform": "Linux x86_64",
+    "architecture": "x86_64",
+    "kernel": "6.8.0-87-generic",
+    "distro": "ubuntu-24.04",
+    "display_server": "x11"
+  },
+  "browser": {
+    "family": "chrome",
+    "name": "Chrome",
+    "version": "153.0.8010.12",
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept_language": "en-US,en;q=0.9",
+    "do_not_track": null,
+    "cookie_enabled": true,
+    "java_enabled": false,
+    "pdf_viewer_enabled": true,
+    "product": "Gecko",
+    "product_sub": "20030107",
+    "vendor": "Google Inc.",
+    "vendor_sub": "",
+    "app_name": "Netscape",
+    "app_code_name": "Mozilla",
+    "app_version": "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+  },
+  "client_hints": {
+    "brands": [
+      {
+        "brand": "Google Chrome",
+        "version": "153"
+      },
+      {
+        "brand": "Not_A Brand",
+        "version": "8"
+      },
+      {
+        "brand": "Chromium",
+        "version": "153"
+      }
+    ],
+    "full_version_list": [
+      {
+        "brand": "Google Chrome",
+        "version": "153.0.8010.12"
+      },
+      {
+        "brand": "Not_A Brand",
+        "version": "8.0.0.0"
+      },
+      {
+        "brand": "Chromium",
+        "version": "153.0.8010.12"
+      }
+    ],
+    "platform": "Linux",
+    "platform_version": "",
+    "architecture": "x86",
+    "bitness": "64",
+    "model": "",
+    "mobile": false,
+    "wow64": false,
+    "full_version": "153.0.8010.12"
+  },
+  "hardware": {
+    "hardware_concurrency": 12,
+    "device_memory": 16,
+    "max_touch_points": 0,
+    "gpu": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "vendor_unmasked": "Google Inc. (Intel)",
+      "renderer_unmasked": "ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)"
+    }
+  },
+  "screen": {
+    "width": 1920,
+    "height": 1080,
+    "avail_width": 1856,
+    "avail_height": 1048,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.0,
+    "inner_width": 1856,
+    "inner_height": 961,
+    "outer_width": 1856,
+    "outer_height": 1048,
+    "avail_top": 32,
+    "avail_left": 64,
+    "maximized": true
+  },
+  "locale": {
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "timezone": "America/Chicago",
+    "timezone_offset": 360
+  },
+  "network": {
+    "connection_type": "4g",
+    "downlink": 10,
+    "rtt": 50,
+    "save_data": false
+  },
+  "fingerprint_seeds": {
+    "canvas_seed": "7e2b90d4c16a3f5809d1b4e7a2c6f830",
+    "webgl_noise_seed": "a4c71e3092fb6d58e6098a1d4c37b2f5",
+    "audio_seed": "29f6d0b8e3a7451cc8e2f19a057d6b43"
+  },
+  "webgl": {
+    "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+    "extensions": [
+      "EXT_clip_control",
+      "EXT_color_buffer_float",
+      "EXT_color_buffer_half_float",
+      "EXT_conservative_depth",
+      "EXT_depth_clamp",
+      "EXT_disjoint_timer_query_webgl2",
+      "EXT_float_blend",
+      "EXT_polygon_offset_clamp",
+      "EXT_render_snorm",
+      "EXT_texture_compression_bptc",
+      "EXT_texture_compression_rgtc",
+      "EXT_texture_filter_anisotropic",
+      "EXT_texture_mirror_clamp_to_edge",
+      "EXT_texture_norm16",
+      "KHR_parallel_shader_compile",
+      "NV_shader_noperspective_interpolation",
+      "OES_draw_buffers_indexed",
+      "OES_sample_variables",
+      "OES_shader_multisample_interpolation",
+      "OES_texture_float_linear",
+      "OVR_multiview2",
+      "WEBGL_blend_func_extended",
+      "WEBGL_clip_cull_distance",
+      "WEBGL_compressed_texture_astc",
+      "WEBGL_compressed_texture_etc",
+      "WEBGL_compressed_texture_etc1",
+      "WEBGL_compressed_texture_s3tc",
+      "WEBGL_compressed_texture_s3tc_srgb",
+      "WEBGL_debug_renderer_info",
+      "WEBGL_debug_shaders",
+      "WEBGL_lose_context",
+      "WEBGL_multi_draw",
+      "WEBGL_polygon_mode",
+      "WEBGL_provoking_vertex",
+      "WEBGL_render_shared_exponent",
+      "WEBGL_stencil_texturing"
+    ],
+    "parameters": {
+      "MAX_TEXTURE_SIZE": 16384,
+      "MAX_VIEWPORT_DIMS": [
+        16384,
+        16384
+      ],
+      "MAX_VERTEX_ATTRIBS": 16,
+      "MAX_VERTEX_UNIFORM_VECTORS": 4096,
+      "MAX_FRAGMENT_UNIFORM_VECTORS": 4096,
+      "MAX_VARYING_VECTORS": 32,
+      "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+      "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+      "MAX_TEXTURE_IMAGE_UNITS": 32,
+      "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+      "MAX_RENDERBUFFER_SIZE": 16384,
+      "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+      "MAX_FRAGMENT_UNIFORM_COMPONENTS": 16384,
+      "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+      "MAX_3D_TEXTURE_SIZE": 2048,
+      "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 128,
+      "MAX_UNIFORM_BUFFER_BINDINGS": 84,
+      "MAX_UNIFORM_BLOCK_SIZE": 65536,
+      "MAX_COMBINED_UNIFORM_BLOCKS": 84,
+      "MAX_SAMPLES": 16,
+      "ALIASED_LINE_WIDTH_RANGE": [
+        1,
+        7.375
+      ],
+      "ALIASED_POINT_SIZE_RANGE": [
+        1,
+        255.875
+      ]
+    },
+    "shader_precision": {
+      "VERTEX_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      }
+    }
+  },
+  "fonts": {
+    "available": [
+      "C059",
+      "Consolas",
+      "D050000L",
+      "DejaVu Sans",
+      "DejaVu Sans Mono",
+      "DejaVu Serif",
+      "FreeMono",
+      "FreeSans",
+      "FreeSerif",
+      "Liberation Mono",
+      "Liberation Sans",
+      "Liberation Serif",
+      "Nimbus Mono PS",
+      "Nimbus Roman",
+      "Nimbus Sans",
+      "Noto Color Emoji",
+      "Noto Mono",
+      "P052",
+      "Segoe UI",
+      "Segoe UI Emoji",
+      "Ubuntu",
+      "Ubuntu Mono",
+      "Ubuntu Sans",
+      "Ubuntu Sans Mono",
+      "URW Bookman",
+      "URW Gothic",
+      "Z003"
+    ]
+  },
+  "tls": {
+    "profile_id": "chrome_153_linux",
+    "ja3": "9bddd6d71939cb1fcf03871f2cc2adcf",
+    "ja3s_note": "Chrome 153 ClientHello and H2 preface are OS-independent; captured on Linux (profiles/tls/chrome_153_linux.json)."
+  },
+  "timing": {
+    "performance_now_resolution_us": 100
+  },
+  "behavior": {
+    "profile": "casual_user",
+    "wheel": {
+      "px_per_notch": 120,
+      "delta_ratio": 1.0
+    }
+  },
+  "permissions": {
+    "geolocation": "prompt",
+    "notifications": "prompt",
+    "camera": "prompt",
+    "microphone": "prompt"
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "base_latency": 0.01,
+    "max_channel_count": 2
+  },
+  "media_devices": {
+    "webcam_label": "HD Pro Webcam C920 (046d:082d)",
+    "mic_label": "HD Pro Webcam C920 Analog Stereo",
+    "speaker_label": "Built-in Audio Analog Stereo",
+    "audioinput": 1,
+    "videoinput": 1,
+    "audiooutput": 1
+  },
+  "preferences": {
+    "color_scheme": "light",
+    "color_gamut": "srgb",
+    "scrollbar_width": 15
+  },
+  "speech_voices": [],
+  "webgpu": null,
+  "media": {
+    "hevc": false,
+    "h264_power_efficient": false,
+    "av1_hw": false
+  },
+  "apis": {
+    "share": false,
+    "bluetooth": false
+  },
+  "provenance": {
+    "captured": false,
+    "source": "reference persona with one change; must trip exactly R21_FONTS_OS",
+    "notes": [
+      "Ubuntu persona with Windows fonts (Segoe UI, Consolas, Segoe UI Emoji)"
+    ]
+  }
+}

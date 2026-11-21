@@ -1,0 +1,1307 @@
+{
+ "provenance": {
+  "captured": true,
+  "tool": "tools/os_truth/capture.js",
+  "label": "linux_x11_cft153_ubuntu24fonts",
+  "date": "2026-11-03",
+  "browser": "Google Chrome for Testing 153.0.8010.12",
+  "mode": "headed under xvfb-run (-screen 0 1920x1080x24 -dpi 96 unless noted)",
+  "flags": [
+   "--no-sandbox",
+   "--no-first-run",
+   "--no-default-browser-check",
+   "--password-store=basic",
+   "--disable-component-update"
+  ],
+  "host": {
+   "os": "Ubuntu 24.04.5 LTS",
+   "kernel": "6.18.44-fc-v230",
+   "arch": "x86_64"
+  },
+  "fontconfig": "tools/os_truth/fontconf/ubuntu24",
+  "gtkFont": "Ubuntu Sans 11",
+  "loopbackOnly": true,
+  "limits": [
+   "GPU: none in this container; WebGL/WebGPU show what Chromium does without a GPU (SwiftShader or nothing), not a desktop GPU.",
+   "Audio: no PipeWire/PulseAudio server; AudioContext values are the no-device fallback.",
+   "Fonts: the container font set (default sans-serif is Inter, not a stock distro font).",
+   "Window manager: none under Xvfb, so avail* equals the screen and there is no panel or dock.",
+   "Speech: no speech-dispatcher, so no local voices.",
+   "fontconfig: tools/os_truth/fontconf/ubuntu24/fonts.conf; distro fonts that are not installed here fall back to installed ones."
+  ]
+ },
+ "result": {
+  "errors": {},
+  "identity": {
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "appVersion": "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "platform": "Linux x86_64",
+   "vendor": "Google Inc.",
+   "uaData": {
+    "brands": [
+     {
+      "brand": "Chromium",
+      "version": "153"
+     },
+     {
+      "brand": "Not_A Brand",
+      "version": "8"
+     }
+    ],
+    "mobile": false,
+    "platform": "Linux"
+   },
+   "uaHigh": {
+    "architecture": "x86",
+    "bitness": "64",
+    "brands": [
+     {
+      "brand": "Chromium",
+      "version": "153"
+     },
+     {
+      "brand": "Not_A Brand",
+      "version": "8"
+     }
+    ],
+    "formFactors": [
+     "Desktop"
+    ],
+    "fullVersionList": [
+     {
+      "brand": "Chromium",
+      "version": "153.0.8010.12"
+     },
+     {
+      "brand": "Not_A Brand",
+      "version": "8.0.0.0"
+     }
+    ],
+    "mobile": false,
+    "model": "",
+    "platform": "Linux",
+    "platformVersion": "",
+    "uaFullVersion": "153.0.8010.12",
+    "wow64": false
+   }
+  },
+  "navigator": {
+   "hardwareConcurrency": 4,
+   "deviceMemory": 16,
+   "maxTouchPoints": 0,
+   "pdfViewerEnabled": true,
+   "languages": [
+    "en-US"
+   ],
+   "plugins": 5,
+   "webdriver": false,
+   "doNotTrack": null,
+   "cookieEnabled": true,
+   "timeZone": "UTC",
+   "locale": "en-US"
+  },
+  "osApis": {
+   "navigator": {
+    "share": false,
+    "canShare": false,
+    "bluetooth": false,
+    "hid": true,
+    "serial": true,
+    "usb": true,
+    "xr": true,
+    "contacts": false,
+    "windowControlsOverlay": true,
+    "virtualKeyboard": true,
+    "ink": true,
+    "presentation": true,
+    "keyboard": true,
+    "getInstalledRelatedApps": true,
+    "setAppBadge": true,
+    "wakeLock": true,
+    "devicePosture": true,
+    "login": true,
+    "gpu": true,
+    "scheduling": true,
+    "managed": true,
+    "credentials": true,
+    "mediaSession": true,
+    "storageBuckets": true
+   },
+   "window": {
+    "Bluetooth": false,
+    "BluetoothDevice": false,
+    "BluetoothUUID": false,
+    "BluetoothRemoteGATTServer": false,
+    "HID": true,
+    "Serial": true,
+    "USB": true,
+    "documentPictureInPicture": true,
+    "showOpenFilePicker": true,
+    "queryLocalFonts": true,
+    "getScreenDetails": true,
+    "EyeDropper": true,
+    "NavigatorManagedData": true,
+    "VirtualKeyboard": true,
+    "WindowControlsOverlay": true,
+    "Ink": true,
+    "Presentation": true,
+    "XRSystem": true,
+    "ContactsManager": false,
+    "GPU": true,
+    "MediaStreamTrackProcessor": true,
+    "IdleDetector": true,
+    "NDEFReader": false,
+    "LaunchQueue": true
+   }
+  },
+  "screen": {
+   "width": 1920,
+   "height": 1080,
+   "availWidth": 1920,
+   "availHeight": 1080,
+   "availLeft": 0,
+   "availTop": 0,
+   "colorDepth": 24,
+   "pixelDepth": 24,
+   "isExtended": false,
+   "orientation": "landscape-primary",
+   "dpr": 1,
+   "outerWidth": 945,
+   "outerHeight": 1060,
+   "innerWidth": 945,
+   "innerHeight": 973,
+   "screenX": 10,
+   "screenY": 10,
+   "screenLeft": 10,
+   "screenTop": 10,
+   "visualViewport": {
+    "width": 930,
+    "height": 973,
+    "scale": 1
+   }
+  },
+  "scrollbar": {
+   "div": 15,
+   "divH": 15,
+   "root": 15,
+   "rootH": 0,
+   "textarea": {
+    "offsetWidth": 182,
+    "clientWidth": 180,
+    "offsetHeight": 36
+   },
+   "scrollbarGutter": "auto"
+  },
+  "fonts": {
+   "base": {
+    "monospace": [
+     824,
+     84
+    ],
+    "serif": [
+     910,
+     83
+    ],
+    "sans-serif": [
+     965,
+     82
+    ]
+   },
+   "generic": {
+    "serif": [
+     910,
+     83
+    ],
+    "sans-serif": [
+     965,
+     82
+    ],
+    "monospace": [
+     824,
+     84
+    ],
+    "cursive": [
+     910,
+     83
+    ],
+    "fantasy": [
+     910,
+     83
+    ],
+    "system-ui": [
+     1112,
+     84
+    ],
+    "emoji": [
+     1018,
+     85
+    ],
+    "math": [
+     910,
+     83
+    ],
+    "ui-serif": [
+     910,
+     83
+    ],
+    "ui-sans-serif": [
+     910,
+     83
+    ],
+    "ui-monospace": [
+     910,
+     83
+    ],
+    "ui-rounded": [
+     910,
+     83
+    ],
+    "fangsong": [
+     910,
+     83
+    ],
+    "-webkit-standard": [
+     910,
+     83
+    ],
+    "initial": [
+     910,
+     83
+    ]
+   },
+   "detected": [
+    "Arial",
+    "Helvetica",
+    "Liberation Sans",
+    "Arimo",
+    "DejaVu Sans",
+    "Inter",
+    "FreeSans",
+    "Times New Roman",
+    "Times",
+    "Liberation Serif",
+    "Tinos",
+    "DejaVu Serif",
+    "FreeSerif",
+    "Courier New",
+    "Courier",
+    "Liberation Mono",
+    "Cousine",
+    "DejaVu Sans Mono",
+    "FreeMono",
+    "JetBrains Mono",
+    "Monospace",
+    "Calibri",
+    "Carlito",
+    "Cambria",
+    "Caladea",
+    "Noto Color Emoji",
+    "Unifont",
+    "WenQuanYi Zen Hei",
+    "IPAGothic",
+    "Loma",
+    "OpenSymbol"
+   ],
+   "detectedDims": {
+    "Arial": [
+     965,
+     82
+    ],
+    "Helvetica": [
+     965,
+     82
+    ],
+    "Liberation Sans": [
+     965,
+     82
+    ],
+    "Arimo": [
+     965,
+     82
+    ],
+    "DejaVu Sans": [
+     1112,
+     84
+    ],
+    "Inter": [
+     995,
+     87
+    ],
+    "FreeSans": [
+     937,
+     79
+    ],
+    "Times New Roman": [
+     910,
+     83
+    ],
+    "Times": [
+     910,
+     83
+    ],
+    "Liberation Serif": [
+     910,
+     83
+    ],
+    "Tinos": [
+     910,
+     83
+    ],
+    "DejaVu Serif": [
+     1106,
+     84
+    ],
+    "FreeSerif": [
+     903,
+     79
+    ],
+    "Courier New": [
+     821,
+     82
+    ],
+    "Courier": [
+     821,
+     82
+    ],
+    "Liberation Mono": [
+     821,
+     82
+    ],
+    "Cousine": [
+     821,
+     82
+    ],
+    "DejaVu Sans Mono": [
+     824,
+     84
+    ],
+    "FreeMono": [
+     821,
+     72
+    ],
+    "JetBrains Mono": [
+     821,
+     95
+    ],
+    "Monospace": [
+     824,
+     84
+    ],
+    "Calibri": [
+     909,
+     88
+    ],
+    "Carlito": [
+     909,
+     88
+    ],
+    "Cambria": [
+     916,
+     83
+    ],
+    "Caladea": [
+     916,
+     83
+    ],
+    "Noto Color Emoji": [
+     917,
+     85
+    ],
+    "Unifont": [
+     684,
+     72
+    ],
+    "WenQuanYi Zen Hei": [
+     931,
+     96
+    ],
+    "IPAGothic": [
+     684,
+     72
+    ],
+    "Loma": [
+     967,
+     115
+    ],
+    "OpenSymbol": [
+     813,
+     89
+    ]
+   },
+   "against": {
+    "Arial": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": false
+    },
+    "Helvetica": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": false
+    },
+    "Liberation Sans": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": false
+    },
+    "Arimo": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": false
+    },
+    "DejaVu Sans": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Inter": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Noto Sans": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Ubuntu": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Ubuntu Sans": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Cantarell": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Adwaita Sans": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "FreeSans": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Nimbus Sans": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Nimbus Sans L": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Times New Roman": {
+     "monospace": true,
+     "serif": false,
+     "sans-serif": true
+    },
+    "Times": {
+     "monospace": true,
+     "serif": false,
+     "sans-serif": true
+    },
+    "Liberation Serif": {
+     "monospace": true,
+     "serif": false,
+     "sans-serif": true
+    },
+    "Tinos": {
+     "monospace": true,
+     "serif": false,
+     "sans-serif": true
+    },
+    "DejaVu Serif": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Noto Serif": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "FreeSerif": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Nimbus Roman": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Courier New": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Courier": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Liberation Mono": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Cousine": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "DejaVu Sans Mono": {
+     "monospace": false,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Noto Sans Mono": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Ubuntu Mono": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Ubuntu Sans Mono": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Adwaita Mono": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "FreeMono": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Nimbus Mono PS": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "JetBrains Mono": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Monospace": {
+     "monospace": false,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Calibri": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Carlito": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Cambria": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Caladea": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Segoe UI": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Segoe UI Variable Text": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Consolas": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Tahoma": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Verdana": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Georgia": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Trebuchet MS": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Helvetica Neue": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Menlo": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Monaco": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "SF Pro": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    ".AppleSystemUIFont": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Comic Sans MS": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Impact": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Papyrus": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Apple Chancery": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Bitstream Charter": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Courier 10 Pitch": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Noto Color Emoji": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Segoe UI Emoji": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Apple Color Emoji": {
+     "monospace": false,
+     "serif": false,
+     "sans-serif": false
+    },
+    "Unifont": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "WenQuanYi Zen Hei": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "IPAGothic": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "Loma": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    },
+    "OpenSymbol": {
+     "monospace": true,
+     "serif": true,
+     "sans-serif": true
+    }
+   },
+   "resolves": {
+    "serif": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "sans-serif": [
+     "Arial",
+     "Helvetica",
+     "Liberation Sans",
+     "Arimo"
+    ],
+    "monospace": [
+     "DejaVu Sans Mono",
+     "Monospace"
+    ],
+    "cursive": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "fantasy": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "system-ui": [
+     "DejaVu Sans"
+    ],
+    "emoji": [],
+    "math": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "ui-serif": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "ui-sans-serif": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "ui-monospace": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "ui-rounded": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "fangsong": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "-webkit-standard": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ],
+    "initial": [
+     "Times New Roman",
+     "Times",
+     "Liberation Serif",
+     "Tinos"
+    ]
+   },
+   "baseOf": {
+    "serif": [
+     "serif"
+    ],
+    "sans-serif": [
+     "sans-serif"
+    ],
+    "monospace": [
+     "monospace"
+    ],
+    "cursive": [
+     "serif"
+    ],
+    "fantasy": [
+     "serif"
+    ],
+    "system-ui": [],
+    "emoji": [],
+    "math": [
+     "serif"
+    ],
+    "ui-serif": [
+     "serif"
+    ],
+    "ui-sans-serif": [
+     "serif"
+    ],
+    "ui-monospace": [
+     "serif"
+    ],
+    "ui-rounded": [
+     "serif"
+    ],
+    "fangsong": [
+     "serif"
+    ],
+    "-webkit-standard": [
+     "serif"
+    ],
+    "initial": [
+     "serif"
+    ]
+   }
+  },
+  "fontKeywords": {
+   "caption": {
+    "set": "caption",
+    "family": "Arial",
+    "size": "16px",
+    "weight": "400",
+    "style": "normal"
+   },
+   "icon": {
+    "set": "icon",
+    "family": "Arial",
+    "size": "16px",
+    "weight": "400",
+    "style": "normal"
+   },
+   "menu": {
+    "set": "menu",
+    "family": "Arial",
+    "size": "16px",
+    "weight": "400",
+    "style": "normal"
+   },
+   "message-box": {
+    "set": "message-box",
+    "family": "Arial",
+    "size": "16px",
+    "weight": "400",
+    "style": "normal"
+   },
+   "small-caption": {
+    "set": "small-caption",
+    "family": "Arial",
+    "size": "16px",
+    "weight": "400",
+    "style": "normal"
+   },
+   "status-bar": {
+    "set": "status-bar",
+    "family": "Arial",
+    "size": "16px",
+    "weight": "400",
+    "style": "normal"
+   },
+   "-webkit-small-control": {
+    "set": "-webkit-small-control",
+    "family": "Arial",
+    "size": "13.3333px",
+    "weight": "400",
+    "style": "normal"
+   },
+   "input": {
+    "family": "Arial",
+    "size": "13.3333px"
+   },
+   "button": {
+    "family": "Arial",
+    "size": "13.3333px"
+   },
+   "body": {
+    "family": "sans-serif"
+   }
+  },
+  "emoji": {
+   "measureText100": 124.7706298828125,
+   "measureTextA100": 66.69921875,
+   "inked": 8930,
+   "colored": 8588,
+   "dom": [
+    125,
+    117
+   ],
+   "domEmojiFamily": [
+    125,
+    117
+   ]
+  },
+  "systemColors": {
+   "Canvas": "rgb(255, 255, 255)",
+   "CanvasText": "rgb(0, 0, 0)",
+   "LinkText": "rgb(0, 0, 238)",
+   "VisitedText": "rgb(85, 26, 139)",
+   "ActiveText": "rgb(255, 0, 0)",
+   "ButtonFace": "rgb(239, 239, 239)",
+   "ButtonText": "rgb(0, 0, 0)",
+   "ButtonBorder": "rgb(0, 0, 0)",
+   "Field": "rgb(255, 255, 255)",
+   "FieldText": "rgb(0, 0, 0)",
+   "Highlight": "rgba(0, 65, 198, 0.8)",
+   "HighlightText": "rgb(255, 255, 255)",
+   "SelectedItem": "rgb(25, 103, 210)",
+   "SelectedItemText": "rgb(255, 255, 255)",
+   "Mark": "rgb(255, 255, 0)",
+   "MarkText": "rgb(0, 0, 0)",
+   "GrayText": "rgb(128, 128, 128)",
+   "AccentColor": "rgb(0, 117, 255)",
+   "AccentColorText": "rgb(255, 255, 255)",
+   "ActiveCaption": "rgb(255, 255, 255)",
+   "Menu": "rgb(255, 255, 255)",
+   "Window": "rgb(255, 255, 255)",
+   "Scrollbar": "rgb(255, 255, 255)"
+  },
+  "mediaQueries": {
+   "prefers-color-scheme": [
+    "light"
+   ],
+   "forced-colors": [
+    "none"
+   ],
+   "pointer": [
+    "fine"
+   ],
+   "any-pointer": [
+    "fine"
+   ],
+   "hover": [
+    "hover"
+   ],
+   "any-hover": [
+    "hover"
+   ],
+   "color-gamut": [
+    "srgb"
+   ],
+   "dynamic-range": [
+    "standard"
+   ],
+   "prefers-reduced-motion": [
+    "no-preference"
+   ],
+   "prefers-contrast": [
+    "no-preference"
+   ],
+   "inverted-colors": [],
+   "prefers-reduced-transparency": [
+    "no-preference"
+   ],
+   "display-mode": [
+    "browser"
+   ],
+   "scripting": [
+    "enabled"
+   ],
+   "update": [
+    "fast"
+   ],
+   "video-dynamic-range": [],
+   "prefers-reduced-data": [],
+   "monochrome": false,
+   "color": [
+    8
+   ]
+  },
+  "audio": {
+   "sampleRate": 44100,
+   "baseLatency": 0.01,
+   "outputLatency": 0,
+   "state": "suspended",
+   "maxChannelCount": 2,
+   "channelCount": 2,
+   "sinkId": "",
+   "stateAfterResume": "suspended",
+   "outputLatencyAfterResume": 0
+  },
+  "devices": [],
+  "voices": {
+   "count": 0,
+   "local": 0,
+   "default": null,
+   "voices": []
+  },
+  "media": {
+   "canPlayType": {
+    "video/mp4; codecs=\"avc1.42E01E\"": "probably",
+    "video/mp4; codecs=\"avc1.640028\"": "probably",
+    "video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"": "probably",
+    "video/mp4; codecs=\"hvc1.1.6.L93.B0\"": "",
+    "video/mp4; codecs=\"hev1.1.6.L93.B0\"": "",
+    "video/mp4; codecs=\"vp09.00.10.08\"": "probably",
+    "video/mp4; codecs=\"av01.0.05M.08\"": "probably",
+    "video/mp4; codecs=\"dvh1.05.06\"": "",
+    "video/webm; codecs=\"vp8\"": "probably",
+    "video/webm; codecs=\"vp9\"": "probably",
+    "video/webm; codecs=\"vp09.00.10.08\"": "probably",
+    "video/webm; codecs=\"av01.0.05M.08\"": "probably",
+    "video/webm; codecs=\"vp8, vorbis\"": "probably",
+    "video/ogg; codecs=\"theora\"": "",
+    "video/x-matroska; codecs=\"avc1.42E01E\"": "probably",
+    "video/mp2t; codecs=\"avc1.42E01E,mp4a.40.2\"": "",
+    "application/vnd.apple.mpegurl": "maybe",
+    "application/x-mpegURL": "maybe",
+    "audio/mp4; codecs=\"mp4a.40.2\"": "probably",
+    "audio/mp4; codecs=\"ec-3\"": "",
+    "audio/mp4; codecs=\"ac-3\"": "",
+    "audio/mp4; codecs=\"flac\"": "probably",
+    "audio/mp4; codecs=\"opus\"": "probably",
+    "audio/mpeg": "probably",
+    "audio/aac": "probably",
+    "audio/ogg; codecs=\"opus\"": "probably",
+    "audio/ogg; codecs=\"vorbis\"": "probably",
+    "audio/ogg; codecs=\"flac\"": "probably",
+    "audio/webm; codecs=\"opus\"": "probably",
+    "audio/flac": "probably",
+    "audio/wav; codecs=\"1\"": "probably",
+    "audio/x-m4a": "maybe",
+    "video/quicktime": "",
+    "video/3gpp": "maybe"
+   },
+   "mse": {
+    "video/mp4; codecs=\"avc1.42E01E\"": true,
+    "video/mp4; codecs=\"avc1.640028\"": true,
+    "video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"": true,
+    "video/mp4; codecs=\"hvc1.1.6.L93.B0\"": false,
+    "video/mp4; codecs=\"hev1.1.6.L93.B0\"": false,
+    "video/mp4; codecs=\"vp09.00.10.08\"": true,
+    "video/mp4; codecs=\"av01.0.05M.08\"": true,
+    "video/mp4; codecs=\"dvh1.05.06\"": false,
+    "video/webm; codecs=\"vp8\"": true,
+    "video/webm; codecs=\"vp9\"": true,
+    "video/webm; codecs=\"vp09.00.10.08\"": true,
+    "video/webm; codecs=\"av01.0.05M.08\"": true,
+    "video/webm; codecs=\"vp8, vorbis\"": true,
+    "video/ogg; codecs=\"theora\"": false,
+    "video/x-matroska; codecs=\"avc1.42E01E\"": false,
+    "video/mp2t; codecs=\"avc1.42E01E,mp4a.40.2\"": true,
+    "application/vnd.apple.mpegurl": false,
+    "application/x-mpegURL": false,
+    "audio/mp4; codecs=\"mp4a.40.2\"": true,
+    "audio/mp4; codecs=\"ec-3\"": false,
+    "audio/mp4; codecs=\"ac-3\"": false,
+    "audio/mp4; codecs=\"flac\"": true,
+    "audio/mp4; codecs=\"opus\"": true,
+    "audio/mpeg": true,
+    "audio/aac": true,
+    "audio/ogg; codecs=\"opus\"": false,
+    "audio/ogg; codecs=\"vorbis\"": false,
+    "audio/ogg; codecs=\"flac\"": false,
+    "audio/webm; codecs=\"opus\"": true,
+    "audio/flac": false,
+    "audio/wav; codecs=\"1\"": false,
+    "audio/x-m4a": false,
+    "video/quicktime": false,
+    "video/3gpp": false
+   },
+   "recorder": {
+    "video/webm;codecs=vp8": true,
+    "video/webm;codecs=vp9": true,
+    "video/webm;codecs=av1": true,
+    "video/webm;codecs=h264": true,
+    "video/webm;codecs=avc1": true,
+    "video/mp4;codecs=avc1": true,
+    "video/mp4;codecs=avc3": true,
+    "video/mp4;codecs=hvc1": false,
+    "video/mp4;codecs=vp9": true,
+    "video/mp4;codecs=av01": true,
+    "video/x-matroska;codecs=avc1": true,
+    "audio/webm;codecs=opus": true,
+    "audio/mp4;codecs=mp4a.40.2": false,
+    "audio/mp4;codecs=opus": true,
+    "audio/ogg;codecs=opus": false,
+    "audio/wav": false
+   },
+   "decodingInfo": {
+    "file:h264": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    },
+    "file:hevc": {
+     "supported": false,
+     "smooth": false,
+     "powerEfficient": false
+    },
+    "file:vp9": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    },
+    "file:av1": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    },
+    "file:vp8": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    },
+    "media-source:h264": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    },
+    "media-source:hevc": {
+     "supported": false,
+     "smooth": false,
+     "powerEfficient": false
+    },
+    "media-source:vp9": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    },
+    "media-source:av1": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    },
+    "media-source:vp8": {
+     "supported": true,
+     "smooth": true,
+     "powerEfficient": false
+    }
+   },
+   "encodingInfo": {
+    "h264": {
+     "error": "TypeError"
+    },
+    "vp8": {
+     "error": "TypeError"
+    },
+    "vp9": {
+     "error": "TypeError"
+    },
+    "av1": {
+     "error": "TypeError"
+    }
+   }
+  },
+  "webgpu": {
+   "present": true,
+   "adapter": null,
+   "preferredCanvasFormat": "rgba8unorm"
+  },
+  "keyboard": {
+   "present": true,
+   "size": 48,
+   "KeyQ": "q",
+   "KeyA": "a",
+   "KeyZ": "z",
+   "Semicolon": ";",
+   "Backquote": "`"
+  },
+  "webgl": {
+   "webgl": null,
+   "webgl2": null
+  },
+  "collectedAt": "2026-11-03T13:03:39.112Z",
+  "wheelTarget": {
+   "x": 483,
+   "y": 612
+  }
+ },
+ "wheel": {
+  "events": [
+   {
+    "t": 1128,
+    "deltaX": 0,
+    "deltaY": 120,
+    "deltaMode": 0,
+    "wheelDelta": -120,
+    "wheelDeltaY": -120,
+    "wheelDeltaX": 0,
+    "ctrlKey": false,
+    "isTrusted": true
+   },
+   {
+    "t": 1478,
+    "deltaX": 0,
+    "deltaY": 120,
+    "deltaMode": 0,
+    "wheelDelta": -120,
+    "wheelDeltaY": -120,
+    "wheelDeltaX": 0,
+    "ctrlKey": false,
+    "isTrusted": true
+   },
+   {
+    "t": 1828,
+    "deltaX": 0,
+    "deltaY": 120,
+    "deltaMode": 0,
+    "wheelDelta": -120,
+    "wheelDeltaY": -120,
+    "wheelDeltaX": 0,
+    "ctrlKey": false,
+    "isTrusted": true
+   },
+   {
+    "t": 2178,
+    "deltaX": 0,
+    "deltaY": 120,
+    "deltaMode": 0,
+    "wheelDelta": -120,
+    "wheelDeltaY": -120,
+    "wheelDeltaX": 0,
+    "ctrlKey": false,
+    "isTrusted": true
+   },
+   {
+    "t": 2528,
+    "deltaX": 0,
+    "deltaY": -120,
+    "deltaMode": 0,
+    "wheelDelta": 120,
+    "wheelDeltaY": 120,
+    "wheelDeltaX": 0,
+    "ctrlKey": false,
+    "isTrusted": true
+   },
+   {
+    "t": 2878,
+    "deltaX": 0,
+    "deltaY": -120,
+    "deltaMode": 0,
+    "wheelDelta": 120,
+    "wheelDeltaY": 120,
+    "wheelDeltaX": 0,
+    "ctrlKey": false,
+    "isTrusted": true
+   }
+  ],
+  "scrollY": 240
+ }
+}

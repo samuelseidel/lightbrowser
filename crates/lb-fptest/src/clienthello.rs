@@ -139,8 +139,10 @@ fn u16_list(b: &[u8], what: &'static str) -> Result<Vec<u16>, ParseError> {
     if !b.len().is_multiple_of(2) {
         return Err(ParseError::Invalid(what));
     }
-    Ok(b.chunks_exact(2)
-        .map(|c| u16::from_be_bytes([c[0], c[1]]))
+    Ok(b.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_be_bytes(*c))
         .collect())
 }
 

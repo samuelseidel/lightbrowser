@@ -6,3 +6,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
+bitflags = "2"
+cssparser = "0.38"
+html5ever = "0.40.1"
+precomputed-hash = "0.1.1"
+selectors = "0.42.0"

@@ -1,0 +1,24 @@
+<!doctype html><html><head><!--LOG-->
+<style id=s1>#t { color: rgb(1, 1, 1) } #t { font-size: 20px }</style>
+<link rel=stylesheet href=a.css title=main>
+<style media=print>#t { color: red }</style>
+<link rel=stylesheet href=slow-b.css media="screen, print">
+<script>
+addEventListener('load', function(){
+  var a=[];
+  for (var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];
+    a.push([i, s.constructor.name, s.ownerNode.tagName, s.href&&s.href.replace(location.origin,''), s.type, s.title, s.media.mediaText, s.media.length, s.disabled, s.cssRules.length, s.parentStyleSheet, s.ownerRule].join('|'));}
+  log(a.join('\n'));
+  log('item '+(document.styleSheets.item(1)===document.styleSheets[1])+' '+(document.styleSheets[9]===undefined)+' '+document.styleSheets.item(9)+' '+(document.styleSheets===document.styleSheets)+' '+Object.prototype.toString.call(document.styleSheets));
+  log('same '+(document.querySelector('link').sheet===document.styleSheets[1])+' '+(document.getElementById('s1').sheet===document.styleSheets[0]));
+  var r=document.styleSheets[0].cssRules[0];
+  log('rule '+r.constructor.name+' '+r.type+' '+r.selectorText+' | '+r.cssText+' | '+r.style.color+' '+(r.parentStyleSheet===document.styleSheets[0]));
+  document.querySelector('link').disabled=true;
+  log('disabled '+C()+' '+document.styleSheets[1].disabled+' '+S());
+  document.getElementById('s1').remove();
+  log('removed '+S()+' '+C());
+});
+</script>
+</head><body><div id=t></div>
+<script>log('script '+C()+' '+getComputedStyle(document.getElementById('t')).fontSize+' sheets='+S())</script>
+</body></html>

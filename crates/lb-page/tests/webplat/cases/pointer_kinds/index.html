@@ -1,0 +1,31 @@
+<!doctype html><!--LOG--><body style="margin:0"><input id=in style="width:200px;height:30px;margin:0;padding:0;border:0;display:block"><button id=btn style="display:block;width:100px;height:20px">b</button><div id=box style="width:400px;height:300px;background:#ccc"></div><script>
+// Which trusted events carry sourceCapabilities (and which class they are).
+// (auxclick and contextmenu: see pointer_click; selectstart is not made here.)
+var last = null;
+function sc(e) {
+  var s = e.sourceCapabilities;
+  if (s === null) return 'null';
+  if (s === undefined) return 'undefined';
+  return 'fires=' + s.firesTouchEvents + (last === s ? '' : '*');
+}
+var types = ['mouseover', 'mouseenter', 'mouseout', 'mouseleave', 'mousemove', 'mousedown', 'mouseup', 'click', 'dblclick', 'wheel',
+  'pointerover', 'pointerenter', 'pointerdown', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture',
+  'keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'focus', 'focusin', 'blur', 'focusout', 'select', 'scroll', 'dragstart'];
+types.forEach(function (type) {
+  document.addEventListener(type, function (e) {
+    log(e.type + ' ' + e.constructor.name + ' trusted=' + e.isTrusted + ' sc=' + sc(e) + (e.detail ? ' detail=' + e.detail : ''));
+    if (e.sourceCapabilities) last = e.sourceCapabilities;
+  }, true);
+});
+window.addEventListener('focus', function (e) { log('window focus ' + e.constructor.name + ' sc=' + sc(e)); });
+function reset() { L.length = 0; last = null; }
+function after() {
+  log('--- script');
+  var i = document.getElementById('in');
+  i.click();
+  i.focus();
+  i.dispatchEvent(new MouseEvent('mousedown'));
+  document.getElementById('box').dispatchEvent(new WheelEvent('wheel'));
+  end();
+}
+</script>

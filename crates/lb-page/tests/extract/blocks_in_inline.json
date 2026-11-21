@@ -1,0 +1,43 @@
+{
+  "url": "http://{HOST}/blocks_in_inline.html",
+  "final_url": "http://{HOST}/blocks_in_inline.html",
+  "status": 200,
+  "title": "Link blocks",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 1,
+      "text": "Link blocks"
+    },
+    {
+      "level": 2,
+      "text": "Section head"
+    }
+  ],
+  "links": [
+    {
+      "url": "http://{HOST}/card",
+      "text": "Card title Card description",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/img",
+      "text": "",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/empty",
+      "text": "",
+      "rel": ""
+    },
+    {
+      "url": "http://{HOST}/space",
+      "text": "",
+      "rel": ""
+    }
+  ],
+  "text": "Link blocks\nCard title\nCard description\nCustom element paragraph\nSpan\nwith a div\ninside\nSection head\nArticle text\nTerm\nDefinition\nSummary\nDetail text\nCaption text",
+  "markdown": "# Link blocks\n\n[Card title Card *description*](http://{HOST}/card)\n\n[![](http://{HOST}/i.png)](http://{HOST}/img)\n\nCustom element paragraph\n\nSpan\n\nwith a div\n\ninside\n\n## Section head\n\nArticle text\n\nTerm\n\nDefinition\n\nSummary\n\n![Figure](http://{HOST}/f.png)\n\nCaption text\n"
+}

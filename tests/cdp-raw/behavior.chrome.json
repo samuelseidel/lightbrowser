@@ -1,0 +1,1560 @@
+{
+ "histcap": {
+  "len": 50,
+  "entries": 50,
+  "cur": 49
+ },
+ "histcap_nav": {
+  "len": 50,
+  "entries": 50,
+  "cur": 49,
+  "first": "http://127.0.0.1:A/p1?n=5"
+ },
+ "same_hash": [
+  3,
+  3,
+  4,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "back_events": {
+  "e1": [
+   "frameStartedNavigating:historyDifferentDocument",
+   "frameStartedLoading",
+   "frameNavigated",
+   "domContentEventFired",
+   "loadEventFired",
+   "frameStoppedLoading"
+  ],
+  "log1": "[\"pageshow:\"]",
+  "url1": "http://127.0.0.1:A/p2",
+  "e2": [
+   "frameStartedNavigating:historyDifferentDocument",
+   "frameStartedLoading",
+   "frameNavigated",
+   "domContentEventFired",
+   "loadEventFired",
+   "frameStoppedLoading"
+  ],
+  "url2": "http://127.0.0.1:A/p3"
+ },
+ "double_back": {
+  "a": "http://127.0.0.1:A/p2",
+  "b": "http://127.0.0.1:A/p1"
+ },
+ "go_odd": {
+  "history.go(-5)": [
+   1,
+   "http://127.0.0.1:A/p2"
+  ],
+  "history.go(100000)": [
+   1,
+   "http://127.0.0.1:A/p2"
+  ],
+  "history.go('abc')": [
+   1,
+   "http://127.0.0.1:A/p2"
+  ],
+  "history.go(NaN)": [
+   1,
+   "http://127.0.0.1:A/p2"
+  ],
+  "history.go(1e10)": [
+   1,
+   "http://127.0.0.1:A/p2"
+  ],
+  "history.go(-1.9)": [
+   1,
+   "http://127.0.0.1:A/p1"
+  ],
+  "history.go()": [
+   1,
+   "http://127.0.0.1:A/p1"
+  ],
+  "history.go(null)": [
+   1,
+   "http://127.0.0.1:A/p1"
+  ],
+  "history.go(-1)": [
+   "ERR:{\"code\":-32000,\"message\":\"Inspected target navigated or closed\"}",
+   "about:blank"
+  ]
+ },
+ "nth_errors": {
+  "missing": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "str": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "neg": {
+   "ok": false,
+   "code": -32602,
+   "msg": "No entry with passed id"
+  },
+  "big": {
+   "ok": false,
+   "code": -32602,
+   "msg": "No entry with passed id"
+  },
+  "float": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "cur": {
+   "ok": true,
+   "keys": []
+  },
+  "curEv": [],
+  "curHist": 3,
+  "reset": {
+   "ok": true,
+   "keys": []
+  },
+  "resetLen": [
+   1,
+   1
+  ],
+  "resetExtra": {
+   "ok": true,
+   "keys": []
+  },
+  "afterReset": {
+   "idx": 0
+  },
+  "back_after_reset": 1
+ },
+ "ref_default": {
+  "none": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "same": {
+   "h": {
+    "referer": "http://127.0.0.1:A/p1?q=1",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:A/p1?q=1"
+  },
+  "cross": {
+   "h": {
+    "referer": "http://127.0.0.1:B/",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/"
+  },
+  "cred": {
+   "h": {
+    "referer": "http://127.0.0.1:B/",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/"
+  },
+  "cross_noref": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "cross_origin": {
+   "h": {
+    "referer": "http://127.0.0.1:B/",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/"
+  },
+  "cross_soc": {
+   "h": {
+    "referer": "http://127.0.0.1:B/",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/"
+  },
+  "cross_unsafe": {
+   "h": {
+    "referer": "http://127.0.0.1:B/p1/deep?q=1",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/p1/deep?q=1"
+  },
+  "cross_sameorigin": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "same_sameorigin": {
+   "h": {
+    "referer": "http://127.0.0.1:A/p1/deep?q=1",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:A/p1/deep?q=1"
+  },
+  "cross_oowco": {
+   "h": {
+    "referer": "http://127.0.0.1:B/",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/"
+  },
+  "cross_nrwd": {
+   "h": {
+    "referer": "http://127.0.0.1:B/p1/deep?q=1",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/p1/deep?q=1"
+  },
+  "cross_sdc": {
+   "h": {
+    "referer": "http://127.0.0.1:B/",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/"
+  },
+  "empty_ref": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "empty_ref_pol": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "pol_only": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "badref": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "file_ref": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "data_ref": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "about_ref": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "https_ref": {
+   "h": {
+    "referer": "https://example.invalid/x?y",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "https://example.invalid/x?y"
+  },
+  "https_ref_default": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "policy_case": {
+   "h": null,
+   "ref": ""
+  },
+  "badpol": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid referrerPolicy"
+  },
+  "badpol2": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid referrerPolicy"
+  },
+  "badpol3": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "badtrans": {
+   "ok": true,
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "badtrans2": {
+   "ok": true,
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  }
+ },
+ "ref_redirect": {
+  "r301": {
+   "h": {
+    "referer": "http://127.0.0.1:B/p/deep?q",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/p/deep?q",
+   "url": "http://127.0.0.1:A/hdr?r=1"
+  },
+  "rx": {
+   "h": {
+    "referer": null,
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": ""
+  },
+  "rp": {
+   "h": {
+    "referer": "http://127.0.0.1:A/p/deep?q",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:A/p/deep?q"
+  },
+  "img": {
+   "referer": "http://127.0.0.1:A/img",
+   "sfs": "same-origin",
+   "sfm": "no-cors",
+   "sfd": "image",
+   "sfu": null,
+   "n": 1
+  },
+  "fetch": {
+   "referer": "http://127.0.0.1:A/img",
+   "sfs": "same-origin",
+   "sfm": "cors",
+   "sfd": "empty",
+   "sfu": null,
+   "n": 1
+  },
+  "script_nav": {
+   "referer": "http://127.0.0.1:A/img",
+   "sfs": "same-origin",
+   "sfm": "navigate",
+   "sfd": "document",
+   "sfu": null,
+   "n": 1
+  }
+ },
+ "ref_history": {
+  "back": {
+   "h": {
+    "referer": "http://127.0.0.1:B/orig",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/orig",
+   "loc": "http://127.0.0.1:A/hdr?one"
+  },
+  "perf": "back_forward",
+  "reload": {
+   "h": {
+    "referer": "http://127.0.0.1:B/orig",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:B/orig",
+   "perf": "reload"
+  },
+  "nth": {
+   "h": null,
+   "perf": "back_forward"
+  }
+ },
+ "script_disabled": {
+  "set": {
+   "ok": true,
+   "keys": []
+  },
+  "bad": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "bad2": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "evalWhile": 2,
+  "after_nav": "{\"ns\":true,\"nsKids\":1}",
+  "dynsrc": 1,
+  "jsurl": 1,
+  "fnCall": "object",
+  "evalFn": 5,
+  "promise": 4,
+  "iframe": 1,
+  "enable": {
+   "ok": true,
+   "keys": []
+  },
+  "after_enable": "{\"inl\":1,\"ext\":1,\"mod\":1,\"ns\":false}"
+ },
+ "script_disabled_event": {
+  "q": "[\"mt\",\"raf\"]"
+ },
+ "blocked": {
+  "setBad": {
+   "ok": true,
+   "keys": []
+  },
+  "setStr": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "setNum": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "setPat": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Pattern \"*\" failed to parse as a URLPattern."
+  },
+  "setPatBad": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "json": "TypeError:Failed to fetch",
+  "jsonq": "TypeError:Failed to fetch",
+  "hdr": 200,
+  "jsonCase": 200,
+  "q1": 200,
+  "q2": "TypeError:Failed to fetch",
+  "exact": "TypeError:Failed to fetch",
+  "exactq": "TypeError:Failed to fetch",
+  "fragj": "TypeError:Failed to fetch",
+  "nav": {
+   "ok": true,
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "navEv": [
+   "Network.requestWillBeSent",
+   "Page.frameNavigated"
+  ],
+  "navUrl": "http://127.0.0.1:A/hdr",
+  "f2": "TypeError:Failed to fetch",
+  "fEv": [
+   "Network.requestWillBeSent",
+   "Network.loadingFailed"
+  ],
+  "xhr": "error",
+  "img": "error",
+  "unblocked": 200
+ },
+ "offline": {
+  "onl0": true,
+  "bad": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "bad2": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "bad3": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "ok": {
+   "ok": true,
+   "keys": []
+  },
+  "onl1": false,
+  "log": "[\"pageshow:\",\"offline:\"]",
+  "fetch": "TypeError:Failed to fetch",
+  "nav": {
+   "ok": true,
+   "keys": [
+    "errorText",
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "navErr": "net::ERR_INTERNET_DISCONNECTED",
+  "navEv": [
+   "Network.loadingFailed:net::ERR_INTERNET_DISCONNECTED",
+   "Page.frameNavigated"
+  ],
+  "ws": "error",
+  "ok2": {
+   "ok": true,
+   "keys": []
+  },
+  "onl2": true,
+  "log2": "EXC:ReferenceError: __log is not defined\n    at <anonymous>:1:16",
+  "fetch2": "TypeError:Failed to fetch",
+  "over": {
+   "ok": true,
+   "keys": []
+  },
+  "fetch3": "TypeError:Failed to fetch",
+  "onl3": false
+ },
+ "offline_scope": {
+  "other": 200,
+  "same": "TypeError",
+  "afterDisable": 200,
+  "online": true,
+  "log": "[\"pageshow:\",\"offline:\",\"online:\"]"
+ },
+ "frame_owner": {
+  "main": {
+   "ok": false,
+   "code": -32000,
+   "msg": "Frame with the given id does not belong to the target."
+  },
+  "noparam": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "bogus": {
+   "ok": false,
+   "code": -32000,
+   "msg": "Frame with the given id was not found."
+  },
+  "numeric": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "childNoDoc": {
+   "ok": true,
+   "keys": [
+    "backendNodeId"
+   ]
+  },
+  "childDoc": {
+   "ok": true,
+   "keys": [
+    "backendNodeId",
+    "nodeId"
+   ]
+  },
+  "desc": {
+   "name": "IFRAME"
+  },
+  "removed": {
+   "ok": false,
+   "code": -32000,
+   "msg": "Frame with the given id was not found."
+  }
+ },
+ "heap": {
+  "r": {
+   "ok": true,
+   "keys": [
+    "backingStorageSize",
+    "embedderHeapUsedSize",
+    "totalSize",
+    "usedSize"
+   ]
+  },
+  "grows": true,
+  "typesOk": [
+   "number",
+   "number",
+   "number",
+   "number"
+  ],
+  "totalGeUsed": true,
+  "withParams": {
+   "ok": true,
+   "keys": [
+    "backingStorageSize",
+    "embedderHeapUsedSize",
+    "totalSize",
+    "usedSize"
+   ]
+  },
+  "noEnable": {
+   "ok": true,
+   "keys": [
+    "backingStorageSize",
+    "embedderHeapUsedSize",
+    "totalSize",
+    "usedSize"
+   ]
+  }
+ },
+ "audits": {
+  "en": {
+   "ok": true,
+   "keys": []
+  },
+  "en2": {
+   "ok": true,
+   "keys": []
+  },
+  "dis": {
+   "ok": true,
+   "keys": []
+  },
+  "dis2": {
+   "ok": true,
+   "keys": []
+  },
+  "enParam": {
+   "ok": true,
+   "keys": []
+  },
+  "enc": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "enc2": {
+   "ok": false,
+   "code": -32000,
+   "msg": "No resource with given identifier found"
+  },
+  "contrast": {
+   "ok": false,
+   "code": -32601,
+   "msg": "'Audits.checkContrast' wasn't found"
+  },
+  "forms": {
+   "ok": true,
+   "keys": [
+    "formIssues"
+   ]
+  },
+  "bypass": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "bypass2": {
+   "ok": true,
+   "keys": []
+  },
+  "bypass3": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "csp": {
+   "ok": true,
+   "keys": []
+  },
+  "cspbad": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "issues": [
+   "DeprecationIssue"
+  ]
+ },
+ "redirect_events": {
+  "seq": [
+   "requestWillBeSent:r1",
+   "requestWillBeSent(redir 301):hdr?r=1",
+   "responseReceived:hdr?r=1",
+   "loadingFinished:"
+  ],
+  "sameId": 1,
+  "fields": [
+   {
+    "type": "Document",
+    "hasRR": false,
+    "rrKeys": null,
+    "hasInit": true,
+    "redirectHasExtraInfo": false,
+    "loader": true
+   },
+   {
+    "type": "Document",
+    "hasRR": true,
+    "rrKeys": "alternateProtocolUsage,charset,connectionId,connectionReused,encodedDataLength,fromDiskCache,fromPrefetchCache,fromServiceWorker,headers,mimeType,protocol,remoteIPAddress,remotePort,responseTime,securityState,status,statusText,timing,url",
+    "hasInit": true,
+    "redirectHasExtraInfo": false,
+    "loader": true
+   }
+  ],
+  "fetchHops": [
+   "POST r307 - Fetch x",
+   "POST hdr?r=307 307 Fetch x"
+  ],
+  "xhops": [
+   "http://127.0.0.1:A/rx -",
+   "http://127.0.0.1:B/hdr?x=1 302"
+  ]
+ },
+ "reload_after_push": {
+  "re": {
+   "ok": true,
+   "keys": []
+  },
+  "url": "http://127.0.0.1:A/p2",
+  "state": "{\"a\":1}",
+  "hist": [
+   "about:blank:typed:",
+   "p1:typed:/p1",
+   "p2:reload:/p2"
+  ],
+  "cur": 2,
+  "ev": [
+   "frameStartedNavigating:reload",
+   "frameStartedLoading",
+   "frameNavigated",
+   "domContentEventFired",
+   "loadEventFired",
+   "frameStoppedLoading"
+  ],
+  "re2": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "re3": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  }
+ },
+ "frame_history": {
+  "len0": 2,
+  "len1": 3,
+  "entries": [
+   "about:blank",
+   "iframe",
+   "iframe"
+  ],
+  "cur": 2,
+  "after_back": "http://127.0.0.1:A/iframe",
+  "iframe_src": "http://127.0.0.1:A/p1"
+ },
+ "popstate_state": {
+  "state": "null",
+  "s1": [
+   "{\"s\":2}",
+   "http://127.0.0.1:A/p1#h"
+  ],
+  "s2": [
+   "{\"s\":0}",
+   "http://127.0.0.1:A/p1"
+  ],
+  "s3": [
+   "null",
+   "http://127.0.0.1:A/p1#k"
+  ],
+  "log": "[\"pageshow:\",\"popstate:null\",\"hashchange:p1#h>p1#k\",\"popstate:{\\\"s\\\":2}\",\"hashchange:p1#k>p1#h\",\"popstate:{\\\"s\\\":0}\",\"hashchange:p1#h>p1\",\"popstate:null\",\"hashchange:p1>p1#k\"]",
+  "back_to_push": [
+   "null",
+   "http://127.0.0.1:A/p1#k",
+   6
+  ],
+  "back2": [
+   "{\"s\":2}",
+   "http://127.0.0.1:A/p1#h",
+   6
+  ]
+ },
+ "nav_misc": {
+  "same": {
+   "ok": true,
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "frag": {
+   "keys": [
+    "frameId",
+    "isDownload"
+   ]
+  },
+  "frag2": {
+   "keys": [
+    "frameId",
+    "isDownload"
+   ]
+  },
+  "frag3": {
+   "keys": [
+    "frameId",
+    "isDownload"
+   ]
+  },
+  "len": 5,
+  "blankfrag": {
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "u": "about:blank#x",
+  "badframe": {
+   "ok": false,
+   "code": -32000,
+   "msg": "No frame with given id found"
+  },
+  "empty": {
+   "ok": false,
+   "code": -32000,
+   "msg": "Cannot navigate to invalid URL"
+  },
+  "jsurl": {
+   "ok": true,
+   "keys": [
+    "errorText",
+    "frameId"
+   ]
+  },
+  "link": {
+   "ok": true,
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "trans": "typed,typed,typed,typed,typed,typed,link"
+ },
+ "fail_nav": {
+  "result": {
+   "ok": true,
+   "keys": [
+    "errorText",
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "errorText": "net::ERR_CONNECTION_REFUSED",
+  "events": [
+   "frameStartedNavigating:differentDocument",
+   "frameStartedLoading",
+   "requestWillBeSent",
+   "loadingFailed:net::ERR_CONNECTION_REFUSED",
+   "frameNavigated:chrome-error://chromewebdata/:http://127.0.0.1:D/x:32",
+   "domContentEventFired",
+   "loadEventFired",
+   "frameStoppedLoading"
+  ],
+  "tree": {
+   "url": "chrome-error://chromewebdata/",
+   "unreachableUrl": "http://127.0.0.1:D/x",
+   "mimeType": "text/html",
+   "secure": "InsecureScheme",
+   "origin": "://"
+  },
+  "loc": "chrome-error://chromewebdata/",
+  "origin": "null",
+  "title": "",
+  "html": false,
+  "ready": "complete",
+  "hist": [
+   [
+    "about:blank",
+    "about:blank",
+    "",
+    "typed"
+   ],
+   [
+    "p1",
+    "p1",
+    "/p1",
+    "typed"
+   ],
+   [
+    "p2",
+    "p2",
+    "/p2",
+    "typed"
+   ],
+   [
+    "x",
+    "",
+    "",
+    "typed"
+   ]
+  ],
+  "cur": 3,
+  "len": 4,
+  "reload": {
+   "ok": true,
+   "keys": []
+  },
+  "reloadEv": [
+   "loadingFailed",
+   "frameNavigated"
+  ],
+  "afterReload": [
+   4,
+   "chrome-error://chromewebdata/"
+  ],
+  "back": "http://127.0.0.1:A/p2",
+  "forward": "chrome-error://chromewebdata/",
+  "after": [
+   "http://127.0.0.1:A/p3",
+   5
+  ]
+ },
+ "fail_script_nav": {
+  "loc": "chrome-error://chromewebdata/",
+  "events": [
+   "loadingFailed",
+   "frameNavigated"
+  ],
+  "hist": [
+   [
+    "about:blank",
+    "typed"
+   ],
+   [
+    "p1",
+    "typed"
+   ],
+   [
+    "y",
+    "link"
+   ]
+  ],
+  "back": "http://127.0.0.1:A/p1"
+ },
+ "url_patterns": {
+  "abs_port": {
+   "set": {
+    "ok": true,
+    "keys": []
+   },
+   "json": "TypeError",
+   "hdr": 200
+  },
+  "abs_wild": {
+   "set": {
+    "ok": true,
+    "keys": []
+   },
+   "json": "TypeError",
+   "hdr": 200
+  },
+  "star_scheme": {
+   "set": {
+    "ok": true,
+    "keys": []
+   },
+   "json": "TypeError",
+   "hdr": 200
+  },
+  "relative": {
+   "set": {
+    "ok": false,
+    "code": -32602,
+    "msg": "Pattern \"/json\" failed to parse as a URLPattern."
+   },
+   "json": null,
+   "hdr": null
+  },
+  "no_block": {
+   "set": {
+    "ok": true,
+    "keys": []
+   },
+   "json": 200,
+   "hdr": 200
+  },
+  "pathname_only": {
+   "set": {
+    "ok": true,
+    "keys": []
+   },
+   "json": 200,
+   "hdr": 200
+  },
+  "missing_block": {
+   "set": {
+    "ok": false,
+    "code": -32602,
+    "msg": "Invalid parameters"
+   },
+   "json": null,
+   "hdr": null
+  },
+  "bad": {
+   "set": {
+    "ok": false,
+    "code": -32602,
+    "msg": "Pattern \"http://[\" failed to parse as a URLPattern."
+   },
+   "json": null,
+   "hdr": null
+  },
+  "empty": {
+   "set": {
+    "ok": true,
+    "keys": []
+   },
+   "json": 200,
+   "hdr": 200
+  }
+ },
+ "redirect_fail": {
+  "nav": [
+   {
+    "ok": true,
+    "keys": [
+     "errorText",
+     "frameId",
+     "isDownload",
+     "loaderId"
+    ]
+   },
+   "net::ERR_CONNECTION_REFUSED"
+  ],
+  "events": [
+   "requestWillBeSent:http://127.0.0.1:A/rdead",
+   "requestWillBeSent(redir 302):http://127.0.0.1:D/x",
+   "loadingFailed:net::ERR_CONNECTION_REFUSED",
+   "frameNavigated"
+  ],
+  "loc": "chrome-error://chromewebdata/",
+  "fetch": "TypeError",
+  "fetchEvents": [
+   "requestWillBeSent:http://127.0.0.1:A/rdead",
+   "requestWillBeSent(redir 302):http://127.0.0.1:D/x",
+   "loadingFailed:net::ERR_CONNECTION_REFUSED"
+  ],
+  "blockedHop": "TypeError",
+  "blockedHopEvents": [
+   "requestWillBeSent:http://127.0.0.1:A/r1",
+   "requestWillBeSent:http://127.0.0.1:A/hdr?r=1",
+   "loadingFailed::inspector",
+   "loadingFailed:net::ERR_ABORTED:undefined"
+  ]
+ },
+ "fail_history": {
+  "fail": "net::ERR_CONNECTION_REFUSED",
+  "hist": [
+   "about:blank",
+   "p1",
+   "p2",
+   "dead"
+  ],
+  "cur": 3,
+  "len": 4,
+  "loc": "chrome-error://chromewebdata/"
+ },
+ "beforeunload_back": {
+  "back": 1,
+  "loc": "http://127.0.0.1:A/p1",
+  "dlg": 0
+ },
+ "link_ref": {
+  "click": {
+   "h": {
+    "referer": "http://127.0.0.1:A/link?deep=1",
+    "sfs": "same-origin",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": null,
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:A/link?deep=1"
+  },
+  "reload": {
+   "h": {
+    "referer": "http://127.0.0.1:A/link?deep=1",
+    "sfs": "same-origin",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:A/link?deep=1"
+  },
+  "locreload": {
+   "h": {
+    "referer": "http://127.0.0.1:A/hdr?l",
+    "sfs": "same-origin",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": null,
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:A/hdr?l"
+  },
+  "back": {
+   "h": {
+    "referer": "http://127.0.0.1:A/hdr?l",
+    "sfs": "same-origin",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": "http://127.0.0.1:A/hdr?l"
+  }
+ },
+ "frag_events": {
+  "hashset": [
+   [
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "[\"pageshow:\",\"popstate:null\",\"hashchange:p1>p1#k\"]"
+  ],
+  "cdp": [
+   [
+    "frameStartedNavigating:sameDocument",
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "[\"popstate:null\",\"hashchange:p1#k>p1#z\"]"
+  ],
+  "push": [
+   [
+    "frameStartedLoading",
+    "navigatedWithinDocument:historyApi",
+    "frameStoppedLoading"
+   ],
+   "[]"
+  ],
+  "repl": [
+   [
+    "frameStartedLoading",
+    "navigatedWithinDocument:historyApi",
+    "frameStoppedLoading"
+   ],
+   "[]"
+  ]
+ },
+ "frag_same": {
+  "hash_a": {
+   "ev": [
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "log": "[\"popstate:null\",\"hashchange:p1>p1#a\"]",
+   "len": 3,
+   "cur": 2,
+   "trans": "typed,typed,link"
+  },
+  "hash_a_again": {
+   "ev": [],
+   "log": "[]",
+   "len": 3,
+   "cur": 2,
+   "trans": "typed,typed,link"
+  },
+  "href_same": {
+   "ev": [
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "log": "[\"popstate:null\"]",
+   "len": 3,
+   "cur": 2,
+   "trans": "typed,typed,link"
+  },
+  "assign_other": {
+   "ev": [
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "log": "[\"popstate:null\",\"hashchange:p1#a>p1#b\"]",
+   "len": 4,
+   "cur": 3,
+   "trans": "typed,typed,link,link"
+  },
+  "replace_c": {
+   "ev": [
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "log": "[\"popstate:null\",\"hashchange:p1#b>p1#c\"]",
+   "len": 4,
+   "cur": 3,
+   "trans": "typed,typed,link,link"
+  },
+  "cdp_same": {
+   "ev": [
+    "frameStartedNavigating:sameDocument",
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "log": "[\"popstate:null\"]",
+   "len": 5,
+   "cur": 4,
+   "trans": "typed,typed,link,link,typed"
+  },
+  "cdp_d": {
+   "ev": [
+    "frameStartedNavigating:sameDocument",
+    "frameStartedLoading",
+    "navigatedWithinDocument:fragment",
+    "frameStoppedLoading"
+   ],
+   "log": "[\"popstate:null\",\"hashchange:p1#c>p1#d\"]",
+   "len": 6,
+   "cur": 5,
+   "trans": "typed,typed,link,link,typed,link"
+  },
+  "cdp_nofrag": {
+   "ev": [
+    "frameStartedNavigating:differentDocument",
+    "frameStartedLoading",
+    "frameNavigated",
+    "domContentEventFired",
+    "loadEventFired",
+    "frameStoppedLoading"
+   ],
+   "log": "[\"pageshow:\"]",
+   "len": 7,
+   "cur": 6,
+   "trans": "typed,typed,link,link,typed,link,typed"
+  }
+ },
+ "double_back2": {
+  "a": "http://127.0.0.1:A/p2",
+  "fwd": "http://127.0.0.1:A/p3",
+  "b": "http://127.0.0.1:A/p2",
+  "cur": 2,
+  "c": "http://127.0.0.1:A/p1"
+ },
+ "blocked_raw": [
+  {
+   "m": "Network.requestWillBeSent",
+   "p": [
+    "documentURL",
+    "frameId",
+    "hasUserGesture",
+    "initiator",
+    "loaderId",
+    "redirectHasExtraInfo",
+    "request",
+    "requestId",
+    "timestamp",
+    "type",
+    "wallTime"
+   ]
+  },
+  {
+   "m": "Network.loadingFailed",
+   "p": {
+    "requestId": "string",
+    "timestamp": "number",
+    "type": "Fetch",
+    "errorText": "",
+    "canceled": false,
+    "blockedReason": "inspector"
+   }
+  }
+ ],
+ "redirect_raw": [
+  {
+   "top": "documentURL|frameId|hasUserGesture|initiator|loaderId|redirectHasExtraInfo|request|requestId|timestamp|type|wallTime"
+  },
+  {
+   "rr": {
+    "url": "string",
+    "status": "number",
+    "statusText": "string",
+    "headers": "Date|location",
+    "mimeType": "string",
+    "charset": "string",
+    "connectionReused": "boolean",
+    "connectionId": "number",
+    "remoteIPAddress": "string",
+    "remotePort": "number",
+    "fromDiskCache": "boolean",
+    "fromServiceWorker": "boolean",
+    "fromPrefetchCache": "boolean",
+    "encodedDataLength": "number",
+    "timing": "connectEnd|connectStart|dnsEnd|dnsStart|proxyEnd|proxyStart|pushEnd|pushStart|receiveHeadersEnd|receiveHeadersStart|requestTime|sendEnd|sendStart|sslEnd|sslStart|workerFetchStart|workerReady|workerRespondWithSettled|workerStart",
+    "responseTime": "number",
+    "protocol": "string",
+    "alternateProtocolUsage": "string",
+    "securityState": "string"
+   },
+   "top": "documentURL|frameId|hasUserGesture|initiator|loaderId|redirectHasExtraInfo|redirectResponse|request|requestId|timestamp|type|wallTime"
+  }
+ ],
+ "long_ref": {
+  "long": {
+   "h": {
+    "referer": "http://127.0.0.1:B/",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": 23
+  },
+  "mid": {
+   "h": {
+    "referer": "http://127.0.0.1:B/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sfs": "none",
+    "sfm": "navigate",
+    "sfd": "document",
+    "sfu": "?1",
+    "n": 1
+   },
+   "ref": 4023
+  }
+ },
+ "frame_nav": {
+  "r": {
+   "ok": true,
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "h": {
+   "referer": "http://127.0.0.1:B/x",
+   "sfs": "none",
+   "sfm": "navigate",
+   "sfd": "iframe",
+   "sfu": "?1",
+   "n": 1
+  },
+  "len": 3,
+  "ev": [
+   "frameStartedNavigating:differentDocument",
+   "frameStartedLoading",
+   "frameNavigated",
+   "frameStoppedLoading"
+  ],
+  "entries": [
+   "about:blank",
+   "iframe",
+   "iframe"
+  ]
+ },
+ "reload_older": {
+  "cur": 2,
+  "n": 4,
+  "loc": "http://127.0.0.1:A/p2",
+  "cur2": 2,
+  "fw": "http://127.0.0.1:A/p3"
+ },
+ "glob_q": {
+  "q": 200,
+  "q2": 200,
+  "q3": 404,
+  "many": 200,
+  "port": "TypeError",
+  "bare": "TypeError",
+  "path": "TypeError"
+ },
+ "stress": {
+  "huge": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "huge2": {
+   "ok": false,
+   "code": -32602,
+   "msg": "Invalid parameters"
+  },
+  "neg0": {
+   "ok": false,
+   "code": -32602,
+   "msg": "No entry with passed id"
+  },
+  "a": {
+   "ok": true,
+   "keys": []
+  },
+  "b": {
+   "ok": true,
+   "keys": []
+  },
+  "loc": "http://127.0.0.1:A/p2",
+  "close": {
+   "ok": true,
+   "keys": [
+    "success"
+   ]
+  },
+  "alive": 2,
+  "unload_back": [
+   "http://127.0.0.1:A/p2",
+   2
+  ],
+  "go0": [
+   "http://127.0.0.1:A/p1",
+   2
+  ],
+  "perf_ms_lt": true,
+  "disabled_nav": {
+   "ok": true,
+   "keys": [
+    "frameId",
+    "isDownload",
+    "loaderId"
+   ]
+  },
+  "disabled_eval": "/script-page",
+  "disabled_worker": "ERR:{\"code\":\"timeout\"}",
+  "disabled_timer": "ERR:{\"code\":\"timeout\"}"
+ }
+}

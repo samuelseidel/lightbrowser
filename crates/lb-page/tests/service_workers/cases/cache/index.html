@@ -1,0 +1,43 @@
+<!doctype html><title>cache</title><!--LOG-->
+<script>
+function err(name) { return function (e) { log(name + ' rejected ' + e.name + ': ' + e.message) } }
+function desc(r) { return r ? (r.status + ' ' + r.type + ' url=' + rel(r.url) + ' ct=' + r.headers.get('content-type')) : String(r) }
+var c;
+log(typeof caches + ' ' + Object.prototype.toString.call(caches) + ' ' + (caches === self.caches));
+caches.keys().then(function (k) { log('keys ' + JSON.stringify(k)); return caches.has('a') })
+.then(function (h) { log('has a ' + h); return caches.open('a') })
+.then(function (x) { c = x; log('open ' + Object.prototype.toString.call(c)); return caches.open('b') })
+.then(function (b) { log('open again same ' + (b === c)); return caches.keys() })
+.then(function (k) { log('keys ' + JSON.stringify(k)); return c.put('x.txt', new Response('X', { headers: { 'Content-Type': 'text/plain' } })) })
+.then(function (v) { log('put ' + v); return c.match('x.txt') })
+.then(function (r) { log('match ' + desc(r)); return r.text() })
+.then(function (t) { log('text ' + t); return c.match('x.txt?q=1') })
+.then(function (r) { log('match search ' + desc(r)); return c.match('x.txt?q=1', { ignoreSearch: true }) })
+.then(function (r) { log('match ignoreSearch ' + desc(r)); return c.add('data.txt') })
+.then(function (v) { log('add ' + v); return c.match(new Request('data.txt')) })
+.then(function (r) { log('match add ' + desc(r)); return r.text() })
+.then(function (t) { log('text ' + t.trim()); return c.addAll(['data.txt?a', 'data.txt?b']) })
+.then(function (v) { log('addAll ' + v); return c.keys() })
+.then(function (k) { log('cache keys ' + k.map(function (r) { return Object.prototype.toString.call(r) + ' ' + rel(r.url) + ' ' + r.method }).join(', ')); return c.matchAll('data.txt', { ignoreSearch: true }) })
+.then(function (rs) { log('matchAll ' + rs.length); return c.add('missing.txt').then(null, err('add 404')) })
+.then(function () { return c.put(new Request('x.txt', { method: 'POST', body: 'b' }), new Response('y')).then(null, err('put POST')) })
+.then(function () { return c.match('x.txt', { ignoreMethod: false }) })
+.then(function (r) { log('match after bad put ' + desc(r)); return caches.match('data.txt') })
+.then(function (r) { log('caches.match ' + desc(r)); return caches.match('data.txt', { cacheName: 'b' }) })
+.then(function (r) { log('caches.match b ' + desc(r)); return c.delete('x.txt') })
+.then(function (d) { log('delete ' + d); return c.delete('x.txt') })
+.then(function (d) { log('delete again ' + d); return caches.delete('b') })
+.then(function (d) { log('caches.delete b ' + d); return caches.keys() })
+.then(function (k) { log('keys ' + JSON.stringify(k)); return caches.open('b') })
+.then(function (b) { return b.keys() })
+.then(function (k) { log('b reopened ' + k.length); var r = new Response('used'); return r.text().then(function () { return c.put('used', r) }) })
+.then(null, err('put used'))
+.then(function () { return c.match('nope') })
+.then(function (r) { log('match nope ' + r); return c.put('vary', new Response('v', { headers: { Vary: '*' } })).then(null, err('put vary')) })
+.then(function () { return caches.open('').then(function () { log('open empty ok') }) })
+.then(function () { try { caches.open() } catch (e) { log('sync ' + e) } return caches.open().then(function (x) { log('open() ' + Object.prototype.toString.call(x)) }, err('open()')) })
+.then(function () { return caches.keys() })
+.then(function (k) { log('keys ' + JSON.stringify(k)) })
+.then(function () { return c.match('data.txt?a').then(function (r) { return r.clone().text().then(function (t) { log('clone ' + t.trim() + ' used=' + r.bodyUsed) }) }) })
+.then(end, function (e) { log('chain failed ' + e); end() });
+</script>

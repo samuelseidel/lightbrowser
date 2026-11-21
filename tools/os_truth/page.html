@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>os truth</title>
+<style>
+  body { margin: 8px; font: 16px sans-serif; }
+  #tall { height: 3000px; }
+  #status { font: 14px monospace; }
+</style>
+</head>
+<body>
+<p id="status">collecting</p>
+<div id="tall"></div>
+<script>
+// OS ground-truth capture page (tools/os_truth). Served on loopback by
+// capture.js. Collects the OS-dependent surface of the browser that loads
+// it and POSTs it to /result. Then records wheel events (driven by XTest
+// in headed runs) and POSTs them to /wheel. Loads nothing from other hosts.
+'use strict';
+(async () => {
+  const out = { errors: {} };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const step = async (name, fn) => {
+    try { out[name] = await Promise.race([fn(), sleep(4000).then(() => ({ timeout: true }))]); }
+    catch (e) { out[name] = null; out.errors[name] = `${e && e.name}: ${e && e.message}`; }
+  };
+
+  await step('identity', async () => {
+    const d = navigator.userAgentData;
+    const hints = ['architecture', 'bitness', 'brands', 'formFactors', 'fullVersionList', 'mobile', 'model',
+      'platform', 'platformVersion', 'uaFullVersion', 'wow64'];
+    return {
+      userAgent: navigator.userAgent, appVersion: navigator.appVersion, platform: navigator.platform,
+      vendor: navigator.vendor, oscpu: navigator.oscpu,
+      uaData: d ? { brands: d.brands, mobile: d.mobile, platform: d.platform } : null,
+      uaHigh: d ? await d.getHighEntropyValues(hints) : null,
+    };
+  });
+
+  await step('navigator', () => ({
+    hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: navigator.deviceMemory,
+    maxTouchPoints: navigator.maxTouchPoints, pdfViewerEnabled: navigator.pdfViewerEnabled,
+    languages: navigator.languages, plugins: navigator.plugins.length, webdriver: navigator.webdriver,
+    doNotTrack: navigator.doNotTrack, cookieEnabled: navigator.cookieEnabled,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: Intl.DateTimeFormat().resolvedOptions().locale,
+  }));
+
+  // APIs Chrome gates per OS. `in` checks only: nothing is called.
+  await step('osApis', () => {
+    const nav = ['share', 'canShare', 'bluetooth', 'hid', 'serial', 'usb', 'xr', 'contacts', 'windowControlsOverlay',
+      'virtualKeyboard', 'ink', 'presentation', 'keyboard', 'getInstalledRelatedApps', 'setAppBadge', 'wakeLock',
+      'devicePosture', 'login', 'gpu', 'scheduling', 'managed', 'credentials', 'mediaSession', 'storageBuckets'];
+    const win = ['Bluetooth', 'BluetoothDevice', 'BluetoothUUID', 'BluetoothRemoteGATTServer', 'HID', 'Serial', 'USB',
+      'documentPictureInPicture', 'showOpenFilePicker', 'queryLocalFonts', 'getScreenDetails', 'EyeDropper',
+      'NavigatorManagedData', 'VirtualKeyboard', 'WindowControlsOverlay', 'Ink', 'Presentation', 'XRSystem',
+      'ContactsManager', 'GPU', 'MediaStreamTrackProcessor', 'IdleDetector', 'NDEFReader', 'LaunchQueue'];
+    const o = { navigator: {}, window: {} };
+    for (const k of nav) o.navigator[k] = k in navigator;
+    for (const k of win) o.window[k] = k in window;
+    return o;
+  });
+
+  await step('screen', () => ({
+    width: screen.width, height: screen.height, availWidth: screen.availWidth, availHeight: screen.availHeight,
+    availLeft: screen.availLeft, availTop: screen.availTop, colorDepth: screen.colorDepth, pixelDepth: screen.pixelDepth,
+    isExtended: screen.isExtended, orientation: screen.orientation && screen.orientation.type,
+    dpr: devicePixelRatio, outerWidth, outerHeight, innerWidth, innerHeight, screenX, screenY,
+    screenLeft: window.screenLeft, screenTop: window.screenTop,
+    visualViewport: window.visualViewport ? { width: visualViewport.width, height: visualViewport.height, scale: visualViewport.scale } : null,
+  }));
+
+  await step('scrollbar', () => {
+    const d = document.createElement('div');
+    d.style.cssText = 'width:100px;height:100px;overflow:scroll;position:absolute;top:0;left:-500px';
+    document.body.appendChild(d);
+    const ta = document.createElement('textarea');
+    document.body.appendChild(ta);
+    const r = {
+      div: d.offsetWidth - d.clientWidth, divH: d.offsetHeight - d.clientHeight,
+      root: innerWidth - document.documentElement.clientWidth,
+      rootH: innerHeight - document.documentElement.clientHeight,
+      textarea: { offsetWidth: ta.offsetWidth, clientWidth: ta.clientWidth, offsetHeight: ta.offsetHeight },
+      scrollbarGutter: getComputedStyle(document.documentElement).scrollbarGutter,
+    };
+    d.remove(); ta.remove();
+    return r;
+  });
+
+  const CANDIDATES = ['Arial', 'Helvetica', 'Liberation Sans', 'Arimo', 'DejaVu Sans', 'Inter', 'Noto Sans', 'Ubuntu',
+    'Ubuntu Sans', 'Cantarell', 'Adwaita Sans', 'FreeSans', 'Nimbus Sans', 'Nimbus Sans L', 'Times New Roman', 'Times',
+    'Liberation Serif', 'Tinos', 'DejaVu Serif', 'Noto Serif', 'FreeSerif', 'Nimbus Roman', 'Courier New', 'Courier',
+    'Liberation Mono', 'Cousine', 'DejaVu Sans Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'Ubuntu Sans Mono',
+    'Adwaita Mono', 'FreeMono', 'Nimbus Mono PS', 'JetBrains Mono', 'Monospace', 'Calibri', 'Carlito', 'Cambria',
+    'Caladea', 'Segoe UI', 'Segoe UI Variable Text', 'Consolas', 'Tahoma', 'Verdana', 'Georgia', 'Trebuchet MS',
+    'Helvetica Neue', 'Menlo', 'Monaco', 'SF Pro', '.AppleSystemUIFont', 'Comic Sans MS', 'Impact', 'Papyrus',
+    'Apple Chancery', 'Bitstream Charter', 'Courier 10 Pitch', 'Noto Color Emoji', 'Segoe UI Emoji',
+    'Apple Color Emoji', 'Unifont', 'WenQuanYi Zen Hei', 'IPAGothic', 'Loma', 'OpenSymbol'];
+  const GENERICS = ['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'emoji', 'math',
+    'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'fangsong', '-webkit-standard', 'initial'];
+
+  await step('fonts', () => {
+    const span = document.createElement('span');
+    span.style.cssText = 'position:absolute;left:-9999px;top:0;font-size:72px;white-space:nowrap';
+    span.textContent = 'mmmmmmmmmmlli1WQ@#é';
+    document.body.appendChild(span);
+    const dims = (ff) => { span.style.fontFamily = ff; return [span.offsetWidth, span.offsetHeight]; };
+    const bases = ['monospace', 'serif', 'sans-serif'];
+    const base = Object.fromEntries(bases.map((b) => [b, dims(b)]));
+    const generic = Object.fromEntries(GENERICS.map((g) => [g, dims(g)]));
+    const detected = {};
+    const against = {};
+    for (const f of CANDIDATES) {
+      const per = {};
+      for (const b of bases) {
+        const d = dims(`"${f}", ${b}`);
+        per[b] = d[0] !== base[b][0] || d[1] !== base[b][1];
+        if (per[b] && !detected[f]) detected[f] = d;
+      }
+      against[f] = per;
+    }
+    // Which detected candidates have exactly the generic's size.
+    const same = (a, b) => a[0] === b[0] && a[1] === b[1];
+    const resolves = {};
+    for (const g of GENERICS) resolves[g] = Object.keys(detected).filter((f) => same(detected[f], generic[g]));
+    // Generic sizes that match a base (the candidate list may miss the font).
+    const baseOf = {};
+    for (const g of GENERICS) baseOf[g] = bases.filter((b) => same(base[b], generic[g]));
+    span.remove();
+    return { base, generic, detected: Object.keys(detected), detectedDims: detected, against, resolves, baseOf };
+  });
+
+  await step('fontKeywords', () => {
+    const o = {};
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    for (const k of ['caption', 'icon', 'menu', 'message-box', 'small-caption', 'status-bar', '-webkit-small-control']) {
+      el.style.font = '';
+      el.style.font = k;
+      const cs = getComputedStyle(el);
+      o[k] = { set: el.style.font, family: cs.fontFamily, size: cs.fontSize, weight: cs.fontWeight, style: cs.fontStyle };
+    }
+    const inp = document.createElement('input');
+    const btn = document.createElement('button');
+    document.body.append(inp, btn);
+    o.input = { family: getComputedStyle(inp).fontFamily, size: getComputedStyle(inp).fontSize };
+    o.button = { family: getComputedStyle(btn).fontFamily, size: getComputedStyle(btn).fontSize };
+    o.body = { family: getComputedStyle(document.body).fontFamily };
+    el.remove(); inp.remove(); btn.remove();
+    return o;
+  });
+
+  await step('emoji', () => {
+    const c = document.createElement('canvas');
+    c.width = 160; c.height = 120;
+    const x = c.getContext('2d');
+    x.fillStyle = '#000';
+    x.textBaseline = 'top';
+    x.font = '100px sans-serif';
+    const w100 = x.measureText('\u{1F600}').width;
+    const wA = x.measureText('A').width;
+    x.fillText('\u{1F600}', 4, 4);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let colored = 0, inked = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      inked++;
+      const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+      if (mx - mn > 40) colored++;
+    }
+    const span = document.createElement('span');
+    span.style.cssText = 'position:absolute;left:-9999px;font-size:100px;white-space:nowrap';
+    span.textContent = '\u{1F600}';
+    document.body.appendChild(span);
+    const dom = [span.offsetWidth, span.offsetHeight];
+    span.style.fontFamily = 'emoji';
+    const domEmojiFamily = [span.offsetWidth, span.offsetHeight];
+    span.remove();
+    return { measureText100: w100, measureTextA100: wA, inked, colored, dom, domEmojiFamily };
+  });
+
+  await step('systemColors', () => {
+    const names = ['Canvas', 'CanvasText', 'LinkText', 'VisitedText', 'ActiveText', 'ButtonFace', 'ButtonText',
+      'ButtonBorder', 'Field', 'FieldText', 'Highlight', 'HighlightText', 'SelectedItem', 'SelectedItemText',
+      'Mark', 'MarkText', 'GrayText', 'AccentColor', 'AccentColorText', 'ActiveCaption', 'Menu', 'Window', 'Scrollbar'];
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const o = {};
+    for (const n of names) { el.style.color = ''; el.style.color = n; o[n] = el.style.color ? getComputedStyle(el).color : null; }
+    el.remove();
+    return o;
+  });
+
+  await step('mediaQueries', () => {
+    const q = {
+      'prefers-color-scheme': ['light', 'dark'], 'forced-colors': ['none', 'active'], pointer: ['none', 'coarse', 'fine'],
+      'any-pointer': ['none', 'coarse', 'fine'], hover: ['none', 'hover'], 'any-hover': ['none', 'hover'],
+      'color-gamut': ['srgb', 'p3', 'rec2020'], 'dynamic-range': ['standard', 'high'],
+      'prefers-reduced-motion': ['no-preference', 'reduce'], 'prefers-contrast': ['no-preference', 'more', 'less', 'custom'],
+      'inverted-colors': ['none', 'inverted'], 'prefers-reduced-transparency': ['no-preference', 'reduce'],
+      'display-mode': ['browser', 'standalone', 'fullscreen'], scripting: ['enabled', 'none'], update: ['fast', 'slow'],
+      'video-dynamic-range': ['standard', 'high'], 'prefers-reduced-data': ['no-preference', 'reduce'],
+    };
+    const o = {};
+    for (const [f, vals] of Object.entries(q)) o[f] = vals.filter((v) => matchMedia(`(${f}: ${v})`).matches);
+    o.monochrome = matchMedia('(monochrome)').matches;
+    o.color = [8, 10, 16].filter((b) => matchMedia(`(color: ${b})`).matches);
+    return o;
+  });
+
+  await step('audio', async () => {
+    const ac = new AudioContext();
+    const o = { sampleRate: ac.sampleRate, baseLatency: ac.baseLatency, outputLatency: ac.outputLatency,
+      state: ac.state, maxChannelCount: ac.destination.maxChannelCount, channelCount: ac.destination.channelCount,
+      sinkId: typeof ac.sinkId === 'string' ? ac.sinkId : typeof ac.sinkId };
+    try { await Promise.race([ac.resume(), sleep(500)]); } catch (_) { /* gesture needed */ }
+    o.stateAfterResume = ac.state;
+    o.outputLatencyAfterResume = ac.outputLatency;
+    await ac.close();
+    return o;
+  });
+
+  await step('devices', async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
+    const d = await navigator.mediaDevices.enumerateDevices();
+    return d.map((x) => ({ kind: x.kind, deviceId: x.deviceId ? (x.deviceId.length > 20 ? 'hash' : x.deviceId) : '', label: x.label }));
+  });
+
+  await step('voices', async () => {
+    let v = speechSynthesis.getVoices();
+    if (!v.length) {
+      await Promise.race([new Promise((r) => speechSynthesis.addEventListener('voiceschanged', r, { once: true })), sleep(2000)]);
+      v = speechSynthesis.getVoices();
+    }
+    return { count: v.length, local: v.filter((x) => x.localService).length,
+      default: (v.find((x) => x.default) || {}).name || null,
+      voices: v.map((x) => [x.name, x.lang, x.localService ? 1 : 0]) };
+  });
+
+  const TYPES = [
+    'video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.640028"', 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+    'video/mp4; codecs="hvc1.1.6.L93.B0"', 'video/mp4; codecs="hev1.1.6.L93.B0"', 'video/mp4; codecs="vp09.00.10.08"',
+    'video/mp4; codecs="av01.0.05M.08"', 'video/mp4; codecs="dvh1.05.06"', 'video/webm; codecs="vp8"',
+    'video/webm; codecs="vp9"', 'video/webm; codecs="vp09.00.10.08"', 'video/webm; codecs="av01.0.05M.08"',
+    'video/webm; codecs="vp8, vorbis"', 'video/ogg; codecs="theora"', 'video/x-matroska; codecs="avc1.42E01E"',
+    'video/mp2t; codecs="avc1.42E01E,mp4a.40.2"', 'application/vnd.apple.mpegurl', 'application/x-mpegURL',
+    'audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="ec-3"', 'audio/mp4; codecs="ac-3"', 'audio/mp4; codecs="flac"',
+    'audio/mp4; codecs="opus"', 'audio/mpeg', 'audio/aac', 'audio/ogg; codecs="opus"', 'audio/ogg; codecs="vorbis"',
+    'audio/ogg; codecs="flac"', 'audio/webm; codecs="opus"', 'audio/flac', 'audio/wav; codecs="1"', 'audio/x-m4a',
+    'video/quicktime', 'video/3gpp'];
+  const REC = ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm;codecs=av1', 'video/webm;codecs=h264',
+    'video/webm;codecs=avc1', 'video/mp4;codecs=avc1', 'video/mp4;codecs=avc3', 'video/mp4;codecs=hvc1',
+    'video/mp4;codecs=vp9', 'video/mp4;codecs=av01', 'video/x-matroska;codecs=avc1', 'audio/webm;codecs=opus',
+    'audio/mp4;codecs=mp4a.40.2', 'audio/mp4;codecs=opus', 'audio/ogg;codecs=opus', 'audio/wav'];
+
+  await step('media', async () => {
+    const v = document.createElement('video');
+    const a = document.createElement('audio');
+    const o = { canPlayType: {}, mse: {}, recorder: {}, decodingInfo: {}, encodingInfo: {} };
+    for (const t of TYPES) o.canPlayType[t] = (t.startsWith('audio') ? a : v).canPlayType(t);
+    for (const t of TYPES) o.mse[t] = window.MediaSource ? MediaSource.isTypeSupported(t) : null;
+    for (const t of REC) o.recorder[t] = window.MediaRecorder ? MediaRecorder.isTypeSupported(t) : null;
+    const video = (contentType) => ({ contentType, width: 1920, height: 1080, bitrate: 5000000, framerate: 30 });
+    const cfgs = {
+      h264: video('video/mp4; codecs="avc1.640028"'), hevc: video('video/mp4; codecs="hvc1.1.6.L120.90"'),
+      vp9: video('video/webm; codecs="vp09.00.40.08"'), av1: video('video/mp4; codecs="av01.0.08M.08"'),
+      vp8: video('video/webm; codecs="vp8"'),
+    };
+    for (const type of ['file', 'media-source']) {
+      for (const [k, c] of Object.entries(cfgs)) {
+        try {
+          const r = await navigator.mediaCapabilities.decodingInfo({ type, video: c });
+          o.decodingInfo[`${type}:${k}`] = { supported: r.supported, smooth: r.smooth, powerEfficient: r.powerEfficient };
+        } catch (e) { o.decodingInfo[`${type}:${k}`] = { error: `${e.name}` }; }
+      }
+    }
+    for (const [k, c] of Object.entries({ h264: video('video/mp4; codecs="avc1.42E01E"'), vp8: video('video/webm; codecs="vp8"'),
+      vp9: video('video/webm; codecs="vp09.00.10.08"'), av1: video('video/mp4; codecs="av01.0.04M.08"') })) {
+      try {
+        const r = await navigator.mediaCapabilities.encodingInfo({ type: 'record', video: c });
+        o.encodingInfo[k] = { supported: r.supported, smooth: r.smooth, powerEfficient: r.powerEfficient };
+      } catch (e) { o.encodingInfo[k] = { error: `${e.name}` }; }
+    }
+    return o;
+  });
+
+  await step('webgpu', async () => {
+    if (!navigator.gpu) return { present: false };
+    const ad = await navigator.gpu.requestAdapter();
+    if (!ad) return { present: true, adapter: null, preferredCanvasFormat: navigator.gpu.getPreferredCanvasFormat() };
+    const i = ad.info || {};
+    return { present: true, preferredCanvasFormat: navigator.gpu.getPreferredCanvasFormat(),
+      adapter: { vendor: i.vendor, architecture: i.architecture, device: i.device, description: i.description,
+        isFallbackAdapter: i.isFallbackAdapter, features: [...ad.features].sort(),
+        maxTextureDimension2D: ad.limits.maxTextureDimension2D } };
+  });
+
+  await step('keyboard', async () => {
+    if (!navigator.keyboard) return { present: false };
+    const m = await navigator.keyboard.getLayoutMap();
+    return { present: true, size: m.size, KeyQ: m.get('KeyQ'), KeyA: m.get('KeyA'), KeyZ: m.get('KeyZ'),
+      Semicolon: m.get('Semicolon'), Backquote: m.get('Backquote') };
+  });
+
+  await step('webgl', () => {
+    const one = (kind) => {
+      const c = document.createElement('canvas');
+      const gl = c.getContext(kind);
+      if (!gl) return null;
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      const g = (p) => { const v = gl.getParameter(gl[p]); return v && v.length !== undefined && typeof v !== 'string' ? Array.from(v) : v; };
+      const r = {
+        vendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null,
+        renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
+        maskedVendor: g('VENDOR'), maskedRenderer: g('RENDERER'), version: g('VERSION'), glsl: g('SHADING_LANGUAGE_VERSION'),
+        MAX_TEXTURE_SIZE: g('MAX_TEXTURE_SIZE'), MAX_VIEWPORT_DIMS: g('MAX_VIEWPORT_DIMS'),
+        MAX_RENDERBUFFER_SIZE: g('MAX_RENDERBUFFER_SIZE'), MAX_VERTEX_UNIFORM_VECTORS: g('MAX_VERTEX_UNIFORM_VECTORS'),
+        MAX_FRAGMENT_UNIFORM_VECTORS: g('MAX_FRAGMENT_UNIFORM_VECTORS'), MAX_VARYING_VECTORS: g('MAX_VARYING_VECTORS'),
+        ALIASED_LINE_WIDTH_RANGE: g('ALIASED_LINE_WIDTH_RANGE'), ALIASED_POINT_SIZE_RANGE: g('ALIASED_POINT_SIZE_RANGE'),
+        extensions: (gl.getSupportedExtensions() || []).length,
+      };
+      if (kind === 'webgl2') r.MAX_SAMPLES = g('MAX_SAMPLES');
+      return r;
+    };
+    return { webgl: one('webgl'), webgl2: one('webgl2') };
+  });
+
+  out.collectedAt = new Date().toISOString();
+  document.getElementById('status').textContent = 'posted';
+  // Where the viewport centre is on the screen, for the XTest wheel driver.
+  out.wheelTarget = {
+    x: Math.round(screenX + (outerWidth - innerWidth) / 2 + innerWidth / 2),
+    y: Math.round(screenY + (outerHeight - innerHeight) + innerHeight / 2),
+  };
+  const wheel = [];
+  addEventListener('wheel', (e) => {
+    wheel.push({ t: Math.round(e.timeStamp), deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode,
+      wheelDelta: e.wheelDelta, wheelDeltaY: e.wheelDeltaY, wheelDeltaX: e.wheelDeltaX, ctrlKey: e.ctrlKey,
+      isTrusted: e.isTrusted });
+  }, { passive: true });
+  await fetch('/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out) });
+  // Wheel phase: capture.js scrolls with XTest (headed only), then asks for the events.
+  const t0 = performance.now();
+  while (performance.now() - t0 < 15000) {
+    const r = await fetch('/wheel-done').then((x) => x.json()).catch(() => ({ done: false }));
+    if (r.done) break;
+    await sleep(200);
+  }
+  await fetch('/wheel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ events: wheel, scrollY: Math.round(scrollY) }) });
+  document.getElementById('status').textContent = 'done';
+})();
+</script>
+</body>
+</html>

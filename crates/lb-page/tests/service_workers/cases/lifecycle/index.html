@@ -1,0 +1,34 @@
+<!doctype html><title>lifecycle</title><!--LOG-->
+<script>
+var n = load(), sw = navigator.serviceWorker;
+log('load ' + n + ' controller ' + (sw.controller && rel(sw.controller.scriptURL) + ' ' + sw.controller.state));
+sw.oncontrollerchange = function () { log('controllerchange') };
+if (n === 0) {
+  log(typeof sw + ' ' + Object.prototype.toString.call(sw) + ' ' + (sw === navigator.serviceWorker));
+  sw.ready.then(function (r) { log('ready ' + rel(r.scope) + ' ' + (r.active && r.active.state)) });
+  var p = sw.register('sw.js');
+  log('register returned ' + Object.prototype.toString.call(p));
+  p.then(function (reg) {
+    log('registered ' + Object.prototype.toString.call(reg) + ' scope=' + rel(reg.scope) + ' installing=' + !!reg.installing + ' waiting=' + !!reg.waiting + ' active=' + !!reg.active + ' updateViaCache=' + reg.updateViaCache);
+    reg.onupdatefound = function () { log('updatefound (late)') };
+    var w = reg.installing;
+    log('installing ' + Object.prototype.toString.call(w) + ' ' + rel(w.scriptURL) + ' ' + w.state);
+    w.onstatechange = function (e) {
+      log('statechange ' + e.constructor.name + ' ' + w.state + ' installing=' + !!reg.installing + ' waiting=' + !!reg.waiting + ' active=' + !!reg.active + ' same=' + (reg.active === w || reg.waiting === w || reg.installing === w));
+      if (w.state === 'activated') swlog(w).then(again);
+    };
+  }, function (e) { log('register error ' + e) });
+} else {
+  var c = sw.controller;
+  sw.getRegistrations().then(function (rs) {
+    log('registrations ' + rs.length + ' ' + rel(rs[0].scope));
+    return sw.getRegistration();
+  }).then(function (r) {
+    log('getRegistration active===controller ' + (r.active === c) + ' ' + rel(r.active.scriptURL));
+    return sw.ready;
+  }).then(function (r) {
+    log('ready ' + r.active.state);
+    return swlog(c);
+  }).then(end);
+}
+</script>

@@ -1,0 +1,42 @@
+<!doctype html><title>errors</title><!--LOG-->
+<script>
+function desc(e) {
+  return e.constructor.name + ' ' + e.type + ' msg [' + e.message + '] file ' + String(e.filename).replace(/^.*\//, '') + ' ' + e.lineno + ':' + e.colno + ' error ' + e.error + ' cancelable ' + e.cancelable + ' bubbles ' + e.bubbles;
+}
+var steps = [
+  function () {
+    var w = new Worker('throws.js');
+    w.onmessage = function (e) { log('throws worker said ' + e.data); };
+    w.onerror = function (e) { log('A ' + desc(e)); next(); };
+  },
+  function () {
+    var w = new Worker('handled.js');
+    w.onmessage = function (e) { log('handled worker said ' + e.data); next(); };
+    w.onerror = function (e) { log('B unexpected ' + desc(e)); };
+  },
+  function () {
+    var w = new Worker('missing.js');
+    w.onerror = function (e) { log('C ' + e.constructor.name + ' ' + e.type + ' cancelable ' + e.cancelable + ' msg ' + e.message); next(); };
+  },
+  function () {
+    var w = new Worker('syntax.js');
+    w.onerror = function (e) { log('D ' + desc(e)); e.preventDefault(); next(); };
+  },
+  function () {
+    var w = new Worker('later.js');
+    w.onerror = function (e) { log('E ' + desc(e)); next(); };
+    w.postMessage('go');
+  },
+  function () {
+    try { new Worker('http://[bad'); } catch (e) { log('F ' + e.name + ': ' + e.message); }
+    try { new Worker('http://localhost:1/x.js'); } catch (e) { log('G ' + e.name + ': ' + e.message.replace(/:\d+'/, ":PORT'")); }
+    try { new Worker(); } catch (e) { log('H ' + e.name + ': ' + e.message); }
+    try { Worker('x.js'); } catch (e) { log('I ' + e.name + ': ' + e.message); }
+    try { new Worker('w.js', {type: 'bogus'}); } catch (e) { log('J ' + e.name + ': ' + e.message); }
+    next();
+  },
+];
+var i = 0;
+function next() { if (i < steps.length) steps[i++](); else end(); }
+next();
+</script>

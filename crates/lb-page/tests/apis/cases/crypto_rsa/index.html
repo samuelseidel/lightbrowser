@@ -1,0 +1,55 @@
+<!doctype html><!--LOG--><script src="../keys.js"></script><script>
+var S = crypto.subtle;
+function k(key) { var al = Object.assign({}, key.algorithm); if (al.publicExponent) al.publicExponent = hex(al.publicExponent); return [key.type, key.extractable, JSON.stringify(al), key.usages.join('/')].join(' '); }
+(async () => {
+  for (const h of ['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512']) {
+    var priv = await S.importKey('pkcs8', unhex(RSA_P8), { name: 'RSASSA-PKCS1-v1_5', hash: h }, true, ['sign']);
+    var pub = await S.importKey('spki', unhex(RSA_SPKI), { name: 'RSASSA-PKCS1-v1_5', hash: h }, true, ['verify']);
+    log(h + ' priv ' + k(priv) + ' ' + (priv.algorithm.publicExponent instanceof Uint8Array) + ' ' + (priv.algorithm === priv.algorithm));
+    log(h + ' pub ' + k(pub));
+    var sig = await S.sign('RSASSA-PKCS1-v1_5', priv, enc('msg'));
+    log(h + ' pkcs1 sig ' + hex(sig));
+    log(h + ' pkcs1 verify ' + await S.verify('RSASSA-PKCS1-v1_5', pub, sig, enc('msg')) + ' ' + await S.verify('RSASSA-PKCS1-v1_5', pub, sig, enc('msx')));
+    var pp = await S.importKey('pkcs8', unhex(RSA_P8), { name: 'RSA-PSS', hash: h }, true, ['sign']);
+    var pq = await S.importKey('spki', unhex(RSA_SPKI), { name: 'RSA-PSS', hash: h }, true, ['verify']);
+    log(h + ' pss0 ' + hex(await S.sign({ name: 'RSA-PSS', saltLength: 0 }, pp, enc('msg'))));
+    var ps = await S.sign({ name: 'RSA-PSS', saltLength: 20 }, pp, enc('msg'));
+    log(h + ' pss20 verify ' + await S.verify({ name: 'RSA-PSS', saltLength: 20 }, pq, ps, enc('msg')) + ' ' + await S.verify({ name: 'RSA-PSS', saltLength: 21 }, pq, ps, enc('msg')));
+    await a(h + ' pss salt too big', () => S.sign({ name: 'RSA-PSS', saltLength: 1000 }, pp, enc('msg')));
+    await a(h + ' pss no salt', () => S.sign({ name: 'RSA-PSS' }, pp, enc('msg')));
+    var oe = await S.importKey('spki', unhex(RSA_SPKI), { name: 'RSA-OAEP', hash: h }, true, ['encrypt', 'wrapKey']);
+    var od = await S.importKey('pkcs8', unhex(RSA_P8), { name: 'RSA-OAEP', hash: h }, true, ['decrypt', 'unwrapKey']);
+    await a(h + ' oaep', async () => { var ct = await S.encrypt({ name: 'RSA-OAEP' }, oe, enc('secret')); return ct.byteLength + ' ' + new TextDecoder().decode(await S.decrypt({ name: 'RSA-OAEP' }, od, ct)); });
+    await a(h + ' oaep label', async () => { var ctl = await S.encrypt({ name: 'RSA-OAEP', label: enc('L') }, oe, enc('s')); log(new TextDecoder().decode(await S.decrypt({ name: 'RSA-OAEP', label: enc('L') }, od, ctl))); return S.decrypt({ name: 'RSA-OAEP', label: enc('M') }, od, ctl); });
+    await a(h + ' oaep too long', () => S.encrypt({ name: 'RSA-OAEP' }, oe, new Uint8Array(200)));
+  }
+  var priv = await S.importKey('pkcs8', unhex(RSA_P8), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, ['sign']);
+  var pub = await S.importKey('spki', unhex(RSA_SPKI), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, ['verify']);
+  log('spki same ' + (hex(await S.exportKey('spki', pub)) == RSA_SPKI));
+  log('pkcs8 ' + hex(await S.exportKey('pkcs8', priv)));
+  var jp = await S.exportKey('jwk', priv);
+  log('jwk priv ' + JSON.stringify(jp));
+  log('jwk pub ' + JSON.stringify(await S.exportKey('jwk', pub)));
+  await a('raw export', () => S.exportKey('raw', pub));
+  await a('jwk import', async () => k(await S.importKey('jwk', jp, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, ['sign'])));
+  await a('jwk alg mismatch', () => S.importKey('jwk', jp, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-1' }, true, ['sign']));
+  await a('jwk pss export', async () => { var x = await S.importKey('jwk', Object.assign({}, jp, { alg: 'PS384' }), { name: 'RSA-PSS', hash: 'SHA-384' }, true, ['sign']); return JSON.stringify(await S.exportKey('jwk', x)).slice(0, 60); });
+  await a('oaep jwk', async () => { var x = await S.importKey('spki', unhex(RSA_SPKI), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt']); var j = await S.exportKey('jwk', x); return j.alg + ' ' + j.key_ops + ' ' + j.kty + ' ' + j.e; });
+  await a('pub sign usage', () => S.importKey('spki', unhex(RSA_SPKI), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, true, ['sign']));
+  await a('oaep sign usage', () => S.importKey('spki', unhex(RSA_SPKI), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['verify']));
+  await a('no hash', () => S.importKey('spki', unhex(RSA_SPKI), { name: 'RSA-PSS' }, true, ['verify']));
+  await a('ec as rsa', () => S.importKey('spki', unhex(P256_SPKI), { name: 'RSA-PSS', hash: 'SHA-256' }, true, ['verify']));
+  var g = await S.generateKey({ name: 'RSA-PSS', modulusLength: 1024, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+  log('gen ' + k(g.privateKey) + ' | ' + k(g.publicKey));
+  var gs = await S.sign({ name: 'RSA-PSS', saltLength: 32 }, g.privateKey, enc('x'));
+  log('gen verify ' + gs.byteLength + ' ' + await S.verify({ name: 'RSA-PSS', saltLength: 32 }, g.publicKey, gs, enc('x')));
+  await a('gen e 3', async () => k((await S.generateKey({ name: 'RSA-OAEP', modulusLength: 1024, publicExponent: new Uint8Array([3]), hash: 'SHA-1' }, false, ['decrypt'])).privateKey));
+  await a('gen e 5', () => S.generateKey({ name: 'RSA-OAEP', modulusLength: 1024, publicExponent: new Uint8Array([5]), hash: 'SHA-1' }, false, ['decrypt']));
+  await a('gen 1000', () => S.generateKey({ name: 'RSA-OAEP', modulusLength: 1000, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-1' }, false, ['decrypt']));
+  await a('gen 256', () => S.generateKey({ name: 'RSA-OAEP', modulusLength: 256, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-1' }, false, ['decrypt']));
+  await a('gen no exponent', () => S.generateKey({ name: 'RSA-OAEP', modulusLength: 1024, hash: 'SHA-1' }, false, ['decrypt']));
+  await a('gen exponent array', () => S.generateKey({ name: 'RSA-OAEP', modulusLength: 1024, publicExponent: [1, 0, 1], hash: 'SHA-1' }, false, ['decrypt']));
+  await a('wrap', async () => { var kk = await S.importKey('raw', new Uint8Array(16), 'AES-GCM', true, ['encrypt']); var oe = await S.importKey('spki', unhex(RSA_SPKI), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['wrapKey']); var od = await S.importKey('pkcs8', unhex(RSA_P8), { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['unwrapKey']); var w = await S.wrapKey('raw', kk, oe, 'RSA-OAEP'); var u = await S.unwrapKey('raw', w, od, 'RSA-OAEP', 'AES-GCM', true, ['decrypt']); return w.byteLength + ' ' + k(u) + ' ' + hex(await S.exportKey('raw', u)); });
+  end();
+})();
+</script>

@@ -1,0 +1,18 @@
+<!doctype html><title>errors</title><!--LOG-->
+<script>
+var sw = navigator.serviceWorker;
+function watch(name, reg) {
+  var w = reg.installing;
+  log(name + ' installing ' + (w && w.state));
+  return new Promise(function (res) {
+    w.onstatechange = function () {
+      log(name + ' ' + w.state + ' installing=' + !!reg.installing + ' waiting=' + !!reg.waiting + ' active=' + !!reg.active);
+      if (w.state === 'redundant' || w.state === 'activated') res();
+    };
+  });
+}
+sw.register('reject.js', { scope: 'r/' }).then(function (reg) { return watch('reject', reg) })
+.then(function () { return sw.register('throw-install.js', { scope: 't/' }) }).then(function (reg) { return watch('throw', reg) })
+.then(function () { return sw.getRegistrations() })
+.then(function (rs) { log('registrations ' + rs.map(function (r) { return rel(r.scope) + ':' + !!r.active }).sort().join(' ')); end() });
+</script>

@@ -1,0 +1,11 @@
+<!doctype html><title>navigation</title><!--LOG-->
+<!--SW-->
+<script>
+var n = load(), sw = navigator.serviceWorker;
+log('load ' + n + ' controller=' + !!sw.controller);
+if (n === 0) {
+  sw.register('sw.js').then(function () { return sw.ready }).then(function () { return caches.keys() }).then(function (k) { log('caches ' + JSON.stringify(k)); again() });
+} else {
+  swlog(sw.controller).then(n === 1 ? again : end);
+}
+</script>

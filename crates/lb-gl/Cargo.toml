@@ -1,0 +1,14 @@
+[package]
+name = "lb-gl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# Software WebGL (ADR 0030): GLSL ES 1.00 / 3.00 compiler, a lane-parallel
+# interpreter, the rasterizer, textures and framebuffers. Pure Rust, no
+# dependencies.
+[dependencies]
+
+[dev-dependencies]
+serde_json = "1"

@@ -1,0 +1,64 @@
+<!doctype html><html><head><title>buffer</title></head><body>
+<!--LOG-->
+<script>
+function mine(){return performance.getEntriesByType('resource').filter(function(e){return /\/r\.txt/.test(e.name)})}
+function idx(){return mine().map(function(e){return e.name.split('i=')[1]}).join(',')}
+async function many(tag,n){for(var i=0;i<n;i++)await drain(fetch('r.txt?size=1&i='+i+'&'+tag))}
+addEventListener('load',async function(){
+  await sleep(300);
+  performance.clearResourceTimings();
+  log('cleared '+performance.getEntriesByType('resource').length);
+  var full=0, ev=null;
+  performance.onresourcetimingbufferfull=function(e){full++;ev=e;if(full<=3)log('full #'+full+' len='+performance.getEntriesByType('resource').length)};
+  await many('a',255);
+  await sleep(100);
+  log('A len '+mine().length+' full '+full+' first '+mine()[0].name.split('i=')[1]+' last '+mine()[mine().length-1].name.split('i=')[1]);
+  log('event '+[ev.type,ev instanceof Event,ev.bubbles,ev.cancelable,ev.target===performance,Object.prototype.toString.call(ev)].join());
+  performance.clearResourceTimings();
+  log('B cleared '+mine().length);
+  // a handler that makes room keeps the entry that did not fit
+  performance.setResourceTimingBufferSize(2);
+  full=0;
+  performance.onresourcetimingbufferfull=function(){full++;log('B full len='+mine().length+' -> size 10');performance.setResourceTimingBufferSize(10)};
+  await many('b',5);
+  await sleep(50);
+  log('B len '+mine().length+' full '+full+' idx '+idx());
+  // a handler that clears the buffer keeps the entry that did not fit
+  performance.clearResourceTimings();
+  performance.setResourceTimingBufferSize(2);
+  full=0;
+  performance.onresourcetimingbufferfull=function(){full++;log('C full len='+mine().length+' -> clear');performance.clearResourceTimings()};
+  await many('c',5);
+  await sleep(50);
+  log('C len '+mine().length+' full '+full+' idx '+idx());
+  // a handler that does nothing drops the entry
+  performance.clearResourceTimings();
+  performance.setResourceTimingBufferSize(2);
+  full=0;
+  performance.onresourcetimingbufferfull=function(){full++};
+  await many('d',5);
+  await sleep(50);
+  log('D len '+mine().length+' full '+full+' idx '+idx());
+  // addEventListener works the same
+  performance.clearResourceTimings();
+  performance.onresourcetimingbufferfull=null;
+  var n=0;performance.addEventListener('resourcetimingbufferfull',function(){n++});
+  await many('e',4);
+  await sleep(50);
+  log('E len '+mine().length+' events '+n);
+  // size 0
+  performance.clearResourceTimings();
+  performance.setResourceTimingBufferSize(0);
+  n=0;
+  await many('f',2);
+  await sleep(50);
+  log('F len '+mine().length+' events '+n);
+  performance.setResourceTimingBufferSize(250);
+  t('size none',function(){return performance.setResourceTimingBufferSize()});
+  t('size neg',function(){return performance.setResourceTimingBufferSize(-1)});
+  t('size str',function(){return performance.setResourceTimingBufferSize('7')});
+  t('size ret',function(){return performance.setResourceTimingBufferSize(250)});
+  t('clear ret',function(){return performance.clearResourceTimings()});
+  end();
+});
+</script></body></html>

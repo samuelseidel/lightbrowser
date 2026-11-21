@@ -1,0 +1,6 @@
+<!doctype html><title>network</title><!--LOG-->
+<script>
+document.cookie = 'wk=1';
+var w = new Worker('w.js');
+w.onmessage = function (e) { e.data.forEach(log); end(); };
+</script>

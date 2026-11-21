@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+<meta charset="utf-8">
+<title>  Acme   Store &amp; Co  </title>
+<link rel="stylesheet" href="/static/site.css">
+<style>
+  body > .nav li:first-child a { color: red; }
+  /* </div> inside style stays raw */
+</style>
+<script>
+  window.__boot = { t: 1 < 2 && "</div>" };
+  // <!-- not a comment in script data
+</script>
+<script src="/static/vendor.js" defer></script>
+</head>
+<body class="home Page">
+<!-- header -->
+<div id="nav" class="nav">
+  <ul>
+    <li class="first"><a href="/">Home</a>
+    <li><a href="/shop" CLASS="shop">Shop</a>
+    <li><a>No href</a>
+  </ul>
+</div>
+<p>Intro <b>bold <i>both</b> italic</i> tail
+<div id="content">
+  <table id="outer" border=1>
+    <tr><td>cell 1<td>
+      <table id="inner"><tr><td>inner cell</td></tr></table>
+    <tr><td colspan="2">row 2</td>
+    stray text
+  </table>
+  <template id="tpl"><li class="item"><span>templated</span></li></template>
+  <form id="f" action="/buy">
+    <input type="checkbox" name="a" checked>
+    <input type="radio" name="b">
+    <input type="text" name="q" required placeholder="Search">
+    <input type="text" name="r" value="filled" readonly>
+    <fieldset disabled>
+      <legend><input name="in-legend"></legend>
+      <input name="in-fieldset">
+    </fieldset>
+    <select name="s"><option>one<option selected>two<optgroup disabled label="g"><option>three</optgroup></select>
+    <textarea name="t">
+hello</textarea>
+    <button type="submit" disabled>Buy</button>
+  </form>
+  <svg viewBox="0 0 10 10"><use xlink:href="#icon"/><foreignObject><p>html in svg</p></foreignObject></svg>
+  <p>Entities: &lt;tag&gt; &nbsp;&copy; &#x41;&#66;</p>
+  <p dup="1" dup="2" Data-X="Y">duplicate attrs</p>
+  <img src="/a.png" alt=""><br/><hr>
+  <script>document.write("<p id='w'>written</p>");</script>
+  <noscript><p>no js</p></noscript>
+  <div id="empty"></div><div id="ws"> </div><div id="comment-only"><!-- c --></div>
+</div>
+<script type="application/ld+json">{"@type": "Store"}</script>
+</body>
+</html>

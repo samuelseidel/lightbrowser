@@ -1,0 +1,305 @@
+{
+  "schema_version": "2.0",
+  "profile_id": "bad0f153-dead-4bad-b000-c0ffee153002",
+  "profile_name": "[ADVERSARIAL] Chrome persona with no client hints",
+  "created_at": "2026-11-02T00:00:00Z",
+  "tags": [
+    "adversarial",
+    "invalid",
+    "chrome",
+    "missing-client-hints"
+  ],
+  "adversarial": true,
+  "os": {
+    "name": "Windows",
+    "version": "10 22H2",
+    "build": "10.0.19045",
+    "platform": "Win32",
+    "architecture": "x86_64"
+  },
+  "browser": {
+    "family": "chrome",
+    "name": "Chrome",
+    "version": "153.0.8010.12",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept_language": "en-US,en;q=0.9",
+    "do_not_track": null,
+    "cookie_enabled": true,
+    "java_enabled": false,
+    "pdf_viewer_enabled": true,
+    "product": "Gecko",
+    "product_sub": "20030107",
+    "vendor": "Google Inc.",
+    "vendor_sub": "",
+    "app_name": "Netscape",
+    "app_code_name": "Mozilla",
+    "app_version": "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+  },
+  "hardware": {
+    "hardware_concurrency": 12,
+    "device_memory": 8,
+    "max_touch_points": 0,
+    "gpu": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "vendor_unmasked": "Google Inc. (NVIDIA)",
+      "renderer_unmasked": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002504) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    }
+  },
+  "screen": {
+    "width": 1920,
+    "height": 1080,
+    "avail_width": 1920,
+    "avail_height": 1040,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.0,
+    "inner_width": 1920,
+    "inner_height": 937,
+    "outer_width": 1920,
+    "outer_height": 1040,
+    "avail_top": 0,
+    "avail_left": 0
+  },
+  "locale": {
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "timezone": "America/New_York",
+    "timezone_offset": 300
+  },
+  "network": {
+    "connection_type": "4g",
+    "downlink": 10,
+    "rtt": 50,
+    "save_data": false
+  },
+  "fingerprint_seeds": {
+    "canvas_seed": "5e1c8a2d94b07f36a1d5c0e9b823f467",
+    "webgl_noise_seed": "d09b4f71e2a85c3601f8b7d4a9e2c516",
+    "audio_seed": "72a6e3c1f0d84b95e7a2c8316db04f59"
+  },
+  "webgl": {
+    "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+    "extensions": [
+      "EXT_clip_control",
+      "EXT_color_buffer_float",
+      "EXT_color_buffer_half_float",
+      "EXT_conservative_depth",
+      "EXT_depth_clamp",
+      "EXT_disjoint_timer_query_webgl2",
+      "EXT_float_blend",
+      "EXT_polygon_offset_clamp",
+      "EXT_render_snorm",
+      "EXT_texture_compression_bptc",
+      "EXT_texture_compression_rgtc",
+      "EXT_texture_filter_anisotropic",
+      "EXT_texture_mirror_clamp_to_edge",
+      "EXT_texture_norm16",
+      "KHR_parallel_shader_compile",
+      "NV_shader_noperspective_interpolation",
+      "OES_draw_buffers_indexed",
+      "OES_sample_variables",
+      "OES_shader_multisample_interpolation",
+      "OES_texture_float_linear",
+      "OVR_multiview2",
+      "WEBGL_clip_cull_distance",
+      "WEBGL_compressed_texture_s3tc",
+      "WEBGL_compressed_texture_s3tc_srgb",
+      "WEBGL_debug_renderer_info",
+      "WEBGL_debug_shaders",
+      "WEBGL_lose_context",
+      "WEBGL_multi_draw",
+      "WEBGL_polygon_mode",
+      "WEBGL_provoking_vertex",
+      "WEBGL_stencil_texturing"
+    ],
+    "parameters": {
+      "MAX_TEXTURE_SIZE": 16384,
+      "MAX_VIEWPORT_DIMS": [
+        32767,
+        32767
+      ],
+      "MAX_VERTEX_ATTRIBS": 16,
+      "MAX_VERTEX_UNIFORM_VECTORS": 4095,
+      "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+      "MAX_VARYING_VECTORS": 30,
+      "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 32,
+      "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+      "MAX_RENDERBUFFER_SIZE": 16384,
+      "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+      "MAX_FRAGMENT_UNIFORM_COMPONENTS": 4096,
+      "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+      "MAX_3D_TEXTURE_SIZE": 2048,
+      "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 120,
+      "MAX_UNIFORM_BUFFER_BINDINGS": 72,
+      "MAX_UNIFORM_BLOCK_SIZE": 65536,
+      "MAX_COMBINED_UNIFORM_BLOCKS": 60,
+      "MAX_SAMPLES": 4,
+      "ALIASED_LINE_WIDTH_RANGE": [
+        1,
+        1
+      ],
+      "ALIASED_POINT_SIZE_RANGE": [
+        1,
+        1024
+      ]
+    },
+    "shader_precision": {
+      "VERTEX_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      }
+    }
+  },
+  "fonts": {
+    "available": [
+      "Arial",
+      "Arial Black",
+      "Bahnschrift",
+      "Calibri",
+      "Cambria",
+      "Cambria Math",
+      "Candara",
+      "Comic Sans MS",
+      "Consolas",
+      "Constantia",
+      "Corbel",
+      "Courier New",
+      "Ebrima",
+      "Franklin Gothic Medium",
+      "Gabriola",
+      "Gadugi",
+      "Georgia",
+      "Impact",
+      "Ink Free",
+      "Javanese Text",
+      "Leelawadee UI",
+      "Lucida Console",
+      "Lucida Sans Unicode",
+      "Malgun Gothic",
+      "Marlett",
+      "Microsoft Himalaya",
+      "Microsoft JhengHei",
+      "Microsoft New Tai Lue",
+      "Microsoft PhagsPa",
+      "Microsoft Sans Serif",
+      "Microsoft Tai Le",
+      "Microsoft YaHei",
+      "Microsoft Yi Baiti",
+      "MingLiU-ExtB",
+      "Mongolian Baiti",
+      "MS Gothic",
+      "MV Boli",
+      "Myanmar Text",
+      "Nirmala UI",
+      "Palatino Linotype",
+      "Segoe MDL2 Assets",
+      "Segoe Print",
+      "Segoe Script",
+      "Segoe UI",
+      "Segoe UI Emoji",
+      "Segoe UI Historic",
+      "Segoe UI Symbol",
+      "SimSun",
+      "Sitka Text",
+      "Sylfaen",
+      "Symbol",
+      "Tahoma",
+      "Times New Roman",
+      "Trebuchet MS",
+      "Verdana",
+      "Webdings",
+      "Wingdings",
+      "Yu Gothic"
+    ]
+  },
+  "tls": {
+    "profile_id": "chrome_153_linux",
+    "ja3": "9bddd6d71939cb1fcf03871f2cc2adcf",
+    "ja3s_note": "Chrome 153 ClientHello and H2 preface are OS-independent; captured on Linux (profiles/tls/chrome_153_linux.json)."
+  },
+  "timing": {
+    "performance_now_resolution_us": 100
+  },
+  "behavior": {
+    "profile": "casual_user"
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "base_latency": 0.01,
+    "max_channel_count": 2
+  },
+  "media_devices": {
+    "webcam_label": "",
+    "mic_label": "",
+    "speaker_label": ""
+  },
+  "permissions": {
+    "geolocation": "prompt",
+    "notifications": "prompt",
+    "camera": "prompt",
+    "microphone": "prompt"
+  }
+}

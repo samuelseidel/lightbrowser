@@ -1,0 +1,24 @@
+<!doctype html><html><head><title>paint</title></head><body><h1>paint</h1><p>text</p>
+<!--LOG-->
+<script>
+var early=performance.getEntriesByType('paint').length;
+var seen=[];
+var po=new PerformanceObserver(function(l){l.getEntries().forEach(function(e){seen.push(e.name+'@'+(e.startTime>0))})});
+po.observe({type:'paint'});
+addEventListener('load',async function(){
+  await sleep(400);
+  var p=performance.getEntriesByType('paint');
+  log('early '+early+' count '+p.length);
+  log('names '+p.map(function(e){return e.name}).join());
+  var e=p[0];
+  log('shape '+[e instanceof PerformancePaintTiming,e instanceof PerformanceEntry,Object.prototype.toString.call(e),e.entryType,e.duration,e.startTime>0,keys(e),Object.keys(e.toJSON()).join()].join(' | '));
+  log('order '+(p[0].startTime<=p[1].startTime)+' '+(p[0].name=='first-paint')+' same='+(p[0].startTime===p[1].startTime));
+  log('after nav '+(e.startTime>=performance.getEntriesByType('navigation')[0].responseEnd)+' '+(e.startTime<performance.now()));
+  log('observed '+seen.join());
+  log('byname '+performance.getEntriesByName('first-contentful-paint').length+' '+performance.getEntriesByName('first-paint','paint').length);
+  var lt=chrome.loadTimes();
+  log('loadTimes '+(lt.firstPaintTime>0));
+  log('all '+performance.getEntries().filter(function(x){return x.entryType=='paint'}).length);
+  end();
+});
+</script></body></html>

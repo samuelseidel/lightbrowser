@@ -1,0 +1,6 @@
+<!doctype html><html><head><!--LOG-->
+<link rel=stylesheet href=slow-a.css onload="log('link load '+document.readyState+' '+C()+' '+(this.sheet?this.sheet.cssRules.length:'null'))">
+<script>log('head script sheets='+S()+' link.sheet='+(document.querySelector('link').sheet!==null))</script>
+</head><body><div id=t></div>
+<script>log('body script '+C()+' sheets='+S())</script>
+</body></html>

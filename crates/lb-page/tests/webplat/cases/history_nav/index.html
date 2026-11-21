@@ -1,0 +1,10 @@
+<!doctype html><!--LOG--><script>
+// The budget belongs to the frame, not the document: 150 pushState calls
+// and a navigation (151) leave 49 for the next document of the frame.
+// The navigation itself is ignored once the budget is gone: the page
+// that reaches 'end' says whether it got there.
+var n = 0;
+for (var i = 1; i <= 150; i++) { n++; history.pushState(n, '', '#a' + n); }
+sessionStorage.setItem('from', 'index');
+location.href = 'next.html';
+</script>

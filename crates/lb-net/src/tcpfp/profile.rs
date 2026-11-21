@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use lb_persona::OsFamily;
+use lb_persona::OsKind;
 use serde::{Deserialize, Serialize};
 
 use crate::error::NetError;
@@ -206,11 +206,15 @@ impl TcpProfile {
         Ok(out)
     }
 
-    /// The operating system, parsed from `os`.
-    pub fn os(&self) -> Result<OsFamily, NetError> {
-        self.os
-            .parse()
-            .map_err(|e: String| NetError::Profile(format!("{}: {e}", self.profile_id)))
+    /// The operating system, parsed from `os` (`windows`, `macos`, `linux`).
+    pub fn os(&self) -> Result<OsKind, NetError> {
+        match OsKind::from_name(&self.os) {
+            OsKind::Other => Err(NetError::Profile(format!(
+                "{}: unknown os: {:?}",
+                self.profile_id, self.os
+            ))),
+            os => Ok(os),
+        }
     }
 
     /// Checks the profile describes a SYN that can exist and that its stored

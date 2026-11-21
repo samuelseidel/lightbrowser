@@ -24,6 +24,14 @@ pub enum NetError {
     },
     #[error("profile: {0}")]
     Profile(String),
+    /// A proxy failure, as Chrome's `net::ERR_*` text.
+    #[error("{0}")]
+    Proxy(String),
+    /// The proxy asked for credentials we do not have (`407`). Shown as
+    /// Chrome's error when nobody answers the challenge (recorded: headless
+    /// Chrome without an auth handler fails the navigation so).
+    #[error("net::ERR_INVALID_AUTH_CREDENTIALS")]
+    ProxyAuth(crate::proxy::ProxyChallenge),
     #[error("persona family {persona} does not match TLS profile {profile}")]
     FamilyMismatch { persona: String, profile: String },
     #[error("persona claims {persona} but TCP profile {profile} is for {profile_os}")]
@@ -37,6 +45,10 @@ pub enum NetError {
          start `lightbrowser tcp-shim` first (without it the host's own SYN would be sent)"
     )]
     TcpShimMissing(String),
+    /// The egress policy refused the destination (ADR 0044). The text
+    /// starts with Chrome's code for a request the client blocked.
+    #[error("net::ERR_BLOCKED_BY_CLIENT: {0}")]
+    Blocked(#[from] crate::egress::Blocked),
 }
 
 impl From<boring::error::ErrorStack> for NetError {
@@ -47,12 +59,6 @@ impl From<boring::error::ErrorStack> for NetError {
 
 impl From<http::Error> for NetError {
     fn from(e: http::Error) -> Self {
-        NetError::Http(e.to_string())
-    }
-}
-
-impl From<hyper::Error> for NetError {
-    fn from(e: hyper::Error) -> Self {
         NetError::Http(e.to_string())
     }
 }

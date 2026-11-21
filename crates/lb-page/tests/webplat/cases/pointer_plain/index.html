@@ -1,0 +1,34 @@
+<!doctype html><!--LOG--><body style="margin:0"><div id=box style="width:400px;height:300px;background:#ccc"></div><script>
+// The same input as pointer_raw with no pointerrawupdate listener, and
+// events a script makes.
+var box = document.getElementById('box');
+function brief(e) { return e.type + ' ' + e.clientX + ',' + e.clientY; }
+// (Chrome's predictor adds predicted events to a move now and then, from
+// its own state and the event times: only the other types are counted.)
+function pred(e) { return e.type == 'pointermove' ? '-' : e.getPredictedEvents().length; }
+function reset() { L.length = 0; }
+['pointermove', 'pointerdown', 'pointerup'].forEach(function (type) {
+  box.addEventListener(type, function (e) {
+    log(brief(e) + ' coalesced=[' + e.getCoalescedEvents().map(brief).join(' ; ') + '] predicted=' + pred(e));
+  });
+});
+function after() {
+  // Events made by script: no source, own coalesced list only when given.
+  var e = new PointerEvent('pointermove', { clientX: 5, clientY: 6 });
+  log('script pointermove: sc=' + e.sourceCapabilities + ' coalesced=' + e.getCoalescedEvents().length + ' predicted=' + e.getPredictedEvents().length);
+  var c = new PointerEvent('pointermove', { clientX: 7, clientY: 8 });
+  var e2 = new PointerEvent('pointermove', { coalescedEvents: [c], predictedEvents: [c, c] });
+  log('script with lists: coalesced=' + e2.getCoalescedEvents().map(brief).join(';') + ' predicted=' + e2.getPredictedEvents().length);
+  var e3 = new PointerEvent('pointerdown', { coalescedEvents: [c] });
+  log('pointerdown with list: coalesced=' + e3.getCoalescedEvents().length);
+  var m = new MouseEvent('click'), k = new KeyboardEvent('keydown'), u = new UIEvent('x', { sourceCapabilities: new InputDeviceCapabilities({ firesTouchEvents: true }) });
+  log('script mouse/key: sc=' + m.sourceCapabilities + ' ' + k.sourceCapabilities);
+  log('init: ' + (u.sourceCapabilities && u.sourceCapabilities.firesTouchEvents) + ' ' + new InputDeviceCapabilities().firesTouchEvents + ' ' + new InputDeviceCapabilities({}).firesTouchEvents);
+  var d = new InputDeviceCapabilities({ firesTouchEvents: false });
+  log('shape: ' + Object.prototype.toString.call(d) + ' ' + Object.getOwnPropertyNames(InputDeviceCapabilities.prototype).join() + ' ' + typeof d.firesTouchEvents + ' ' + d.firesTouchEvents);
+  t('no this', function () { return Object.getOwnPropertyDescriptor(InputDeviceCapabilities.prototype, 'firesTouchEvents').get.call({}); });
+  t('call without new', function () { return InputDeviceCapabilities(); });
+  t('sc descriptor', function () { var g = Object.getOwnPropertyDescriptor(UIEvent.prototype, 'sourceCapabilities'); return typeof g.get + ' ' + g.set + ' ' + g.enumerable + ' ' + g.configurable; });
+  end();
+}
+</script>

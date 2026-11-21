@@ -1,0 +1,3365 @@
+{
+ "sid": "0000000000000001",
+ "created": 1793711732.1380193,
+ "documents": [
+  {
+   "t": 1793711732.1380234,
+   "path": "/shop",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Accept-Encoding"
+   ],
+   "headers": {
+    "host": "127.0.0.1:18766",
+    "connection": "keep-alive",
+    "sec-ch-ua": "\"Chromium\";v=\"153\", \"Not_A Brand\";v=\"8\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "accept-language": "en-US,en;q=0.9",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-fetch-site": "none",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": false,
+   "scheme": "http"
+  },
+  {
+   "t": 1793711732.150295,
+   "path": "/shop",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Accept-Language",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-arch",
+    "sec-ch-ua-platform",
+    "sec-ch-ua-platform-version",
+    "sec-ch-ua-model",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-form-factors",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "headers": {
+    "host": "127.0.0.1:18766",
+    "connection": "keep-alive",
+    "accept-language": "en-US,en;q=0.9",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-ch-ua": "\"Chromium\";v=\"153\", \"Not_A Brand\";v=\"8\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-arch": "\"x86\"",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "sec-ch-ua-platform-version": "\"\"",
+    "sec-ch-ua-model": "\"\"",
+    "sec-ch-ua-bitness": "\"64\"",
+    "sec-ch-ua-wow64": "?0",
+    "sec-ch-ua-full-version-list": "\"Chromium\";v=\"153.0.8010.12\", \"Not_A Brand\";v=\"8.0.0.0\"",
+    "sec-ch-ua-form-factors": "\"Desktop\"",
+    "sec-fetch-site": "none",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": true,
+   "scheme": "http"
+  },
+  {
+   "t": 1793711732.5978768,
+   "path": "/search?q=waterproof+rain+jacket",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-arch",
+    "sec-ch-ua-platform",
+    "sec-ch-ua-platform-version",
+    "sec-ch-ua-model",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-form-factors",
+    "Accept-Language",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "headers": {
+    "host": "127.0.0.1:18766",
+    "connection": "keep-alive",
+    "sec-ch-ua": "\"Chromium\";v=\"153\", \"Not_A Brand\";v=\"8\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-arch": "\"x86\"",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "sec-ch-ua-platform-version": "\"\"",
+    "sec-ch-ua-model": "\"\"",
+    "sec-ch-ua-bitness": "\"64\"",
+    "sec-ch-ua-wow64": "?0",
+    "sec-ch-ua-full-version-list": "\"Chromium\";v=\"153.0.8010.12\", \"Not_A Brand\";v=\"8.0.0.0\"",
+    "sec-ch-ua-form-factors": "\"Desktop\"",
+    "accept-language": "en-US,en;q=0.9",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "referer": "http://127.0.0.1:18766/shop",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": true,
+   "scheme": "http"
+  },
+  {
+   "t": 1793711732.7866614,
+   "path": "/login",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-arch",
+    "sec-ch-ua-platform",
+    "sec-ch-ua-platform-version",
+    "sec-ch-ua-model",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-form-factors",
+    "Accept-Language",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "headers": {
+    "host": "127.0.0.1:18766",
+    "connection": "keep-alive",
+    "sec-ch-ua": "\"Chromium\";v=\"153\", \"Not_A Brand\";v=\"8\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-arch": "\"x86\"",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "sec-ch-ua-platform-version": "\"\"",
+    "sec-ch-ua-model": "\"\"",
+    "sec-ch-ua-bitness": "\"64\"",
+    "sec-ch-ua-wow64": "?0",
+    "sec-ch-ua-full-version-list": "\"Chromium\";v=\"153.0.8010.12\", \"Not_A Brand\";v=\"8.0.0.0\"",
+    "sec-ch-ua-form-factors": "\"Desktop\"",
+    "accept-language": "en-US,en;q=0.9",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "referer": "http://127.0.0.1:18766/search?q=waterproof+rain+jacket",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": true,
+   "scheme": "http"
+  }
+ ],
+ "requests": [
+  {
+   "t": 1793711732.194056,
+   "path": "/static/style.css",
+   "kind": "css",
+   "since_doc_ms": 43.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.1975582,
+   "path": "/collector.js",
+   "kind": "js",
+   "since_doc_ms": 47.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2006702,
+   "path": "/img/p0.svg",
+   "kind": "img",
+   "since_doc_ms": 50.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2032046,
+   "path": "/img/p1.svg",
+   "kind": "img",
+   "since_doc_ms": 52.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2081323,
+   "path": "/img/p2.svg",
+   "kind": "img",
+   "since_doc_ms": 57.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2093198,
+   "path": "/img/p4.svg",
+   "kind": "img",
+   "since_doc_ms": 59.0,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2096646,
+   "path": "/img/p5.svg",
+   "kind": "img",
+   "since_doc_ms": 59.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2099688,
+   "path": "/img/p3.svg",
+   "kind": "img",
+   "since_doc_ms": 59.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2104912,
+   "path": "/static/app.js",
+   "kind": "js",
+   "since_doc_ms": 60.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.214228,
+   "path": "/img/p7.svg",
+   "kind": "img",
+   "since_doc_ms": 63.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2145026,
+   "path": "/img/p6.svg",
+   "kind": "img",
+   "since_doc_ms": 64.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2419007,
+   "path": "/img/p8.svg",
+   "kind": "img",
+   "since_doc_ms": 91.6,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.254818,
+   "path": "/img/p9.svg",
+   "kind": "img",
+   "since_doc_ms": 104.5,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.2550635,
+   "path": "/img/p10.svg",
+   "kind": "img",
+   "since_doc_ms": 104.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.255377,
+   "path": "/img/p11.svg",
+   "kind": "img",
+   "since_doc_ms": 105.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.4174123,
+   "path": "/favicon.ico",
+   "kind": "favicon",
+   "since_doc_ms": 267.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.4263525,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 276.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.6075974,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 9.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.6088583,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 11.0,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.6122189,
+   "path": "/static/style.css",
+   "kind": "css",
+   "since_doc_ms": 14.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.6125526,
+   "path": "/collector.js",
+   "kind": "js",
+   "since_doc_ms": 14.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.6172872,
+   "path": "/static/app.js",
+   "kind": "js",
+   "since_doc_ms": 19.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.713558,
+   "path": "/favicon.ico",
+   "kind": "favicon",
+   "since_doc_ms": 115.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.7309482,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 133.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.7980886,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 11.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.7994359,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 12.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.8334763,
+   "path": "/static/style.css",
+   "kind": "css",
+   "since_doc_ms": 46.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.83387,
+   "path": "/collector.js",
+   "kind": "js",
+   "since_doc_ms": 47.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.8340514,
+   "path": "/static/app.js",
+   "kind": "js",
+   "since_doc_ms": 47.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.934819,
+   "path": "/favicon.ico",
+   "kind": "favicon",
+   "since_doc_ms": 148.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711732.9447284,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 158.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711733.0103564,
+   "path": "/login",
+   "kind": "form",
+   "since_doc_ms": 223.7,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "Cache-Control",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-arch",
+    "sec-ch-ua-platform",
+    "sec-ch-ua-platform-version",
+    "sec-ch-ua-model",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-form-factors",
+    "Accept-Language",
+    "Upgrade-Insecure-Requests",
+    "Content-Type",
+    "User-Agent",
+    "Origin",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711733.0175195,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 230.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  },
+  {
+   "t": 1793711733.0191953,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 232.5,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ]
+  }
+ ],
+ "pages": {
+  "4b7d706f8cf62e": {
+   "url": "/shop",
+   "seq": 3,
+   "reason": "hidden",
+   "received": 1793711732.6089282,
+   "t": 475,
+   "probes": {
+    "webdriver": {
+     "id": "webdriver",
+     "cat": "automation",
+     "value": false,
+     "suspicious": false,
+     "weight": 90
+    },
+    "webdriver_tamper": {
+     "id": "webdriver_tamper",
+     "cat": "automation",
+     "value": {
+      "reasons": [],
+      "index": 22
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "ua_headless": {
+     "id": "ua_headless",
+     "cat": "automation",
+     "value": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+     "suspicious": false,
+     "weight": 95
+    },
+    "automation_keys": {
+     "id": "automation_keys",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 90
+    },
+    "extra_globals": {
+     "id": "extra_globals",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 30
+    },
+    "chrome_object": {
+     "id": "chrome_object",
+     "cat": "consistency",
+     "value": {
+      "present": true,
+      "keys": [
+       "app",
+       "csi",
+       "loadTimes"
+      ],
+      "runtime": false
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "plugins": {
+     "id": "plugins",
+     "cat": "consistency",
+     "value": {
+      "plugins": 5,
+      "mimeTypes": 2,
+      "names": [
+       "PDF Viewer",
+       "Chrome PDF Viewer",
+       "Chromium PDF Viewer",
+       "Microsoft Edge PDF Viewer",
+       "WebKit built-in PDF"
+      ],
+      "shape": true,
+      "pdfViewerEnabled": true
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "languages": {
+     "id": "languages",
+     "cat": "consistency",
+     "value": {
+      "languages": [
+       "en-US"
+      ],
+      "acceptLanguage": "en-US,en;q=0.9",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "outer_size_zero": {
+     "id": "outer_size_zero",
+     "cat": "automation",
+     "value": {
+      "outerWidth": 945,
+      "outerHeight": 1060,
+      "innerWidth": 945,
+      "innerHeight": 917
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "window_frame_absent": {
+     "id": "window_frame_absent",
+     "cat": "consistency",
+     "value": {
+      "dw": 0,
+      "dh": 143
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "screen_sanity": {
+     "id": "screen_sanity",
+     "cat": "consistency",
+     "value": {
+      "width": 1920,
+      "height": 1080,
+      "availWidth": 1920,
+      "availHeight": 1080,
+      "colorDepth": 24,
+      "dpr": 1,
+      "innerWidth": 945,
+      "innerHeight": 917,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "screen_no_taskbar": {
+     "id": "screen_no_taskbar",
+     "cat": "consistency",
+     "value": {
+      "availHeight": 1080,
+      "height": 1080
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "ua_ch_headless": {
+     "id": "ua_ch_headless",
+     "cat": "automation",
+     "value": {
+      "brands": [
+       "Chromium",
+       "Not_A Brand"
+      ],
+      "header": [
+       "Chromium",
+       "Not_A Brand"
+      ]
+     },
+     "suspicious": false,
+     "weight": 90
+    },
+    "ua_ch_mismatch": {
+     "id": "ua_ch_mismatch",
+     "cat": "consistency",
+     "value": {
+      "brands": [
+       "Chromium;153",
+       "Not_A Brand;8"
+      ],
+      "platform": "Linux",
+      "mobile": false,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "webgl_params": {
+     "id": "webgl_params",
+     "cat": "fingerprint",
+     "value": null,
+     "suspicious": false,
+     "weight": 0
+    },
+    "webgl_software": {
+     "id": "webgl_software",
+     "cat": "fingerprint",
+     "value": {
+      "supported": false
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "webgl_os_mismatch": {
+     "id": "webgl_os_mismatch",
+     "cat": "consistency",
+     "value": null,
+     "suspicious": false,
+     "weight": 50
+    },
+    "canvas": {
+     "id": "canvas",
+     "cat": "fingerprint",
+     "value": {
+      "hash": "1429016680f708",
+      "stable": true,
+      "solidExact": true
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "fonts": {
+     "id": "fonts",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "detected": {
+       "windows": [
+        "Segoe UI",
+        "Calibri",
+        "Cambria",
+        "MS Gothic"
+       ],
+       "mac": [
+        "Helvetica Neue"
+       ],
+       "linux": [
+        "DejaVu Sans",
+        "Liberation Sans",
+        "FreeSans",
+        "Noto Color Emoji"
+       ],
+       "common": [
+        "Arial",
+        "Times New Roman",
+        "Courier New"
+       ]
+      },
+      "hash": "138ce09eeb75ac",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "hardware": {
+     "id": "hardware",
+     "cat": "consistency",
+     "value": {
+      "hardwareConcurrency": 4,
+      "deviceMemory": 16,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "timezone_mismatch": {
+     "id": "timezone_mismatch",
+     "cat": "consistency",
+     "value": {
+      "tz": "UTC",
+      "locale": "en-US",
+      "intlOffset": 0,
+      "dateOffset": 0
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "timezone_utc": {
+     "id": "timezone_utc",
+     "cat": "consistency",
+     "value": "UTC",
+     "suspicious": true,
+     "weight": 10
+    },
+    "locale_mismatch": {
+     "id": "locale_mismatch",
+     "cat": "consistency",
+     "value": {
+      "intl": "en-US",
+      "navigator": "en-US"
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "perf_now_resolution": {
+     "id": "perf_now_resolution",
+     "cat": "consistency",
+     "value": {
+      "stepMs": 0.1,
+      "crossOriginIsolated": false
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "native_functions": {
+     "id": "native_functions",
+     "cat": "automation",
+     "value": {
+      "checked": 39,
+      "bad": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "property_order": {
+     "id": "property_order",
+     "cat": "automation",
+     "value": {
+      "navigatorHash": "1ead0d99a53ae9",
+      "windowHash": "3ef69dd8a53f0",
+      "windowCount": 1227,
+      "strays": []
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "has_focus": {
+     "id": "has_focus",
+     "cat": "automation",
+     "value": {
+      "hasFocus": true,
+      "visibility": "visible"
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "iframe_mismatch": {
+     "id": "iframe_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "stack_engine": {
+     "id": "stack_engine",
+     "cat": "consistency",
+     "value": {
+      "engine": "v8",
+      "sample": "Error: lb |     at lbStackSample (http://127.0.0.1:18766/collector.js?s=36ee04a389b7c48a:722:37)"
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "stack_hooked": {
+     "id": "stack_hooked",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "connection": {
+     "id": "connection",
+     "cat": "consistency",
+     "value": {
+      "effectiveType": "4g",
+      "rtt": 100,
+      "downlink": 1.55,
+      "saveData": false
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "os_surface": {
+     "id": "os_surface",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "scrollbar": {
+       "div": 15,
+       "root": 15,
+       "overflows": true,
+       "rootOverflowY": "visible",
+       "bodyOverflowY": "visible"
+      },
+      "apis": {
+       "share": false,
+       "canShare": false,
+       "bluetooth": false,
+       "Bluetooth": false
+      },
+      "fonts": {
+       "base": {
+        "monospace": [
+         824,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ]
+       },
+       "generic": {
+        "system-ui": [
+         995,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "monospace": [
+         824,
+         108
+        ]
+       },
+       "detected": {
+        "Segoe UI": [
+         995,
+         108
+        ],
+        "Helvetica Neue": [
+         995,
+         108
+        ],
+        "DejaVu Sans": [
+         1112,
+         108
+        ],
+        "DejaVu Sans Mono": [
+         824,
+         108
+        ],
+        "Noto Color Emoji": [
+         917,
+         108
+        ],
+        "Liberation Sans": [
+         965,
+         108
+        ],
+        "Liberation Serif": [
+         910,
+         108
+        ],
+        "Liberation Mono": [
+         821,
+         108
+        ],
+        "Arial": [
+         965,
+         108
+        ],
+        "Helvetica": [
+         965,
+         108
+        ],
+        "Times New Roman": [
+         910,
+         108
+        ],
+        "Times": [
+         910,
+         108
+        ],
+        "Courier New": [
+         821,
+         108
+        ],
+        "Inter": [
+         995,
+         108
+        ],
+        "FreeSans": [
+         937,
+         108
+        ],
+        "Carlito": [
+         909,
+         108
+        ]
+       }
+      },
+      "emoji": {
+       "inked": 2826,
+       "colored": 2716
+      },
+      "gl": null,
+      "hw": {
+       "deviceMemory": 16,
+       "hardwareConcurrency": 4
+      },
+      "screen": {
+       "width": 1920,
+       "height": 1080,
+       "availWidth": 1920,
+       "availHeight": 1080,
+       "availLeft": 0,
+       "availTop": 0,
+       "dpr": 1,
+       "screenX": 20,
+       "screenY": 20,
+       "outerWidth": 945,
+       "outerHeight": 1060,
+       "innerWidth": 945,
+       "innerHeight": 917
+      }
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "cdp_runtime": {
+     "id": "cdp_runtime",
+     "cat": "automation",
+     "value": {
+      "errorStackGetter": false,
+      "nodeIdGetter": false
+     },
+     "suspicious": false,
+     "weight": 80
+    },
+    "notification_permission": {
+     "id": "notification_permission",
+     "cat": "consistency",
+     "value": {
+      "notification": "default",
+      "permissions": "prompt"
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "battery": {
+     "id": "battery",
+     "cat": "consistency",
+     "value": {
+      "charging": true,
+      "level": 1,
+      "chargingTime": 0,
+      "dischargingTime": null
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "audio": {
+     "id": "audio",
+     "cat": "fingerprint",
+     "value": {
+      "sum": 124.04347776696522,
+      "hash": "99b43bc461c4e",
+      "stable": true
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "worker_mismatch": {
+     "id": "worker_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "os_media": {
+     "id": "os_media",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "secure": true,
+      "throws": {
+       "canPlayType": null,
+       "mseIsTypeSupported": null,
+       "recorderIsTypeSupported": null,
+       "decodingInfo": null,
+       "getLayoutMap": null,
+       "requestAdapter": null
+      },
+      "present": {
+       "mediaCapabilities": true,
+       "MediaSource": true,
+       "MediaRecorder": true,
+       "keyboard": true,
+       "gpu": true,
+       "speechSynthesis": true
+      },
+      "high": {
+       "architecture": "x86",
+       "bitness": "64",
+       "brands": [
+        {
+         "brand": "Chromium",
+         "version": "153"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8"
+        }
+       ],
+       "formFactors": [
+        "Desktop"
+       ],
+       "fullVersionList": [
+        {
+         "brand": "Chromium",
+         "version": "153.0.8010.12"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8.0.0.0"
+        }
+       ],
+       "mobile": false,
+       "model": "",
+       "platform": "Linux",
+       "platformVersion": "",
+       "wow64": false
+      },
+      "codecs": {
+       "hevcCanPlay": "",
+       "h264": {
+        "supported": true,
+        "powerEfficient": false
+       },
+       "hevc": {
+        "supported": false,
+        "powerEfficient": false
+       }
+      },
+      "keyboardSize": 48,
+      "gpu": {
+       "present": true,
+       "adapter": null
+      },
+      "ms": 47
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "beh_wheel_deltas": {
+     "id": "beh_wheel_deltas",
+     "cat": "behavior",
+     "suspicious": false,
+     "weight": 0,
+     "value": {
+      "n": 6,
+      "pairs": [
+       [
+        120,
+        -120,
+        0
+       ],
+       [
+        120,
+        -120,
+        0
+       ],
+       [
+        120,
+        -120,
+        0
+       ],
+       [
+        120,
+        -120,
+        0
+       ],
+       [
+        -120,
+        120,
+        0
+       ],
+       [
+        -120,
+        120,
+        0
+       ]
+      ]
+     }
+    },
+    "os_voices": {
+     "id": "os_voices",
+     "cat": "behavior",
+     "value": {
+      "count": 0,
+      "local": 0,
+      "localNames": []
+     },
+     "suspicious": false,
+     "weight": 0
+    }
+   },
+   "trace": []
+  },
+  "09f4cdfb8cf7b0": {
+   "url": "/search?q=waterproof+rain+jacket",
+   "seq": 3,
+   "reason": "hidden",
+   "received": 1793711732.799621,
+   "t": 204,
+   "probes": {
+    "webdriver": {
+     "id": "webdriver",
+     "cat": "automation",
+     "value": false,
+     "suspicious": false,
+     "weight": 90
+    },
+    "webdriver_tamper": {
+     "id": "webdriver_tamper",
+     "cat": "automation",
+     "value": {
+      "reasons": [],
+      "index": 22
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "ua_headless": {
+     "id": "ua_headless",
+     "cat": "automation",
+     "value": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+     "suspicious": false,
+     "weight": 95
+    },
+    "automation_keys": {
+     "id": "automation_keys",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 90
+    },
+    "extra_globals": {
+     "id": "extra_globals",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 30
+    },
+    "chrome_object": {
+     "id": "chrome_object",
+     "cat": "consistency",
+     "value": {
+      "present": true,
+      "keys": [
+       "app",
+       "csi",
+       "loadTimes"
+      ],
+      "runtime": false
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "plugins": {
+     "id": "plugins",
+     "cat": "consistency",
+     "value": {
+      "plugins": 5,
+      "mimeTypes": 2,
+      "names": [
+       "PDF Viewer",
+       "Chrome PDF Viewer",
+       "Chromium PDF Viewer",
+       "Microsoft Edge PDF Viewer",
+       "WebKit built-in PDF"
+      ],
+      "shape": true,
+      "pdfViewerEnabled": true
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "languages": {
+     "id": "languages",
+     "cat": "consistency",
+     "value": {
+      "languages": [
+       "en-US"
+      ],
+      "acceptLanguage": "en-US,en;q=0.9",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "outer_size_zero": {
+     "id": "outer_size_zero",
+     "cat": "automation",
+     "value": {
+      "outerWidth": 945,
+      "outerHeight": 1060,
+      "innerWidth": 945,
+      "innerHeight": 917
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "window_frame_absent": {
+     "id": "window_frame_absent",
+     "cat": "consistency",
+     "value": {
+      "dw": 0,
+      "dh": 143
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "screen_sanity": {
+     "id": "screen_sanity",
+     "cat": "consistency",
+     "value": {
+      "width": 1920,
+      "height": 1080,
+      "availWidth": 1920,
+      "availHeight": 1080,
+      "colorDepth": 24,
+      "dpr": 1,
+      "innerWidth": 945,
+      "innerHeight": 917,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "screen_no_taskbar": {
+     "id": "screen_no_taskbar",
+     "cat": "consistency",
+     "value": {
+      "availHeight": 1080,
+      "height": 1080
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "ua_ch_headless": {
+     "id": "ua_ch_headless",
+     "cat": "automation",
+     "value": {
+      "brands": [
+       "Chromium",
+       "Not_A Brand"
+      ],
+      "header": [
+       "Chromium",
+       "Not_A Brand"
+      ]
+     },
+     "suspicious": false,
+     "weight": 90
+    },
+    "ua_ch_mismatch": {
+     "id": "ua_ch_mismatch",
+     "cat": "consistency",
+     "value": {
+      "brands": [
+       "Chromium;153",
+       "Not_A Brand;8"
+      ],
+      "platform": "Linux",
+      "mobile": false,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "webgl_params": {
+     "id": "webgl_params",
+     "cat": "fingerprint",
+     "value": null,
+     "suspicious": false,
+     "weight": 0
+    },
+    "webgl_software": {
+     "id": "webgl_software",
+     "cat": "fingerprint",
+     "value": {
+      "supported": false
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "webgl_os_mismatch": {
+     "id": "webgl_os_mismatch",
+     "cat": "consistency",
+     "value": null,
+     "suspicious": false,
+     "weight": 50
+    },
+    "canvas": {
+     "id": "canvas",
+     "cat": "fingerprint",
+     "value": {
+      "hash": "1429016680f708",
+      "stable": true,
+      "solidExact": true
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "fonts": {
+     "id": "fonts",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "detected": {
+       "windows": [
+        "Segoe UI",
+        "Calibri",
+        "Cambria",
+        "MS Gothic"
+       ],
+       "mac": [
+        "Helvetica Neue"
+       ],
+       "linux": [
+        "DejaVu Sans",
+        "Liberation Sans",
+        "FreeSans",
+        "Noto Color Emoji"
+       ],
+       "common": [
+        "Arial",
+        "Times New Roman",
+        "Courier New"
+       ]
+      },
+      "hash": "138ce09eeb75ac",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "hardware": {
+     "id": "hardware",
+     "cat": "consistency",
+     "value": {
+      "hardwareConcurrency": 4,
+      "deviceMemory": 16,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "timezone_mismatch": {
+     "id": "timezone_mismatch",
+     "cat": "consistency",
+     "value": {
+      "tz": "UTC",
+      "locale": "en-US",
+      "intlOffset": 0,
+      "dateOffset": 0
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "timezone_utc": {
+     "id": "timezone_utc",
+     "cat": "consistency",
+     "value": "UTC",
+     "suspicious": true,
+     "weight": 10
+    },
+    "locale_mismatch": {
+     "id": "locale_mismatch",
+     "cat": "consistency",
+     "value": {
+      "intl": "en-US",
+      "navigator": "en-US"
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "perf_now_resolution": {
+     "id": "perf_now_resolution",
+     "cat": "consistency",
+     "value": {
+      "stepMs": 0.1,
+      "crossOriginIsolated": false
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "native_functions": {
+     "id": "native_functions",
+     "cat": "automation",
+     "value": {
+      "checked": 39,
+      "bad": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "property_order": {
+     "id": "property_order",
+     "cat": "automation",
+     "value": {
+      "navigatorHash": "1ead0d99a53ae9",
+      "windowHash": "3ef69dd8a53f0",
+      "windowCount": 1227,
+      "strays": []
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "has_focus": {
+     "id": "has_focus",
+     "cat": "automation",
+     "value": {
+      "hasFocus": true,
+      "visibility": "visible"
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "iframe_mismatch": {
+     "id": "iframe_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "stack_engine": {
+     "id": "stack_engine",
+     "cat": "consistency",
+     "value": {
+      "engine": "v8",
+      "sample": "Error: lb |     at lbStackSample (http://127.0.0.1:18766/collector.js?s=36ee04a389b7c48a:722:37)"
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "stack_hooked": {
+     "id": "stack_hooked",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "connection": {
+     "id": "connection",
+     "cat": "consistency",
+     "value": {
+      "effectiveType": "4g",
+      "rtt": 100,
+      "downlink": 1.55,
+      "saveData": false
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "os_surface": {
+     "id": "os_surface",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "scrollbar": {
+       "div": 15,
+       "root": 0,
+       "overflows": false,
+       "rootOverflowY": "visible",
+       "bodyOverflowY": "visible"
+      },
+      "apis": {
+       "share": false,
+       "canShare": false,
+       "bluetooth": false,
+       "Bluetooth": false
+      },
+      "fonts": {
+       "base": {
+        "monospace": [
+         824,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ]
+       },
+       "generic": {
+        "system-ui": [
+         995,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "monospace": [
+         824,
+         108
+        ]
+       },
+       "detected": {
+        "Segoe UI": [
+         995,
+         108
+        ],
+        "Helvetica Neue": [
+         995,
+         108
+        ],
+        "DejaVu Sans": [
+         1112,
+         108
+        ],
+        "DejaVu Sans Mono": [
+         824,
+         108
+        ],
+        "Noto Color Emoji": [
+         917,
+         108
+        ],
+        "Liberation Sans": [
+         965,
+         108
+        ],
+        "Liberation Serif": [
+         910,
+         108
+        ],
+        "Liberation Mono": [
+         821,
+         108
+        ],
+        "Arial": [
+         965,
+         108
+        ],
+        "Helvetica": [
+         965,
+         108
+        ],
+        "Times New Roman": [
+         910,
+         108
+        ],
+        "Times": [
+         910,
+         108
+        ],
+        "Courier New": [
+         821,
+         108
+        ],
+        "Inter": [
+         995,
+         108
+        ],
+        "FreeSans": [
+         937,
+         108
+        ],
+        "Carlito": [
+         909,
+         108
+        ]
+       }
+      },
+      "emoji": {
+       "inked": 2826,
+       "colored": 2716
+      },
+      "gl": null,
+      "hw": {
+       "deviceMemory": 16,
+       "hardwareConcurrency": 4
+      },
+      "screen": {
+       "width": 1920,
+       "height": 1080,
+       "availWidth": 1920,
+       "availHeight": 1080,
+       "availLeft": 0,
+       "availTop": 0,
+       "dpr": 1,
+       "screenX": 20,
+       "screenY": 20,
+       "outerWidth": 945,
+       "outerHeight": 1060,
+       "innerWidth": 945,
+       "innerHeight": 917
+      }
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "cdp_runtime": {
+     "id": "cdp_runtime",
+     "cat": "automation",
+     "value": {
+      "errorStackGetter": false,
+      "nodeIdGetter": false
+     },
+     "suspicious": false,
+     "weight": 80
+    },
+    "notification_permission": {
+     "id": "notification_permission",
+     "cat": "consistency",
+     "value": {
+      "notification": "default",
+      "permissions": "prompt"
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "battery": {
+     "id": "battery",
+     "cat": "consistency",
+     "value": {
+      "charging": true,
+      "level": 1,
+      "chargingTime": 0,
+      "dischargingTime": null
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "audio": {
+     "id": "audio",
+     "cat": "fingerprint",
+     "value": {
+      "sum": 124.04347776696522,
+      "hash": "99b43bc461c4e",
+      "stable": true
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "worker_mismatch": {
+     "id": "worker_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "os_media": {
+     "id": "os_media",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "secure": true,
+      "throws": {
+       "canPlayType": null,
+       "mseIsTypeSupported": null,
+       "recorderIsTypeSupported": null,
+       "decodingInfo": null,
+       "getLayoutMap": null,
+       "requestAdapter": null
+      },
+      "present": {
+       "mediaCapabilities": true,
+       "MediaSource": true,
+       "MediaRecorder": true,
+       "keyboard": true,
+       "gpu": true,
+       "speechSynthesis": true
+      },
+      "high": {
+       "architecture": "x86",
+       "bitness": "64",
+       "brands": [
+        {
+         "brand": "Chromium",
+         "version": "153"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8"
+        }
+       ],
+       "formFactors": [
+        "Desktop"
+       ],
+       "fullVersionList": [
+        {
+         "brand": "Chromium",
+         "version": "153.0.8010.12"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8.0.0.0"
+        }
+       ],
+       "mobile": false,
+       "model": "",
+       "platform": "Linux",
+       "platformVersion": "",
+       "wow64": false
+      },
+      "codecs": {
+       "hevcCanPlay": "",
+       "h264": {
+        "supported": true,
+        "powerEfficient": false
+       },
+       "hevc": {
+        "supported": false,
+        "powerEfficient": false
+       }
+      },
+      "keyboardSize": 48,
+      "gpu": {
+       "present": true,
+       "adapter": null
+      },
+      "ms": 37
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "beh_wheel_deltas": {
+     "id": "beh_wheel_deltas",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "pairs": []
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "os_voices": {
+     "id": "os_voices",
+     "cat": "behavior",
+     "value": {
+      "count": 0,
+      "local": 0,
+      "localNames": []
+     },
+     "suspicious": false,
+     "weight": 0
+    }
+   },
+   "trace": []
+  },
+  "40f07d148cf890": {
+   "url": "/login",
+   "seq": 3,
+   "reason": "hidden",
+   "received": 1793711733.0192685,
+   "t": 234,
+   "probes": {
+    "webdriver": {
+     "id": "webdriver",
+     "cat": "automation",
+     "value": false,
+     "suspicious": false,
+     "weight": 90
+    },
+    "webdriver_tamper": {
+     "id": "webdriver_tamper",
+     "cat": "automation",
+     "value": {
+      "reasons": [],
+      "index": 22
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "ua_headless": {
+     "id": "ua_headless",
+     "cat": "automation",
+     "value": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+     "suspicious": false,
+     "weight": 95
+    },
+    "automation_keys": {
+     "id": "automation_keys",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 90
+    },
+    "extra_globals": {
+     "id": "extra_globals",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 30
+    },
+    "chrome_object": {
+     "id": "chrome_object",
+     "cat": "consistency",
+     "value": {
+      "present": true,
+      "keys": [
+       "app",
+       "csi",
+       "loadTimes"
+      ],
+      "runtime": false
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "plugins": {
+     "id": "plugins",
+     "cat": "consistency",
+     "value": {
+      "plugins": 5,
+      "mimeTypes": 2,
+      "names": [
+       "PDF Viewer",
+       "Chrome PDF Viewer",
+       "Chromium PDF Viewer",
+       "Microsoft Edge PDF Viewer",
+       "WebKit built-in PDF"
+      ],
+      "shape": true,
+      "pdfViewerEnabled": true
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "languages": {
+     "id": "languages",
+     "cat": "consistency",
+     "value": {
+      "languages": [
+       "en-US"
+      ],
+      "acceptLanguage": "en-US,en;q=0.9",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "outer_size_zero": {
+     "id": "outer_size_zero",
+     "cat": "automation",
+     "value": {
+      "outerWidth": 945,
+      "outerHeight": 1060,
+      "innerWidth": 945,
+      "innerHeight": 917
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "window_frame_absent": {
+     "id": "window_frame_absent",
+     "cat": "consistency",
+     "value": {
+      "dw": 0,
+      "dh": 143
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "screen_sanity": {
+     "id": "screen_sanity",
+     "cat": "consistency",
+     "value": {
+      "width": 1920,
+      "height": 1080,
+      "availWidth": 1920,
+      "availHeight": 1080,
+      "colorDepth": 24,
+      "dpr": 1,
+      "innerWidth": 945,
+      "innerHeight": 917,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "screen_no_taskbar": {
+     "id": "screen_no_taskbar",
+     "cat": "consistency",
+     "value": {
+      "availHeight": 1080,
+      "height": 1080
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "ua_ch_headless": {
+     "id": "ua_ch_headless",
+     "cat": "automation",
+     "value": {
+      "brands": [
+       "Chromium",
+       "Not_A Brand"
+      ],
+      "header": [
+       "Chromium",
+       "Not_A Brand"
+      ]
+     },
+     "suspicious": false,
+     "weight": 90
+    },
+    "ua_ch_mismatch": {
+     "id": "ua_ch_mismatch",
+     "cat": "consistency",
+     "value": {
+      "brands": [
+       "Chromium;153",
+       "Not_A Brand;8"
+      ],
+      "platform": "Linux",
+      "mobile": false,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "webgl_params": {
+     "id": "webgl_params",
+     "cat": "fingerprint",
+     "value": null,
+     "suspicious": false,
+     "weight": 0
+    },
+    "webgl_software": {
+     "id": "webgl_software",
+     "cat": "fingerprint",
+     "value": {
+      "supported": false
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "webgl_os_mismatch": {
+     "id": "webgl_os_mismatch",
+     "cat": "consistency",
+     "value": null,
+     "suspicious": false,
+     "weight": 50
+    },
+    "canvas": {
+     "id": "canvas",
+     "cat": "fingerprint",
+     "value": {
+      "hash": "1429016680f708",
+      "stable": true,
+      "solidExact": true
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "fonts": {
+     "id": "fonts",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "detected": {
+       "windows": [
+        "Segoe UI",
+        "Calibri",
+        "Cambria",
+        "MS Gothic"
+       ],
+       "mac": [
+        "Helvetica Neue"
+       ],
+       "linux": [
+        "DejaVu Sans",
+        "Liberation Sans",
+        "FreeSans",
+        "Noto Color Emoji"
+       ],
+       "common": [
+        "Arial",
+        "Times New Roman",
+        "Courier New"
+       ]
+      },
+      "hash": "138ce09eeb75ac",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "hardware": {
+     "id": "hardware",
+     "cat": "consistency",
+     "value": {
+      "hardwareConcurrency": 4,
+      "deviceMemory": 16,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "timezone_mismatch": {
+     "id": "timezone_mismatch",
+     "cat": "consistency",
+     "value": {
+      "tz": "UTC",
+      "locale": "en-US",
+      "intlOffset": 0,
+      "dateOffset": 0
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "timezone_utc": {
+     "id": "timezone_utc",
+     "cat": "consistency",
+     "value": "UTC",
+     "suspicious": true,
+     "weight": 10
+    },
+    "locale_mismatch": {
+     "id": "locale_mismatch",
+     "cat": "consistency",
+     "value": {
+      "intl": "en-US",
+      "navigator": "en-US"
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "perf_now_resolution": {
+     "id": "perf_now_resolution",
+     "cat": "consistency",
+     "value": {
+      "stepMs": 0.1,
+      "crossOriginIsolated": false
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "native_functions": {
+     "id": "native_functions",
+     "cat": "automation",
+     "value": {
+      "checked": 39,
+      "bad": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "property_order": {
+     "id": "property_order",
+     "cat": "automation",
+     "value": {
+      "navigatorHash": "1ead0d99a53ae9",
+      "windowHash": "3ef69dd8a53f0",
+      "windowCount": 1227,
+      "strays": []
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "has_focus": {
+     "id": "has_focus",
+     "cat": "automation",
+     "value": {
+      "hasFocus": true,
+      "visibility": "visible"
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "iframe_mismatch": {
+     "id": "iframe_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "stack_engine": {
+     "id": "stack_engine",
+     "cat": "consistency",
+     "value": {
+      "engine": "v8",
+      "sample": "Error: lb |     at lbStackSample (http://127.0.0.1:18766/collector.js?s=36ee04a389b7c48a:722:37)"
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "stack_hooked": {
+     "id": "stack_hooked",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "connection": {
+     "id": "connection",
+     "cat": "consistency",
+     "value": {
+      "effectiveType": "4g",
+      "rtt": 100,
+      "downlink": 1.55,
+      "saveData": false
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "os_surface": {
+     "id": "os_surface",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "scrollbar": {
+       "div": 15,
+       "root": 0,
+       "overflows": false,
+       "rootOverflowY": "visible",
+       "bodyOverflowY": "visible"
+      },
+      "apis": {
+       "share": false,
+       "canShare": false,
+       "bluetooth": false,
+       "Bluetooth": false
+      },
+      "fonts": {
+       "base": {
+        "monospace": [
+         824,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ]
+       },
+       "generic": {
+        "system-ui": [
+         995,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "monospace": [
+         824,
+         108
+        ]
+       },
+       "detected": {
+        "Segoe UI": [
+         995,
+         108
+        ],
+        "Helvetica Neue": [
+         995,
+         108
+        ],
+        "DejaVu Sans": [
+         1112,
+         108
+        ],
+        "DejaVu Sans Mono": [
+         824,
+         108
+        ],
+        "Noto Color Emoji": [
+         917,
+         108
+        ],
+        "Liberation Sans": [
+         965,
+         108
+        ],
+        "Liberation Serif": [
+         910,
+         108
+        ],
+        "Liberation Mono": [
+         821,
+         108
+        ],
+        "Arial": [
+         965,
+         108
+        ],
+        "Helvetica": [
+         965,
+         108
+        ],
+        "Times New Roman": [
+         910,
+         108
+        ],
+        "Times": [
+         910,
+         108
+        ],
+        "Courier New": [
+         821,
+         108
+        ],
+        "Inter": [
+         995,
+         108
+        ],
+        "FreeSans": [
+         937,
+         108
+        ],
+        "Carlito": [
+         909,
+         108
+        ]
+       }
+      },
+      "emoji": {
+       "inked": 2826,
+       "colored": 2716
+      },
+      "gl": null,
+      "hw": {
+       "deviceMemory": 16,
+       "hardwareConcurrency": 4
+      },
+      "screen": {
+       "width": 1920,
+       "height": 1080,
+       "availWidth": 1920,
+       "availHeight": 1080,
+       "availLeft": 0,
+       "availTop": 0,
+       "dpr": 1,
+       "screenX": 20,
+       "screenY": 20,
+       "outerWidth": 945,
+       "outerHeight": 1060,
+       "innerWidth": 945,
+       "innerHeight": 917
+      }
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "cdp_runtime": {
+     "id": "cdp_runtime",
+     "cat": "automation",
+     "value": {
+      "errorStackGetter": false,
+      "nodeIdGetter": false
+     },
+     "suspicious": false,
+     "weight": 80
+    },
+    "notification_permission": {
+     "id": "notification_permission",
+     "cat": "consistency",
+     "value": {
+      "notification": "default",
+      "permissions": "prompt"
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "battery": {
+     "id": "battery",
+     "cat": "consistency",
+     "value": {
+      "charging": true,
+      "level": 1,
+      "chargingTime": 0,
+      "dischargingTime": null
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "audio": {
+     "id": "audio",
+     "cat": "fingerprint",
+     "value": {
+      "sum": 124.04347776696522,
+      "hash": "99b43bc461c4e",
+      "stable": true
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "worker_mismatch": {
+     "id": "worker_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "os_media": {
+     "id": "os_media",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "secure": true,
+      "throws": {
+       "canPlayType": null,
+       "mseIsTypeSupported": null,
+       "recorderIsTypeSupported": null,
+       "decodingInfo": null,
+       "getLayoutMap": null,
+       "requestAdapter": null
+      },
+      "present": {
+       "mediaCapabilities": true,
+       "MediaSource": true,
+       "MediaRecorder": true,
+       "keyboard": true,
+       "gpu": true,
+       "speechSynthesis": true
+      },
+      "high": {
+       "architecture": "x86",
+       "bitness": "64",
+       "brands": [
+        {
+         "brand": "Chromium",
+         "version": "153"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8"
+        }
+       ],
+       "formFactors": [
+        "Desktop"
+       ],
+       "fullVersionList": [
+        {
+         "brand": "Chromium",
+         "version": "153.0.8010.12"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8.0.0.0"
+        }
+       ],
+       "mobile": false,
+       "model": "",
+       "platform": "Linux",
+       "platformVersion": "",
+       "wow64": false
+      },
+      "codecs": {
+       "hevcCanPlay": "",
+       "h264": {
+        "supported": true,
+        "powerEfficient": false
+       },
+       "hevc": {
+        "supported": false,
+        "powerEfficient": false
+       }
+      },
+      "keyboardSize": 48,
+      "gpu": {
+       "present": true,
+       "adapter": null
+      },
+      "ms": 31
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "beh_wheel_deltas": {
+     "id": "beh_wheel_deltas",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "pairs": []
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "os_voices": {
+     "id": "os_voices",
+     "cat": "behavior",
+     "value": {
+      "count": 0,
+      "local": 0,
+      "localNames": []
+     },
+     "suspicious": false,
+     "weight": 0
+    }
+   },
+   "trace": []
+  }
+ },
+ "beacons": 9,
+ "user_agents": [
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+ ],
+ "tls": [],
+ "accept_ch": [
+  "Sec-CH-UA-Platform-Version",
+  "Sec-CH-UA-Arch",
+  "Sec-CH-UA-Bitness",
+  "Sec-CH-UA-Full-Version-List",
+  "Sec-CH-UA-Model",
+  "Sec-CH-UA-WoW64",
+  "Sec-CH-UA-Form-Factors"
+ ],
+ "provenance": {
+  "captured": true,
+  "how": "Chrome for Testing 153.0.8010.12, headed under xvfb-run (1920x1080x24, 96 dpi), started with --remote-debugging-port and driven by run.js T-010 over CDP on loopback; the wheel pairs are XTest notches from tests/fixtures/os/linux_x11_cft153.json.",
+  "limits": "No GPU (SwiftShader WebGL), no window manager, no speech voices, container fonts (Inter).",
+  "tool": "tools/os_truth/bench_fixtures.py"
+ }
+}

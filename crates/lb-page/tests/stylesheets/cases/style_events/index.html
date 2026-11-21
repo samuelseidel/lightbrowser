@@ -1,0 +1,16 @@
+<!doctype html><html><head><!--LOG--><script>var t0;</script>
+<style onload="log('style1 load')" onerror="log('style1 err')">#t{color:red}</style>
+<style onload="log('style2 load')" onerror="log('style2 err')">@import url(slow-a.css);</style>
+<style onload="log('style3 load')" onerror="log('style3 err')">@import url(missing.css);</style>
+<link rel=stylesheet href=imp404.css onload="log('link imp404 load '+this.sheet.cssRules.length+' '+this.sheet.cssRules[0].styleSheet.cssRules.length)" onerror="log('link imp404 err')">
+<link rel=stylesheet href=x.css onload="log('x load')">
+<link rel=stylesheet href=x.css onload="log('x2 load')">
+<link rel=stylesheet href="data:text/css,%23t%7Bfont-size:30px%7D" onload="log('data load '+this.sheet.href)">
+<link rel=stylesheet onload="log('nohref load')" onerror="log('nohref err')">
+<link rel=stylesheet href="" onload="log('empty load')" onerror="log('empty err')">
+<script>t0=document.documentElement;log('script '+C()+' '+S()+' '+getComputedStyle(t0).fontSize)</script>
+</head><body><div id=t></div>
+<script>var s=document.createElement('style');s.onload=function(){log('dyn style load')};s.textContent='#t{color:blue}';document.head.appendChild(s);log('after dyn '+C());
+var s2=document.createElement('style');s2.onload=function(){log('dyn style2 load '+C())};s2.textContent='@import url(slow-b.css);';document.head.appendChild(s2);log('after dyn2 '+C()+' '+document.styleSheets.length);
+</script>
+</body></html>

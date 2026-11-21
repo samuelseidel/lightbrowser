@@ -1,0 +1,33 @@
+<!doctype html><title>transfer</title><!--LOG-->
+<script>
+var w = new Worker('w.js');
+var buf = new Uint8Array([9, 8, 7]).buffer;
+var ch = new MessageChannel();
+log('channel ' + Object.prototype.toString.call(ch) + ' ' + Object.prototype.toString.call(ch.port1) + ' ' + (ch.port1 === ch.port1) + ' keys ' + Object.getOwnPropertyNames(MessagePort.prototype).join());
+ch.port1.onmessage = function (e) { log('port1 got ' + e.data + ' target ' + (e.target === ch.port1) + ' ports ' + e.ports.length); next(); };
+w.postMessage({buf: buf, port: ch.port2}, [buf, ch.port2]);
+log('after transfer ' + buf.byteLength);
+try { ch.port2.postMessage('x'); log('port2 post ok'); } catch (e) { log('port2 ' + e.name); }
+var steps = [
+  function () {
+    try { w.postMessage(function f() {}); } catch (e) { log('fn ' + e.name + ' ' + e.code + ': ' + e.message); }
+    try { w.postMessage(document.body); } catch (e) { log('node ' + e.name + ': ' + e.message); }
+    try { w.postMessage(1, [1]); } catch (e) { log('bad transfer ' + e.name + ': ' + e.message); }
+    try { w.postMessage(buf, [buf]); } catch (e) { log('detached ' + e.name + ': ' + e.message); }
+    var b2 = new ArrayBuffer(2);
+    try { w.postMessage(1, [b2, b2]); } catch (e) { log('dup ' + e.name + ': ' + e.message); }
+    try { w.postMessage(1, {transfer: [b2]}); log('options ok ' + b2.byteLength); } catch (e) { log('options ' + e.name + ': ' + e.message); }
+    var c2 = new MessageChannel();
+    c2.port2.onmessage = function (e) { log('local ' + e.data + ' ' + (e.source === null)); next(); };
+    c2.port1.postMessage('hi');
+  },
+  function () {
+    var c3 = new MessageChannel();
+    c3.port2.addEventListener('message', function (e) { log('not started ' + e.data); });
+    c3.port1.postMessage('queued');
+    setTimeout(function () { log('starting'); c3.port2.start(); setTimeout(function () { c3.port1.close(); c3.port1.postMessage('after close'); setTimeout(end, 100); }, 50); }, 50);
+  },
+];
+var i = 0;
+function next() { if (i < steps.length) steps[i++](); }
+</script>

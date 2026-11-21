@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<title>Shadow</title>
+<h1>Shadow</h1>
+<div id="host1">
+  <template shadowrootmode="open">
+    <h2>In shadow</h2>
+    <p>Before slot <slot></slot> after slot</p>
+    <a href="/in-shadow">shadow link</a>
+  </template>
+  <span>slotted text</span>
+  <b slot="nothing">unassigned light child</b>
+</div>
+<div id="host2"></div>
+<script>
+const r = document.getElementById('host2').attachShadow({mode: 'open'});
+r.innerHTML = '<ul><li><slot name="a">fallback</slot></li><li>second</li></ul>';
+const s = document.createElement('em');
+s.slot = 'a';
+s.textContent = 'named slot';
+document.getElementById('host2').appendChild(s);
+</script>
+<p>After</p>

@@ -1,4 +1,4 @@
-//! Public data is the source of truth for the TCP profiles (ADR 0009).
+//! Public data is the source of truth for the TCP profiles (ADR 0033).
 //!
 //! `profiles/reference/tcp_public.json` holds shares computed from real client
 //! SYNs in a public dataset (`scripts/tcp_public_reference.py`). Every trait a

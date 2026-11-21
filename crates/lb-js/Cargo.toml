@@ -6,9 +6,29 @@ license.workspace = true
 publish = false
 
 [features]
-# Exactly one engine per binary. The real `v8` / `mozjs` deps arrive in M2 / M4b.
-chrome = []
+# Exactly one engine per binary. `mozjs` (SpiderMonkey) arrives in M4b.
+# Dependents use `default-features = false` and forward the family feature.
+default = ["chrome"]
+chrome = ["dep:v8", "dep:zstd", "dep:libc"]
 firefox = []
 
 [dependencies]
 lb-persona = { path = "../lb-persona" }
+# rusty_v8. Downloads a prebuilt static library at build time (cache it in CI).
+v8 = { version = "=152.2.0", optional = true }
+# Decompresses the ICU data (`icu/`, ADR 0013). lb-net links it anyway.
+zstd = { version = "0.13", optional = true, default-features = false }
+# `madvise` to drop the compressed ICU pages once they are decompressed.
+libc = { version = "0.2", optional = true }
+# `import.meta.resolve` (module specifier resolution).
+url = "2"
+
+# Rewrites `icu/icudt78.dat.zst` from the prebuilt V8 archive (ADR 0013).
+[[example]]
+name = "icu_pack"
+required-features = ["chrome"]
+
+# Binary-size floor of linking V8 (M6, ADR 0013).
+[[example]]
+name = "v8_floor"
+required-features = ["chrome"]

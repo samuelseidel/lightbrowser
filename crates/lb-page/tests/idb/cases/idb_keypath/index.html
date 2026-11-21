@@ -1,0 +1,63 @@
+<!doctype html><!--LOG--><script>
+(async function(){
+  await fresh('kp');
+  var r = indexedDB.open('kp', 1);
+  r.onupgradeneeded = function(){
+    var db = r.result;
+    var specs = [['a', {keyPath:'a.b'}], ['b', {keyPath:['x','y.z']}], ['c', {keyPath:''}], ['d', {autoIncrement:true}], ['e', {keyPath:'id', autoIncrement:true}], ['f', {keyPath:'length'}], ['g', {keyPath:null}], ['h', {keyPath:undefined}]];
+    specs.forEach(function(s){ t('create '+s[0], function(){var st=db.createObjectStore(s[0], s[1]); var kp=st.keyPath; return show(kp)+' same='+(kp===st.keyPath)+' auto='+st.autoIncrement}); });
+    var badSpecs = [{keyPath:'a b'}, {keyPath:'1a'}, {keyPath:'a.'}, {keyPath:'a..b'}, {keyPath:['a', '']}, {keyPath:[]}, {keyPath:'', autoIncrement:true}, {keyPath:['a'], autoIncrement:true}, {keyPath:'a.b c'}, {keyPath:'été'}, {keyPath:'$_x.y1'}, {keyPath:{toString:function(){return 'q'}}}];
+    badSpecs.forEach(function(s, i){ t('bad '+i, function(){var st=db.createObjectStore('bad'+i, s); return 'ok '+show(st.keyPath)}); });
+  };
+  var db = await req(r);
+  var tx = db.transaction(['a','b','c','d','e','f','g'], 'readwrite');
+  var out = [];
+  function p(name, f){ try { var q = f(); q.onsuccess = function(){out.push(name+' -> '+show(q.result))}; q.onerror = function(e){e.preventDefault(); out.push(name+' error '+q.error.name+': '+q.error.message)}; } catch(e) { out.push(name+' threw '+err(e)); } }
+  p('a put', function(){return tx.objectStore('a').put({a:{b:7}})});
+  p('a put nested missing', function(){return tx.objectStore('a').put({a:5})});
+  p('a put explicit', function(){return tx.objectStore('a').put({a:{b:1}}, 1)});
+  p('a put bad key', function(){return tx.objectStore('a').put({a:{b:{}}})});
+  p('b put', function(){return tx.objectStore('b').put({x:1, y:{z:'q'}})});
+  p('b put missing', function(){return tx.objectStore('b').put({x:1})});
+  p('c put', function(){return tx.objectStore('c').put('str')});
+  p('c put obj', function(){return tx.objectStore('c').put({})});
+  p('d put', function(){return tx.objectStore('d').put('v1')});
+  p('d put', function(){return tx.objectStore('d').put('v2')});
+  p('d put 10', function(){return tx.objectStore('d').put('v3', 10)});
+  p('d put', function(){return tx.objectStore('d').put('v4')});
+  p('d put 4.5', function(){return tx.objectStore('d').put('v5', 4.5)});
+  p('d put str', function(){return tx.objectStore('d').put('v6', 'k')});
+  p('d put', function(){return tx.objectStore('d').put('v7')});
+  p('d put -5', function(){return tx.objectStore('d').put('v8', -5)});
+  p('d put', function(){return tx.objectStore('d').put('v9')});
+  p('d getAllKeys', function(){return tx.objectStore('d').getAllKeys()});
+  p('e put', function(){return tx.objectStore('e').put({v:1})});
+  p('e put keyed', function(){return tx.objectStore('e').put({v:2, id:20})});
+  p('e put', function(){return tx.objectStore('e').put({v:3})});
+  p('e get', function(){return tx.objectStore('e').getAll()});
+  p('e put prim', function(){return tx.objectStore('e').put(5)});
+  p('e put nested', function(){return tx.objectStore('e').put({v:{}}, 3)});
+  p('f put', function(){return tx.objectStore('f').put('hello')});
+  p('f put arr', function(){return tx.objectStore('f').put([1,2,3])});
+  p('f put obj', function(){return tx.objectStore('f').put({length:'L'})});
+  p('g put no key', function(){return tx.objectStore('g').put('x')});
+  p('g put key', function(){return tx.objectStore('g').put('x', [1])});
+  p('a explicit+path', function(){return tx.objectStore('a').add({a:{b:2}}, 2)});
+  p('a getAll', function(){return tx.objectStore('a').getAll()});
+  p('b getAllKeys', function(){return tx.objectStore('b').getAllKeys()});
+  await done(tx).then(function(x){out.push(x)}, function(x){out.push('aborted '+err(x))});
+  out.forEach(log);
+  // key generator max
+  var tx2 = db.transaction('d', 'readwrite');
+  var s = tx2.objectStore('d');
+  var o = [];
+  s.put('big', 9007199254740992).onsuccess = function(e){o.push('big '+e.target.result)};
+  var q = s.put('after');
+  q.onsuccess = function(e){o.push('after '+e.target.result)};
+  q.onerror = function(e){e.preventDefault(); o.push('after error '+q.error.name+': '+q.error.message)};
+  await done(tx2).then(function(x){o.push(x)}, function(x){o.push('aborted '+err(x))});
+  o.forEach(log);
+  db.close();
+  end();
+})();
+</script>

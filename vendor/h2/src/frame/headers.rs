@@ -265,6 +265,12 @@ impl Headers {
         self.flags.is_end_stream()
     }
 
+    /// Priority block for this request's HEADERS frame (LIGHTBROWSER
+    /// patch). Takes precedence over the codec-wide one.
+    pub(crate) fn set_stream_dep(&mut self, dep: StreamDependency) {
+        self.stream_dep = Some(dep);
+    }
+
     pub fn set_end_stream(&mut self) {
         self.flags.set_end_stream()
     }
@@ -323,7 +329,10 @@ impl Headers {
         // At this point, the `is_end_headers` flag should always be set
         debug_assert!(self.flags.is_end_headers());
 
-        let priority = priority.filter(|_| self.header_block.pseudo.method.is_some());
+        let priority = self
+            .stream_dep
+            .or(priority)
+            .filter(|_| self.header_block.pseudo.method.is_some());
 
         // Get the HEADERS frame head
         let mut head = self.head();

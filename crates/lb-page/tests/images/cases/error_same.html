@@ -1,0 +1,9 @@
+<!doctype html><html><head><!--LOG--></head><body>
+<img id=m1 src="missing.png" onerror="log('error m1 '+this.complete)">
+<img id=m2 src="missing.png" onerror="log('error m2 '+this.complete)">
+<script>
+addEventListener('load',function(){setTimeout(function(){
+  var n=W(new Image(),'late');n.src='missing.png';log('late set complete='+n.complete);
+},50)});
+</script>
+</body></html>

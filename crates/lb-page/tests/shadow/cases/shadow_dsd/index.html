@@ -1,0 +1,26 @@
+<!doctype html><!--LOG--><body>
+<div id=o><template shadowrootmode=open shadowrootdelegatesfocus shadowrootclonable shadowrootserializable><p>open</p><script>log('script in dsd ' + d(document.currentScript.getRootNode()));</script><slot></slot></template><span>light</span></div>
+<div id=c><template shadowrootmode=closed><p>closed</p></template></div>
+<div id=two><template shadowrootmode=open><i>first</i></template><template shadowrootmode=open><i>second</i></template></div>
+<button id=btn><template shadowrootmode=open><i>nope</i></template></button>
+<div id=bad><template shadowrootmode=bogus><i>bogus</i></template></div>
+<div id=nest><template shadowrootmode=open><div id=inner><template shadowrootmode=open><b>deep</b></template></div></template></div>
+<div id=re><template shadowrootmode=open><i>declarative</i></template></div>
+<script>
+var o = document.getElementById('o'), c = document.getElementById('c');
+t('open', () => [o.shadowRoot.mode, o.shadowRoot.delegatesFocus, o.shadowRoot.clonable, o.shadowRoot.serializable, o.shadowRoot.innerHTML, o.innerHTML, o.children.length].join('|'));
+t('closed', () => [c.shadowRoot, c.innerHTML, c.childNodes.length].join('|'));
+t('two', () => { var x = document.getElementById('two'); return [x.shadowRoot.innerHTML, x.innerHTML].join('|'); });
+t('button', () => { var x = document.getElementById('btn'); return [x.shadowRoot, x.innerHTML, x.firstElementChild && x.firstElementChild.content.childNodes.length, x.firstElementChild && x.firstElementChild.getAttribute('shadowrootmode'), x.firstElementChild && x.firstElementChild.shadowRootMode].join('|'); });
+t('bogus', () => { var x = document.getElementById('bad'); return [x.shadowRoot, x.innerHTML].join('|'); });
+t('nested', () => { var x = document.getElementById('nest'); var i = x.shadowRoot.getElementById('inner'); return [i.shadowRoot.innerHTML, x.getHTML({ serializableShadowRoots: true }), x.getHTML({ shadowRoots: [x.shadowRoot, i.shadowRoot] })].join('|'); });
+t('reattach', () => { var x = document.getElementById('re'); var s0 = x.shadowRoot; var s1 = x.attachShadow({ mode: 'open' }); return [s0 === s1, s1.innerHTML, s1.childNodes.length].join(); });
+t('reattach again', () => document.getElementById('re').attachShadow({ mode: 'open' }));
+t('template prop', () => { var tp = document.createElement('template'); tp.shadowRootMode = 'open'; return [tp.getAttribute('shadowrootmode'), tp.shadowRootMode, tp.shadowRootDelegatesFocus, tp.shadowRootClonable, tp.shadowRootSerializable].join(); });
+t('clone', () => { var k = o.cloneNode(true); return [k.shadowRoot && k.shadowRoot.innerHTML.length, k.innerHTML].join('|'); });
+t('outerHTML', () => o.outerHTML);
+t('DOMParser', () => { var doc = new DOMParser().parseFromString('<div id=q><template shadowrootmode=open><em>x</em></template></div>', 'text/html'); var q = doc.getElementById('q'); return [q.shadowRoot, q.innerHTML].join('|'); });
+document.write('<div id=dw><template shadowrootmode=open><em>written</em></template></div>');
+t('document.write', () => { var x = document.getElementById('dw'); return [x.shadowRoot && x.shadowRoot.innerHTML, x.innerHTML].join('|'); });
+end();
+</script>

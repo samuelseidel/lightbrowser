@@ -1,0 +1,32 @@
+<!doctype html><html><head><title>timeline</title><link rel=stylesheet href=s.css></head><body>
+<img src=i.png>
+<!--LOG-->
+<script>
+addEventListener('load',async function(){
+  await sleep(300);
+  performance.mark('m1');performance.mark('m2',{startTime:1});performance.measure('me',{start:0.5,end:2});
+  var all=performance.getEntries();
+  log('sorted '+all.every(function(e,i){return i==0||all[i-1].startTime<=e.startTime}));
+  var counts={};all.forEach(function(e){counts[e.entryType]=(counts[e.entryType]||0)+1});
+  log('types '+Object.keys(counts).sort().map(function(k){return k+'='+counts[k]}).join(' ').replace(/resource=\d+/,'resource=N'));
+  log('byType '+['navigation','resource','mark','measure','paint','visibility-state','layout-shift','longtask','largest-contentful-paint','first-input','event','element','long-animation-frame','bogus'].map(function(k){return k+':'+performance.getEntriesByType(k).length}).join(' ').replace(/resource:\d+/,'resource:N'));
+  log('first entries '+all.slice(0,3).map(function(e){return e.entryType+':'+short(e.name)}).join());
+  log('resource order '+performance.getEntriesByType('resource').filter(function(e){return !/favicon/.test(e.name)}).map(function(e){return short(e.name)}).join());
+  t('PerformanceEntry ctor',function(){return new PerformanceEntry()});
+  t('PerformanceResourceTiming ctor',function(){return new PerformanceResourceTiming()});
+  t('PerformanceNavigationTiming ctor',function(){return new PerformanceNavigationTiming()});
+  t('PerformanceMeasure ctor',function(){return new PerformanceMeasure()});
+  t('PerformancePaintTiming ctor',function(){return new PerformancePaintTiming()});
+  t('PerformanceServerTiming ctor',function(){return new PerformanceServerTiming()});
+  t('Performance ctor',function(){return new Performance()});
+  log('performance '+[Object.prototype.toString.call(performance),performance instanceof EventTarget,performance===window.performance,typeof performance.onresourcetimingbufferfull,performance.onresourcetimingbufferfull,Object.keys(performance.toJSON()).join(),typeof performance.eventCounts,Object.prototype.toString.call(performance.eventCounts),typeof performance.interactionCount,typeof performance.memory].join(' | '));
+  log('timeOrigin '+[typeof performance.timeOrigin,performance.timeOrigin===performance.timeOrigin,Math.abs(performance.timeOrigin+performance.now()-Date.now())<50].join());
+  t('illegal invocation',function(){return Performance.prototype.getEntries.call({})});
+  t('illegal invocation 2',function(){return Object.getOwnPropertyDescriptor(PerformanceEntry.prototype,'name').get.call({})});
+  var ent=performance.getEntriesByType('resource')[0];
+  log('props '+Object.getOwnPropertyNames(PerformanceEntry.prototype).join()+' | '+Object.getOwnPropertyNames(PerformanceMark.prototype).join());
+  log('entry ctor '+(ent.constructor===PerformanceResourceTiming)+' '+Object.prototype.toString.call(ent)+' '+typeof ent.toJSON);
+  t('getEntries args',function(){return performance.getEntries(1,2).length>0});
+  end();
+});
+</script></body></html>

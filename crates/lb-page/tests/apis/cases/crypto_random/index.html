@@ -1,0 +1,36 @@
+<!doctype html><!--LOG--><script>
+t('typeof', () => typeof crypto + ' ' + Object.prototype.toString.call(crypto) + ' ' + (crypto === self.crypto) + ' ' + (crypto instanceof Crypto));
+t('subtle', () => Object.prototype.toString.call(crypto.subtle) + ' ' + (crypto.subtle === crypto.subtle) + ' ' + (crypto.subtle instanceof SubtleCrypto));
+t('desc', () => { var d = Object.getOwnPropertyDescriptor(Window.prototype, 'crypto') || Object.getOwnPropertyDescriptor(window, 'crypto'); return typeof d.get + ' ' + d.enumerable + ' ' + d.configurable; });
+t('new Crypto', () => new Crypto());
+t('new SubtleCrypto', () => new SubtleCrypto());
+t('new CryptoKey', () => new CryptoKey());
+t('u8', () => { var a = new Uint8Array(16); var r = crypto.getRandomValues(a); return (r === a) + ' ' + a.length + ' ' + a.some(x => x != 0); });
+for (const T of [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, BigInt64Array, BigUint64Array, Float16Array, Float32Array, Float64Array, DataView])
+  t('type ' + T.name, () => { var a = T === DataView ? new DataView(new ArrayBuffer(8)) : new T(4); return crypto.getRandomValues(a) === a; });
+t('65536', () => crypto.getRandomValues(new Uint8Array(65536)).length);
+t('65537', () => crypto.getRandomValues(new Uint8Array(65537)).length);
+t('u32 16385', () => crypto.getRandomValues(new Uint32Array(16385)).length);
+t('none', () => crypto.getRandomValues());
+t('null', () => crypto.getRandomValues(null));
+t('array', () => crypto.getRandomValues([1, 2]));
+t('buffer', () => crypto.getRandomValues(new ArrayBuffer(4)));
+t('empty', () => crypto.getRandomValues(new Uint8Array(0)).length);
+t('detached this', () => Crypto.prototype.getRandomValues.call({}, new Uint8Array(1)));
+t('offset view', () => { var b = new Uint8Array(8); var v = new Uint8Array(b.buffer, 4, 2); crypto.getRandomValues(v); return b[0] + b[1] + b[2] + b[3] + b[6] + b[7]; });
+t('uuid', () => { var u = crypto.randomUUID(); return u.length + ' ' + /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(u) + ' ' + (u != crypto.randomUUID()); });
+t('uuid this', () => Crypto.prototype.randomUUID.call(1));
+t('proto', () => Object.getOwnPropertyNames(Crypto.prototype).join(','));
+t('subtle proto', () => Object.getOwnPropertyNames(SubtleCrypto.prototype).join(','));
+t('key proto', () => Object.getOwnPropertyNames(CryptoKey.prototype).join(','));
+t('lengths', () => [crypto.getRandomValues.length, crypto.randomUUID.length, crypto.subtle.digest.length, crypto.subtle.importKey.length, crypto.subtle.deriveBits.length].join(','));
+var w = new Worker(URL.createObjectURL(new Blob([`
+  var o = [];
+  o.push(typeof crypto + ' ' + (crypto instanceof Crypto) + ' ' + Object.prototype.toString.call(crypto.subtle));
+  o.push(crypto.getRandomValues(new Uint8Array(8)).length);
+  o.push(crypto.randomUUID().length);
+  try { crypto.getRandomValues(new Float64Array(1)); } catch (e) { o.push(e.name + ': ' + e.message); }
+  crypto.subtle.digest('SHA-256', new TextEncoder().encode('abc')).then(d => { o.push(Array.from(new Uint8Array(d)).map(x => x.toString(16).padStart(2, '0')).join('')); postMessage(o.join('|')); });
+`], { type: 'text/javascript' })));
+w.onmessage = e => { log('worker: ' + e.data); end(); };
+</script>

@@ -1,0 +1,18 @@
+{
+  "url": "http://{HOST}/no_h1.html",
+  "final_url": "http://{HOST}/no_h1.html",
+  "status": 200,
+  "title": "Title with *stars* & more",
+  "lang": null,
+  "description": null,
+  "canonical": null,
+  "headings": [
+    {
+      "level": 2,
+      "text": "Only h2"
+    }
+  ],
+  "links": [],
+  "text": "Only h2\nAnother hidden h1\nBody",
+  "markdown": "# Title with \\*stars\\* & more\n\n## Only h2\n\nBody\n"
+}

@@ -12,9 +12,51 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0004](0004-lazy-layout.md) | Lazy style and layout, CPU canvas, no painting by default | Accepted (2026-11-02) |
 | [0005](0005-cdp.md) | CDP as the control API for both families | Accepted (2026-11-02) |
 | [0006](0006-browser-families.md) | Two browser families, one binary per family | Accepted (2026-11-02) |
-| [0007](0007-tcp-stack-fingerprint.md) | TCP/IP stack fingerprint: socket options plus a netfilter shim | Accepted (2026-11-03) |
-| [0008](0008-whole-connection-tcp-shaping.md) | Shape the whole connection, not only the SYN | Accepted (2026-11-03) |
-| [0009](0009-public-data-source-of-truth.md) | Public data is the source of truth for TCP profiles | Accepted (2026-11-03) |
+| [0007](0007-local-detection-bench.md) | Our own local detection bench is "our detection engine" | Accepted (2026-11-03) |
+| [0008](0008-host-object-model.md) | Host objects are `(kind, id)` pairs with a per-realm wrapper cache | Accepted (2026-11-03); node refs and node wrappers superseded by 0017 |
+| [0009](0009-cdp-isolated-worlds-and-emulation.md) | CDP bindings only in isolated worlds; Emulation must match the persona | Accepted (2026-11-03) |
+| [0010](0010-own-box-tree-and-font-tables.md) | Our own box tree over taffy, and font metric tables compiled in | Accepted (2026-11-03) |
+| [0011](0011-per-destination-headers.md) | Request headers per destination, captured from local Chromium | Accepted (2026-11-03) |
+| [0012](0012-frames-as-realms.md) | Frames are realms in the page's engine, built on the spot (`RealmOps`) | Accepted (2026-11-03); cross-frame gaps closed by 0017 |
+| [0013](0013-startup-snapshot-and-size-budget.md) | V8 startup snapshot made in memory; binary budget follows the V8 floor | Accepted (2026-11-03) |
+| [0014](0014-on-demand-page-screenshots.md) | Page screenshots painted on demand from the layout | Accepted (2026-11-03); scope extended by 0020 |
+| [0015](0015-os-personas.md) | OS personas: one OS axis, read through accessors | Accepted (2026-11-03) |
+| [0016](0016-lazy-interface-objects.md) | Lazy interfaces and interface objects; hot code packed at link time | Accepted (2026-11-03) |
+| [0017](0017-cross-document-nodes-and-detached-frames.md) | Nodes carry their document; one node wrapper per world; removed frames stay usable | Accepted (2026-11-03) |
+| [0018](0018-connection-reuse.md) | Connection reuse as Chrome does it: per-context pool, HTTP/1.1 keep-alive, one HTTP/2 session per group, TLS resumption, network thread | Accepted (2026-11-04) |
+| [0019](0019-style-sheet-loading-and-cssom.md) | Style sheets load as Chrome loads them: script- and parser-blocking sheets, `@import`, CSSOM | Accepted (2026-11-04) |
+| [0020](0020-css-background-images-and-box-decorations.md) | CSS background images load like Chrome's; screenshots paint backgrounds, radius and shadows | Accepted (2026-11-04) |
+| [0021](0021-workers.md) | Dedicated and shared workers on their own threads and isolates; worker globals from a Chrome capture; V8 structured clone, message ports | Accepted (2026-11-04) |
+| [0022](0022-service-workers.md) | Service workers and the Cache API, in memory per context: registry and jobs in the page layer, versions as workers, fetch interception, clients | Accepted (2026-11-04) |
+| [0023](0023-spare-realms-and-realm-cost.md) | Cheaper window realms (per-interface plans, engine extras deleted by name) and spare realms made while the worker waits; one matching context per element with a selector pre-check | Accepted (2026-11-04) |
+| [0024](0024-image-reuse-within-a-document.md) | Images reused within a document as Blink does: one request per URL in flight, the list of available images, current image kept while a new source loads | Accepted (2026-11-04) |
+| [0030](0030-software-webgl.md) | Software WebGL in `lb-gl`: own GLSL ES 1.00/3.00 compiler with ANGLE's messages, a 16-lane interpreter, the rasterizer with multisampling, depth, stencil, blending, textures and framebuffers | Accepted (2026-11-04) |
+| [0029](0029-workers-as-cdp-targets.md) | Workers as CDP targets (auto-attach with `waitForDebuggerOnStart`, Runtime on the worker thread, console, errors, Network, `Inspector.workerScriptLoaded`), `fromServiceWorker`, idle service workers stopped after 30 s unless a CDP session is attached |
+| [0028](0028-indexeddb.md) | IndexedDB in memory per browser context and origin: one `Send` backend (connections, open/delete queue, scheduling, rollback copies), replies as window tasks in backend order, activation until the next task boundary and auto-commit, Chrome's checks and texts |
+| [0027](0027-proxies.md) | Proxies per browser context: HTTP `CONNECT` tunnels (direct ClientHello/H2), forward requests with Chrome's headers, SOCKS5 with remote DNS, Chrome's `407` round (configured credentials or CDP `Fetch.authRequired`), Chrome's bypass rules; Chrome's header set for non-trustworthy `http:` destinations |
+| [0026](0026-shadow-dom-and-custom-elements.md) | Shadow roots as arena nodes of the host's document, slot assignment on demand, flat tree for style/layout/hit testing, Chrome's event retargeting and `slotchange` timing; custom elements with reactions derived from mutation records, the parser pausing at possible custom elements, customized built-ins and form-associated elements |
+| [0025](0025-web-crypto-websocket-dynamic-import-sync-xhr.md) | Web Crypto on BoringSSL (Blink's normalization, Chromium's status texts, OS randomness), WebSocket through lb-net's own client (Chrome's handshake, http/1.1-only ClientHello), dynamic `import()` sharing the module map, `blob:`/`data:` in `fetch()`/XHR, synchronous XHR |
+| [0031](0031-tcp-stack-fingerprint.md) | TCP/IP stack fingerprint: socket options plus a netfilter shim | Accepted (2026-11-03) |
+| [0032](0032-whole-connection-tcp-shaping.md) | Shape the whole connection, not only the SYN | Accepted (2026-11-03) |
+| [0033](0033-public-data-source-of-truth.md) | Public data is the source of truth for TCP profiles | Accepted (2026-11-03) |
+| [0034](0034-console-side-effects.md) | Console calls run the page code Chrome runs, and no other | Accepted (2026-11-07) |
+| [0035](0035-worker-threads-on-demand.md) | Page worker threads start on demand | Accepted (2026-11-07) |
+| [0036](0036-javascript-dialogs.md) | JavaScript dialogs wait on the page's worker for the CDP client | Accepted (2026-11-07) |
+| [0037](0037-playwright-uploads-permissions-dnd-pdf.md) | File uploads, permissions, geolocation, drag and drop and PDF for Playwright | Accepted (2026-11-07) |
+| [0038](0038-v8-foreground-tasks.md) | V8's foreground tasks run on the isolate's own thread | Accepted (2026-11-07) |
+| [0039](0039-kept-compiled-scripts.md) | Compiled classic scripts are kept per engine and partition | Accepted (2026-11-07) |
+| [0041](0041-detection-test-acceptance.md) | Internal detection tests define acceptance; comparisons are informational | Accepted (2026-11-19) |
+| [0042](0042-human-input-dispatch-gaps.md) | Preserve human input gaps under load | Accepted (2026-11-20) |
+| [0043](0043-detector-rules-wave-2.md) | Detector rules wave 2: Referer/Fetch-Metadata consistency, declared agents (RFC 9421), fleet and path repetition, worker measurement, font over-claim, WebRTC info probe | Accepted (2026-11-07) |
+| [0044](0044-egress-policy.md) | Egress policy at the transport (`--egress loopback`, `--allow-host`): the internal-use rule in code, open by default | Accepted (2026-11-07) |
+| [0045](0045-cdp-coverage.md) | CDP coverage for stock clients: session history, `Page.navigate` referrer, Audits and other missing methods, raw CDP replay against Chrome | Accepted (2026-11-07) |
+| [0046](0046-performance-timeline.md) | Performance Timeline (navigation, resource, paint, user timing, observers) from the loader's own measurements | Accepted (2026-11-07) |
+| [0047](0047-web-platform-small-items.md) | History rate limit, pointer events (coalesced, `sourceCapabilities`, `pointerrawupdate`), StorageManager, speech synthesis events | Accepted (2026-11-07) |
+| [0048](0048-serve-limits-and-shutdown.md) | `serve` and `mcp` as long-lived services: connection, page and queue limits, `/json/new` needs PUT, signals with a hard deadline, `--log`, panic hook | Accepted (2026-11-16) |
+| [0049](0049-network-input-limits.md) | Network input limits: decoder caps, WebSocket message cap, timeouts | Accepted (2026-11-16) |
+| [0050](0050-depth-limits.md) | Depth limits: layout, CDP trees, the shader compiler and page stacks | Accepted (2026-11-16) |
+| [0051](0051-mcp-server.md) | `lightbrowser mcp`: MCP server over stdio, driven through an in-process CDP connection; loopback-only by default (egress policy, `--allow-host`) | Accepted (2026-11-07). Renumbered from 0041 on 2026-11-21 |
+| [0052](0052-extract-dumps.md) | `fetch --dump markdown \| links \| json` from the post-script DOM and computed style | Accepted (2026-11-07). Renumbered from 0042 on 2026-11-21 |
 
 ## Adding an ADR
 

@@ -1,0 +1,31 @@
+<!doctype html><!--LOG--><script>
+// The budget: calls of pushState until one is ignored, and what else is
+// ignored once it is used up. An ignored call does nothing and says
+// nothing to the page (a console warning is the only trace). Success is
+// read from history.state, as history.length stops at 50 entries.
+var n = 0, first = 0;
+function push() { var s = ++n; history.pushState(s, '', '#s' + s); return history.state === s; }
+for (var i = 1; i <= 250; i++) if (!push() && !first) first = i;
+log('first ignored pushState: ' + first);
+log('length ' + history.length + ' state ' + history.state + ' hash ' + location.hash);
+history.replaceState('r', '', '#replaced');
+log('replaceState: state ' + history.state + ' hash ' + location.hash);
+location.hash = '#viahash';
+log('hash assignment: ' + location.hash);
+location.href = '#viahref';
+log('href to a fragment: ' + location.hash);
+location.assign('#viaassign');
+log('assign to a fragment: ' + location.hash);
+location.replace('#viareplace');
+log('replace with a fragment: ' + location.hash);
+var pops = [];
+addEventListener('popstate', function (e) { pops.push(String(e.state)); });
+history.back();
+history.go(-1);
+history.forward();
+setTimeout(function () {
+  log('popstates after back, go, forward: ' + pops.length);
+  log('final state ' + history.state + ' hash ' + location.hash);
+  end();
+}, 500);
+</script>

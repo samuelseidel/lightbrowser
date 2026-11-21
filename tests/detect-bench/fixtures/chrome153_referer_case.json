@@ -1,0 +1,2906 @@
+{
+ "sid": "fedfad28cf166c1f",
+ "created": 1794076398.7627954,
+ "documents": [
+  {
+   "t": 1794076398.7627974,
+   "path": "/shop",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding"
+   ],
+   "headers": {
+    "host": "127.0.0.1:19200",
+    "connection": "keep-alive",
+    "sec-ch-ua": "\"Chromium\";v=\"153\", \"Not_A Brand\";v=\"8\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "accept-language": "en-US,en;q=0.9",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-fetch-site": "none",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "referer": "http://127.0.0.1:1/elsewhere",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": false,
+   "scheme": "http",
+   "referer": "http://127.0.0.1:1/elsewhere",
+   "origin": null,
+   "sec_fetch_site": "none",
+   "sec_fetch_mode": "navigate",
+   "sec_fetch_dest": "document",
+   "sec_fetch_user": "?1"
+  },
+  {
+   "t": 1794076398.7652936,
+   "path": "/shop",
+   "method": "GET",
+   "http_version": "HTTP/1.1",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Accept-Language",
+    "Upgrade-Insecure-Requests",
+    "User-Agent",
+    "Accept",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-arch",
+    "sec-ch-ua-platform",
+    "sec-ch-ua-platform-version",
+    "sec-ch-ua-model",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-form-factors",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-User",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "headers": {
+    "host": "127.0.0.1:19200",
+    "connection": "keep-alive",
+    "accept-language": "en-US,en;q=0.9",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "sec-ch-ua": "\"Chromium\";v=\"153\", \"Not_A Brand\";v=\"8\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-arch": "\"x86\"",
+    "sec-ch-ua-platform": "\"Linux\"",
+    "sec-ch-ua-platform-version": "\"\"",
+    "sec-ch-ua-model": "\"\"",
+    "sec-ch-ua-bitness": "\"64\"",
+    "sec-ch-ua-wow64": "?0",
+    "sec-ch-ua-full-version-list": "\"Chromium\";v=\"153.0.8010.12\", \"Not_A Brand\";v=\"8.0.0.0\"",
+    "sec-ch-ua-form-factors": "\"Desktop\"",
+    "sec-fetch-site": "none",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "referer": "http://127.0.0.1:1/elsewhere",
+    "accept-encoding": "gzip, deflate, br, zstd"
+   },
+   "cookie": true,
+   "scheme": "http",
+   "referer": "http://127.0.0.1:1/elsewhere",
+   "origin": null,
+   "sec_fetch_site": "none",
+   "sec_fetch_mode": "navigate",
+   "sec_fetch_dest": "document",
+   "sec_fetch_user": "?1"
+  }
+ ],
+ "requests": [
+  {
+   "t": 1794076398.8088963,
+   "path": "/static/style.css",
+   "kind": "css",
+   "since_doc_ms": 43.6,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "style",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8096323,
+   "path": "/img/p0.svg",
+   "kind": "img",
+   "since_doc_ms": 44.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8102605,
+   "path": "/img/p1.svg",
+   "kind": "img",
+   "since_doc_ms": 45,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8105152,
+   "path": "/collector.js",
+   "kind": "js",
+   "since_doc_ms": 45.2,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "script",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8121138,
+   "path": "/img/p2.svg",
+   "kind": "img",
+   "since_doc_ms": 46.8,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8122544,
+   "path": "/img/p3.svg",
+   "kind": "img",
+   "since_doc_ms": 47,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.813182,
+   "path": "/img/p4.svg",
+   "kind": "img",
+   "since_doc_ms": 47.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8133125,
+   "path": "/static/app.js",
+   "kind": "js",
+   "since_doc_ms": 48,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "script",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8143132,
+   "path": "/img/p5.svg",
+   "kind": "img",
+   "since_doc_ms": 49,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8144348,
+   "path": "/img/p6.svg",
+   "kind": "img",
+   "since_doc_ms": 49.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8145645,
+   "path": "/img/p7.svg",
+   "kind": "img",
+   "since_doc_ms": 49.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8508224,
+   "path": "/img/p8.svg",
+   "kind": "img",
+   "since_doc_ms": 85.5,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8545458,
+   "path": "/img/p9.svg",
+   "kind": "img",
+   "since_doc_ms": 89.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8562684,
+   "path": "/img/p10.svg",
+   "kind": "img",
+   "since_doc_ms": 91,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.8565745,
+   "path": "/img/p11.svg",
+   "kind": "img",
+   "since_doc_ms": 91.3,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.9402113,
+   "path": "/static/sw_nav.js",
+   "kind": "js",
+   "since_doc_ms": 174.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Cache-Control",
+    "Accept",
+    "Service-Worker",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "User-Agent",
+    "Accept-Encoding",
+    "Accept-Language",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "same-origin",
+   "sec_fetch_dest": "serviceworker",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.9877267,
+   "path": "/favicon.ico",
+   "kind": "favicon",
+   "since_doc_ms": 222.4,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": null,
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "no-cors",
+   "sec_fetch_dest": "image",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076398.9943438,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 229.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": "http://127.0.0.1:19200",
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "cors",
+   "sec_fetch_dest": "empty",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076399.112386,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 347.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": "http://127.0.0.1:19200",
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "cors",
+   "sec_fetch_dest": "empty",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076401.9853654,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 3220.1,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": "http://127.0.0.1:19200",
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "cors",
+   "sec_fetch_dest": "empty",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076403.0002334,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 4234.9,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": "http://127.0.0.1:19200",
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "cors",
+   "sec_fetch_dest": "empty",
+   "sec_fetch_user": null
+  },
+  {
+   "t": 1794076403.0028958,
+   "path": "/api/report",
+   "kind": "beacon",
+   "since_doc_ms": 4237.6,
+   "cookie": true,
+   "http_version": "HTTP/1.1",
+   "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+   "header_names": [
+    "Host",
+    "Connection",
+    "Content-Length",
+    "sec-ch-ua-full-version-list",
+    "sec-ch-ua-platform",
+    "Accept-Language",
+    "sec-ch-ua",
+    "sec-ch-ua-bitness",
+    "sec-ch-ua-model",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-form-factors",
+    "sec-ch-ua-wow64",
+    "sec-ch-ua-arch",
+    "User-Agent",
+    "Content-Type",
+    "sec-ch-ua-platform-version",
+    "Accept",
+    "Origin",
+    "Sec-Fetch-Site",
+    "Sec-Fetch-Mode",
+    "Sec-Fetch-Dest",
+    "Referer",
+    "Accept-Encoding",
+    "Cookie"
+   ],
+   "host": "127.0.0.1:19200",
+   "scheme": "http",
+   "referer": "http://127.0.0.1:19200/shop",
+   "origin": "http://127.0.0.1:19200",
+   "sec_fetch_site": "same-origin",
+   "sec_fetch_mode": "cors",
+   "sec_fetch_dest": "empty",
+   "sec_fetch_user": null
+  }
+ ],
+ "pages": {
+  "ad8f0111495503": {
+   "url": "/shop",
+   "seq": 5,
+   "reason": "hidden",
+   "received": 1794076403.0029824,
+   "t": 4236,
+   "probes": {
+    "webdriver": {
+     "id": "webdriver",
+     "cat": "automation",
+     "value": false,
+     "suspicious": false,
+     "weight": 90
+    },
+    "webdriver_tamper": {
+     "id": "webdriver_tamper",
+     "cat": "automation",
+     "value": {
+      "reasons": [],
+      "index": 22
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "ua_headless": {
+     "id": "ua_headless",
+     "cat": "automation",
+     "value": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+     "suspicious": true,
+     "weight": 95
+    },
+    "automation_keys": {
+     "id": "automation_keys",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 90
+    },
+    "extra_globals": {
+     "id": "extra_globals",
+     "cat": "automation",
+     "value": [],
+     "suspicious": false,
+     "weight": 30
+    },
+    "chrome_object": {
+     "id": "chrome_object",
+     "cat": "consistency",
+     "value": {
+      "present": true,
+      "keys": [
+       "app",
+       "csi",
+       "loadTimes"
+      ],
+      "runtime": false
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "plugins": {
+     "id": "plugins",
+     "cat": "consistency",
+     "value": {
+      "plugins": 5,
+      "mimeTypes": 2,
+      "names": [
+       "PDF Viewer",
+       "Chrome PDF Viewer",
+       "Chromium PDF Viewer",
+       "Microsoft Edge PDF Viewer",
+       "WebKit built-in PDF"
+      ],
+      "shape": true,
+      "pdfViewerEnabled": true
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "languages": {
+     "id": "languages",
+     "cat": "consistency",
+     "value": {
+      "languages": [
+       "en-US"
+      ],
+      "acceptLanguage": "en-US,en;q=0.9",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "outer_size_zero": {
+     "id": "outer_size_zero",
+     "cat": "automation",
+     "value": {
+      "outerWidth": 780,
+      "outerHeight": 580,
+      "innerWidth": 780,
+      "innerHeight": 437
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "window_frame_absent": {
+     "id": "window_frame_absent",
+     "cat": "consistency",
+     "value": {
+      "dw": 0,
+      "dh": 143
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "screen_sanity": {
+     "id": "screen_sanity",
+     "cat": "consistency",
+     "value": {
+      "width": 800,
+      "height": 600,
+      "availWidth": 800,
+      "availHeight": 600,
+      "colorDepth": 24,
+      "dpr": 1,
+      "innerWidth": 780,
+      "innerHeight": 437,
+      "reasons": [
+       "800x600 default screen"
+      ]
+     },
+     "suspicious": true,
+     "weight": 35
+    },
+    "screen_no_taskbar": {
+     "id": "screen_no_taskbar",
+     "cat": "consistency",
+     "value": {
+      "availHeight": 600,
+      "height": 600
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "ua_ch_headless": {
+     "id": "ua_ch_headless",
+     "cat": "automation",
+     "value": {
+      "brands": [
+       "Chromium",
+       "Not_A Brand"
+      ],
+      "header": [
+       "Chromium",
+       "Not_A Brand"
+      ]
+     },
+     "suspicious": false,
+     "weight": 90
+    },
+    "ua_ch_mismatch": {
+     "id": "ua_ch_mismatch",
+     "cat": "consistency",
+     "value": {
+      "brands": [
+       "Chromium;153",
+       "Not_A Brand;8"
+      ],
+      "platform": "Linux",
+      "mobile": false,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "webgl_params": {
+     "id": "webgl_params",
+     "cat": "fingerprint",
+     "value": {
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "paramHash": "148e9c258a709f",
+      "extHash": "2468ad32885c9",
+      "extensions": 35
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "webgl_software": {
+     "id": "webgl_software",
+     "cat": "fingerprint",
+     "value": {
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+     },
+     "suspicious": true,
+     "weight": 45
+    },
+    "webgl_os_mismatch": {
+     "id": "webgl_os_mismatch",
+     "cat": "consistency",
+     "value": {
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "os": "linux",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "canvas": {
+     "id": "canvas",
+     "cat": "fingerprint",
+     "value": {
+      "hash": "c8bdc345c5259",
+      "stable": true,
+      "solidExact": true
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "fonts": {
+     "id": "fonts",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "detected": {
+       "windows": [
+        "MS Gothic"
+       ],
+       "mac": [],
+       "linux": [
+        "DejaVu Sans",
+        "Liberation Sans",
+        "Ubuntu",
+        "Noto Sans",
+        "FreeSans",
+        "Nimbus Sans",
+        "Noto Color Emoji"
+       ],
+       "common": [
+        "Arial",
+        "Times New Roman",
+        "Courier New"
+       ]
+      },
+      "hash": "1a6a0bf8a2c699",
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "hardware": {
+     "id": "hardware",
+     "cat": "consistency",
+     "value": {
+      "hardwareConcurrency": 24,
+      "deviceMemory": 32,
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "timezone_mismatch": {
+     "id": "timezone_mismatch",
+     "cat": "consistency",
+     "value": {
+      "tz": "Europe/Prague",
+      "locale": "en-US",
+      "intlOffset": 60,
+      "dateOffset": 60
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "timezone_utc": {
+     "id": "timezone_utc",
+     "cat": "consistency",
+     "value": "Europe/Prague",
+     "suspicious": false,
+     "weight": 10
+    },
+    "locale_mismatch": {
+     "id": "locale_mismatch",
+     "cat": "consistency",
+     "value": {
+      "intl": "en-US",
+      "navigator": "en-US"
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "perf_now_resolution": {
+     "id": "perf_now_resolution",
+     "cat": "consistency",
+     "value": {
+      "stepMs": 0.1,
+      "crossOriginIsolated": false
+     },
+     "suspicious": false,
+     "weight": 15
+    },
+    "native_functions": {
+     "id": "native_functions",
+     "cat": "automation",
+     "value": {
+      "checked": 39,
+      "bad": []
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "property_order": {
+     "id": "property_order",
+     "cat": "automation",
+     "value": {
+      "navigatorHash": "1ead0d99a53ae9",
+      "windowHash": "3ef69dd8a53f0",
+      "windowCount": 1227,
+      "strays": []
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "has_focus": {
+     "id": "has_focus",
+     "cat": "automation",
+     "value": {
+      "hasFocus": true,
+      "visibility": "visible"
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "iframe_mismatch": {
+     "id": "iframe_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "stack_engine": {
+     "id": "stack_engine",
+     "cat": "consistency",
+     "value": {
+      "engine": "v8",
+      "sample": "Error: lb |     at lbStackSample (http://127.0.0.1:19200/collector.js?s=fedfad28cf166c1f:839:37)"
+     },
+     "suspicious": false,
+     "weight": 60
+    },
+    "stack_hooked": {
+     "id": "stack_hooked",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "connection": {
+     "id": "connection",
+     "cat": "consistency",
+     "value": {
+      "effectiveType": "4g",
+      "rtt": 100,
+      "downlink": 1.5,
+      "saveData": false
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "os_surface": {
+     "id": "os_surface",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "scrollbar": {
+       "div": 15,
+       "root": 15,
+       "overflows": true,
+       "rootOverflowY": "visible",
+       "bodyOverflowY": "visible"
+      },
+      "apis": {
+       "share": false,
+       "canShare": false,
+       "bluetooth": false,
+       "Bluetooth": false
+      },
+      "fonts": {
+       "base": {
+        "monospace": [
+         824,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ]
+       },
+       "generic": {
+        "system-ui": [
+         1044,
+         108
+        ],
+        "sans-serif": [
+         965,
+         108
+        ],
+        "serif": [
+         910,
+         108
+        ],
+        "monospace": [
+         824,
+         108
+        ]
+       },
+       "detected": {
+        "DejaVu Sans": [
+         1112,
+         108
+        ],
+        "DejaVu Sans Mono": [
+         824,
+         108
+        ],
+        "Ubuntu": [
+         994,
+         108
+        ],
+        "Ubuntu Sans": [
+         994,
+         108
+        ],
+        "Noto Color Emoji": [
+         917,
+         108
+        ],
+        "Liberation Sans": [
+         965,
+         108
+        ],
+        "Liberation Serif": [
+         910,
+         108
+        ],
+        "Liberation Mono": [
+         821,
+         108
+        ],
+        "Arial": [
+         965,
+         108
+        ],
+        "Helvetica": [
+         965,
+         108
+        ],
+        "Times New Roman": [
+         910,
+         108
+        ],
+        "Times": [
+         910,
+         108
+        ],
+        "Courier New": [
+         821,
+         108
+        ],
+        "Noto Sans": [
+         1044,
+         108
+        ],
+        "FreeSans": [
+         937,
+         108
+        ]
+       }
+      },
+      "emoji": {
+       "inked": 2826,
+       "colored": 2716
+      },
+      "gl": {
+       "vendor": "Google Inc. (Google)",
+       "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+       "viewport": [
+        8192,
+        8192
+       ],
+       "lineWidth": [
+        1,
+        1
+       ],
+       "pointSize": [
+        1,
+        1023
+       ],
+       "texture": 8192,
+       "vertexUniforms": 4096
+      },
+      "hw": {
+       "deviceMemory": 32,
+       "hardwareConcurrency": 24
+      },
+      "screen": {
+       "width": 800,
+       "height": 600,
+       "availWidth": 800,
+       "availHeight": 600,
+       "availLeft": 0,
+       "availTop": 0,
+       "dpr": 1,
+       "screenX": 20,
+       "screenY": 20,
+       "outerWidth": 780,
+       "outerHeight": 580,
+       "innerWidth": 780,
+       "innerHeight": 437
+      }
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "cdp_runtime": {
+     "id": "cdp_runtime",
+     "cat": "automation",
+     "value": {
+      "errorStackGetter": false,
+      "nodeIdGetter": false
+     },
+     "suspicious": false,
+     "weight": 80
+    },
+    "notification_permission": {
+     "id": "notification_permission",
+     "cat": "consistency",
+     "value": {
+      "notification": "default",
+      "permissions": "prompt"
+     },
+     "suspicious": false,
+     "weight": 50
+    },
+    "battery": {
+     "id": "battery",
+     "cat": "consistency",
+     "value": {
+      "charging": true,
+      "level": 1,
+      "chargingTime": 0,
+      "dischargingTime": null
+     },
+     "suspicious": false,
+     "weight": 10
+    },
+    "audio": {
+     "id": "audio",
+     "cat": "fingerprint",
+     "value": {
+      "sum": 124.04347776696522,
+      "hash": "99b43bc461c4e",
+      "stable": true
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "worker_mismatch": {
+     "id": "worker_mismatch",
+     "cat": "automation",
+     "value": {
+      "reasons": []
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "sw_navigator": {
+     "id": "sw_navigator",
+     "cat": "automation",
+     "value": {
+      "window": {
+       "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "appVersion": "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "platform": "Linux x86_64",
+       "hardwareConcurrency": 24,
+       "deviceMemory": 32,
+       "language": "en-US",
+       "languages": [
+        "en-US"
+       ],
+       "gpu": true,
+       "uaData": {
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "mobile": false,
+        "platform": "Linux"
+       },
+       "high": {
+        "architecture": "x86",
+        "bitness": "64",
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "formFactors": [
+         "Desktop"
+        ],
+        "fullVersionList": [
+         {
+          "brand": "Chromium",
+          "version": "153.0.8010.12"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8.0.0.0"
+         }
+        ],
+        "mobile": false,
+        "model": "",
+        "platform": "Linux",
+        "platformVersion": "",
+        "uaFullVersion": "153.0.8010.12",
+        "wow64": false
+       }
+      },
+      "worker": {
+       "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "appVersion": "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "platform": "Linux x86_64",
+       "hardwareConcurrency": 24,
+       "deviceMemory": 32,
+       "language": "en-US",
+       "languages": [
+        "en-US"
+       ],
+       "gpu": true,
+       "uaData": {
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "mobile": false,
+        "platform": "Linux"
+       },
+       "high": {
+        "architecture": "x86",
+        "bitness": "64",
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "formFactors": [
+         "Desktop"
+        ],
+        "fullVersionList": [
+         {
+          "brand": "Chromium",
+          "version": "153.0.8010.12"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8.0.0.0"
+         }
+        ],
+        "mobile": false,
+        "model": "",
+        "platform": "Linux",
+        "platformVersion": "",
+        "uaFullVersion": "153.0.8010.12",
+        "wow64": false
+       }
+      }
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "worker_navigator": {
+     "id": "worker_navigator",
+     "cat": "automation",
+     "value": {
+      "window": {
+       "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "appVersion": "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "platform": "Linux x86_64",
+       "hardwareConcurrency": 24,
+       "deviceMemory": 32,
+       "language": "en-US",
+       "languages": [
+        "en-US"
+       ],
+       "gpu": true,
+       "uaData": {
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "mobile": false,
+        "platform": "Linux"
+       },
+       "high": {
+        "architecture": "x86",
+        "bitness": "64",
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "formFactors": [
+         "Desktop"
+        ],
+        "fullVersionList": [
+         {
+          "brand": "Chromium",
+          "version": "153.0.8010.12"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8.0.0.0"
+         }
+        ],
+        "mobile": false,
+        "model": "",
+        "platform": "Linux",
+        "platformVersion": "",
+        "uaFullVersion": "153.0.8010.12",
+        "wow64": false
+       }
+      },
+      "worker": {
+       "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "appVersion": "5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+       "platform": "Linux x86_64",
+       "hardwareConcurrency": 24,
+       "deviceMemory": 32,
+       "language": "en-US",
+       "languages": [
+        "en-US"
+       ],
+       "gpu": true,
+       "uaData": {
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "mobile": false,
+        "platform": "Linux"
+       },
+       "high": {
+        "architecture": "x86",
+        "bitness": "64",
+        "brands": [
+         {
+          "brand": "Chromium",
+          "version": "153"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8"
+         }
+        ],
+        "formFactors": [
+         "Desktop"
+        ],
+        "fullVersionList": [
+         {
+          "brand": "Chromium",
+          "version": "153.0.8010.12"
+         },
+         {
+          "brand": "Not_A Brand",
+          "version": "8.0.0.0"
+         }
+        ],
+        "mobile": false,
+        "model": "",
+        "platform": "Linux",
+        "platformVersion": "",
+        "uaFullVersion": "153.0.8010.12",
+        "wow64": false
+       }
+      }
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "os_media": {
+     "id": "os_media",
+     "cat": "consistency",
+     "value": {
+      "os": "linux",
+      "secure": true,
+      "throws": {
+       "canPlayType": null,
+       "mseIsTypeSupported": null,
+       "recorderIsTypeSupported": null,
+       "decodingInfo": null,
+       "getLayoutMap": null,
+       "requestAdapter": null
+      },
+      "present": {
+       "mediaCapabilities": true,
+       "MediaSource": true,
+       "MediaRecorder": true,
+       "keyboard": true,
+       "gpu": true,
+       "speechSynthesis": true
+      },
+      "high": {
+       "architecture": "x86",
+       "bitness": "64",
+       "brands": [
+        {
+         "brand": "Chromium",
+         "version": "153"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8"
+        }
+       ],
+       "formFactors": [
+        "Desktop"
+       ],
+       "fullVersionList": [
+        {
+         "brand": "Chromium",
+         "version": "153.0.8010.12"
+        },
+        {
+         "brand": "Not_A Brand",
+         "version": "8.0.0.0"
+        }
+       ],
+       "mobile": false,
+       "model": "",
+       "platform": "Linux",
+       "platformVersion": "",
+       "wow64": false
+      },
+      "codecs": {
+       "hevcCanPlay": "",
+       "h264": {
+        "supported": true,
+        "powerEfficient": false
+       },
+       "hevc": {
+        "supported": false,
+        "powerEfficient": false
+       }
+      },
+      "keyboardSize": 49,
+      "gpu": {
+       "present": true,
+       "adapter": null
+      },
+      "ms": 29
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "worker_measure": {
+     "id": "worker_measure",
+     "cat": "automation",
+     "value": {
+      "window": {
+       "language": "en-US",
+       "languages": [
+        "en-US"
+       ],
+       "locale": "en-US",
+       "timeZone": "Europe/Prague",
+       "dpr": 1,
+       "supported": true,
+       "measure": {
+        "sans-serif|0": [
+         143.945,
+         -1,
+         143.391,
+         12,
+         0,
+         14,
+         3
+        ],
+        "sans-serif|1": [
+         316.602,
+         0,
+         315.703,
+         12,
+         3,
+         14,
+         3
+        ],
+        "sans-serif|2": [
+         185.242,
+         0,
+         185.016,
+         12,
+         3,
+         14,
+         3
+        ],
+        "sans-serif|3": [
+         134.048,
+         0,
+         133.24,
+         14,
+         4,
+         14,
+         3
+        ],
+        "sans-serif|4": [
+         64.335,
+         0,
+         64.372,
+         15,
+         4,
+         14,
+         3
+        ],
+        "serif|0": [
+         137.789,
+         0,
+         138.344,
+         12,
+         0,
+         14,
+         3
+        ],
+        "serif|1": [
+         292.375,
+         0,
+         292.375,
+         12,
+         4,
+         14,
+         3
+        ],
+        "serif|2": [
+         170.266,
+         0,
+         169.938,
+         13,
+         4,
+         14,
+         3
+        ],
+        "serif|3": [
+         127.79,
+         0,
+         126.982,
+         14,
+         4,
+         14,
+         3
+        ],
+        "serif|4": [
+         63.89,
+         0,
+         63.927,
+         15,
+         4,
+         14,
+         3
+        ],
+        "monospace|0": [
+         125.227,
+         0,
+         124.594,
+         12,
+         0,
+         15,
+         4
+        ],
+        "monospace|1": [
+         414.211,
+         0,
+         413.578,
+         12,
+         3,
+         15,
+         4
+        ],
+        "monospace|2": [
+         192.656,
+         0,
+         193.023,
+         12,
+         3,
+         15,
+         4
+        ],
+        "monospace|3": [
+         173.227,
+         0,
+         169.594,
+         14,
+         5,
+         15,
+         4
+        ],
+        "monospace|4": [
+         69.523,
+         0,
+         69.559,
+         15,
+         4,
+         15,
+         4
+        ],
+        "system-ui|0": [
+         161.984,
+         -1,
+         160.856,
+         12,
+         0,
+         17,
+         5
+        ],
+        "system-ui|1": [
+         334.881,
+         0,
+         334.041,
+         12,
+         4,
+         17,
+         5
+        ],
+        "system-ui|2": [
+         186.032,
+         0,
+         185.736,
+         12,
+         4,
+         17,
+         5
+        ],
+        "system-ui|3": [
+         135.904,
+         0,
+         135.096,
+         14,
+         4,
+         17,
+         5
+        ],
+        "system-ui|4": [
+         64.05,
+         0,
+         64.087,
+         15,
+         4,
+         17,
+         5
+        ],
+        "Arial|0": [
+         143.945,
+         -1,
+         143.391,
+         12,
+         0,
+         14,
+         3
+        ],
+        "Arial|1": [
+         316.602,
+         0,
+         315.703,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Arial|2": [
+         185.242,
+         0,
+         185.016,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Arial|3": [
+         134.048,
+         0,
+         133.24,
+         14,
+         4,
+         14,
+         3
+        ],
+        "Arial|4": [
+         64.335,
+         0,
+         64.372,
+         15,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|0": [
+         137.789,
+         0,
+         138.344,
+         12,
+         0,
+         14,
+         3
+        ],
+        "Times New Roman|1": [
+         292.375,
+         0,
+         292.375,
+         12,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|2": [
+         170.266,
+         0,
+         169.938,
+         13,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|3": [
+         127.79,
+         0,
+         126.982,
+         14,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|4": [
+         63.89,
+         0,
+         63.927,
+         15,
+         4,
+         14,
+         3
+        ],
+        "Courier New|0": [
+         124.82,
+         0,
+         124.219,
+         12,
+         0,
+         13,
+         5
+        ],
+        "Courier New|1": [
+         412.867,
+         0,
+         412.266,
+         12,
+         3,
+         13,
+         5
+        ],
+        "Courier New|2": [
+         192.031,
+         0,
+         192.43,
+         12,
+         3,
+         13,
+         5
+        ],
+        "Courier New|3": [
+         146.298,
+         -1,
+         145.49,
+         14,
+         4,
+         13,
+         5
+        ],
+        "Courier New|4": [
+         69.491,
+         0,
+         69.528,
+         15,
+         4,
+         13,
+         5
+        ],
+        "Segoe UI|0": [
+         143.945,
+         -1,
+         143.391,
+         12,
+         0,
+         14,
+         3
+        ],
+        "Segoe UI|1": [
+         316.602,
+         0,
+         315.703,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Segoe UI|2": [
+         185.242,
+         0,
+         185.016,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Segoe UI|3": [
+         134.048,
+         0,
+         133.24,
+         14,
+         4,
+         14,
+         3
+        ],
+        "Segoe UI|4": [
+         64.335,
+         0,
+         64.372,
+         15,
+         4,
+         14,
+         3
+        ]
+       }
+      },
+      "worker": {
+       "language": "en-US",
+       "languages": [
+        "en-US"
+       ],
+       "locale": "en-US",
+       "timeZone": "Europe/Prague",
+       "dpr": null,
+       "supported": true,
+       "measure": {
+        "sans-serif|0": [
+         143.945,
+         -1,
+         143.391,
+         12,
+         0,
+         14,
+         3
+        ],
+        "sans-serif|1": [
+         316.602,
+         0,
+         315.703,
+         12,
+         3,
+         14,
+         3
+        ],
+        "sans-serif|2": [
+         185.242,
+         0,
+         185.016,
+         12,
+         3,
+         14,
+         3
+        ],
+        "sans-serif|3": [
+         134.048,
+         0,
+         133.24,
+         14,
+         4,
+         14,
+         3
+        ],
+        "sans-serif|4": [
+         64.335,
+         0,
+         64.372,
+         15,
+         4,
+         14,
+         3
+        ],
+        "serif|0": [
+         137.789,
+         0,
+         138.344,
+         12,
+         0,
+         14,
+         3
+        ],
+        "serif|1": [
+         292.375,
+         0,
+         292.375,
+         12,
+         4,
+         14,
+         3
+        ],
+        "serif|2": [
+         170.266,
+         0,
+         169.938,
+         13,
+         4,
+         14,
+         3
+        ],
+        "serif|3": [
+         127.79,
+         0,
+         126.982,
+         14,
+         4,
+         14,
+         3
+        ],
+        "serif|4": [
+         63.89,
+         0,
+         63.927,
+         15,
+         4,
+         14,
+         3
+        ],
+        "monospace|0": [
+         125.227,
+         0,
+         124.594,
+         12,
+         0,
+         15,
+         4
+        ],
+        "monospace|1": [
+         414.211,
+         0,
+         413.578,
+         12,
+         3,
+         15,
+         4
+        ],
+        "monospace|2": [
+         192.656,
+         0,
+         193.023,
+         12,
+         3,
+         15,
+         4
+        ],
+        "monospace|3": [
+         173.227,
+         0,
+         169.594,
+         14,
+         5,
+         15,
+         4
+        ],
+        "monospace|4": [
+         69.523,
+         0,
+         69.559,
+         15,
+         4,
+         15,
+         4
+        ],
+        "system-ui|0": [
+         161.984,
+         -1,
+         160.856,
+         12,
+         0,
+         17,
+         5
+        ],
+        "system-ui|1": [
+         334.881,
+         0,
+         334.041,
+         12,
+         4,
+         17,
+         5
+        ],
+        "system-ui|2": [
+         186.032,
+         0,
+         185.736,
+         12,
+         4,
+         17,
+         5
+        ],
+        "system-ui|3": [
+         135.904,
+         0,
+         135.096,
+         14,
+         4,
+         17,
+         5
+        ],
+        "system-ui|4": [
+         64.05,
+         0,
+         64.087,
+         15,
+         4,
+         17,
+         5
+        ],
+        "Arial|0": [
+         143.945,
+         -1,
+         143.391,
+         12,
+         0,
+         14,
+         3
+        ],
+        "Arial|1": [
+         316.602,
+         0,
+         315.703,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Arial|2": [
+         185.242,
+         0,
+         185.016,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Arial|3": [
+         134.048,
+         0,
+         133.24,
+         14,
+         4,
+         14,
+         3
+        ],
+        "Arial|4": [
+         64.335,
+         0,
+         64.372,
+         15,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|0": [
+         137.789,
+         0,
+         138.344,
+         12,
+         0,
+         14,
+         3
+        ],
+        "Times New Roman|1": [
+         292.375,
+         0,
+         292.375,
+         12,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|2": [
+         170.266,
+         0,
+         169.938,
+         13,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|3": [
+         127.79,
+         0,
+         126.982,
+         14,
+         4,
+         14,
+         3
+        ],
+        "Times New Roman|4": [
+         63.89,
+         0,
+         63.927,
+         15,
+         4,
+         14,
+         3
+        ],
+        "Courier New|0": [
+         124.82,
+         0,
+         124.219,
+         12,
+         0,
+         13,
+         5
+        ],
+        "Courier New|1": [
+         412.867,
+         0,
+         412.266,
+         12,
+         3,
+         13,
+         5
+        ],
+        "Courier New|2": [
+         192.031,
+         0,
+         192.43,
+         12,
+         3,
+         13,
+         5
+        ],
+        "Courier New|3": [
+         146.298,
+         -1,
+         145.49,
+         14,
+         4,
+         13,
+         5
+        ],
+        "Courier New|4": [
+         69.491,
+         0,
+         69.528,
+         15,
+         4,
+         13,
+         5
+        ],
+        "Segoe UI|0": [
+         143.945,
+         -1,
+         143.391,
+         12,
+         0,
+         14,
+         3
+        ],
+        "Segoe UI|1": [
+         316.602,
+         0,
+         315.703,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Segoe UI|2": [
+         185.242,
+         0,
+         185.016,
+         12,
+         3,
+         14,
+         3
+        ],
+        "Segoe UI|3": [
+         134.048,
+         0,
+         133.24,
+         14,
+         4,
+         14,
+         3
+        ],
+        "Segoe UI|4": [
+         64.335,
+         0,
+         64.372,
+         15,
+         4,
+         14,
+         3
+        ]
+       }
+      }
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "beh_counts": {
+     "id": "beh_counts",
+     "cat": "behavior",
+     "value": {
+      "counts": {
+       "visibilitychange": 1
+      },
+      "untrusted": 0,
+      "dwellMs": 4236
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "beh_untrusted": {
+     "id": "beh_untrusted",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 70
+    },
+    "beh_ttfi": {
+     "id": "beh_ttfi",
+     "cat": "behavior",
+     "value": {
+      "ttfi": null,
+      "afterLoad": null
+     },
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_click_hold": {
+     "id": "beh_click_hold",
+     "cat": "behavior",
+     "value": {
+      "median": null,
+      "n": 0
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "beh_click_center": {
+     "id": "beh_click_center",
+     "cat": "behavior",
+     "value": {
+      "centred": 0,
+      "clicks": 0
+     },
+     "suspicious": false,
+     "weight": 40
+    },
+    "beh_click_no_path": {
+     "id": "beh_click_no_path",
+     "cat": "behavior",
+     "value": {
+      "bare": 0,
+      "clicks": 0
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_mouse_linear": {
+     "id": "beh_mouse_linear",
+     "cat": "behavior",
+     "value": {
+      "pathPx": 0,
+      "straightPx": 0,
+      "ratio": null
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_mouse_velocity": {
+     "id": "beh_mouse_velocity",
+     "cat": "behavior",
+     "value": [],
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_movement_zero": {
+     "id": "beh_movement_zero",
+     "cat": "behavior",
+     "value": {
+      "moved": 0,
+      "zeroDelta": 0
+     },
+     "suspicious": false,
+     "weight": 30
+    },
+    "beh_wheel_pattern": {
+     "id": "beh_wheel_pattern",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "big": 0,
+      "sameDelta": false,
+      "gapCv": null
+     },
+     "suspicious": false,
+     "weight": 20
+    },
+    "beh_scroll_no_input": {
+     "id": "beh_scroll_no_input",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 25
+    },
+    "beh_typing_no_keys": {
+     "id": "beh_typing_no_keys",
+     "cat": "behavior",
+     "value": {
+      "inputs": 0,
+      "maxChunk": 0
+     },
+     "suspicious": false,
+     "weight": 45
+    },
+    "beh_key_rhythm": {
+     "id": "beh_key_rhythm",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "median": null,
+      "spread": null
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_key_dwell": {
+     "id": "beh_key_dwell",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "median": null,
+      "spread": null
+     },
+     "suspicious": false,
+     "weight": 35
+    },
+    "beh_input_without_focus": {
+     "id": "beh_input_without_focus",
+     "cat": "behavior",
+     "value": 0,
+     "suspicious": false,
+     "weight": 30
+    },
+    "beh_wheel_deltas": {
+     "id": "beh_wheel_deltas",
+     "cat": "behavior",
+     "value": {
+      "n": 0,
+      "pairs": []
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "os_voices": {
+     "id": "os_voices",
+     "cat": "behavior",
+     "value": {
+      "count": 0,
+      "local": 0,
+      "localNames": []
+     },
+     "suspicious": false,
+     "weight": 0
+    },
+    "webrtc_gather": {
+     "id": "webrtc_gather",
+     "cat": "consistency",
+     "value": {
+      "supported": true,
+      "stun": "127.0.0.1:19202",
+      "complete": true,
+      "timedOut": false,
+      "candidates": [
+       {
+        "type": "srflx",
+        "protocol": "udp",
+        "address": "127.0.0.1",
+        "port": 49203,
+        "relatedAddress": "0.0.0.0",
+        "relatedPort": 0,
+        "mdns": false,
+        "ms": 12
+       },
+       {
+        "type": "host",
+        "protocol": "udp",
+        "address": "3b2520b3-01fd-4e38-85fc-da7dc36ad887.local",
+        "port": 49203,
+        "relatedAddress": null,
+        "relatedPort": null,
+        "mdns": true,
+        "ms": 13
+       }
+      ],
+      "firstMs": 12,
+      "gatherMs": 124
+     },
+     "suspicious": false,
+     "weight": 0
+    }
+   },
+   "trace": [
+    {
+     "t": 4235.6,
+     "type": "visibilitychange",
+     "tr": 1,
+     "v": "hidden"
+    }
+   ]
+  }
+ },
+ "beacons": 5,
+ "user_agents": [
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36"
+ ],
+ "tls": [],
+ "accept_ch": [
+  "Sec-CH-UA-Platform-Version",
+  "Sec-CH-UA-Arch",
+  "Sec-CH-UA-Bitness",
+  "Sec-CH-UA-Full-Version-List",
+  "Sec-CH-UA-Model",
+  "Sec-CH-UA-WoW64",
+  "Sec-CH-UA-Form-Factors"
+ ],
+ "provenance": {
+  "captured": true,
+  "loopbackOnly": true,
+  "browser": "Chrome for Testing 153.0.8010.12 (chromium-1243), --headless=new --no-sandbox, Linux x86_64, driven over CDP by Playwright 1.65",
+  "bench": "tests/detect-bench server.py at this commit, 127.0.0.1",
+  "flow": "Page.navigate with a Referer given by the driver (Playwright goto referer option): Sec-Fetch-Site none with a Referer. Stock Chrome sends this contradiction when a driver sets the Referer.",
+  "recorded": "2026-11-07 on rtx-dev",
+  "trimmed": "probes of pages after the first keep only the fingerprint and info probes the rules read"
+ }
+}

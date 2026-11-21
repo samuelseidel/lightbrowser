@@ -1,0 +1,22 @@
+<!doctype html><!--LOG--><script>
+function ev(x, out) { ['readystatechange', 'loadstart', 'progress', 'load', 'error', 'loadend', 'abort', 'timeout'].forEach(t => x.addEventListener(t, () => out.push(t + (t == 'readystatechange' ? x.readyState : '')))); }
+t('text', () => { var x = new XMLHttpRequest(), o = []; ev(x, o); x.open('GET', 'a.txt', false); o.push('opened'); x.send(); o.push('sent'); return o.join(',') + ' ' + x.status + ' ' + JSON.stringify(x.statusText) + ' ' + x.responseText + ' ' + x.getResponseHeader('Content-Type') + ' ' + x.readyState; });
+t('upload listeners', () => { var x = new XMLHttpRequest(), o = []; x.upload.onloadstart = () => o.push('uploadstart'); x.open('POST', 'a.txt', false); x.send('body'); return o.join(',') + ' ' + x.status; });
+t('404', () => { var x = new XMLHttpRequest(), o = []; ev(x, o); x.open('GET', 'missing.txt', false); x.send(); return o.join(',') + ' ' + x.status + ' ' + x.responseText; });
+t('responseType before', () => { var x = new XMLHttpRequest(); x.responseType = 'json'; x.open('GET', 'a.json', false); return 'opened'; });
+t('responseType after', () => { var x = new XMLHttpRequest(); x.open('GET', 'a.json', false); x.responseType = 'json'; return 'set'; });
+t('timeout before', () => { var x = new XMLHttpRequest(); x.timeout = 10; x.open('GET', 'a.json', false); return 'opened'; });
+t('timeout after', () => { var x = new XMLHttpRequest(); x.open('GET', 'a.json', false); x.timeout = 10; return 'set'; });
+t('network error', () => { var x = new XMLHttpRequest(), o = []; ev(x, o); x.open('GET', 'http://127.0.0.1:1/x', false); try { x.send(); } catch (e) { o.push('threw ' + err(e)); } return o.join(',') + ' ' + x.status + ' ' + x.readyState; });
+t('send twice', () => { var x = new XMLHttpRequest(); x.open('GET', 'a.txt', false); x.send(); x.send(); });
+t('sync in rsc', () => { var x = new XMLHttpRequest(), o = []; x.onreadystatechange = () => { if (x.readyState == 4) { var y = new XMLHttpRequest(); y.open('GET', 'a.json', false); y.send(); o.push('inner ' + y.status); } }; x.open('GET', 'a.txt', false); x.send(); return o.join(','); });
+var order = [];
+setTimeout(() => order.push('timeout'), 0);
+Promise.resolve().then(() => order.push('micro'));
+var x = new XMLHttpRequest(); x.open('GET', 'slow-a.txt', false); x.send(); order.push('sync done ' + x.responseText);
+setTimeout(() => {
+  log('order ' + order.join(','));
+  var w = new Worker('w.js');
+  w.onmessage = e => { log('worker ' + e.data); end(); };
+}, 50);
+</script>

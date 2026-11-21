@@ -1,0 +1,29 @@
+<!doctype html><!--LOG--><script>
+var o = [];
+class XB extends HTMLButtonElement { constructor() { super(); o.push('xb ctor ' + this.localName + ' is=' + this.getAttribute('is')); } connectedCallback() { o.push('xb connected'); } }
+t('bad extends', () => customElements.define('x-bad', class extends HTMLElement {}, { extends: 'x-y' }));
+t('extends unknown', () => customElements.define('x-bad2', class extends HTMLElement {}, { extends: 'blink' }));
+t('define', () => customElements.define('x-b', XB, { extends: 'button' }));
+t('get', () => [customElements.get('x-b') === XB, customElements.getName(XB)].join());
+</script><body><button is=x-b id=p>parsed</button><x-b id=wrongtag></x-b><script>
+log('parser: ' + o.join(' | ')); o = [];
+var p = document.getElementById('p');
+t('parsed', () => [p instanceof XB, p.constructor.name, p.outerHTML, document.getElementById('wrongtag') instanceof XB, p.matches(':defined')].join());
+var c = document.createElement('button', { is: 'x-b' });
+t('createElement is', () => [c instanceof XB, c.getAttribute('is'), c.outerHTML, o.join(' | ')].join(' ')); o = [];
+t('createElement string', () => { var e = document.createElement('button', 'x-b'); return [e instanceof XB, e.outerHTML].join(); });
+t('createElement unknown is', () => { var e = document.createElement('button', { is: 'x-none' }); return [e.constructor.name, e.outerHTML].join(); });
+t('new XB', () => { var e = new XB(); return [e.localName, e.outerHTML, e.getAttribute('is'), o.join(' | ')].join(' '); }); o = [];
+t('createElementNS', () => { var e = document.createElementNS('http://www.w3.org/1999/xhtml', 'button', { is: 'x-b' }); return [e instanceof XB, e.outerHTML].join(); });
+t('autonomous with is', () => { customElements.define('x-auto', class extends HTMLElement {}); var e = document.createElement('x-auto', { is: 'x-b' }); return [e.constructor.name === '', e.outerHTML].join(); });
+t('setAttribute is', () => { var e = document.createElement('button'); e.setAttribute('is', 'x-b'); document.body.appendChild(e); return e instanceof XB; });
+t('clone', () => { var e = p.cloneNode(true); return [e instanceof XB, o.join(' | ')].join(' '); }); o = [];
+t('innerHTML', () => { var d = document.createElement('div'); d.innerHTML = '<button is="x-b">i</button>'; return [d.firstChild instanceof XB, o.join(' | ')].join(' '); }); o = [];
+t('attachShadow builtin', () => p.attachShadow({ mode: 'open' }));
+class XN extends HTMLElement { static get disabledFeatures() { return ['shadow']; } }
+customElements.define('x-noshadow', XN);
+t('disabled shadow', () => new XN().attachShadow({ mode: 'open' }));
+t('div builtin', () => { customElements.define('x-div', class extends HTMLDivElement { constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<i>s</i>'; } }, { extends: 'div' }); var e = document.createElement('div', { is: 'x-div' }); return e.shadowRoot.innerHTML; });
+t('wrong base', () => { customElements.define('x-wrong', class extends HTMLDivElement {}, { extends: 'p' }); return document.createElement('p', { is: 'x-wrong' }).constructor.name; });
+end();
+</script>

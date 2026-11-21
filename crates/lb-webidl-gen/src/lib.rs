@@ -1,3 +1,132 @@
-//! Build-time WebIDL -> Rust binding generator. Uses the Chromium IDL set for the chrome family and the Gecko IDL set for the firefox family.
+//! Build-time WebIDL to Rust binding-table generator.
 //!
-//! Stub crate. See docs/ARCHITECTURE.md and docs/ROADMAP.md.
+//! Reads the vendored Chromium IDL set (`idl/chromium/`, Chromium
+//! 153.0.8010.12), merges partials and mixins, then runs the Chrome pass
+//! against the captured surface fixture
+//! (`tests/fixtures/chromium_153_surface_secure.json`, a secure loopback
+//! page; `chromium_153_surface.json` from `about:blank` marks what only
+//! secure contexts have): members Chrome does not
+//! ship are dropped and everything is put in Chrome's order. The OS overlay
+//! (`tests/fixtures/chrome_153_os_overlay.json`) adds what Chrome has on
+//! Windows and macOS only (Web Share, Web Bluetooth); those members are
+//! listed in `OS_GATED` and removed per persona at realm setup. The worker
+//! fixture (`tests/fixtures/chromium_153_worker_surface.json`) gives the
+//! dedicated and shared worker globals (`WORKER_SCOPES`, ADR 0021). The output is
+//! `crates/lb-webapi/src/generated/chromium.rs`: static descriptor data
+//! (`lb_webapi::desc`), no logic.
+//!
+//! ```text
+//! cargo run -p lb-webidl-gen -- --family chrome \
+//!     --fixture tests/fixtures/chromium_153_surface_secure.json \
+//!     --insecure-fixture tests/fixtures/chromium_153_surface.json \
+//!     --out crates/lb-webapi/src/generated/chromium.rs
+//! ```
+//!
+//! Pieces:
+//! - [`parse`]: a tolerant parser for Blink's IDL dialect (own, not
+//!   `weedle2`: Blink's `[Exposed(Window Foo)]`, quoted extended attribute
+//!   values and dashed attribute names need no pre-processing this way).
+//! - [`model`]: definitions merged per interface.
+//! - [`chrome`]: the fixture-driven filter and ordering pass, with a
+//!   [`ir::Coverage`] report of how much the IDL alone reproduces.
+//! - [`emit`]: prints the tables.
+//!
+//! The Gecko IDL set for the firefox family arrives in M4b.
+
+pub mod chrome;
+pub mod emit;
+pub mod ir;
+pub mod model;
+pub mod parse;
+
+use std::path::{Path, PathBuf};
+
+/// Parse every file listed in `<root>/FILES.txt`, in that order.
+pub fn parse_dir(root: &Path) -> Result<Vec<parse::IdlFile>, Box<dyn std::error::Error>> {
+    let list = std::fs::read_to_string(root.join("FILES.txt"))?;
+    let mut out = Vec::new();
+    for rel in list.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let src = std::fs::read_to_string(root.join(rel))?;
+        out.push(parse::parse_idl(&src, rel)?);
+    }
+    Ok(out)
+}
+
+/// The workspace root (two levels above this crate).
+pub fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root")
+        .to_path_buf()
+}
+
+/// Default inputs and output for the chrome family.
+pub struct ChromeInputs {
+    pub idl_root: PathBuf,
+    /// The arbiter: a capture in a secure context.
+    pub fixture: PathBuf,
+    /// A capture of a non-secure page (`about:blank`); what it lacks is
+    /// marked secure-context only.
+    pub insecure_fixture: Option<PathBuf>,
+    /// Members only Windows and macOS have (Web Share, Web Bluetooth),
+    /// merged into both fixtures and emitted as `OS_GATED`.
+    pub overlay: Option<PathBuf>,
+    /// The dedicated and shared worker globals (ADR 0021): their own
+    /// properties, interface objects and member orders, emitted as
+    /// `WORKER_SCOPES`.
+    pub worker_fixture: Option<PathBuf>,
+    pub out: PathBuf,
+}
+
+impl Default for ChromeInputs {
+    fn default() -> Self {
+        let root = workspace_root();
+        ChromeInputs {
+            idl_root: Path::new(env!("CARGO_MANIFEST_DIR")).join("idl/chromium"),
+            fixture: root.join("tests/fixtures/chromium_153_surface_secure.json"),
+            insecure_fixture: Some(root.join("tests/fixtures/chromium_153_surface.json")),
+            overlay: Some(root.join("tests/fixtures/chrome_153_os_overlay.json")),
+            worker_fixture: Some(root.join("tests/fixtures/chromium_153_worker_surface.json")),
+            out: root.join("crates/lb-webapi/src/generated/chromium.rs"),
+        }
+    }
+}
+
+/// Run the chrome pipeline: parse, merge, filter and order.
+pub fn build_chrome(inputs: &ChromeInputs) -> Result<ir::Table, Box<dyn std::error::Error>> {
+    let files = parse_dir(&inputs.idl_root)?;
+    let model = model::Model::build(&files);
+    let read = |p: &Path| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        Ok(serde_json::from_str(&std::fs::read_to_string(p)?)?)
+    };
+    let mut fixture = read(&inputs.fixture)?;
+    let mut insecure = inputs.insecure_fixture.as_deref().map(read).transpose()?;
+    let overlay = inputs.overlay.as_deref().map(read).transpose()?;
+    if let Some(o) = &overlay {
+        chrome::apply_overlay(&mut fixture, o, true)?;
+        if let Some(ins) = insecure.as_mut() {
+            chrome::apply_overlay(ins, o, false)?;
+        }
+    }
+    let workers = inputs.worker_fixture.as_deref().map(read).transpose()?;
+    let mut table = chrome::build(&model, &fixture, insecure.as_ref(), workers.as_ref())?;
+    if let Some(o) = &overlay {
+        table.os_gated = chrome::overlay_gates(o, &table)?;
+    }
+    Ok(table)
+}
+
+/// Header of the generated chromium file.
+pub const CHROME_HEADER: &str = "@generated by lb-webidl-gen from the Chromium 153.0.8010.12 IDL set\n\
+(crates/lb-webidl-gen/idl/chromium) and tests/fixtures/chromium_153_surface_secure.json\n\
+(secure-context marks from chromium_153_surface.json) and the OS overlay\n\
+tests/fixtures/chrome_153_os_overlay.json (Windows/macOS-only members) and the worker\n\
+globals of tests/fixtures/chromium_153_worker_surface.json.\n\
+Do not edit. Regenerate with:\n\
+  cargo run -p lb-webidl-gen -- --family chrome";
+
+/// The generated chromium file as a string.
+pub fn render_chrome(table: &ir::Table) -> String {
+    emit::emit(table, CHROME_HEADER)
+}

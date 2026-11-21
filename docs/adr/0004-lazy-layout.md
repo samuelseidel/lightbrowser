@@ -1,6 +1,6 @@
 # ADR 0004: Lazy style and layout, CPU canvas, no painting by default
 
-Status: Accepted (2026-11-02)
+Status: Accepted (2026-11-02). Screenshots: see ADR 0014.
 
 ## Context
 

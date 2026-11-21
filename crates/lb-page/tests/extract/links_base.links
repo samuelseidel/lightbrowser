@@ -1,0 +1,9 @@
+http://{HOST}/docs/guide/intro.html	the intro
+http://{HOST}/docs/ref/api.html#top	the API reference
+http://cdn.example.org/lib.js	a CDN file
+mailto:team@example.org	mail us
+https://example.com/a(b)	paren
+http://{HOST}/docs/guide/intro.html	other text
+http://{HOST}/abs/path?q=1&r=2	absolute path
+http://{HOST}/docs/guide/	empty href
+http://{HOST}/docs/guide/x%20y.html	space in href

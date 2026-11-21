@@ -1,0 +1,159 @@
+//! Release link options for binary size and memory (M6, ADR 0013 and
+//! 0016). Only the final link of `lightbrowser` changes; no dependency is
+//! rebuilt.
+//!
+//! - `--icf=safe`: fold identical functions whose address is not taken
+//!   (mostly V8 template instances): about -5 MB.
+//! - `-z pack-relative-relocs`: DT_RELR instead of RELA for the PIE's
+//!   relative relocations: about -2 MB. Needs glibc >= 2.36 at run time.
+//! - No unwind tables: `.eh_frame` (and so `.eh_frame_hdr`) is discarded
+//!   by a linker script inserted into the default layout: -3.6 MB. Nothing
+//!   in the release binary unwinds: Rust builds with `panic = "abort"`,
+//!   V8, ICU, libc++ and BoringSSL are built without C++ exceptions, and
+//!   no thread is cancelled. What is lost is stack walking for crash
+//!   reports (Rust `RUST_BACKTRACE`, V8's fatal-error "C stack trace",
+//!   gdb without debug info), which the stripped binary has no symbols
+//!   for anyway. Set `LB_KEEP_UNWIND=1` to keep them.
+//! - Hot code first: `--symbol-ordering-file=hot-symbols.txt` puts the
+//!   functions a page load runs (made by `tools/hot_symbols/gen.py` from a
+//!   training workload, not the bench corpus) at the start of `.text`, so
+//!   they share pages instead of being spread over ~29 MB of code. The
+//!   kernel maps the 64 KB around each code page fault, so a scattered hot
+//!   set costs resident memory and faults: `serve` crawling the bench
+//!   corpus -4 to -5 MB RSS (ADR 0016). Symbols a build lacks are ignored
+//!   (`--no-warn-symbol-ordering`); a stale list only costs locality.
+//!   `LB_NO_ORDER=1` links without it.
+//!
+//! All need lld, the default linker of `x86_64-unknown-linux-gnu` since
+//! Rust 1.90. Set `LB_PLAIN_LINK=1` to link without any of them. For size
+//! work, `LB_LINK_MAP=<path>` also writes lld's link map there (about
+//! 60 MB; only the final link reruns).
+
+use std::path::PathBuf;
+
+/// `LB_GIT_COMMIT` and `LB_GIT_DIRTY` for `--version --verbose`: from
+/// `LB_BUILD_COMMIT` if set (trees built outside git), else from git, else
+/// `unknown`. Reruns when HEAD or its branch moves (not on `git add` or
+/// edits), so the dirty flag is the state when HEAD last moved and the
+/// script ran: it can say clean for a tree edited since.
+fn git_info() {
+    println!("cargo:rerun-if-env-changed=LB_BUILD_COMMIT");
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let (commit, dirty) = match std::env::var("LB_BUILD_COMMIT") {
+        Ok(c) if !c.is_empty() => (c, false),
+        _ => match git(&["rev-parse", "HEAD"]) {
+            Some(c) => {
+                // HEAD and the ref it names (a branch, or packed-refs when
+                // the branch has no loose file): a commit or checkout
+                // reruns this, `git add` does not.
+                let mut watch = vec!["HEAD".to_string()];
+                if let Some(r) = git(&["symbolic-ref", "-q", "HEAD"]) {
+                    watch.push(r);
+                    watch.push("packed-refs".into());
+                }
+                for f in &watch {
+                    if let Some(p) = git(&["rev-parse", "--git-path", f])
+                        && std::path::Path::new(&p).exists()
+                    {
+                        println!("cargo:rerun-if-changed={p}");
+                    }
+                }
+                let dirty = git(&["status", "--porcelain", "--untracked-files=no"])
+                    .is_some_and(|s| !s.is_empty());
+                (c, dirty)
+            }
+            None => ("unknown".to_string(), false),
+        },
+    };
+    println!("cargo:rustc-env=LB_GIT_COMMIT={commit}");
+    println!("cargo:rustc-env=LB_GIT_DIRTY={dirty}");
+}
+
+fn main() {
+    git_info();
+    println!("cargo:rerun-if-env-changed=LB_PLAIN_LINK");
+    println!("cargo:rerun-if-env-changed=LB_KEEP_UNWIND");
+    println!("cargo:rerun-if-env-changed=LB_LINK_MAP");
+    println!("cargo:rerun-if-env-changed=LB_NO_ORDER");
+    println!("cargo:rerun-if-changed=hot-symbols.txt");
+    let release = std::env::var("PROFILE").is_ok_and(|p| p == "release");
+    let target = std::env::var("TARGET").unwrap_or_default();
+    if !release
+        || target != "x86_64-unknown-linux-gnu"
+        || std::env::var_os("LB_PLAIN_LINK").is_some()
+    {
+        return;
+    }
+    if let Some(map) = std::env::var_os("LB_LINK_MAP") {
+        // Size work only: write a link map to this path.
+        println!(
+            "cargo:rustc-link-arg-bins=-Wl,-Map={}",
+            map.to_string_lossy()
+        );
+    }
+    let order = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"))
+        .join("hot-symbols.txt");
+    if std::env::var_os("LB_NO_ORDER").is_none() && order.is_file() {
+        println!(
+            "cargo:rustc-link-arg-bins=-Wl,--symbol-ordering-file={}",
+            order.display()
+        );
+        println!("cargo:rustc-link-arg-bins=-Wl,--no-warn-symbol-ordering");
+        warn_if_other_rustc(&order);
+    }
+    println!("cargo:rustc-link-arg-bins=-Wl,--icf=safe");
+    println!("cargo:rustc-link-arg-bins=-Wl,-z,pack-relative-relocs");
+    if std::env::var_os("LB_KEEP_UNWIND").is_none() {
+        // `INSERT AFTER` keeps lld's default layout for everything else.
+        let script = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"))
+            .join("discard-eh-frame.ld");
+        std::fs::write(
+            &script,
+            "SECTIONS { /DISCARD/ : { *(.eh_frame) } } INSERT AFTER .text;\n",
+        )
+        .expect("write linker script");
+        println!("cargo:rustc-link-arg-bins=-Wl,-T,{}", script.display());
+    }
+}
+
+/// Rust symbol names carry per-crate hashes that change with the rustc
+/// build, so a list made with another toolchain orders no Rust code (lld
+/// drops the names without a word). The list's first line names the rustc
+/// that made it (`# rustc 1.99.1 58cf8f9c3`; lld skips `#` lines).
+fn warn_if_other_rustc(order: &std::path::Path) {
+    let Some(stamp) = std::fs::read_to_string(order)
+        .ok()
+        .and_then(|s| s.lines().next().map(str::to_owned))
+        .and_then(|l| l.strip_prefix("# rustc ").map(str::to_owned))
+    else {
+        return;
+    };
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let Ok(out) = std::process::Command::new(rustc).arg("-vV").output() else {
+        return;
+    };
+    let vv = String::from_utf8_lossy(&out.stdout);
+    let field = |k: &str| {
+        vv.lines()
+            .find_map(|l| l.strip_prefix(k))
+            .map(str::trim)
+            .unwrap_or("?")
+            .to_owned()
+    };
+    let commit = field("commit-hash:");
+    let now = format!("{} {}", field("release:"), &commit[..commit.len().min(9)]);
+    if stamp.trim() != now {
+        println!(
+            "cargo:warning=hot-symbols.txt was made with rustc {}, this build uses {now}: \
+             Rust code is not ordered; run tools/hot_symbols/remap.py",
+            stamp.trim()
+        );
+    }
+}

@@ -1,0 +1,32 @@
+:root { --ink: #1d2433; --muted: #5b6475; --line: #e3e6ec; --accent: #00798c; --bg: #fafbfc; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+a { color: var(--accent); }
+.top { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+.logo { font-weight: 700; text-decoration: none; color: var(--ink); }
+.top nav a { margin-right: 14px; text-decoration: none; }
+.search { margin-left: auto; display: flex; gap: 6px; }
+input, textarea, button { font: inherit; }
+input[type=search], input[type=email], input[type=password], input[type=number], textarea { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+button { padding: 7px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+main { max-width: 1100px; margin: 0 auto; padding: 16px 24px 48px; }
+.hero { padding: 24px 0; }
+.layout { display: grid; grid-template-columns: 1fr 280px; gap: 24px; align-items: start; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.card img { width: 100%; height: auto; border-radius: 6px; display: block; }
+.card h3 { margin: 10px 0 2px; font-size: 1rem; }
+.cat { color: var(--muted); margin: 0; font-size: .9rem; }
+.price { font-weight: 600; }
+.cart { position: sticky; top: 80px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.cart label { display: block; margin: 8px 0; }
+.cart textarea, .cart input[type=number] { width: 100%; }
+.login form { max-width: 360px; display: grid; gap: 12px; }
+.login label { display: grid; gap: 4px; }
+.login .row { display: flex; gap: 8px; align-items: center; }
+.big-search { display: flex; gap: 8px; margin-bottom: 12px; }
+.big-search input { flex: 1; }
+.news article { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; margin: 18px 0; }
+.news img { float: right; margin: 0 0 8px 16px; max-width: 40%; height: auto; border-radius: 6px; }
+.foot { text-align: center; color: var(--muted); padding: 24px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) { .layout { grid-template-columns: 1fr; } .cart { position: static; } }

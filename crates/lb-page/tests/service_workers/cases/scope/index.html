@@ -1,0 +1,29 @@
+<!doctype html><title>scope</title><!--LOG-->
+<script>
+var sw = navigator.serviceWorker;
+function err(name) { return function (e) { log(name + ' rejected ' + e.name + ': ' + rel(e.message)) } }
+function ok(name) { return function (r) { log(name + ' ok scope=' + rel(r.scope) + ' script=' + rel((r.installing || r.waiting || r.active).scriptURL)) } }
+sw.register('sw.js', { scope: '/elsewhere/' }).then(ok('outside'), err('outside'))
+.then(function () { return sw.register('http://localhost:1/sw.js').then(ok('cross-origin'), err('cross-origin')) })
+.then(function () { return sw.register('missing.js').then(ok('404'), err('404')) })
+.then(function () { return sw.register('text.txt').then(ok('mime'), err('mime')) })
+.then(function () { return sw.register('syntax.js').then(ok('syntax'), err('syntax')) })
+.then(function () { return sw.register('throws.js').then(ok('throws'), err('throws')) })
+.then(function () { return sw.register('sw.js', { scope: 'sub/' }).then(ok('sub'), err('sub')) })
+.then(function () { return sw.register('sw.js', { scope: './' }).then(ok('dir'), err('dir')) })
+.then(function () { return sw.register('allowed-sw.js', { scope: '/' }).then(ok('allowed root'), err('allowed root')) })
+.then(function () { return sw.register('sw.js', { scope: 'a%2fb' }).then(ok('escaped'), err('escaped')) })
+.then(function () { return sw.register('sw.js', { updateViaCache: 'bad' }).then(ok('uvc'), err('uvc')) })
+.then(function () { return sw.register('data:text/javascript,1').then(ok('data'), err('data')) })
+.then(function () { return sw.register().then(ok('none'), err('none')) }, function (e) { log('sync ' + e) })
+.then(function () { return sw.getRegistrations() })
+.then(function (rs) { log('registrations ' + rs.map(function (r) { return rel(r.scope) }).sort().join(' ')); return sw.getRegistration('sub/deeper/x') })
+.then(function (r) { log('match sub/deeper/x ' + (r && rel(r.scope))); return sw.getRegistration('other.html') })
+.then(function (r) { log('match other.html ' + (r && rel(r.scope))); return sw.getRegistration('/nothing') })
+.then(function (r) { log('match /nothing ' + (r && rel(r.scope))); return sw.getRegistration('http://localhost:1/') })
+.then(function (r) { log('cross ' + r) }, err('cross'))
+.then(function () { return sw.getRegistration('sub/') })
+.then(function (r) { return r.unregister().then(function (v) { log('unregister ' + v + ' ' + rel(r.scope)); return r.unregister() }) })
+.then(function (v) { log('unregister again ' + v); return sw.getRegistrations() })
+.then(function (rs) { log('registrations ' + rs.map(function (r) { return rel(r.scope) }).sort().join(' ')); end() });
+</script>

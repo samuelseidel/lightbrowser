@@ -1,0 +1,68 @@
+<!doctype html><!--LOG--><body><script>
+var o = [];
+t('registry', () => [typeof customElements, String(customElements), Object.getOwnPropertyNames(CustomElementRegistry.prototype).sort().join(' '), customElements === window.customElements, typeof CustomElementRegistry].join('|'));
+t('new registry', () => String(new CustomElementRegistry()));
+t('define no args', () => customElements.define());
+t('bad name', () => customElements.define('nodash', class extends HTMLElement {}));
+t('reserved', () => customElements.define('font-face', class extends HTMLElement {}));
+t('upper', () => customElements.define('X-a', class extends HTMLElement {}));
+t('not ctor', () => customElements.define('x-arrow', () => {}));
+t('not function', () => customElements.define('x-obj', {}));
+t('bad proto', () => { var f = function () {}; f.prototype = 5; customElements.define('x-badproto', f); });
+t('getter throws', () => { class X extends HTMLElement {} Object.defineProperty(X.prototype, 'connectedCallback', { get() { throw new Error('boom'); } }); customElements.define('x-throw', X); });
+t('observed not iterable', () => { class X extends HTMLElement { static get observedAttributes() { return 5; } } customElements.define('x-obs', X); });
+class XA extends HTMLElement {
+  constructor() { super(); o.push('ctor ' + this.localName + ' attrs=' + this.attributes.length + ' parent=' + d(this.parentNode)); }
+  static get observedAttributes() { o.push('get observedAttributes'); return ['foo', 'bar']; }
+  connectedCallback() { o.push('connected ' + this.isConnected); }
+  disconnectedCallback() { o.push('disconnected ' + this.isConnected); }
+  adoptedCallback(a, b) { o.push('adopted ' + d(a) + '>' + d(b) + ' ' + (b === document)); }
+  attributeChangedCallback(n, ov, nv, ns) { o.push('attr ' + n + ' ' + ov + ' -> ' + nv + ' ns=' + ns); }
+}
+var ex = document.createElement('x-a'); ex.setAttribute('foo', 'early'); document.body.appendChild(ex);
+o.push('defining');
+t('define', () => customElements.define('x-a', XA));
+log('upgrade on define: ' + o.join(' | ')); o = [];
+t('again', () => customElements.define('x-a', class extends HTMLElement {}));
+t('same ctor', () => customElements.define('x-a2', XA));
+t('get', () => [customElements.get('x-a') === XA, customElements.get('x-nope'), customElements.getName(XA), customElements.getName(class {})].join());
+t('proto', () => [ex instanceof XA, Object.getPrototypeOf(ex) === XA.prototype, ex.matches(':defined'), document.createElement('x-nope').matches(':defined'), document.createElement('div').matches(':defined')].join());
+var x = document.createElement('x-a');
+t('createElement', () => [x instanceof XA, x.matches(':defined'), o.join(' | ')].join(' ')); o = [];
+x.setAttribute('foo', '1'); x.setAttribute('baz', '2'); x.setAttribute('foo', '1'); x.removeAttribute('foo'); x.setAttributeNS('urn:x', 'p:bar', '3'); x.id = 'xid'; x.toggleAttribute('bar');
+log('attributes: ' + o.join(' | ')); o = [];
+document.body.appendChild(x); o.push('appended');
+document.body.appendChild(x); o.push('re-appended');
+x.remove(); o.push('removed');
+var frag = document.createDocumentFragment(); frag.appendChild(x); document.body.appendChild(frag); o.push('via fragment');
+log('tree: ' + o.join(' | ')); o = [];
+var y = new XA(); o.push('new returned ' + d(y));
+t('new', () => [y instanceof XA, y.localName, y.namespaceURI, y.isConnected].join());
+t('new HTMLElement', () => new HTMLElement());
+t('new unregistered', () => { class U extends HTMLElement {} return new U(); });
+t('call without new', () => XA.call({}));
+log('new: ' + o.join(' | ')); o = [];
+var doc2 = document.implementation.createHTMLDocument('');
+doc2.body.appendChild(x); o.push('moved to doc2');
+document.body.appendChild(x); o.push('back');
+var z = doc2.createElement('x-a'); o.push('doc2 createElement ' + (z instanceof XA));
+log('adopt: ' + o.join(' | ')); o = [];
+document.body.innerHTML += '<x-a foo=parsed><x-a id=child></x-a></x-a>';
+log('innerHTML: ' + o.join(' | ')); o = [];
+var wd = customElements.whenDefined('x-later'); var wd2 = customElements.whenDefined('x-later');
+t('whenDefined same', () => wd === wd2);
+customElements.whenDefined('x-a').then(c => log('whenDefined defined ' + (c === XA)));
+customElements.whenDefined('bad').catch(e => log('whenDefined bad ' + err(e)));
+wd.then(c => log('whenDefined later ' + c.name));
+Promise.resolve().then(() => log('micro'));
+var later = document.createElement('x-later'); document.body.appendChild(later);
+customElements.define('x-later', class XLater extends HTMLElement { connectedCallback() { log('later connected'); } });
+log('after define later');
+t('upgrade', () => { var u = document.createElement('x-up'); customElements.define('x-up', class extends HTMLElement { constructor() { super(); o.push('up ctor'); } }); var before = u.constructor.name; customElements.upgrade(u); return before + ' ' + u.constructor.name + ' ' + o.join(); }); o = [];
+t('ctor returns other', () => { customElements.define('x-other', class extends HTMLElement { constructor() { super(); return document.createElement('div'); } }); return document.createElement('x-other'); });
+t('ctor throws', () => { customElements.define('x-thr', class extends HTMLElement { constructor() { super(); throw new Error('ctor boom'); } }); var e = document.createElement('x-thr'); return e.constructor.name + ' ' + e.matches(':defined'); });
+t('ctor attrs', () => { customElements.define('x-attr', class extends HTMLElement { constructor() { super(); this.setAttribute('a', 'b'); } }); return document.createElement('x-attr'); });
+t('ctor child', () => { customElements.define('x-kid', class extends HTMLElement { constructor() { super(); this.appendChild(document.createElement('p')); } }); return document.createElement('x-kid'); });
+t('callback throws', () => { customElements.define('x-cbt', class extends HTMLElement { connectedCallback() { throw new Error('cb boom'); } }); var e = document.createElement('x-cbt'); document.body.appendChild(e); return 'no throw'; });
+setTimeout(end, 30);
+</script>

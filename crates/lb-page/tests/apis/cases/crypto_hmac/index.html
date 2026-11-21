@@ -1,0 +1,47 @@
+<!doctype html><!--LOG--><script>
+var S = crypto.subtle;
+function k(key) { return [key.type, key.extractable, JSON.stringify(key.algorithm), key.usages.join('/'), Object.prototype.toString.call(key)].join(' '); }
+(async () => {
+  var raw = unhex('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f');
+  for (const h of ['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512']) {
+    var key = await S.importKey('raw', raw, { name: 'HMAC', hash: h }, true, ['sign', 'verify']);
+    log(h + ' key ' + k(key));
+    var sig = await S.sign('HMAC', key, enc('hello'));
+    log(h + ' sig ' + hex(sig));
+    log(h + ' verify ' + await S.verify('HMAC', key, sig, enc('hello')) + ' ' + await S.verify('HMAC', key, sig, enc('hellO')) + ' ' + await S.verify({ name: 'HMAC' }, key, sig.slice(1), enc('hello')));
+    log(h + ' raw ' + hex(await S.exportKey('raw', key)));
+    log(h + ' jwk ' + JSON.stringify(await S.exportKey('jwk', key)));
+  }
+  await a('length 100', async () => k(await S.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256', length: 100 }, true, ['sign'])));
+  await a('length 256', async () => k(await S.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256', length: 256 }, true, ['sign'])));
+  await a('length 300', async () => k(await S.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256', length: 300 }, true, ['sign'])));
+  await a('empty raw', async () => k(await S.importKey('raw', new Uint8Array(0), { name: 'HMAC', hash: 'SHA-256' }, true, ['sign'])));
+  await a('jwk import', async () => { var key = await S.importKey('jwk', { kty: 'oct', k: 'AAECAwQFBgcICQoLDA0ODw', alg: 'HS256', ext: true }, { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']); return k(key) + ' ' + JSON.stringify(await S.exportKey('jwk', key)); });
+  await a('jwk alg mismatch', () => S.importKey('jwk', { kty: 'oct', k: 'AAECAwQFBgcICQoLDA0ODw', alg: 'HS384' }, { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']));
+  await a('jwk ext false', () => S.importKey('jwk', { kty: 'oct', k: 'AAECAwQFBgcICQoLDA0ODw', ext: false }, { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']));
+  await a('jwk bad kty', () => S.importKey('jwk', { kty: 'EC', k: 'AAEC' }, { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']));
+  await a('jwk no k', () => S.importKey('jwk', { kty: 'oct' }, { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']));
+  await a('jwk use', () => S.importKey('jwk', { kty: 'oct', k: 'AAEC', use: 'enc' }, { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']));
+  await a('jwk key_ops', () => S.importKey('jwk', { kty: 'oct', k: 'AAEC', key_ops: ['sign'] }, { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']));
+  await a('no hash', () => S.importKey('raw', raw, { name: 'HMAC' }, true, ['sign']));
+  await a('bad usage', () => S.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, true, ['encrypt']));
+  await a('empty usages', async () => k(await S.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, true, [])));
+  await a('bogus usage', () => S.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, true, ['bogus']));
+  await a('bad format', () => S.importKey('spki', raw, { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']));
+  await a('unknown format', () => S.importKey('foo', raw, { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']));
+  var ne = await S.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  log('ne ' + k(ne));
+  await a('export non-extractable', () => S.exportKey('raw', ne));
+  await a('verify with sign-only', () => S.verify('HMAC', ne, new Uint8Array(32), enc('x')));
+  await a('sign wrong alg', () => S.sign('AES-GCM', ne, enc('x')));
+  await a('sign not key', () => S.sign('HMAC', {}, enc('x')));
+  for (const len of [undefined, 128, 512, 7]) {
+    await a('generate ' + len, async () => { var g = await S.generateKey({ name: 'HMAC', hash: 'SHA-512', length: len }, true, ['sign', 'verify', 'sign']); return k(g) + ' ' + (await S.exportKey('raw', g)).byteLength; });
+  }
+  await a('generate 0', () => S.generateKey({ name: 'HMAC', hash: 'SHA-256', length: 0 }, true, ['sign']));
+  await a('generate no usages', () => S.generateKey({ name: 'HMAC', hash: 'SHA-256' }, true, []));
+  t('key same algorithm object', () => ne.algorithm === ne.algorithm);
+  t('key usages same', () => ne.usages === ne.usages);
+  end();
+})();
+</script>

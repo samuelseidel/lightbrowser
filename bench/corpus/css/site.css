@@ -1,0 +1,40 @@
+:root{--fg:#1d2330;--bg:#fafaf7;--accent:#1f6f8b;--muted:#6b7280;--line:#dcdcd4}
+*{box-sizing:border-box}
+html{font-family:system-ui,"Segoe UI",Roboto,sans-serif;color:var(--fg);background:var(--bg)}
+body{margin:0;line-height:1.55}
+header.site{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--line);background:#fff}
+header.site .brand{font-weight:700;color:var(--accent);text-decoration:none}
+nav.main a{margin-left:16px;color:var(--fg);text-decoration:none}
+nav.main a:hover{color:var(--accent)}
+main{max-width:960px;margin:0 auto;padding:24px}
+h1{font-size:2rem;margin:0 0 .5rem}
+h2{font-size:1.4rem;margin:1.6rem 0 .5rem;border-bottom:1px solid var(--line);padding-bottom:.2rem}
+h3{font-size:1.1rem;margin:1.2rem 0 .4rem}
+p{margin:.6rem 0}
+.meta{color:var(--muted);font-size:.9rem}
+.toc{background:#fff;border:1px solid var(--line);padding:12px 16px;margin:16px 0}
+.toc ol{margin:0;padding-left:20px}
+figure{margin:16px 0;padding:0}
+figure img{max-width:100%;height:auto;display:block;border:1px solid var(--line)}
+figcaption{font-size:.85rem;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.card{background:#fff;border:1px solid var(--line);padding:12px;border-radius:4px}
+.card img{width:100%;height:auto;display:block}
+.card .price{font-weight:700;color:var(--accent)}
+.card.sale{border-color:#b45309}
+table{border-collapse:collapse;width:100%;margin:12px 0}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+th{background:#f0f0ea}
+tr.odd td{background:#f8f8f3}
+form.f label{display:block;margin:10px 0 2px;font-weight:600}
+form.f input,form.f select,form.f textarea{width:100%;padding:6px 8px;border:1px solid var(--line);font:inherit}
+form.f button{margin-top:12px;padding:8px 16px;background:var(--accent);color:#fff;border:0;border-radius:3px}
+pre,code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+pre{background:#f0f0ea;padding:10px;overflow:auto}
+.comment{border-left:3px solid var(--line);padding:4px 12px;margin:10px 0}
+.comment .by{font-weight:600}
+.comment.depth1{margin-left:24px}
+.comment.depth2{margin-left:48px}
+footer.site{border-top:1px solid var(--line);padding:16px 24px;color:var(--muted);font-size:.85rem}
+.hidden{display:none}
+@media (max-width:700px){.grid{grid-template-columns:1fr}nav.main a{margin-left:8px}}

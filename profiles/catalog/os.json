@@ -1,0 +1,242 @@
+{
+  "format": 1,
+  "note": "OS releases the generator (crates/lb-persona/src/generate.rs) samples. Windows/macOS values are not captured: M7 surface reference (medium confidence); Linux platformVersion \"\" was captured (tests/fixtures/os/).",
+  "chrome": {
+    "version": "153.0.8010.12",
+    "major": 153,
+    "tls_profile_id": "chrome_153_linux",
+    "ja3": "9bddd6d71939cb1fcf03871f2cc2adcf",
+    "ja3s_note": "Chrome 153 ClientHello and H2 preface are OS-independent; captured on Linux (profiles/tls/chrome_153_linux.json)."
+  },
+  "ua_os": {
+    "windows": "Windows NT 10.0; Win64; x64",
+    "macos": "Macintosh; Intel Mac OS X 10_15_7",
+    "linux": "X11; Linux x86_64"
+  },
+  "locales": [
+    {
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en"
+      ],
+      "accept_language": "en-US,en;q=0.9",
+      "timezones": [
+        [
+          "America/New_York",
+          300
+        ],
+        [
+          "America/Chicago",
+          360
+        ],
+        [
+          "America/Denver",
+          420
+        ],
+        [
+          "America/Los_Angeles",
+          480
+        ]
+      ]
+    }
+  ],
+  "releases": [
+    {
+      "id": "win10_22h2",
+      "kind": "windows",
+      "weight": 4,
+      "os": {
+        "name": "Windows",
+        "version": "10 22H2",
+        "build": "10.0.19045",
+        "platform": "Win32",
+        "architecture": "x86_64"
+      },
+      "platform_version": "10.0.0",
+      "fonts": "windows10",
+      "screens": "windows10",
+      "taskbar_px": 40
+    },
+    {
+      "id": "win11_23h2",
+      "kind": "windows",
+      "weight": 2,
+      "os": {
+        "name": "Windows",
+        "version": "11 23H2",
+        "build": "10.0.22631",
+        "platform": "Win32",
+        "architecture": "x86_64"
+      },
+      "platform_version": "15.0.0",
+      "fonts": "windows11",
+      "screens": "windows",
+      "taskbar_px": 48
+    },
+    {
+      "id": "win11_24h2",
+      "kind": "windows",
+      "weight": 4,
+      "os": {
+        "name": "Windows",
+        "version": "11 24H2",
+        "build": "10.0.26100",
+        "platform": "Win32",
+        "architecture": "x86_64"
+      },
+      "platform_version": "19.0.0",
+      "fonts": "windows11",
+      "screens": "windows",
+      "taskbar_px": 48
+    },
+    {
+      "id": "macos13",
+      "kind": "macos",
+      "weight": 1,
+      "os": {
+        "name": "macOS",
+        "version": "13.7.1",
+        "build": "22H221",
+        "platform": "MacIntel"
+      },
+      "fonts": "macos"
+    },
+    {
+      "id": "macos14",
+      "kind": "macos",
+      "weight": 2,
+      "os": {
+        "name": "macOS",
+        "version": "14.7.1",
+        "build": "23H222",
+        "platform": "MacIntel"
+      },
+      "fonts": "macos"
+    },
+    {
+      "id": "macos15",
+      "kind": "macos",
+      "weight": 4,
+      "os": {
+        "name": "macOS",
+        "version": "15.1",
+        "build": "24B83",
+        "platform": "MacIntel"
+      },
+      "fonts": "macos"
+    },
+    {
+      "id": "macos26",
+      "kind": "macos",
+      "weight": 3,
+      "os": {
+        "name": "macOS",
+        "version": "26.1",
+        "build": "25B78",
+        "platform": "MacIntel"
+      },
+      "fonts": "macos"
+    },
+    {
+      "id": "ubuntu2404_x11",
+      "kind": "linux",
+      "weight": 3,
+      "os": {
+        "name": "Linux",
+        "version": "Ubuntu 24.04 LTS",
+        "build": "6.8.0-87-generic",
+        "platform": "Linux x86_64",
+        "architecture": "x86_64",
+        "kernel": "6.8.0-87-generic",
+        "distro": "ubuntu-24.04",
+        "display_server": "x11"
+      },
+      "fonts": "ubuntu24",
+      "dock_px": 64,
+      "top_bar_px": 32,
+      "llvm": "19.1.1",
+      "drm": "3.57"
+    },
+    {
+      "id": "ubuntu2404_wayland",
+      "kind": "linux",
+      "weight": 3,
+      "os": {
+        "name": "Linux",
+        "version": "Ubuntu 24.04 LTS",
+        "build": "6.8.0-87-generic",
+        "platform": "Linux x86_64",
+        "architecture": "x86_64",
+        "kernel": "6.8.0-87-generic",
+        "distro": "ubuntu-24.04",
+        "display_server": "wayland"
+      },
+      "fonts": "ubuntu24",
+      "dock_px": 64,
+      "top_bar_px": 32,
+      "llvm": "19.1.1",
+      "drm": "3.57"
+    },
+    {
+      "id": "ubuntu2204_x11",
+      "kind": "linux",
+      "weight": 1,
+      "os": {
+        "name": "Linux",
+        "version": "Ubuntu 22.04 LTS",
+        "build": "6.8.0-87-generic",
+        "platform": "Linux x86_64",
+        "architecture": "x86_64",
+        "kernel": "6.8.0-87-generic",
+        "distro": "ubuntu-22.04",
+        "display_server": "x11"
+      },
+      "fonts": "ubuntu22",
+      "dock_px": 64,
+      "top_bar_px": 32,
+      "llvm": "15.0.7",
+      "drm": "3.57"
+    },
+    {
+      "id": "fedora41_wayland",
+      "kind": "linux",
+      "weight": 1,
+      "os": {
+        "name": "Linux",
+        "version": "Fedora Linux 41 (Workstation Edition)",
+        "build": "6.11.4-301.fc41.x86_64",
+        "platform": "Linux x86_64",
+        "architecture": "x86_64",
+        "kernel": "6.11.4-301.fc41.x86_64",
+        "distro": "fedora-41",
+        "display_server": "wayland"
+      },
+      "fonts": "fedora41",
+      "dock_px": 0,
+      "top_bar_px": 32,
+      "llvm": "19.1.7",
+      "drm": "3.59"
+    },
+    {
+      "id": "fedora42_wayland",
+      "kind": "linux",
+      "weight": 2,
+      "os": {
+        "name": "Linux",
+        "version": "Fedora Linux 42 (Workstation Edition)",
+        "build": "6.14.5-300.fc42.x86_64",
+        "platform": "Linux x86_64",
+        "architecture": "x86_64",
+        "kernel": "6.14.5-300.fc42.x86_64",
+        "distro": "fedora-42",
+        "display_server": "wayland"
+      },
+      "fonts": "fedora42",
+      "dock_px": 0,
+      "top_bar_px": 32,
+      "llvm": "20.1.3",
+      "drm": "3.61"
+    }
+  ]
+}

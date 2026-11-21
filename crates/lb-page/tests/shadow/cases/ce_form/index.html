@@ -1,0 +1,40 @@
+<!doctype html><!--LOG--><script>
+var o = [];
+class XF extends HTMLElement {
+  static formAssociated = true;
+  constructor() { super(); this.i = this.attachInternals(); }
+  formAssociatedCallback(f) { o.push('assoc ' + d(f)); }
+  formResetCallback() { o.push('reset'); }
+  formDisabledCallback(dis) { o.push('disabled ' + dis); }
+  formStateRestoreCallback(s, m) { o.push('restore ' + s + ' ' + m); }
+}
+customElements.define('x-f', XF);
+</script><body><form id=f><x-f id=a name=fa></x-f><input name=plain value=v></form><fieldset id=fs><x-f id=b name=fb></x-f></fieldset><script>
+log('parser: ' + o.join(' | ')); o = [];
+var f = document.getElementById('f'), a = document.getElementById('a'), b = document.getElementById('b');
+t('internals', () => [String(a.i), Object.getOwnPropertyNames(ElementInternals.prototype).sort().join(' ')].join('|'));
+t('twice', () => a.attachInternals());
+t('non-custom', () => document.createElement('div').attachInternals());
+t('form', () => [d(a.i.form), d(b.i.form), a.i.willValidate, a.i.validationMessage, a.i.validity.valid, a.i.labels.length, f.elements.length, d(f.elements[0]), f.elements.namedItem('fa') === a].join());
+a.i.setFormValue('hello');
+t('formdata', () => Array.from(new FormData(f)).map(e => e.join('=')).join('&'));
+var fd = new FormData(); fd.append('k1', 'v1'); a.i.setFormValue(fd);
+t('formdata2', () => Array.from(new FormData(f)).map(e => e.join('=')).join('&'));
+a.i.setFormValue(null);
+t('formdata null', () => Array.from(new FormData(f)).map(e => e.join('=')).join('&'));
+a.i.setValidity({ valueMissing: true }, 'need value');
+t('validity', () => [a.i.validity.valid, a.i.validity.valueMissing, a.i.validationMessage, a.i.checkValidity(), f.checkValidity(), a.matches(':invalid')].join());
+t('setValidity no msg', () => a.i.setValidity({ customError: true }));
+a.i.setValidity({});
+t('valid again', () => [a.i.validity.valid, a.matches(':valid')].join());
+f.reset(); o.push('after reset');
+document.getElementById('fs').disabled = true; o.push('after disable');
+document.body.appendChild(a); o.push('moved out');
+f.appendChild(a); o.push('moved in');
+log('callbacks: ' + o.join(' | ')); o = [];
+t('states', () => { a.i.states.add('--x'); a.i.states.add('checked'); return [a.i.states.has('--x'), a.matches(':state(--x)'), a.matches(':state(checked)'), a.i.states.size].join(); });
+t('role', () => { a.i.role = 'button'; a.i.ariaLabel = 'lbl'; return [a.i.role, a.getAttribute('role'), a.i.ariaLabel].join(); });
+t('shadowRoot', () => { var e = document.createElement('x-f'); var s = e.attachShadow({ mode: 'closed' }); return [e.i.shadowRoot === s].join(); });
+t('not form associated', () => { customElements.define('x-nf', class extends HTMLElement { constructor() { super(); this.i = this.attachInternals(); } }); var e = document.createElement('x-nf'); try { e.i.form; } catch (x) { return err(x); } });
+end();
+</script>

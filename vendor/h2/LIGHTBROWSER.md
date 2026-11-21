@@ -28,6 +28,13 @@ new builder methods.
   exclusive: bool)`: every request HEADERS frame gets the PRIORITY flag and
   this RFC 7540 priority block. `weight` is 1 to 256. Chrome:
   `(0, 256, true)`. Trailers and responses are unchanged.
+- `client::Urgency(pub u8)` request extension and
+  `client::Builder::chrome_stream_dependencies(&mut self, on: bool)`: a
+  request carrying an urgency (0 most urgent, 7 least; the `u=` of its
+  `priority` header) gets Chrome's block instead (ADR 0018): exclusive,
+  depending on the most recently opened still-open stream of the same or a
+  more urgent urgency (0 if none), weight 256, 220, 183, 147, 110, 74, 37
+  or 1 (`Spdy3PriorityToHttp2Weight`). Closed streams leave the lists.
 
 Behaviour change (all clients, not opt-in): the first poll of the client
 connection writes its queued frames (connection WINDOW_UPDATE, and HEADERS of
@@ -46,14 +53,16 @@ is at least half the current window, which holds for browser values.
 
 | File | Change |
 |---|---|
-| `src/frame/headers.rs` | `PseudoHeader` enum, `DEFAULT_PSEUDO_ORDER`; `Iter` holds an order and yields pseudo-headers in it; `HeaderBlock::into_encoding` takes the order; new `Headers::encode_with_order(.., order, priority)`, which sets the PRIORITY flag and writes the block for requests when `priority` is set (`encode` calls it with the defaults and is now only used by tests, hence an `allow(dead_code)`); `PushPromise` uses the default order. |
+| `src/frame/headers.rs` | `PseudoHeader` enum, `DEFAULT_PSEUDO_ORDER`; `Iter` holds an order and yields pseudo-headers in it; `HeaderBlock::into_encoding` takes the order; `set_stream_dep` (a request's own block wins over the codec's); new `Headers::encode_with_order(.., order, priority)`, which sets the PRIORITY flag and writes the block for requests when `priority` is set (`encode` calls it with the defaults and is now only used by tests, hence an `allow(dead_code)`); `PushPromise` uses the default order. |
 | `src/frame/mod.rs` | Re-export `PseudoHeader` and `DEFAULT_PSEUDO_ORDER`. |
 | `src/frame/settings.rs` | `Settings.order: Option<Vec<u16>>` and `set_order`; `for_each` (used by encode, payload length and Debug) honours it; helpers `Settings::get(id)` and `Setting::id()`. |
 | `src/codec/framed_write.rs` | Encoder holds `pseudo_order` and `headers_priority`, passes both to `Headers::encode_with_order`; `set_pseudo_order`, `set_headers_priority`. |
 | `src/codec/mod.rs` | `Codec::set_send_pseudo_order`, `Codec::set_send_headers_priority`. |
-| `src/client.rs` | `pub use PseudoHeader`; `Builder.pseudo_order`; `pseudo_header_order` and `settings_order`; `Builder.headers_priority` and `headers_priority`; `handshake2` applies the pseudo order and HEADERS priority to the codec. |
+| `src/client.rs` | `pub use PseudoHeader`; `Builder.pseudo_order`; `pseudo_header_order` and `settings_order`; `Builder.headers_priority` and `headers_priority`; `handshake2` applies the pseudo order and HEADERS priority to the codec; `Urgency`, `chrome_stream_dependencies`. |
 | `src/frame/priority.rs` | `StreamDependency` is `Clone + Copy`; new `StreamDependency::encode`. |
 | `src/proto/connection.rs` | `preface_flushed`: the first `poll` runs `streams.poll_complete` before reading. |
+| `src/proto/streams/counts.rs` | `priorities` (open streams per urgency), `enable_chrome_priorities`, `chrome_dependency`; `transition_after` drops closed streams from the lists. |
+| `src/proto/streams/streams.rs` | `send_request` takes the `Urgency` extension and sets the frame's priority block; `Streams::enable_chrome_priorities`. |
 
 All additions are marked `LIGHTBROWSER patch` in comments.
 

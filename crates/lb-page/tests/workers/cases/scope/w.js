@@ -1,0 +1,24 @@
+var out = [];
+function t(label, f) { try { out.push(label + ' ' + f()); } catch (e) { out.push(label + ' threw ' + e.name + ': ' + e.message); } }
+t('tag', () => Object.prototype.toString.call(self));
+t('self', () => self === globalThis);
+t('chain', () => { var r = []; for (var o = Object.getPrototypeOf(self); o; o = Object.getPrototypeOf(o)) r.push(o.constructor.name); return r.join('>'); });
+t('typeof', () => ['window', 'document', 'importScripts', 'postMessage', 'close', 'fetch', 'XMLHttpRequest', 'Worker', 'SharedWorker', 'MessageChannel', 'localStorage', 'requestAnimationFrame', 'onmessage', 'onconnect', 'name'].map(n => n + '=' + typeof self[n]).join(','));
+t('name', () => JSON.stringify(self.name));
+t('location', () => [location.href.replace(/:\d+\//, ':PORT/'), location.pathname, location.protocol, String(location) === location.href, Object.prototype.toString.call(location)].join(' '));
+t('origin', () => self.origin.replace(/:\d+$/, ':PORT'));
+t('secure', () => self.isSecureContext + ' ' + self.crossOriginIsolated);
+t('navigator', () => Object.prototype.toString.call(navigator) + ' ' + (navigator instanceof WorkerNavigator) + ' ' + typeof Navigator);
+t('nav keys', () => { var r = []; for (var k in navigator) r.push(k); return r.length; });
+t('perf', () => Object.prototype.toString.call(performance) + ' ' + (performance.now() >= 0) + ' ' + typeof performance.timing);
+t('own', () => Object.getOwnPropertyNames(self).length);
+t('desc postMessage', () => JSON.stringify(Object.getOwnPropertyDescriptor(self, 'postMessage'), (k, v) => typeof v === 'function' ? v.name + '/' + v.length : v));
+t('desc self', () => typeof Object.getOwnPropertyDescriptor(WorkerGlobalScope.prototype, 'self').get);
+t('setter self', () => { self.self = 1; return self.self === 1; });
+t('toString fn', () => Function.prototype.toString.call(postMessage));
+t('atob', () => atob('aGk=') + ' ' + btoa('hi'));
+t('bad atob', () => atob('*'));
+t('clone', () => { var o = {a: [1]}; var c = structuredClone(o); return (c !== o) + ' ' + c.a[0]; });
+t('clone fn', () => structuredClone(function f() {}));
+t('postMessage none', () => postMessage());
+postMessage(out);

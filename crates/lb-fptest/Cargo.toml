@@ -27,3 +27,7 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 # AF_PACKET capture of client SYNs (tcp module, Linux only).
 libc = "0.2"
+# Page server (`site`): HTTP/2 server side.
+h2 = "0.4"
+http = "1"
+bytes = "1"

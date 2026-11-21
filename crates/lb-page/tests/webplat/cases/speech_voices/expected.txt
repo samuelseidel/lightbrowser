@@ -1,0 +1,57 @@
+voices 22 first=Microsoft David - English (United States) default=Microsoft David - English (United States)
+--- default voice (local), rate 2
+after speak sp=true pend=false paused=false
+a start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+a boundary 0/3 name=[word] t=0.000 sp=true pend=false paused=false
+a boundary 4/3 name=[word] t=0.200 sp=true pend=false paused=false
+a boundary 9/5 name=[word] t=0.400 sp=true pend=false paused=false
+a end 14/0 name=[] t=0.600 sp=false pend=false paused=false
+later sp=false pend=false paused=false
+--- network voice
+b start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+b end 7/0 name=[] t=0.160 sp=false pend=false paused=false
+--- lang picks the voice (de-DE: network), voice property reads back
+voice of c: null true
+c start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+c end 4/0 name=[] t=0.080 sp=false pend=false paused=false
+--- own voice property
+voice of d: Microsoft Zira - English (United States) same object: true
+d start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+d boundary 0/1 name=[word] t=0.000 sp=true pend=false paused=false
+d end 1/0 name=[] t=0.040 sp=false pend=false paused=false
+--- two queued
+queued sp=true pend=true paused=false
+e start 0/0 name=[] t=0.000 sp=true pend=true paused=false
+e boundary 0/2 name=[word] t=0.000 sp=true pend=true paused=false
+e boundary 3/2 name=[word] t=0.100 sp=true pend=true paused=false
+e end 5/0 name=[] t=0.200 sp=true pend=false paused=false
+f start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+f boundary 0/2 name=[word] t=0.000 sp=true pend=false paused=false
+f end 2/0 name=[] t=0.100 sp=false pend=false paused=false
+--- pause at 0.3 s, resume at 0.8 s (4 words, rate 2)
+g start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+g boundary 0/1 name=[word] t=0.000 sp=true pend=false paused=false
+g boundary 2/1 name=[word] t=0.200 sp=true pend=false paused=false
+right after pause sp=true pend=false paused=false
+g pause 2/0 name=[] t=0.300 sp=true pend=false paused=true
+right after resume sp=true pend=false paused=true
+g resume 2/0 name=[] t=0.800 sp=true pend=false paused=false
+g boundary 4/1 name=[word] t=0.900 sp=true pend=false paused=false
+g boundary 6/1 name=[word] t=1.100 sp=true pend=false paused=false
+g end 7/0 name=[] t=1.300 sp=false pend=false paused=false
+--- cancel at 0.3 s with another queued
+h start 0/0 name=[] t=0.000 sp=true pend=true paused=false
+h boundary 0/1 name=[word] t=0.000 sp=true pend=true paused=false
+h boundary 2/1 name=[word] t=0.200 sp=true pend=true paused=false
+right after cancel sp=false pend=false paused=false
+h error 0/0 name=[] t=0.300 error=canceled sp=false pend=false paused=false
+later sp=false pend=false paused=false
+--- empty text, unusual rate
+j start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+j end 0/0 name=[] t=0.000 sp=false pend=false paused=false
+k start 0/0 name=[] t=0.000 sp=true pend=false paused=false
+k boundary 0/2 name=[word] t=0.000 sp=true pend=false paused=false
+k boundary 3/2 name=[word] t=0.800 sp=true pend=false paused=false
+k end 5/0 name=[] t=1.600 sp=false pend=false paused=false
+end sp=false pend=false paused=false
+end

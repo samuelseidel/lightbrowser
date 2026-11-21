@@ -1,0 +1,496 @@
+{
+  "schema_version": "2.0",
+  "profile_id": "ad153000-0000-4000-8000-000000000003",
+  "profile_name": "ADVERSARIAL (R17_PLATFORM_VERSION): Windows 11 fonts (Segoe UI Variable) with the Windows 10 platformVersion 10.0.0",
+  "created_at": "2026-11-03T00:00:00Z",
+  "tags": [
+    "chrome",
+    "chrome153",
+    "windows",
+    "windows11",
+    "nvidia",
+    "rtx4060",
+    "1080p",
+    "adversarial",
+    "r17"
+  ],
+  "adversarial": true,
+  "os": {
+    "name": "Windows",
+    "version": "11 24H2",
+    "build": "10.0.26100",
+    "platform": "Win32",
+    "architecture": "x86_64"
+  },
+  "browser": {
+    "family": "chrome",
+    "name": "Chrome",
+    "version": "153.0.8010.12",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "accept_language": "en-US,en;q=0.9",
+    "do_not_track": null,
+    "cookie_enabled": true,
+    "java_enabled": false,
+    "pdf_viewer_enabled": true,
+    "product": "Gecko",
+    "product_sub": "20030107",
+    "vendor": "Google Inc.",
+    "vendor_sub": "",
+    "app_name": "Netscape",
+    "app_code_name": "Mozilla",
+    "app_version": "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+  },
+  "client_hints": {
+    "brands": [
+      {
+        "brand": "Google Chrome",
+        "version": "153"
+      },
+      {
+        "brand": "Not_A Brand",
+        "version": "8"
+      },
+      {
+        "brand": "Chromium",
+        "version": "153"
+      }
+    ],
+    "full_version_list": [
+      {
+        "brand": "Google Chrome",
+        "version": "153.0.8010.12"
+      },
+      {
+        "brand": "Not_A Brand",
+        "version": "8.0.0.0"
+      },
+      {
+        "brand": "Chromium",
+        "version": "153.0.8010.12"
+      }
+    ],
+    "platform": "Windows",
+    "platform_version": "10.0.0",
+    "architecture": "x86",
+    "bitness": "64",
+    "model": "",
+    "mobile": false,
+    "wow64": false,
+    "full_version": "153.0.8010.12"
+  },
+  "hardware": {
+    "hardware_concurrency": 16,
+    "device_memory": 16,
+    "max_touch_points": 0,
+    "gpu": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "vendor_unmasked": "Google Inc. (NVIDIA)",
+      "renderer_unmasked": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 (0x00002882) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    }
+  },
+  "screen": {
+    "width": 1920,
+    "height": 1080,
+    "avail_width": 1920,
+    "avail_height": 1032,
+    "color_depth": 24,
+    "pixel_depth": 24,
+    "device_pixel_ratio": 1.0,
+    "inner_width": 1920,
+    "inner_height": 929,
+    "outer_width": 1920,
+    "outer_height": 1032,
+    "avail_top": 0,
+    "avail_left": 0,
+    "maximized": true
+  },
+  "locale": {
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "timezone": "America/Chicago",
+    "timezone_offset": 360
+  },
+  "network": {
+    "connection_type": "4g",
+    "downlink": 10,
+    "rtt": 50,
+    "save_data": false
+  },
+  "fingerprint_seeds": {
+    "canvas_seed": "3a7d1e5c9b20f4686c1ea2d0b7f35c91",
+    "webgl_noise_seed": "8f02c6e4a1d7b3950e6fa8c2d41b7e03",
+    "audio_seed": "c5e81b3f07a9d2646b3d0f9a1e8c57b2"
+  },
+  "webgl": {
+    "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+    "extensions": [
+      "EXT_clip_control",
+      "EXT_color_buffer_float",
+      "EXT_color_buffer_half_float",
+      "EXT_conservative_depth",
+      "EXT_depth_clamp",
+      "EXT_disjoint_timer_query_webgl2",
+      "EXT_float_blend",
+      "EXT_polygon_offset_clamp",
+      "EXT_render_snorm",
+      "EXT_texture_compression_bptc",
+      "EXT_texture_compression_rgtc",
+      "EXT_texture_filter_anisotropic",
+      "EXT_texture_mirror_clamp_to_edge",
+      "EXT_texture_norm16",
+      "KHR_parallel_shader_compile",
+      "NV_shader_noperspective_interpolation",
+      "OES_draw_buffers_indexed",
+      "OES_sample_variables",
+      "OES_shader_multisample_interpolation",
+      "OES_texture_float_linear",
+      "OVR_multiview2",
+      "WEBGL_clip_cull_distance",
+      "WEBGL_compressed_texture_s3tc",
+      "WEBGL_compressed_texture_s3tc_srgb",
+      "WEBGL_debug_renderer_info",
+      "WEBGL_debug_shaders",
+      "WEBGL_lose_context",
+      "WEBGL_multi_draw",
+      "WEBGL_polygon_mode",
+      "WEBGL_provoking_vertex",
+      "WEBGL_stencil_texturing"
+    ],
+    "parameters": {
+      "MAX_TEXTURE_SIZE": 16384,
+      "MAX_VIEWPORT_DIMS": [
+        32767,
+        32767
+      ],
+      "MAX_VERTEX_ATTRIBS": 16,
+      "MAX_VERTEX_UNIFORM_VECTORS": 4095,
+      "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+      "MAX_VARYING_VECTORS": 30,
+      "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 32,
+      "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_TEXTURE_IMAGE_UNITS": 16,
+      "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+      "MAX_RENDERBUFFER_SIZE": 16384,
+      "MAX_VERTEX_UNIFORM_COMPONENTS": 16384,
+      "MAX_FRAGMENT_UNIFORM_COMPONENTS": 4096,
+      "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+      "MAX_3D_TEXTURE_SIZE": 2048,
+      "MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS": 120,
+      "MAX_UNIFORM_BUFFER_BINDINGS": 72,
+      "MAX_UNIFORM_BLOCK_SIZE": 65536,
+      "MAX_COMBINED_UNIFORM_BLOCKS": 60,
+      "MAX_SAMPLES": 4,
+      "ALIASED_LINE_WIDTH_RANGE": [
+        1,
+        1
+      ],
+      "ALIASED_POINT_SIZE_RANGE": [
+        1,
+        1024
+      ]
+    },
+    "shader_precision": {
+      "VERTEX_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "VERTEX_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "VERTEX_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.LOW_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.LOW_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.MEDIUM_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.MEDIUM_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      },
+      "FRAGMENT_SHADER.HIGH_FLOAT": {
+        "range_min": 127,
+        "range_max": 127,
+        "precision": 23
+      },
+      "FRAGMENT_SHADER.HIGH_INT": {
+        "range_min": 31,
+        "range_max": 30,
+        "precision": 0
+      }
+    }
+  },
+  "fonts": {
+    "available": [
+      "Arial",
+      "Arial Black",
+      "Bahnschrift",
+      "Calibri",
+      "Cambria",
+      "Cambria Math",
+      "Candara",
+      "Comic Sans MS",
+      "Consolas",
+      "Constantia",
+      "Corbel",
+      "Courier New",
+      "Ebrima",
+      "Franklin Gothic Medium",
+      "Gabriola",
+      "Gadugi",
+      "Georgia",
+      "Impact",
+      "Ink Free",
+      "Javanese Text",
+      "Leelawadee UI",
+      "Lucida Console",
+      "Lucida Sans Unicode",
+      "Malgun Gothic",
+      "Marlett",
+      "Microsoft Himalaya",
+      "Microsoft JhengHei",
+      "Microsoft New Tai Lue",
+      "Microsoft PhagsPa",
+      "Microsoft Sans Serif",
+      "Microsoft Tai Le",
+      "Microsoft YaHei",
+      "Microsoft Yi Baiti",
+      "MingLiU-ExtB",
+      "Mongolian Baiti",
+      "MS Gothic",
+      "MV Boli",
+      "Myanmar Text",
+      "Nirmala UI",
+      "Palatino Linotype",
+      "Segoe Fluent Icons",
+      "Segoe MDL2 Assets",
+      "Segoe Print",
+      "Segoe Script",
+      "Segoe UI",
+      "Segoe UI Emoji",
+      "Segoe UI Historic",
+      "Segoe UI Symbol",
+      "Segoe UI Variable Display",
+      "Segoe UI Variable Small",
+      "Segoe UI Variable Text",
+      "SimSun",
+      "Sitka Text",
+      "Sylfaen",
+      "Symbol",
+      "Tahoma",
+      "Times New Roman",
+      "Trebuchet MS",
+      "Verdana",
+      "Webdings",
+      "Wingdings",
+      "Yu Gothic"
+    ]
+  },
+  "tls": {
+    "profile_id": "chrome_153_linux",
+    "ja3": "9bddd6d71939cb1fcf03871f2cc2adcf",
+    "ja3s_note": "Chrome 153 ClientHello and H2 preface are OS-independent; captured on Linux (profiles/tls/chrome_153_linux.json)."
+  },
+  "timing": {
+    "performance_now_resolution_us": 100
+  },
+  "behavior": {
+    "profile": "casual_user"
+  },
+  "permissions": {
+    "geolocation": "prompt",
+    "notifications": "prompt",
+    "camera": "prompt",
+    "microphone": "prompt"
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "base_latency": 0.01,
+    "max_channel_count": 2
+  },
+  "media_devices": {
+    "webcam_label": "HD Pro Webcam C920 (046d:082d)",
+    "mic_label": "Microphone (HD Pro Webcam C920)",
+    "speaker_label": "Speakers (Realtek(R) Audio)",
+    "audioinput": 1,
+    "videoinput": 1,
+    "audiooutput": 1
+  },
+  "preferences": {
+    "color_scheme": "light",
+    "color_gamut": "srgb",
+    "scrollbar_width": 17
+  },
+  "speech_voices": [
+    {
+      "name": "Microsoft David - English (United States)",
+      "lang": "en-US",
+      "local_service": true,
+      "default": true
+    },
+    {
+      "name": "Microsoft Mark - English (United States)",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Microsoft Zira - English (United States)",
+      "lang": "en-US",
+      "local_service": true
+    },
+    {
+      "name": "Google Deutsch",
+      "lang": "de-DE",
+      "local_service": false
+    },
+    {
+      "name": "Google US English",
+      "lang": "en-US",
+      "local_service": false
+    },
+    {
+      "name": "Google UK English Female",
+      "lang": "en-GB",
+      "local_service": false
+    },
+    {
+      "name": "Google UK English Male",
+      "lang": "en-GB",
+      "local_service": false
+    },
+    {
+      "name": "Google español",
+      "lang": "es-ES",
+      "local_service": false
+    },
+    {
+      "name": "Google español de Estados Unidos",
+      "lang": "es-US",
+      "local_service": false
+    },
+    {
+      "name": "Google français",
+      "lang": "fr-FR",
+      "local_service": false
+    },
+    {
+      "name": "Google हिन्दी",
+      "lang": "hi-IN",
+      "local_service": false
+    },
+    {
+      "name": "Google Bahasa Indonesia",
+      "lang": "id-ID",
+      "local_service": false
+    },
+    {
+      "name": "Google italiano",
+      "lang": "it-IT",
+      "local_service": false
+    },
+    {
+      "name": "Google 日本語",
+      "lang": "ja-JP",
+      "local_service": false
+    },
+    {
+      "name": "Google 한국의",
+      "lang": "ko-KR",
+      "local_service": false
+    },
+    {
+      "name": "Google Nederlands",
+      "lang": "nl-NL",
+      "local_service": false
+    },
+    {
+      "name": "Google polski",
+      "lang": "pl-PL",
+      "local_service": false
+    },
+    {
+      "name": "Google português do Brasil",
+      "lang": "pt-BR",
+      "local_service": false
+    },
+    {
+      "name": "Google русский",
+      "lang": "ru-RU",
+      "local_service": false
+    },
+    {
+      "name": "Google 普通话（中国大陆）",
+      "lang": "zh-CN",
+      "local_service": false
+    },
+    {
+      "name": "Google 粤語（香港）",
+      "lang": "zh-HK",
+      "local_service": false
+    },
+    {
+      "name": "Google 國語（臺灣）",
+      "lang": "zh-TW",
+      "local_service": false
+    }
+  ],
+  "webgpu": {
+    "vendor": "nvidia",
+    "architecture": "lovelace",
+    "device": "",
+    "description": ""
+  },
+  "media": {
+    "hevc": true,
+    "h264_power_efficient": true,
+    "av1_hw": true
+  },
+  "apis": {
+    "share": true,
+    "bluetooth": true
+  },
+  "provenance": {
+    "captured": false,
+    "source": "reference persona with one change; must trip exactly R17_PLATFORM_VERSION",
+    "notes": [
+      "Windows 11 fonts (Segoe UI Variable) with the Windows 10 platformVersion 10.0.0"
+    ]
+  }
+}

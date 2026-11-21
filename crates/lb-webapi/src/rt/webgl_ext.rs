@@ -1,0 +1,72 @@
+//! WebGL extension interfaces (`[LegacyNoInterfaceObject]` in the Chromium
+//! 153 IDL, `crates/lb-webidl-gen/idl/chromium/modules/webgl/`): their
+//! constants and operations (name, `length`). Extracted once with a small
+//! script; the generated binding table does not carry interfaces without
+//! an interface object.
+
+/// One extension interface.
+pub(crate) struct ExtDesc {
+    pub iface: &'static str,
+    pub consts: &'static [(&'static str, u32)],
+    pub ops: &'static [(&'static str, u8)],
+}
+
+#[rustfmt::skip]
+pub(crate) static EXTENSIONS: &[ExtDesc] = &[
+    ExtDesc { iface: "ANGLEInstancedArrays", consts: &[("VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE", 0x88FE)], ops: &[("drawArraysInstancedANGLE", 4), ("drawElementsInstancedANGLE", 5), ("vertexAttribDivisorANGLE", 2)] },
+    ExtDesc { iface: "EXTBlendMinMax", consts: &[("MIN_EXT", 0x8007), ("MAX_EXT", 0x8008)], ops: &[] },
+    ExtDesc { iface: "EXTClipControl", consts: &[("LOWER_LEFT_EXT", 0x8CA1), ("UPPER_LEFT_EXT", 0x8CA2), ("NEGATIVE_ONE_TO_ONE_EXT", 0x935E), ("ZERO_TO_ONE_EXT", 0x935F), ("CLIP_ORIGIN_EXT", 0x935C), ("CLIP_DEPTH_MODE_EXT", 0x935D)], ops: &[("clipControlEXT", 2)] },
+    ExtDesc { iface: "EXTColorBufferFloat", consts: &[], ops: &[] },
+    ExtDesc { iface: "EXTColorBufferHalfFloat", consts: &[("RGBA16F_EXT", 0x881A), ("RGB16F_EXT", 0x881B), ("FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE_EXT", 0x8211), ("UNSIGNED_NORMALIZED_EXT", 0x8C17)], ops: &[] },
+    ExtDesc { iface: "EXTConservativeDepth", consts: &[], ops: &[] },
+    ExtDesc { iface: "EXTDepthClamp", consts: &[("DEPTH_CLAMP_EXT", 0x864F)], ops: &[] },
+    ExtDesc { iface: "EXTDisjointTimerQuery", consts: &[("QUERY_COUNTER_BITS_EXT", 0x8864), ("CURRENT_QUERY_EXT", 0x8865), ("QUERY_RESULT_EXT", 0x8866), ("QUERY_RESULT_AVAILABLE_EXT", 0x8867), ("TIME_ELAPSED_EXT", 0x88BF), ("TIMESTAMP_EXT", 0x8E28), ("GPU_DISJOINT_EXT", 0x8FBB)], ops: &[("createQueryEXT", 0), ("deleteQueryEXT", 1), ("isQueryEXT", 1), ("beginQueryEXT", 2), ("endQueryEXT", 1), ("queryCounterEXT", 2), ("getQueryEXT", 2), ("getQueryObjectEXT", 2)] },
+    ExtDesc { iface: "EXTDisjointTimerQueryWebGL2", consts: &[("QUERY_COUNTER_BITS_EXT", 0x8864), ("TIME_ELAPSED_EXT", 0x88BF), ("TIMESTAMP_EXT", 0x8E28), ("GPU_DISJOINT_EXT", 0x8FBB)], ops: &[("queryCounterEXT", 2)] },
+    ExtDesc { iface: "EXTFloatBlend", consts: &[], ops: &[] },
+    ExtDesc { iface: "EXTFragDepth", consts: &[], ops: &[] },
+    ExtDesc { iface: "EXTPolygonOffsetClamp", consts: &[("POLYGON_OFFSET_CLAMP_EXT", 0x8E1B)], ops: &[("polygonOffsetClampEXT", 3)] },
+    ExtDesc { iface: "EXTRenderSnorm", consts: &[], ops: &[] },
+    ExtDesc { iface: "EXTShaderTextureLOD", consts: &[], ops: &[] },
+    ExtDesc { iface: "EXTsRGB", consts: &[("SRGB_EXT", 0x8C40), ("SRGB_ALPHA_EXT", 0x8C42), ("SRGB8_ALPHA8_EXT", 0x8C43), ("FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT", 0x8210)], ops: &[] },
+    ExtDesc { iface: "EXTTextureCompressionBPTC", consts: &[("COMPRESSED_RGBA_BPTC_UNORM_EXT", 0x8E8C), ("COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT", 0x8E8D), ("COMPRESSED_RGB_BPTC_SIGNED_FLOAT_EXT", 0x8E8E), ("COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_EXT", 0x8E8F)], ops: &[] },
+    ExtDesc { iface: "EXTTextureCompressionRGTC", consts: &[("COMPRESSED_RED_RGTC1_EXT", 0x8DBB), ("COMPRESSED_SIGNED_RED_RGTC1_EXT", 0x8DBC), ("COMPRESSED_RED_GREEN_RGTC2_EXT", 0x8DBD), ("COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT", 0x8DBE)], ops: &[] },
+    ExtDesc { iface: "EXTTextureFilterAnisotropic", consts: &[("TEXTURE_MAX_ANISOTROPY_EXT", 0x84FE), ("MAX_TEXTURE_MAX_ANISOTROPY_EXT", 0x84FF)], ops: &[] },
+    ExtDesc { iface: "EXTTextureMirrorClampToEdge", consts: &[("MIRROR_CLAMP_TO_EDGE_EXT", 0x8743)], ops: &[] },
+    ExtDesc { iface: "EXTTextureNorm16", consts: &[("R16_EXT", 0x822A), ("RG16_EXT", 0x822C), ("RGB16_EXT", 0x8054), ("RGBA16_EXT", 0x805B), ("R16_SNORM_EXT", 0x8F98), ("RG16_SNORM_EXT", 0x8F99), ("RGB16_SNORM_EXT", 0x8F9A), ("RGBA16_SNORM_EXT", 0x8F9B)], ops: &[] },
+    ExtDesc { iface: "KHRParallelShaderCompile", consts: &[("COMPLETION_STATUS_KHR", 0x91B1)], ops: &[] },
+    ExtDesc { iface: "NVShaderNoperspectiveInterpolation", consts: &[], ops: &[] },
+    ExtDesc { iface: "OESDrawBuffersIndexed", consts: &[], ops: &[("enableiOES", 2), ("disableiOES", 2), ("blendEquationiOES", 2), ("blendEquationSeparateiOES", 3), ("blendFunciOES", 3), ("blendFuncSeparateiOES", 5), ("colorMaskiOES", 5)] },
+    ExtDesc { iface: "OESElementIndexUint", consts: &[], ops: &[] },
+    ExtDesc { iface: "OESFboRenderMipmap", consts: &[], ops: &[] },
+    ExtDesc { iface: "OESSampleVariables", consts: &[], ops: &[] },
+    ExtDesc { iface: "OESShaderMultisampleInterpolation", consts: &[("MIN_FRAGMENT_INTERPOLATION_OFFSET_OES", 0x8E5B), ("MAX_FRAGMENT_INTERPOLATION_OFFSET_OES", 0x8E5C), ("FRAGMENT_INTERPOLATION_OFFSET_BITS_OES", 0x8E5D)], ops: &[] },
+    ExtDesc { iface: "OESStandardDerivatives", consts: &[("FRAGMENT_SHADER_DERIVATIVE_HINT_OES", 0x8B8B)], ops: &[] },
+    ExtDesc { iface: "OESTextureFloat", consts: &[], ops: &[] },
+    ExtDesc { iface: "OESTextureFloatLinear", consts: &[], ops: &[] },
+    ExtDesc { iface: "OESTextureHalfFloat", consts: &[("HALF_FLOAT_OES", 0x8D61)], ops: &[] },
+    ExtDesc { iface: "OESTextureHalfFloatLinear", consts: &[], ops: &[] },
+    ExtDesc { iface: "OESVertexArrayObject", consts: &[("VERTEX_ARRAY_BINDING_OES", 0x85B5)], ops: &[("createVertexArrayOES", 0), ("deleteVertexArrayOES", 0), ("isVertexArrayOES", 0), ("bindVertexArrayOES", 0)] },
+    ExtDesc { iface: "OVRMultiview2", consts: &[("FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_OVR", 0x9630), ("FRAMEBUFFER_ATTACHMENT_TEXTURE_BASE_VIEW_INDEX_OVR", 0x9632), ("MAX_VIEWS_OVR", 0x9631), ("FRAMEBUFFER_INCOMPLETE_VIEW_TARGETS_OVR", 0x9633)], ops: &[("framebufferTextureMultiviewOVR", 6)] },
+    ExtDesc { iface: "WebGLBlendFuncExtended", consts: &[("SRC1_COLOR_WEBGL", 0x88F9), ("SRC1_ALPHA_WEBGL", 0x8589), ("ONE_MINUS_SRC1_COLOR_WEBGL", 0x88FA), ("ONE_MINUS_SRC1_ALPHA_WEBGL", 0x88FB), ("MAX_DUAL_SOURCE_DRAW_BUFFERS_WEBGL", 0x88FC)], ops: &[] },
+    ExtDesc { iface: "WebGLClipCullDistance", consts: &[("MAX_CLIP_DISTANCES_WEBGL", 0xD32), ("MAX_CULL_DISTANCES_WEBGL", 0x82F9), ("MAX_COMBINED_CLIP_AND_CULL_DISTANCES_WEBGL", 0x82FA), ("CLIP_DISTANCE0_WEBGL", 0x3000), ("CLIP_DISTANCE1_WEBGL", 0x3001), ("CLIP_DISTANCE2_WEBGL", 0x3002), ("CLIP_DISTANCE3_WEBGL", 0x3003), ("CLIP_DISTANCE4_WEBGL", 0x3004), ("CLIP_DISTANCE5_WEBGL", 0x3005), ("CLIP_DISTANCE6_WEBGL", 0x3006), ("CLIP_DISTANCE7_WEBGL", 0x3007)], ops: &[] },
+    ExtDesc { iface: "WebGLColorBufferFloat", consts: &[("RGBA32F_EXT", 0x8814), ("FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE_EXT", 0x8211), ("UNSIGNED_NORMALIZED_EXT", 0x8C17)], ops: &[] },
+    ExtDesc { iface: "WebGLCompressedTextureASTC", consts: &[("COMPRESSED_RGBA_ASTC_4x4_KHR", 0x93B0), ("COMPRESSED_RGBA_ASTC_5x4_KHR", 0x93B1), ("COMPRESSED_RGBA_ASTC_5x5_KHR", 0x93B2), ("COMPRESSED_RGBA_ASTC_6x5_KHR", 0x93B3), ("COMPRESSED_RGBA_ASTC_6x6_KHR", 0x93B4), ("COMPRESSED_RGBA_ASTC_8x5_KHR", 0x93B5), ("COMPRESSED_RGBA_ASTC_8x6_KHR", 0x93B6), ("COMPRESSED_RGBA_ASTC_8x8_KHR", 0x93B7), ("COMPRESSED_RGBA_ASTC_10x5_KHR", 0x93B8), ("COMPRESSED_RGBA_ASTC_10x6_KHR", 0x93B9), ("COMPRESSED_RGBA_ASTC_10x8_KHR", 0x93BA), ("COMPRESSED_RGBA_ASTC_10x10_KHR", 0x93BB), ("COMPRESSED_RGBA_ASTC_12x10_KHR", 0x93BC), ("COMPRESSED_RGBA_ASTC_12x12_KHR", 0x93BD), ("COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR", 0x93D0), ("COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR", 0x93D1), ("COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR", 0x93D2), ("COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR", 0x93D3), ("COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR", 0x93D4), ("COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR", 0x93D5), ("COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR", 0x93D6), ("COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR", 0x93D7), ("COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR", 0x93D8), ("COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR", 0x93D9), ("COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR", 0x93DA), ("COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR", 0x93DB), ("COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR", 0x93DC), ("COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR", 0x93DD)], ops: &[("getSupportedProfiles", 0)] },
+    ExtDesc { iface: "WebGLCompressedTextureETC", consts: &[("COMPRESSED_R11_EAC", 0x9270), ("COMPRESSED_SIGNED_R11_EAC", 0x9271), ("COMPRESSED_RG11_EAC", 0x9272), ("COMPRESSED_SIGNED_RG11_EAC", 0x9273), ("COMPRESSED_RGB8_ETC2", 0x9274), ("COMPRESSED_SRGB8_ETC2", 0x9275), ("COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2", 0x9276), ("COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2", 0x9277), ("COMPRESSED_RGBA8_ETC2_EAC", 0x9278), ("COMPRESSED_SRGB8_ALPHA8_ETC2_EAC", 0x9279)], ops: &[] },
+    ExtDesc { iface: "WebGLCompressedTextureETC1", consts: &[("COMPRESSED_RGB_ETC1_WEBGL", 0x8D64)], ops: &[] },
+    ExtDesc { iface: "WebGLCompressedTexturePVRTC", consts: &[("COMPRESSED_RGB_PVRTC_4BPPV1_IMG", 0x8C00), ("COMPRESSED_RGB_PVRTC_2BPPV1_IMG", 0x8C01), ("COMPRESSED_RGBA_PVRTC_4BPPV1_IMG", 0x8C02), ("COMPRESSED_RGBA_PVRTC_2BPPV1_IMG", 0x8C03)], ops: &[] },
+    ExtDesc { iface: "WebGLCompressedTextureS3TC", consts: &[("COMPRESSED_RGB_S3TC_DXT1_EXT", 0x83F0), ("COMPRESSED_RGBA_S3TC_DXT1_EXT", 0x83F1), ("COMPRESSED_RGBA_S3TC_DXT3_EXT", 0x83F2), ("COMPRESSED_RGBA_S3TC_DXT5_EXT", 0x83F3)], ops: &[] },
+    ExtDesc { iface: "WebGLCompressedTextureS3TCsRGB", consts: &[("COMPRESSED_SRGB_S3TC_DXT1_EXT", 0x8C4C), ("COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT", 0x8C4D), ("COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT", 0x8C4E), ("COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT", 0x8C4F)], ops: &[] },
+    ExtDesc { iface: "WebGLDebugRendererInfo", consts: &[("UNMASKED_VENDOR_WEBGL", 0x9245), ("UNMASKED_RENDERER_WEBGL", 0x9246)], ops: &[] },
+    ExtDesc { iface: "WebGLDebugShaders", consts: &[], ops: &[("getTranslatedShaderSource", 1)] },
+    ExtDesc { iface: "WebGLDepthTexture", consts: &[("UNSIGNED_INT_24_8_WEBGL", 0x84FA)], ops: &[] },
+    ExtDesc { iface: "WebGLDrawBuffers", consts: &[("COLOR_ATTACHMENT0_WEBGL", 0x8CE0), ("COLOR_ATTACHMENT1_WEBGL", 0x8CE1), ("COLOR_ATTACHMENT2_WEBGL", 0x8CE2), ("COLOR_ATTACHMENT3_WEBGL", 0x8CE3), ("COLOR_ATTACHMENT4_WEBGL", 0x8CE4), ("COLOR_ATTACHMENT5_WEBGL", 0x8CE5), ("COLOR_ATTACHMENT6_WEBGL", 0x8CE6), ("COLOR_ATTACHMENT7_WEBGL", 0x8CE7), ("COLOR_ATTACHMENT8_WEBGL", 0x8CE8), ("COLOR_ATTACHMENT9_WEBGL", 0x8CE9), ("COLOR_ATTACHMENT10_WEBGL", 0x8CEA), ("COLOR_ATTACHMENT11_WEBGL", 0x8CEB), ("COLOR_ATTACHMENT12_WEBGL", 0x8CEC), ("COLOR_ATTACHMENT13_WEBGL", 0x8CED), ("COLOR_ATTACHMENT14_WEBGL", 0x8CEE), ("COLOR_ATTACHMENT15_WEBGL", 0x8CEF), ("DRAW_BUFFER0_WEBGL", 0x8825), ("DRAW_BUFFER1_WEBGL", 0x8826), ("DRAW_BUFFER2_WEBGL", 0x8827), ("DRAW_BUFFER3_WEBGL", 0x8828), ("DRAW_BUFFER4_WEBGL", 0x8829), ("DRAW_BUFFER5_WEBGL", 0x882A), ("DRAW_BUFFER6_WEBGL", 0x882B), ("DRAW_BUFFER7_WEBGL", 0x882C), ("DRAW_BUFFER8_WEBGL", 0x882D), ("DRAW_BUFFER9_WEBGL", 0x882E), ("DRAW_BUFFER10_WEBGL", 0x882F), ("DRAW_BUFFER11_WEBGL", 0x8830), ("DRAW_BUFFER12_WEBGL", 0x8831), ("DRAW_BUFFER13_WEBGL", 0x8832), ("DRAW_BUFFER14_WEBGL", 0x8833), ("DRAW_BUFFER15_WEBGL", 0x8834), ("MAX_COLOR_ATTACHMENTS_WEBGL", 0x8CDF), ("MAX_DRAW_BUFFERS_WEBGL", 0x8824)], ops: &[("drawBuffersWEBGL", 1)] },
+    ExtDesc { iface: "WebGLDrawInstancedBaseVertexBaseInstance", consts: &[], ops: &[("drawArraysInstancedBaseInstanceWEBGL", 5), ("drawElementsInstancedBaseVertexBaseInstanceWEBGL", 7)] },
+    ExtDesc { iface: "WebGLLoseContext", consts: &[], ops: &[("loseContext", 0), ("restoreContext", 0)] },
+    ExtDesc { iface: "WebGLMultiDraw", consts: &[], ops: &[("multiDrawArraysWEBGL", 6), ("multiDrawElementsWEBGL", 7), ("multiDrawArraysInstancedWEBGL", 8), ("multiDrawElementsInstancedWEBGL", 9)] },
+    ExtDesc { iface: "WebGLMultiDrawInstancedBaseVertexBaseInstance", consts: &[], ops: &[("multiDrawArraysInstancedBaseInstanceWEBGL", 10), ("multiDrawElementsInstancedBaseVertexBaseInstanceWEBGL", 13)] },
+    ExtDesc { iface: "WebGLPolygonMode", consts: &[("POLYGON_MODE_WEBGL", 0xB40), ("POLYGON_OFFSET_LINE_WEBGL", 0x2A02), ("LINE_WEBGL", 0x1B01), ("FILL_WEBGL", 0x1B02)], ops: &[("polygonModeWEBGL", 2)] },
+    ExtDesc { iface: "WebGLProvokingVertex", consts: &[("FIRST_VERTEX_CONVENTION_WEBGL", 0x8E4D), ("LAST_VERTEX_CONVENTION_WEBGL", 0x8E4E), ("PROVOKING_VERTEX_WEBGL", 0x8E4F)], ops: &[("provokingVertexWEBGL", 1)] },
+    ExtDesc { iface: "WebGLRenderSharedExponent", consts: &[], ops: &[] },
+    ExtDesc { iface: "WebGLShaderPixelLocalStorage", consts: &[("MAX_PIXEL_LOCAL_STORAGE_PLANES_WEBGL", 0x96E0), ("MAX_COMBINED_DRAW_BUFFERS_AND_PIXEL_LOCAL_STORAGE_PLANES_WEBGL", 0x96E1), ("PIXEL_LOCAL_STORAGE_ACTIVE_PLANES_WEBGL", 0x96E2), ("LOAD_OP_ZERO_WEBGL", 0x96E3), ("LOAD_OP_CLEAR_WEBGL", 0x96E4), ("LOAD_OP_LOAD_WEBGL", 0x96E5), ("STORE_OP_STORE_WEBGL", 0x96E6), ("PIXEL_LOCAL_INTERNAL_FORMAT_WEBGL", 0x96E7), ("PIXEL_LOCAL_TEXTURE_NAME_WEBGL", 0x96E8), ("PIXEL_LOCAL_TEXTURE_LEVEL_WEBGL", 0x96E9), ("PIXEL_LOCAL_TEXTURE_LAYER_WEBGL", 0x96EA), ("PIXEL_LOCAL_USAGE_WEBGL", 0x96EB), ("PIXEL_LOCAL_CLEAR_VALUE_FLOAT_WEBGL", 0x96EC), ("PIXEL_LOCAL_CLEAR_VALUE_INT_WEBGL", 0x96ED), ("PIXEL_LOCAL_CLEAR_VALUE_UNSIGNED_INT_WEBGL", 0x96EE), ("PIXEL_LOCAL_USAGE_ALWAYS_NONCOHERENT_BIT_WEBGL", 0x1)], ops: &[("isCoherent", 0), ("framebufferTexturePixelLocalStorageWEBGL", 5), ("framebufferPixelLocalClearValuefvWEBGL", 2), ("framebufferPixelLocalClearValuefvWEBGL", 2), ("framebufferPixelLocalClearValueivWEBGL", 2), ("framebufferPixelLocalClearValueivWEBGL", 2), ("framebufferPixelLocalClearValueuivWEBGL", 2), ("framebufferPixelLocalClearValueuivWEBGL", 2), ("beginPixelLocalStorageWEBGL", 1), ("endPixelLocalStorageWEBGL", 1), ("pixelLocalStorageBarrierWEBGL", 0), ("getFramebufferPixelLocalStorageParameterWEBGL", 2)] },
+    ExtDesc { iface: "WebGLStencilTexturing", consts: &[("DEPTH_STENCIL_TEXTURE_MODE_WEBGL", 0x90EA), ("STENCIL_INDEX_WEBGL", 0x1901)], ops: &[] },
+];

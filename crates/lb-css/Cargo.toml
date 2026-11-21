@@ -6,3 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+cssparser = "0.38"
+lb-dom = { path = "../lb-dom" }
+lb-persona = { path = "../lb-persona" }
+url = "2"

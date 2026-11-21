@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<title>Hidden</title>
+<style>
+  .gone { display: none }
+  .ghost { visibility: hidden }
+  #shown-again { visibility: visible }
+  .print-only { display: none }
+</style>
+<h1>Hidden</h1>
+<p>Visible one</p>
+<p hidden>Hidden attribute</p>
+<p style="display:none">Inline none</p>
+<p class="gone">Class none</p>
+<div class="ghost">Ghost text <span id="shown-again">visible child</span></div>
+<p>Before <span class="gone">hidden inline</span>after</p>
+<div style="visibility:hidden"><p>ghost para</p></div>
+<dialog>Closed dialog</dialog>
+<dialog open>Open dialog</dialog>
+<template><p>In template</p></template>
+<noscript><p>No script</p></noscript>
+<p class="print-only">Print only</p>
+<div class="gone"><a href="/hidden-link">hidden link</a></div>
+<p>Last visible</p>

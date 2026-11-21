@@ -1,0 +1,11 @@
+<!doctype html><html><head><title>shared worker</title></head><body>
+<!--LOG-->
+<script>
+addEventListener('load',async function(){
+  await sleep(300);
+  var w=new SharedWorker('w.js?x='+XP);
+  var msg=await new Promise(function(r){w.port.onmessage=function(e){r(e.data)};w.onerror=function(e){r('error '+e.message)};w.port.start()});
+  log(msg);
+  end();
+});
+</script></body></html>

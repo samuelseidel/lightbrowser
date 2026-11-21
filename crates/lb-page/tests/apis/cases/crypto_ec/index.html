@@ -1,0 +1,66 @@
+<!doctype html><!--LOG--><script src="../keys.js"></script><script>
+var S = crypto.subtle;
+function k(key) { return [key.type, key.extractable, JSON.stringify(key.algorithm), key.usages.join('/')].join(' '); }
+(async () => {
+  for (const [curve, P8, SPKI, P8B, SPKIB, h] of [['P-256', P256_P8, P256_SPKI, P256B_P8, P256B_SPKI, 'SHA-256'], ['P-384', P384_P8, P384_SPKI, P384B_P8, P384B_SPKI, 'SHA-384']]) {
+    var priv = await S.importKey('pkcs8', unhex(P8), { name: 'ECDSA', namedCurve: curve }, true, ['sign']);
+    var pub = await S.importKey('spki', unhex(SPKI), { name: 'ECDSA', namedCurve: curve }, true, ['verify']);
+    log(curve + ' priv ' + k(priv));
+    log(curve + ' pub ' + k(pub));
+    log(curve + ' spki same ' + (hex(await S.exportKey('spki', pub)) == SPKI));
+    log(curve + ' pkcs8 ' + hex(await S.exportKey('pkcs8', priv)));
+    log(curve + ' raw pub ' + hex(await S.exportKey('raw', pub)));
+    var jp = await S.exportKey('jwk', priv);
+    log(curve + ' jwk priv ' + JSON.stringify(jp));
+    log(curve + ' jwk pub ' + JSON.stringify(await S.exportKey('jwk', pub)));
+    await a(curve + ' raw priv', () => S.exportKey('raw', priv));
+    await a(curve + ' spki of priv', () => S.exportKey('spki', priv));
+    for (const hh of ['SHA-1', 'SHA-256', 'SHA-512']) {
+      var sig = await S.sign({ name: 'ECDSA', hash: hh }, priv, enc('msg'));
+      log(curve + ' ' + hh + ' sig len ' + sig.byteLength + ' verify ' + await S.verify({ name: 'ECDSA', hash: hh }, pub, sig, enc('msg')) + ' ' + await S.verify({ name: 'ECDSA', hash: hh }, pub, sig, enc('msG')));
+    }
+    await a(curve + ' verify short', () => S.verify({ name: 'ECDSA', hash: h }, pub, new Uint8Array(3), enc('msg')));
+    await a(curve + ' sign with pub', () => S.sign({ name: 'ECDSA', hash: h }, pub, enc('msg')));
+    await a(curve + ' sign no hash', () => S.sign({ name: 'ECDSA' }, priv, enc('msg')));
+    var rawpub = await S.exportKey('raw', pub);
+    await a(curve + ' import raw', async () => k(await S.importKey('raw', rawpub, { name: 'ECDSA', namedCurve: curve }, true, ['verify'])));
+    await a(curve + ' import jwk', async () => { var x = await S.importKey('jwk', jp, { name: 'ECDSA', namedCurve: curve }, false, ['sign']); return k(x); });
+    await a(curve + ' wrong curve', () => S.importKey('spki', unhex(SPKI), { name: 'ECDSA', namedCurve: curve == 'P-256' ? 'P-384' : 'P-256' }, true, ['verify']));
+    await a(curve + ' pub sign usage', () => S.importKey('spki', unhex(SPKI), { name: 'ECDSA', namedCurve: curve }, true, ['sign']));
+    await a(curve + ' priv no usages', () => S.importKey('pkcs8', unhex(P8), { name: 'ECDSA', namedCurve: curve }, true, []));
+    await a(curve + ' pub no usages', async () => k(await S.importKey('spki', unhex(SPKI), { name: 'ECDSA', namedCurve: curve }, true, [])));
+    // ECDH between the two fixed keys, both ways.
+    var a1 = await S.importKey('pkcs8', unhex(P8), { name: 'ECDH', namedCurve: curve }, true, ['deriveBits', 'deriveKey']);
+    var b1 = await S.importKey('spki', unhex(SPKIB), { name: 'ECDH', namedCurve: curve }, true, []);
+    var a2 = await S.importKey('spki', unhex(SPKI), { name: 'ECDH', namedCurve: curve }, true, []);
+    var b2 = await S.importKey('pkcs8', unhex(P8B), { name: 'ECDH', namedCurve: curve }, true, ['deriveBits']);
+    log(curve + ' ecdh keys ' + k(a1) + ' | ' + k(b1));
+    var s1 = await S.deriveBits({ name: 'ECDH', public: b1 }, a1, null);
+    var s2 = await S.deriveBits({ name: 'ECDH', public: a2 }, b2, 128);
+    log(curve + ' ecdh ' + hex(s1) + ' ' + hex(s2));
+    await a(curve + ' ecdh too long', () => S.deriveBits({ name: 'ECDH', public: b1 }, a1, 1024));
+    await a(curve + ' ecdh 13 bits', async () => hex(await S.deriveBits({ name: 'ECDH', public: b1 }, a1, 13)));
+    await a(curve + ' ecdh derive aes', async () => { var d = await S.deriveKey({ name: 'ECDH', public: b1 }, a1, { name: 'AES-GCM', length: 128 }, true, ['encrypt']); return k(d) + ' ' + hex(await S.exportKey('raw', d)); });
+    await a(curve + ' ecdh public is private', () => S.deriveBits({ name: 'ECDH', public: a1 }, a1, 128));
+    await a(curve + ' ecdh ecdsa public', () => S.deriveBits({ name: 'ECDH', public: pub }, a1, 128));
+    await a(curve + ' ecdh no public', () => S.deriveBits({ name: 'ECDH' }, a1, 128));
+    await a(curve + ' ecdh pub jwk', async () => JSON.stringify(await S.exportKey('jwk', b1)));
+    var g = await S.generateKey({ name: 'ECDSA', namedCurve: curve }, true, ['sign', 'verify']);
+    log(curve + ' gen ' + k(g.privateKey) + ' | ' + k(g.publicKey) + ' ' + Object.keys(g).join(',') + ' ' + Object.prototype.toString.call(g));
+    var gs = await S.sign({ name: 'ECDSA', hash: 'SHA-256' }, g.privateKey, enc('x'));
+    log(curve + ' gen verify ' + await S.verify({ name: 'ECDSA', hash: 'SHA-256' }, g.publicKey, gs, enc('x')));
+    var gd = await S.generateKey({ name: 'ECDH', namedCurve: curve }, false, ['deriveBits']);
+    log(curve + ' gen ecdh ' + k(gd.privateKey) + ' | ' + k(gd.publicKey));
+  }
+  await a('P-521', async () => k((await S.generateKey({ name: 'ECDSA', namedCurve: 'P-521' }, true, ['sign'])).privateKey));
+  await a('bad curve', () => S.generateKey({ name: 'ECDSA', namedCurve: 'P-123' }, true, ['sign']));
+  await a('no curve', () => S.generateKey({ name: 'ECDSA' }, true, ['sign']));
+  await a('gen no usages', () => S.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, []));
+  await a('gen verify only', () => S.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']));
+  await a('bad spki', () => S.importKey('spki', new Uint8Array(10), { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']));
+  await a('bad pkcs8', () => S.importKey('pkcs8', new Uint8Array(10), { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']));
+  await a('rsa spki as ec', () => S.importKey('spki', unhex(RSA_SPKI), { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']));
+  await a('jwk bad crv', () => S.importKey('jwk', { kty: 'EC', crv: 'P-384', x: 'AA', y: 'AA' }, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']));
+  end();
+})();
+</script>

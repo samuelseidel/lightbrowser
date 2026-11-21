@@ -8,7 +8,7 @@ exclude = ["vendor"]
 version = "0.0.1"
 edition = "2024"
 license = "LicenseRef-Proprietary"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [profile.release]
 opt-level = 3
@@ -16,6 +16,91 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Binary size (M6, ADR 0013): code that is not on a hot path (CDP and
+# JSON, network and DNS, cookies, CLI, image codecs, decompressors) is
+# optimised for size. With fat LTO the root crate's level is the level of
+# the LTO pipeline for all Rust code, so `lightbrowser` at "s" sizes the
+# whole binary (-0.68 MB); the other crates' levels apply before LTO. The
+# JS bindings (`lb-webapi`, glue around V8) are at "s" too (-0.5 MB; realm
+# creation unchanged, binding definition +0.7 ms). DOM, style, layout and
+# raster keep 3 before LTO. A package override drops the profile's
+# `strip`, so it is repeated here.
+[profile.release.package.lightbrowser]
+opt-level = "s"
+strip = true
+[profile.release.package.lb-webapi]
+opt-level = "s"
+[profile.release.package.lb-cdp]
+opt-level = "s"
+[profile.release.package.lb-net]
+opt-level = "s"
+[profile.release.package.lb-persona]
+opt-level = "s"
+[profile.release.package.lb-behavior]
+opt-level = "s"
+[profile.release.package.hickory-proto]
+opt-level = "s"
+[profile.release.package.hickory-resolver]
+opt-level = "s"
+[profile.release.package.moka]
+opt-level = "s"
+[profile.release.package.h2]
+opt-level = "s"
+[profile.release.package.http]
+opt-level = "s"
+[profile.release.package.tokio-tungstenite]
+opt-level = "s"
+[profile.release.package.tungstenite]
+opt-level = "s"
+[profile.release.package.cookie_store]
+opt-level = "s"
+[profile.release.package.publicsuffix]
+opt-level = "s"
+[profile.release.package.tracing]
+opt-level = "s"
+[profile.release.package.tracing-core]
+opt-level = "s"
+[profile.release.package.time]
+opt-level = "s"
+[profile.release.package.uuid]
+opt-level = "s"
+[profile.release.package.idna]
+opt-level = "s"
+[profile.release.package.resolv-conf]
+opt-level = "s"
+[profile.release.package.futures-util]
+opt-level = "s"
+[profile.release.package.crossbeam-channel]
+opt-level = "s"
+[profile.release.package.crossbeam-epoch]
+opt-level = "s"
+[profile.release.package.image]
+opt-level = "s"
+[profile.release.package.png]
+opt-level = "s"
+[profile.release.package.gif]
+opt-level = "s"
+[profile.release.package.zune-jpeg]
+opt-level = "s"
+[profile.release.package.image-webp]
+opt-level = "s"
+[profile.release.package.moxcms]
+opt-level = "s"
+[profile.release.package.brotli]
+opt-level = "s"
+[profile.release.package.brotli-decompressor]
+opt-level = "s"
+[profile.release.package.flate2]
+opt-level = "s"
+[profile.release.package.miniz_oxide]
+opt-level = "s"
+[profile.release.package.zstd]
+opt-level = "s"
+[profile.release.package.zstd-safe]
+opt-level = "s"
+[profile.release.package.serde_json]
+opt-level = "s"
 
 # Size-tuned build for measuring disk footprint.
 [profile.release-small]

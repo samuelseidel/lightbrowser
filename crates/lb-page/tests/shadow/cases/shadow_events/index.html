@@ -1,0 +1,41 @@
+<!doctype html><!--LOG--><body><div id=host><span id=light slot=s>light</span></div><div id=chost></div><script>
+var host = document.getElementById('host'), light = document.getElementById('light');
+var sr = host.attachShadow({ mode: 'open' });
+sr.innerHTML = '<div id=wrap><button id=btn>b</button><slot id=s name=s></slot></div><input id=inp>';
+var btn = sr.getElementById('btn'), slot = sr.getElementById('s'), wrap = sr.getElementById('wrap'), inp = sr.getElementById('inp');
+var chost = document.getElementById('chost'), csr = chost.attachShadow({ mode: 'closed' });
+csr.innerHTML = '<p id=cp>c<slot></slot></p>'; var cp = csr.firstChild;
+var o = [];
+function lis(tgt, name, cap) { tgt.addEventListener(name, e => o.push((cap ? 'cap ' : '') + d(e.currentTarget) + ' t=' + d(e.target) + ' ph=' + e.eventPhase + (e.relatedTarget !== undefined ? ' rt=' + d(e.relatedTarget) : '') + ' path=' + ds(e.composedPath())), cap); }
+function run(n, f) { o = []; try { f(); } catch (e) { o.push('threw ' + err(e)); } log(n + ': ' + o.join(' | ')); }
+[window, document, host, sr, wrap, btn, slot, light, chost, csr, cp].forEach(x => { lis(x, "x"); lis(x, "x", true); });
+run('composed bubbling from btn', () => btn.dispatchEvent(new Event('x', { bubbles: true, composed: true })));
+run('not composed from btn', () => btn.dispatchEvent(new Event('x', { bubbles: true })));
+run('non-bubbling composed', () => btn.dispatchEvent(new Event('x', { composed: true })));
+run('slotted light', () => light.dispatchEvent(new Event('x', { bubbles: true })));
+run('closed', () => cp.dispatchEvent(new Event('x', { bubbles: true, composed: true })));
+run('at shadow root', () => sr.dispatchEvent(new Event('x', { bubbles: true })));
+var ev = new Event('x', { bubbles: true, composed: true });
+btn.dispatchEvent(ev);
+t('after dispatch', () => [d(ev.target), d(ev.currentTarget), ev.eventPhase, ds(ev.composedPath())].join(' '));
+t('composed default', () => [new Event('x').composed, new CustomEvent('x', { composed: true }).composed, new MouseEvent('click').composed].join());
+// UA-generated events
+['click', 'focus', 'blur', 'focusin', 'focusout', 'input', 'change'].forEach(n => { [document, host, btn, inp].forEach(x => x.addEventListener(n, e => o.push(n + '@' + d(e.currentTarget) + ' t=' + d(e.target) + ' composed=' + e.composed + (e.relatedTarget !== undefined ? ' rt=' + d(e.relatedTarget) : '')))); });
+run('btn.click', () => btn.click());
+run('btn.focus', () => btn.focus());
+t('active', () => [d(document.activeElement), d(sr.activeElement), host.matches(':focus'), btn.matches(':focus'), host.matches(':focus-within'), d(document.querySelector(':focus'))].join());
+run('inp.focus', () => inp.focus());
+run('blur', () => inp.blur());
+t('active after blur', () => [d(document.activeElement), d(sr.activeElement)].join());
+// delegatesFocus
+var dh = document.createElement('div'); dh.tabIndex = -1; document.body.appendChild(dh);
+var ds_ = dh.attachShadow({ mode: 'open', delegatesFocus: true }); ds_.innerHTML = '<span>x</span><input id=d1><input id=d2>';
+run('delegates focus', () => dh.focus());
+t('delegated active', () => [d(document.activeElement), d(ds_.activeElement), dh.matches(':focus'), d(ds_.querySelector(':focus'))].join());
+// mouse events with relatedTarget across the boundary
+run('mouseover rt', () => btn.dispatchEvent(new MouseEvent('x', { bubbles: true, composed: true, relatedTarget: wrap })));
+run('mouseover rt light', () => btn.dispatchEvent(new MouseEvent('x', { bubbles: true, composed: true, relatedTarget: light })));
+run('rt same as target', () => btn.dispatchEvent(new MouseEvent('x', { bubbles: true, composed: true, relatedTarget: btn })));
+t('elementFromPoint', () => { var r = btn.getBoundingClientRect(); return [d(document.elementFromPoint(r.left + 2, r.top + 2)), d(sr.elementFromPoint(r.left + 2, r.top + 2)), r.width > 0].join(); });
+end();
+</script>

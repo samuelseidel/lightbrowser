@@ -1,0 +1,16 @@
+<!doctype html><script>
+// First document: 150 calls, then a navigation of this frame (151);
+// second document: the 49 left, then ignored.
+var second = location.search != '', n = 0, ok = 0, first = 0;
+var calls = second ? 100 : 150;
+for (var i = 1; i <= calls; i++) {
+  n++; history.pushState(n, '', '#c' + n);
+  if (history.state === n) ok++; else if (!first) first = i;
+}
+if (!second) {
+  parent.postMessage('child first document accepted ' + ok, '*');
+  location.href = 'child.html?2';
+} else {
+  parent.postMessage('child second document: first ignored call ' + first, '*');
+}
+</script>

@@ -1,0 +1,9 @@
+<!doctype html><html><head><!--LOG-->
+</head><body><div id=t></div>
+<script>setTimeout(function(){log('timer p2='+!!document.getElementById('p2')+' p3='+!!document.getElementById('p3'))},200)</script>
+<p id=p1>x</p>
+<link rel=stylesheet href=slower-c.css onload="log('c load '+!!document.getElementById('p2')+' '+document.readyState)">
+<p id=p2>y</p>
+<script>log('body script '+C())</script>
+<p id=p3>z</p>
+</body></html>

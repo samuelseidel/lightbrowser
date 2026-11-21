@@ -1,0 +1,7 @@
+<script>var L=[];function log(s){L.push(String(s))}function end(){log('end')}
+function hex(b){return Array.from(new Uint8Array(b instanceof ArrayBuffer?b:b.buffer),function(x){return(x<16?'0':'')+x.toString(16)}).join('')}
+function unhex(s){var a=new Uint8Array(s.length/2);for(var i=0;i<a.length;i++)a[i]=parseInt(s.substr(2*i,2),16);return a}
+function err(e){return e&&e.name!==undefined?(Object.prototype.toString.call(e)+' '+e.name+': '+e.message+(e.code!==undefined?' code='+e.code:'')):'value '+String(e)}
+function t(n,f){try{log(n+': '+f())}catch(e){log(n+' threw '+err(e))}}
+async function a(n,f){try{log(n+': '+await f())}catch(e){log(n+' rejected '+err(e))}}
+function enc(s){return new TextEncoder().encode(s)}</script>

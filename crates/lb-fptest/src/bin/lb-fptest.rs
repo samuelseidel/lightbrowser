@@ -4,6 +4,7 @@
 //! lb-fptest capture --out profiles/tls/chrome_153_linux.json --listen 127.0.0.1:8443 --count 2 \
 //!     --browser-version 153.0.8010.12
 //! lb-fptest serve --listen 127.0.0.1:8443
+//! lb-fptest site --listen 127.0.0.1:8443 --images 20 --delay-ms 50 --seconds 20
 //! ```
 //!
 //! Binds loopback only. Point a local browser or our own client at it.
@@ -93,6 +94,29 @@ enum Cmd {
         #[arg(long)]
         flow: bool,
     },
+    /// Serve a page with subresources (keep-alive, HTTP/2) and print one
+    /// JSON line per connection: ClientHello, ALPN and the paths requested
+    /// on it. Stops after `--seconds`.
+    Site {
+        #[arg(long, default_value = "127.0.0.1:8443")]
+        listen: SocketAddr,
+        /// Plain HTTP/1.1 instead of TLS.
+        #[arg(long)]
+        plain: bool,
+        #[arg(long, default_value = "h2,http/1.1")]
+        alpn: String,
+        #[arg(long, default_value_t = 20)]
+        images: usize,
+        #[arg(long, default_value_t = 0)]
+        scripts: usize,
+        #[arg(long, default_value_t = 0)]
+        styles: usize,
+        /// Delay before each subresource answer.
+        #[arg(long, default_value_t = 50)]
+        delay_ms: u64,
+        #[arg(long, default_value_t = 20)]
+        seconds: u64,
+    },
 }
 
 #[cfg(target_os = "linux")]
@@ -155,6 +179,64 @@ fn tcp_capture(
     Ok(())
 }
 
+/// One JSON line per connection of the page server.
+async fn run_site(cmd: &Cmd) -> Result<(), String> {
+    let Cmd::Site {
+        listen,
+        plain,
+        alpn,
+        images,
+        scripts,
+        styles,
+        delay_ms,
+        seconds,
+    } = cmd
+    else {
+        return Ok(());
+    };
+    if !listen.ip().is_loopback() {
+        return Err(format!("{listen} is not a loopback address"));
+    }
+    let mut cfg = lb_fptest::site::SiteConfig::subresource_page(
+        !plain,
+        *images,
+        *scripts,
+        *styles,
+        std::time::Duration::from_millis(*delay_ms),
+    );
+    cfg.alpn = alpn
+        .split(',')
+        .map(|a| a.trim().as_bytes().to_vec())
+        .collect();
+    let srv = lb_fptest::site::SiteServer::bind(&listen.to_string(), cfg)
+        .await
+        .map_err(|e| format!("bind {listen}: {e}"))?;
+    eprintln!(
+        "lb-fptest: site on {}://{}/",
+        if *plain { "http" } else { "https" },
+        srv.local_addr()
+    );
+    tokio::time::sleep(std::time::Duration::from_secs(*seconds)).await;
+    for c in srv.records() {
+        let ch = c.client_hello.as_ref();
+        let line = serde_json::json!({
+            "conn": c.id,
+            "peer": c.peer.to_string(),
+            "alpn": c.alpn,
+            "resumed": c.resumed(),
+            "closed": c.closed,
+            "error": c.error,
+            "ja4": ch.map(|h| Ja4::from_client_hello(h, 't').hashed()),
+            "extensions": ch.map(|h| h.extension_ids().iter().map(|&e| if is_grease(e) { "GREASE".to_owned() } else { e.to_string() }).collect::<Vec<_>>()),
+            "requests": c.requests.iter().map(|r| format!("{} @{}ms{}{}", r.path, r.at.as_millis(), r.stream.map(|s| format!(" s{s}")).unwrap_or_default(), r.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case("priority")).map(|(_, v)| format!(" [{v}]")).unwrap_or_default())).collect::<Vec<_>>(),
+            "h2_priorities": c.h2_priorities.iter().map(|p| format!("s{}:{}:{}:{}", p.stream, u8::from(p.exclusive), p.depends_on, p.weight as u16 + 1)).collect::<Vec<_>>(),
+            "h2_frames": c.h2_frames.iter().map(|(n, s)| format!("{n}:{s}")).collect::<Vec<_>>(),
+        });
+        println!("{line}");
+    }
+    Ok(())
+}
+
 fn summary(c: &Capture) -> serde_json::Value {
     let ch = c.client_hello.as_ref();
     serde_json::json!({
@@ -208,6 +290,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         #[cfg(not(target_os = "linux"))]
         Cmd::TcpCapture { .. } => return Err("tcp-capture needs Linux".into()),
+        Cmd::Site { .. } => return run_site(&cli.cmd).await,
     };
     let mut cfg = ServerConfig::default();
     if let Cmd::Serve { alpn, .. } = &cli.cmd {

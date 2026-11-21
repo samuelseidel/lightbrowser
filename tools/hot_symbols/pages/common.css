@@ -1,0 +1,7 @@
+body { font: 15px/1.4 system-ui, sans-serif; margin: 0 auto; max-width: 900px; color: #223; }
+header, footer { padding: 8px 12px; background: #f4f5f9; }
+nav a { margin-left: 10px; }
+h1 { font-size: 1.6em; } h2 { font-size: 1.25em; margin-top: 1.4em; }
+img { max-width: 100%; vertical-align: middle; }
+form label { display: block; margin: 4px 0; }
+@media (max-width: 600px) { .cards { grid-template-columns: 1fr; } }

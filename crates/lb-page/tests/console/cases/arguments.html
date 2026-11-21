@@ -1,0 +1,46 @@
+<!doctype html><html><body><pre id=out></pre><script>
+const hits = [];
+const fn = n => { const f = function () {}; f.toString = () => { hits.push(n); return 'F'; }; return f; };
+const tag = n => ({ get [Symbol.toStringTag]() { hits.push(n); return 'T'; } });
+const err = n => { const e = new Error('m'); Object.defineProperty(e, 'name', { get() { hits.push(n); return 'E'; } }); return e; };
+const cases = {
+  arg2Tag: () => console.log('x', tag('arg2Tag')),
+  arg2Fn: () => console.log('x', fn('arg2Fn')),
+  arg3Err: () => console.log(1, 2, err('arg3Err')),
+  arrFn: () => console.log([fn('arrFn')]),
+  arrArrTag: () => console.log([[tag('arrArrTag')]]),
+  arrNested5: () => console.log([[[[[[fn('arrNested5')]]]]]]),
+  arrLong: () => { const a = new Array(2000).fill(0); a[1999] = fn('arrLong'); console.log(a); },
+  tagCount: () => console.log(tag('tagCount')),
+  fmtSfn: () => console.log('%s', fn('fmtSfn')),
+  fmtStag: () => console.log('%s', tag('fmtStag')),
+  fmtSextra: () => console.log('%s', 'a', fn('fmtSextra')),
+  fmtF: () => console.log('%f', { [Symbol.toPrimitive]: () => { hits.push('fmtF'); return 1; } }),
+  fmtI: () => console.log('%i', { [Symbol.toPrimitive]: () => { hits.push('fmtI'); return 1; } }),
+  fmtNotFirst: () => console.log(1, '%s', fn('fmtNotFirst')),
+  fmtObjFirst: () => console.log(new String('%s'), fn('fmtObjFirst')),
+  dirFn: () => console.dir(fn('dirFn')),
+  dirxmlFn: () => console.dirxml(fn('dirxmlFn')),
+  tableFn: () => console.table(fn('tableFn')),
+  assertFn: () => console.assert(false, fn('assertFn')),
+  assertTrue: () => console.assert(true, fn('assertTrue')),
+  errorFn: () => console.error(fn('errorFn')),
+  warnFn: () => console.warn(fn('warnFn')),
+  infoFn: () => console.info(fn('infoFn')),
+  debugFn: () => console.debug(fn('debugFn')),
+  traceFn: () => console.trace(fn('traceFn')),
+  groupFn: () => { console.group(fn('groupFn')); console.groupEnd(); },
+  groupCFn: () => { console.groupCollapsed(fn('groupCFn')); console.groupEnd(); },
+  countFn: () => console.count(fn('countFn')),
+  timeLogFn: () => { console.time('t'); console.timeLog('t', fn('timeLogFn')); console.timeEnd('t'); },
+  symbolObj: () => { const s = Object(Symbol('q')); s.toString = () => hits.push('symbolObj'); console.log(s); },
+  boolObj: () => { const b = new Boolean(true); b.toString = () => hits.push('boolObj'); console.log(b); },
+  errSub: () => { class E extends Error { get name() { hits.push('errSub'); return 'S'; } } console.log(new E('m')); },
+  domExc: () => { const d = new DOMException('m'); Object.defineProperty(d, 'name', { get() { hits.push('domExc'); return 'D'; } }); console.log(d); },
+  dateProto: () => { const d = new Date(0); Object.defineProperty(d, Symbol.toPrimitive, { value: () => { hits.push('dateProto'); return 's'; } }); console.log(d); },
+  regexpFlags: () => { const r = /a/g; Object.defineProperty(r, 'flags', { get() { hits.push('regexpFlags'); return 'g'; } }); console.log(r); },
+  fnArr: () => console.log(fn('fnArrA'), fn('fnArrB')),
+};
+for (const [k, f] of Object.entries(cases)) { try { f(); } catch (e) { hits.push(k + ':threw:' + e); } }
+window.HITS = JSON.stringify(hits); document.getElementById('out').textContent = 'HITS=' + window.HITS;
+</script></body></html>

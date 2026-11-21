@@ -1,0 +1,67 @@
+<!doctype html><!--LOG--><script>
+(async function(){
+  await fresh('ix');
+  var r = indexedDB.open('ix', 1);
+  r.onupgradeneeded = function(){
+    var db = r.result;
+    var s = db.createObjectStore('s', {keyPath:'id'});
+    var i1 = s.createIndex('byName', 'name');
+    var i2 = s.createIndex('byTag', 'tags', {multiEntry:true});
+    var i3 = s.createIndex('byMail', 'mail', {unique:true});
+    var i4 = s.createIndex('byPair', ['name','age']);
+    log('index '+String(i1)+' '+i1.name+' '+i1.keyPath+' '+i1.unique+' '+i1.multiEntry+' '+(i1.objectStore===s)+' '+show(i4.keyPath)+' '+i2.multiEntry+' '+i3.unique);
+    log('names '+Array.from(s.indexNames)+' same='+(s.index('byName')===i1));
+    t('dup index', function(){return s.createIndex('byName', 'x')});
+    t('bad path', function(){return s.createIndex('bad', 'a b')});
+    t('multi array', function(){return s.createIndex('bad2', ['a','b'], {multiEntry:true})});
+    t('missing', function(){return s.index('nope')});
+    t('delete missing', function(){return s.deleteIndex('nope')});
+    var tmp = s.createIndex('tmp', 'x'); s.deleteIndex('tmp');
+    t('deleted use', function(){return tmp.get(1)});
+    log('names2 '+Array.from(s.indexNames));
+    s.put({id:1, name:'bob', tags:['a','b','a'], mail:'b@x', age:30});
+    s.put({id:2, name:'al', tags:'c', mail:'a@x', age:20});
+    s.put({id:3, name:'bob', tags:['b', {}, 'd'], age:40});
+    s.put({id:4, tags:[], mail:'d@x'});
+    s.put({id:5, name:'cy', tags:[['x','y'],'z'], mail:{}});
+  };
+  var db = await req(r);
+  var tx = db.transaction('s', 'readwrite');
+  var s = tx.objectStore('s');
+  var out = [];
+  function p(name, q){ q.onsuccess = function(){out.push(name+' -> '+show(q.result))}; q.onerror = function(e){e.preventDefault(); out.push(name+' error '+q.error.name+': '+q.error.message)}; }
+  p('name get bob', s.index('byName').get('bob'));
+  p('name getKey bob', s.index('byName').getKey('bob'));
+  p('name getAll bob', s.index('byName').getAll('bob'));
+  p('name getAllKeys', s.index('byName').getAllKeys());
+  p('name count', s.index('byName').count());
+  p('tag getAllKeys', s.index('byTag').getAllKeys());
+  p('tag getAll b', s.index('byTag').getAllKeys('b'));
+  p('tag count', s.index('byTag').count());
+  p('tag range', s.index('byTag').getAllKeys(IDBKeyRange.bound('a','c')));
+  p('mail all', s.index('byMail').getAllKeys());
+  p('pair all', s.index('byPair').getAllKeys());
+  p('pair get', s.index('byPair').get(['bob', 40]));
+  p('dup mail', s.put({id:6, mail:'a@x'}));
+  p('after dup', s.count());
+  p('replace same mail', s.put({id:2, name:'al2', mail:'a@x'}));
+  p('name all2', s.index('byName').getAllKeys());
+  p('getAll count', s.index('byName').getAll(null, 2));
+  p('count range', s.index('byName').count(IDBKeyRange.lowerBound('b')));
+  await done(tx).then(function(x){out.push(x)}, function(x){out.push('aborted '+err(x))});
+  out.forEach(log);
+  db.close();
+  // unique index created over violating data aborts the upgrade
+  var r2 = indexedDB.open('ix', 2);
+  r2.onupgradeneeded = function(){
+    var st = r2.transaction.objectStore('s');
+    st.createIndex('uniqName', 'name', {unique:true});
+    r2.transaction.onabort = function(){log('upgrade abort '+err(r2.transaction.error))};
+    r2.transaction.onerror = function(e){log('upgrade error event '+ev(e))};
+  };
+  await a('open v2', function(){return req(r2)});
+  var r3 = indexedDB.open('ix');
+  await a('version after', function(){return req(r3).then(function(db){var v=db.version+' '+Array.from(db.transaction('s').objectStore('s').indexNames);db.close();return v})});
+  end();
+})();
+</script>
