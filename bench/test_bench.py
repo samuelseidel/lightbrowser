@@ -99,9 +99,10 @@ class Report(unittest.TestCase):
         lp = {"crawl_total_s": {"median": 2.0}, "peak_rss_mb": {"median": 40.0}, "cpu_s": {"median": 2.0}}
         s = {"fetch:lightbrowser": lb, "fetch:lightpanda": lp}
         by = {b["budget"]: b["status"] for b in run.budgets(s, 39.0, None)}
-        self.assertEqual(by["crawl wall time vs Lightpanda (fetch)"], "pass")
-        self.assertEqual(by["peak RSS vs Lightpanda (fetch)"], "fail")
-        self.assertEqual(by["CPU time vs Lightpanda (fetch)"], "pass")  # equal counts as <=
+        # ADR 0041: Lightpanda rows are informational, not a gate.
+        self.assertEqual(by["crawl wall time vs Lightpanda (fetch)"], "info")
+        self.assertEqual(by["peak RSS vs Lightpanda (fetch)"], "info")
+        self.assertEqual(by["CPU time vs Lightpanda (fetch)"], "info")
         self.assertEqual(by["CPU time vs Lightpanda (cdp)"], "skip")
 
     def test_ws_url_from_json_version(self):

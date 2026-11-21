@@ -23,9 +23,13 @@ fn run(s: &Shader) -> Vec<[f32; 4]> {
     let t = NoTextures;
     let mut e = Exec::new(s.cells, &t, 1 << 30);
     if let Some(a) = s.inputs.iter().find(|i| i.name == "a") {
-        for l in 0..16 {
-            for k in 0..4 {
-                e.regs[(a.cell + k) as usize][l] = (l as f32 + k as f32 * 0.25).to_bits();
+        for k in 0..4 {
+            for (l, lane) in e.regs[(a.cell + k) as usize]
+                .iter_mut()
+                .take(16)
+                .enumerate()
+            {
+                *lane = (l as f32 + k as f32 * 0.25).to_bits();
             }
         }
     }

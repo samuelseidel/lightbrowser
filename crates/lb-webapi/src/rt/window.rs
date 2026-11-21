@@ -628,7 +628,7 @@ fn record_entry(
 pub(crate) fn apply_traversal(js: &mut dyn Js, w: &Rc<Window>, url: Url, state: Option<String>) {
     let old = w.url();
     w.set_url(url.clone());
-    super::frames::navigated_within_document(w, false);
+    // The page session already reported this traversal to CDP.
     fire_event_with(
         js,
         w,
@@ -668,6 +668,7 @@ pub(crate) fn navigate_to(w: &Window, url: Url, replace: bool) {
     if same_document_fragment(w, &url) {
         let old = w.url().to_string();
         let new = url.to_string();
+        let reported = w.session.borrow().is_some();
         if let Some(host) = w.session.borrow().clone() {
             host.record(&url, None, replace, Some("link"));
         } else {
@@ -686,7 +687,10 @@ pub(crate) fn navigate_to(w: &Window, url: Url, replace: bool) {
             }
         }
         w.set_url(url);
-        super::frames::navigated_within_document(w, false);
+        // `SessionHost::record` already emitted the CDP event.
+        if !reported {
+            super::frames::navigated_within_document(w, false);
+        }
         w.queue_task(
             TaskSource::DomManipulation,
             Box::new(move |js, w| {
@@ -738,9 +742,12 @@ pub(crate) fn navigate_to_as(
         let old = w.url().to_string();
         let new = url.to_string();
         let replace = replace || (browser.is_none() && old == new);
+        let reported = w.session.borrow().is_some();
         record_entry(w, &url, None, replace, Some(browser.unwrap_or("link")));
         w.set_url(url);
-        super::frames::navigated_within_document(w, false);
+        if !reported {
+            super::frames::navigated_within_document(w, false);
+        }
         w.queue_task(
             TaskSource::DomManipulation,
             Box::new(move |js, w| {
@@ -1374,9 +1381,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             if !w.navigation_allowed() {
                 return Ok(());
             }
+            let reported = w.session.borrow().is_some();
             record_entry(w, &url, state, replace, None);
             w.set_url(url);
-            super::frames::navigated_within_document(w, true);
+            if !reported {
+                super::frames::navigated_within_document(w, true);
+            }
             Ok(())
         });
     }

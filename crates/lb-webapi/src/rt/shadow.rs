@@ -299,6 +299,64 @@ pub(crate) fn on_mutations(js: &mut dyn Js, w: &Rc<Window>, batch: &[(u32, Mutat
     for sr in roots {
         update_root(js, w, sr);
     }
+    // Fallback content is not in `assignedNodes`. Chrome still fires
+    // `slotchange` when it is added or removed, and bubbles that to an
+    // outer slot that is showing this slot as its own fallback.
+    let fallback = w.with_doc(|d| {
+        let mut slots = Vec::new();
+        for (doc_slot, m) in batch {
+            if *doc_slot != 0 {
+                continue;
+            }
+            let parent = match m {
+                Mutation::ChildInserted { parent, .. } | Mutation::ChildRemoved { parent, .. } => {
+                    *parent
+                }
+                _ => continue,
+            };
+            if d.is_slot(parent) && d.assigned_nodes(parent).is_empty() && !slots.contains(&parent)
+            {
+                slots.push(parent);
+            }
+        }
+        let mut i = 0;
+        while i < slots.len() {
+            let s = slots[i];
+            i += 1;
+            if let Some(p) = d.parent(s)
+                && d.is_slot(p)
+                && d.assigned_nodes(p).is_empty()
+                && !slots.contains(&p)
+            {
+                slots.push(p);
+            }
+        }
+        slots
+    });
+    for s in fallback {
+        signal_slot(js, w, s);
+    }
+    // A slot assigned into another slot (nested shadow trees) is signaled
+    // when its own assigned nodes change, even if the outer slot's
+    // assigned-node list is unchanged. Chrome fires `slotchange` there too.
+    let extra = w.with_doc(|d| {
+        let signals = w.slot_state.borrow().signals.clone();
+        let mut extra = Vec::new();
+        for &sr in d.shadow_roots() {
+            for s in d.slots_in(sr) {
+                if signals.contains(&s) {
+                    continue;
+                }
+                if d.assigned_nodes(s).iter().any(|n| signals.contains(n)) {
+                    extra.push(s);
+                }
+            }
+        }
+        extra
+    });
+    for s in extra {
+        signal_slot(js, w, s);
+    }
 }
 
 /// The signal slots, emptied (taken before observers are notified).

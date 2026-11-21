@@ -85,7 +85,7 @@ fn malformed_frame_ids_are_unknown_frames() {
         ] {
             let e = h.create_isolated_world("T", id, "w", false).unwrap_err();
             assert_eq!(e.0, "No frame for given id found", "{id:?}");
-            let e = h.frame_owner("T", id).unwrap_err();
+            let e = h.get_frame_owner("T", id).unwrap_err();
             assert_eq!(e.0, "Frame with the given id was not found.", "{id:?}");
         }
         // The page still works.

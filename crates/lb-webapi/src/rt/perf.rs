@@ -2166,7 +2166,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             })
             .flatten()
             .ok_or_else(illegal)?;
-        cx.ret(entries_arg(w, &q))
+        // Chrome 153 returns an Array of entries here (the callback's
+        // argument is the EntryList). Entries queued by `mark` in this
+        // turn are in it; the callback itself runs as a task.
+        let mut entries = q;
+        sort_entries(&mut entries);
+        cx.ret(entries_arg(w, &entries))
     });
     reg.register(
         "PerformanceObserver",

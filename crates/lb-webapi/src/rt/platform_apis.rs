@@ -1,7 +1,8 @@
 //! Minimal Chrome-shaped stubs for APIs Turnstile's soft-pass probes:
-//! `navigator.storage`, `navigator.locks`, `cookieStore`, and the
-//! Navigation API (`window.navigation`). Unregistered IDL getters
-//! returned bare `undefined`; these return real host objects.
+//! `navigator.locks`, `cookieStore`, and the Navigation API
+//! (`window.navigation`). `navigator.storage` is the real manager in
+//! `navigator.rs`. Unregistered IDL getters returned bare `undefined`;
+//! these return real host objects.
 
 use std::rc::Rc;
 
@@ -13,7 +14,6 @@ use crate::registry::Registry;
 /// Objects owned by this module.
 #[derive(Debug)]
 pub(crate) enum PlatformObj {
-    StorageManager,
     LockManager,
     CookieStore,
     Navigation,
@@ -23,7 +23,6 @@ pub(crate) enum PlatformObj {
 impl PlatformObj {
     pub(crate) fn iface_name(&self) -> &'static str {
         match self {
-            PlatformObj::StorageManager => "StorageManager",
             PlatformObj::LockManager => "LockManager",
             PlatformObj::CookieStore => "CookieStore",
             PlatformObj::Navigation => "Navigation",
@@ -62,10 +61,9 @@ fn resolve_later(w: &Rc<Window>, r: lb_js::Resolver, value: Arg) {
 }
 
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
-    getter(reg, rt, "Navigator", "storage", |cx, w| {
-        this_obj(cx)?;
-        cx.ret(plat_arg(w, "nav:storage", PlatformObj::StorageManager))
-    });
+    // `navigator.storage` is the real StorageManager in `navigator.rs`
+    // (Chrome's reported quota and per-system usage). Registering a stub
+    // here replaced it, because a later registration wins.
     getter(reg, rt, "Navigator", "locks", |cx, w| {
         this_obj(cx)?;
         cx.ret(plat_arg(w, "nav:locks", PlatformObj::LockManager))
@@ -75,29 +73,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, "Window", "navigation", |cx, w| {
         cx.ret(plat_arg(w, "win:navigation", PlatformObj::Navigation))
-    });
-
-    method(reg, rt, "StorageManager", "estimate", |cx, w| {
-        this_plat(cx, w, |p| matches!(p, PlatformObj::StorageManager))?;
-        let r = cx.ret_new_promise()?;
-        resolve_later(
-            w,
-            r,
-            Arg::Json(r#"{"quota":322122547200,"usage":0,"usageDetails":{}}"#.into()),
-        );
-        Ok(())
-    });
-    method(reg, rt, "StorageManager", "persisted", |cx, w| {
-        this_plat(cx, w, |p| matches!(p, PlatformObj::StorageManager))?;
-        let r = cx.ret_new_promise()?;
-        resolve_later(w, r, Arg::Bool(false));
-        Ok(())
-    });
-    method(reg, rt, "StorageManager", "persist", |cx, w| {
-        this_plat(cx, w, |p| matches!(p, PlatformObj::StorageManager))?;
-        let r = cx.ret_new_promise()?;
-        resolve_later(w, r, Arg::Bool(false));
-        Ok(())
     });
 
     method(reg, rt, "LockManager", "request", |cx, w| {

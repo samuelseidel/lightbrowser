@@ -15,6 +15,13 @@ cd "$root"
 
 bin=${LIGHTBROWSER_BIN:-"$root/target/debug/lightbrowser"}
 persona=${MVP_PERSONA:-"$root/profiles/reference/chrome/chrome153_win10_rtx3060_1080p.json"}
+input=${MVP_INPUT:-human}
+seed=${MVP_SEED:-1}
+if [[ "$input" == "human" ]]; then
+  expect=${MVP_EXPECT:-'fp<=0&beh<=0'}
+else
+  expect=${MVP_EXPECT:-}
+fi
 if [[ ! -x "$bin" ]]; then
   echo "mvp: binary not found: $bin (build with: cargo build -p lightbrowser)" >&2
   exit 1
@@ -86,13 +93,19 @@ fi
 echo "mvp: bench $base"
 echo "mvp: cdp   $ws"
 set +e
-node tests/detect-bench/run.js --base "$base" --scenario T-010 --cdp "$ws" \
-  --input human --seed 1 --expect 'fp<=0&beh<=0' | tee "$results/run.txt"
+args=(node tests/detect-bench/run.js --base "$base" --scenario T-010 --cdp "$ws" --input "$input" --seed "$seed")
+if [[ -n "$expect" ]]; then
+  args+=(--expect "$expect")
+fi
+echo "mvp: input $input seed $seed persona $(basename "$persona")"
+"${args[@]}" | tee "$results/run.txt"
 code=${PIPESTATUS[0]}
 set -e
 echo "mvp: run.js exit $code"
 if [[ "$code" -ne 0 ]]; then
-  echo "mvp: scored flags are not zero (see the fired rules above)" >&2
+  echo "mvp: crawl failed (expect ${expect:-none}; see the table above)" >&2
   exit "$code"
 fi
-echo "mvp: zero scored flags"
+if [[ "$input" == "human" ]]; then
+  echo "mvp: zero scored flags"
+fi

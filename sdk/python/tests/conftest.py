@@ -114,7 +114,7 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def bench_url(tmp_path_factory):
     """tests/detect-bench/server.py on a free loopback port, results in a temp dir."""
     server = REPO / "tests" / "detect-bench" / "server.py"

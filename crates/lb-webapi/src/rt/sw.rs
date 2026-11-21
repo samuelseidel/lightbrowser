@@ -168,7 +168,9 @@ impl SwRequest {
             } else {
                 "same-origin"
             },
-            cache: if navigate && reload {
+            // Chrome's main-frame navigation is `no-cache` (a reload is too).
+            // An iframe navigation stays `default`.
+            cache: if req.destination == Destination::Document || (navigate && reload) {
                 "no-cache"
             } else {
                 "default"

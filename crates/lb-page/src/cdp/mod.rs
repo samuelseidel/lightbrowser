@@ -979,6 +979,11 @@ impl PageHost for CdpHost {
 
         let frame_id = frame_id.to_owned();
         self.blocking(target_id, move |_, a, top| {
+            if frame_id == a.target {
+                return Err(HostError::new(
+                    "Frame with the given id does not belong to the target.",
+                ));
+            }
             let missing = || HostError::new("Frame with the given id was not found.");
             let id = a.frame_of(&frame_id).ok_or_else(missing)?;
             let child = frames::find(top, id).ok_or_else(missing)?;

@@ -420,7 +420,7 @@ async fn performance_observer_constructs_and_observes() {
                typeof PerformanceObserver,\
                Array.isArray(types) && types.indexOf('mark') >= 0,\
                po instanceof PerformanceObserver,\
-               typeof rec.getEntries === 'function' && rec.getEntries().length === 0,\
+               Array.isArray(rec) && rec.length === 1,\
                saw\
              ].join(',');\
              </script></body>",
