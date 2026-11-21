@@ -35,6 +35,29 @@ pub(crate) fn loader_id(page_id: u64, seq: u64) -> String {
     format!("{page_id:016X}{seq:016X}")
 }
 
+/// Match a child frame's layout viewport to its `<iframe>` content box so
+/// quads and hit-testing use the same coordinates as Chrome / Playwright.
+pub(crate) fn sync_frame_viewport(w: &Window) {
+    frames::sync_viewport(w);
+}
+
+/// Apply CDP media overrides to `w` and every descendant frame, then fire
+/// `MediaQueryList` `change` where `matches` flips.
+pub(crate) fn apply_media_tree(ws: &WorkerState, top: &Rc<Window>, media: &lb_css::MediaOverrides) {
+    let mut stack = vec![top.clone()];
+    while let Some(w) = stack.pop() {
+        w.with_layout_engine(|l, _| l.set_media_overrides(media));
+        let realm = w.realm();
+        ws.with_engine(|engine| {
+            let mut js = EngineJs { engine, realm };
+            lb_webapi::rt::notify_media_lists(&mut js, &w);
+        });
+        for c in frames::children(&w) {
+            stack.push(c.window);
+        }
+    }
+}
+
 /// What the host can read without asking the worker.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FrameInfo {
@@ -81,7 +104,7 @@ pub(crate) struct AgentState {
     /// Bodies of recent responses for `Network.getResponseBody`.
     pub bodies: VecDeque<(String, bytes::Bytes)>,
     pub viewport: Option<(u32, u32)>,
-    /// Navigation sequence of the current document (backend node ids).
+    /// Navigation sequence of the current top document (loader ids).
     pub seq: u64,
     pub loader: String,
     /// Loader ids of child frames' current documents, by frame id.
@@ -109,20 +132,29 @@ pub(crate) struct Agent {
     pub st: RefCell<AgentState>,
 }
 
-/// Backend node ids: the navigation sequence in the high bits, so ids of
-/// an old document never resolve in a new one.
+/// Backend node ids: the runtime document key (ADR 0017) in the high
+/// bits and the arena index in the low bits, so ids of any live document
+/// (top or child frame) resolve and ids of a replaced document do not.
 const NODE_BITS: u32 = 24;
 
-pub(crate) fn backend_id(seq: u64, n: NodeId) -> BackendNodeId {
-    ((seq as i64) << NODE_BITS) | (i64::from(n.0) + 1)
+pub(crate) fn backend_id(doc_key: u32, n: NodeId) -> BackendNodeId {
+    ((i64::from(doc_key)) << NODE_BITS) | (i64::from(n.0) + 1)
 }
 
-fn node_of(seq: u64, id: BackendNodeId) -> Option<NodeId> {
-    if id <= 0 || (id >> NODE_BITS) as u64 != seq {
+/// `(document key, node)` of a backend id, or `None` when the id is empty.
+fn decode_backend(id: BackendNodeId) -> Option<(u32, NodeId)> {
+    if id <= 0 {
         return None;
     }
+    let key = u32::try_from(id >> NODE_BITS).ok()?;
     let n = (id & ((1 << NODE_BITS) - 1)) - 1;
-    u32::try_from(n).ok().map(NodeId)
+    let node = u32::try_from(n).ok().map(NodeId)?;
+    Some((key, node))
+}
+
+fn node_of(doc_key: u32, id: BackendNodeId) -> Option<NodeId> {
+    let (key, n) = decode_backend(id)?;
+    (key == doc_key).then_some(n)
 }
 
 fn now_ms() -> f64 {
@@ -627,6 +659,11 @@ impl Agent {
             }
         }
         self.emit(PageEvent::FrameNavigated { frame });
+        // Same media emulation as the top document (ADR 0009 revision 5).
+        let media = self.st.borrow().media.clone();
+        if media != lb_css::MediaOverrides::default() {
+            child.with_layout_engine(|l, _| l.set_media_overrides(&media));
+        }
         let main =
             self.register_world(Some(child.realm()), None, &frames::effective_url(child), id);
         self.emit(PageEvent::ExecutionContextCreated { context: main });
@@ -730,8 +767,14 @@ impl Agent {
     }
 
     /// Console messages and uncaught exceptions of the page.
-    pub(crate) fn console(&self, _page: &PageState, m: &ConsoleMessage) {
-        let ctx = self.main_ctx().unwrap_or(0);
+    pub(crate) fn console(&self, realm: RealmId, m: &ConsoleMessage) {
+        let ctx = self
+            .st
+            .borrow()
+            .worlds
+            .iter()
+            .find(|w| w.realm == Some(realm))
+            .map_or(0, |w| w.id);
         self.emit(console_event(m, ctx));
     }
 
@@ -761,10 +804,6 @@ impl Agent {
             .get(id)
             .cloned()
             .ok_or_else(|| HostError::new("Could not find object with given id"))
-    }
-
-    pub(crate) fn current_seq(&self) -> u64 {
-        self.st.borrow().seq
     }
 
     pub(crate) fn store_body(&self, request_id: &str, body: bytes::Bytes) {
@@ -946,39 +985,53 @@ pub(crate) fn exception_details(
 impl Agent {
     // ---- DOM ----
 
-    pub(crate) fn ids(&self) -> impl Fn(NodeId) -> BackendNodeId + use<> {
-        let seq = self.current_seq();
-        move |n| backend_id(seq, n)
+    /// Backend-id encoder for the main document of `w`.
+    pub(crate) fn ids(w: &Window) -> impl Fn(NodeId) -> BackendNodeId + use<> {
+        let key = w.doc_key(0);
+        move |n| backend_id(key, n)
     }
 
-    /// The main-document node behind a `NodeRef`.
-    pub(crate) fn node(&self, ws: &WorkerState, w: &Window, node: &NodeRef) -> HostResult<NodeId> {
+    /// The window and main-document node behind a `NodeRef`. Object ids and
+    /// backend ids from a child frame resolve to that frame's window
+    /// (Playwright `frameLocator`; `DOM.requestNode` / `resolveNode`).
+    pub(crate) fn node(
+        &self,
+        ws: &WorkerState,
+        top: &Rc<Window>,
+        node: &NodeRef,
+    ) -> HostResult<(Rc<Window>, NodeId)> {
         match node {
             NodeRef::Backend(id) => {
-                let n = node_of(self.current_seq(), *id)
+                let (key, n) = decode_backend(*id)
                     .ok_or_else(|| HostError::new("No node with given id found"))?;
-                if n.0 as usize >= w.with_doc(|d| d.node_count()) {
+                let (owner, slot) = top
+                    .runtime()
+                    .doc_owner(key)
+                    .ok_or_else(|| HostError::new("No node with given id found"))?;
+                // CDP layout/geometry paths use the window's main document.
+                if slot != 0 {
                     return Err(HostError::new("No node with given id found"));
                 }
-                Ok(n)
+                if n.0 as usize >= owner.with_doc(|d| d.node_count()) {
+                    return Err(HostError::new("No node with given id found"));
+                }
+                sync_frame_viewport(&owner);
+                Ok((owner, n))
             }
             NodeRef::Object(o) => {
                 let obj = self.object(o)?;
-                // Nodes of child frames are not addressable through the
-                // DOM domain yet (their ids are relative to their window).
-                if let Some(owner) = w.runtime().window(obj.realm)
-                    && !std::ptr::eq(owner.as_ref(), w)
-                {
-                    return Err(HostError::new(
-                        "Node belongs to a child frame; DOM methods on frame nodes are not supported yet",
-                    ));
-                }
+                let owner = top.runtime().window(obj.realm).ok_or_else(|| {
+                    HostError::new("Node with given id does not belong to the document")
+                })?;
                 let host = ws
                     .with_engine(|e| e.unwrap_host(obj.realm, obj.handle))
                     .ok_or_else(|| HostError::new("Page is closed"))?
                     .map_err(|e| HostError::new(e.message))?;
-                match host.and_then(|h| w.decode_node(h)) {
-                    Some((0, n)) => Ok(n),
+                match host.and_then(|h| owner.decode_node(h)) {
+                    Some((0, n)) => {
+                        sync_frame_viewport(&owner);
+                        Ok((owner, n))
+                    }
                     _ => Err(HostError::new(
                         "Node with given id does not belong to the document",
                     )),
@@ -1354,11 +1407,12 @@ fn undefined_remote() -> RemoteObject {
 
 /// The document of a window as a `DOM.Node` tree.
 pub(crate) fn dom_node(agent: &Agent, w: &Window, n: NodeId, depth: i32, pierce: bool) -> DomNode {
-    let ids = agent.ids();
+    let ids = Agent::ids(w);
     let url = w.url().to_string();
+    let frame_id = agent.frame_str(frames::frame_id(w));
     let info = lb_cdp::convert::DocInfo {
         url: &url,
-        frame_id: &agent.target,
+        frame_id: &frame_id,
         pierce,
     };
     let mut node = w.with_doc(|d| lb_cdp::convert::dom_node(d, n, depth, &ids, &info));
@@ -1368,8 +1422,9 @@ pub(crate) fn dom_node(agent: &Agent, w: &Window, n: NodeId, depth: i32, pierce:
 
 /// Set `frameId` on `<iframe>` owners whose frame exists.
 fn mark_frame_owners(agent: &Agent, w: &Window, node: &mut DomNode) {
+    let key = w.doc_key(0);
     if node.local_name == "iframe"
-        && let Some(n) = node_of(agent.current_seq(), node.backend_node_id)
+        && let Some(n) = node_of(key, node.backend_node_id)
         && let Some(c) = frames::child_for(w, n)
     {
         node.frame_id = Some(agent.frame_str(c.id));

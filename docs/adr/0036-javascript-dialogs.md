@@ -41,4 +41,8 @@ answer arrives as a CDP command on the CDP thread.
   them shows a dialog; other workers' pages run on.
 - CDP commands for a page that is in a dialog queue until it closes;
   sync host calls give up after their usual 30 s.
-- Not covered: `beforeunload` dialogs, `print()`.
+- `beforeunload` dialogs use the same host (type `beforeunload`, empty
+  message) after sticky activation on that frame. Prompt-to-unload walks
+  the frame tree (parent then children) for top navigations, `Page.close`,
+  and child-frame navigations (`cdp_host::beforeunload_reaches_child_frames`).
+- Not covered: `print()`.

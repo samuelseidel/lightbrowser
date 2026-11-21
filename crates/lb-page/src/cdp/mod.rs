@@ -112,6 +112,11 @@ pub struct CdpHostOptions {
     /// use it (ADR 0027).
     pub proxy_server: Option<String>,
     pub proxy_bypass_list: Option<String>,
+    /// TCP SYN profile for every context (`serve --tcp-profile`):
+    /// `persona` (the persona's `tcp_profile_id`), a profile id from
+    /// `profiles/tcp`, or `None` / `"off"` to leave the host stack (default).
+    /// Windows and macOS profiles need `tcp-shim` (ADR 0031, T10).
+    pub tcp_profile: Option<String>,
 }
 
 impl CdpHostOptions {
@@ -124,6 +129,7 @@ impl CdpHostOptions {
             workers: BrowserOptions::default().workers,
             proxy_server: None,
             proxy_bypass_list: None,
+            tcp_profile: None,
         }
     }
 }
@@ -300,7 +306,44 @@ impl CdpHost {
         if let Some(p) = proxy {
             ctx.set_proxy(p);
         }
+        if let Some(tcp) = self.load_tcp_profile(profile)? {
+            // T13: the hop to a proxy uses the host stack; only direct
+            // connections are shaped. Warn so a Windows/macOS persona
+            // behind a proxy is not assumed to look right on the wire.
+            if ctx.proxy().is_some() {
+                eprintln!(
+                    "warning: --tcp-profile shapes direct connections only; \
+                     the hop to a proxy still uses the host TCP stack \
+                     (docs/tcp-handshake/REMAINING-STEPS.md T13)"
+                );
+            }
+            ctx.set_tcp_profile(tcp).map_err(page_err)?;
+        }
         Ok(ctx)
+    }
+
+    /// Load the TCP profile named by [`CdpHostOptions::tcp_profile`] for
+    /// `profile`, or `None` when shaping is off.
+    fn load_tcp_profile(
+        &self,
+        profile: &Arc<PersonaProfile>,
+    ) -> HostResult<Option<Arc<lb_net::tcpfp::TcpProfile>>> {
+        let id = match self.opts.tcp_profile.as_deref() {
+            None | Some("off") => return Ok(None),
+            Some("persona") => profile.to_network().tcp_profile_id,
+            Some(id) => id.to_owned(),
+        };
+        // profiles/tcp sits next to profiles/tls.
+        let tcp_dir = self
+            .opts
+            .tls_dir
+            .parent()
+            .map(|p| p.join("tcp"))
+            .ok_or_else(|| HostError::new("no profiles/tcp next to --profiles-dir"))?;
+        let path = tcp_dir.join(format!("{id}.json"));
+        let tcp = lb_net::tcpfp::TcpProfile::load(&path)
+            .map_err(|e| HostError::new(format!("loading {}: {e}", path.display())))?;
+        Ok(Some(Arc::new(tcp)))
     }
 
     /// Run `f` with the page's agent and current window on its worker,
@@ -809,6 +852,20 @@ impl PageHost for CdpHost {
 
     // ---- DOM ----
 
+    fn get_frame_owner(&self, target_id: &str, frame_id: &str) -> HostResult<BackendNodeId> {
+        use lb_webapi::rt::frames;
+
+        let frame_id = frame_id.to_owned();
+        self.blocking(target_id, move |_, a, top| {
+            let missing = || HostError::new("Frame with the given id was not found.");
+            let id = a.frame_of(&frame_id).ok_or_else(missing)?;
+            let child = frames::find(top, id).ok_or_else(missing)?;
+            let parent = frames::parent(&child).ok_or_else(missing)?;
+            let node = frames::frame_element(&child).ok_or_else(missing)?;
+            Ok(agent::backend_id(parent.doc_key(0), node))
+        })
+    }
+
     fn get_document(&self, target_id: &str, depth: i32, pierce: bool) -> HostResult<DomNode> {
         self.blocking(target_id, move |_, a, w| {
             Ok(agent::dom_node(a, w, agent::DOCUMENT, depth, pierce))
@@ -823,9 +880,9 @@ impl PageHost for CdpHost {
         pierce: bool,
     ) -> HostResult<DomNode> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
-            Ok(agent::dom_node(a, w, n, depth, pierce))
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
+            Ok(agent::dom_node(a, &w, n, depth, pierce))
         })
     }
 
@@ -837,23 +894,23 @@ impl PageHost for CdpHost {
         object_group: Option<&str>,
     ) -> HostResult<RemoteObject> {
         let group = object_group.map(str::to_string);
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Backend(node))?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
             let ctx = match context {
                 Some(c) => c,
                 None => a
                     .main_ctx()
                     .ok_or_else(|| HostError::new("Cannot find default execution context"))?,
             };
-            a.node_object(ws, w, n, ctx, group.as_deref())
+            a.node_object(ws, &w, n, ctx, group.as_deref())
         })
     }
 
     fn request_node(&self, target_id: &str, object_id: &str) -> HostResult<BackendNodeId> {
         let oid = object_id.to_string();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Object(oid))?;
-            Ok(agent::backend_id(a.current_seq(), n))
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Object(oid))?;
+            Ok(agent::backend_id(w.doc_key(0), n))
         })
     }
 
@@ -864,11 +921,11 @@ impl PageHost for CdpHost {
         selector: &str,
     ) -> HostResult<Option<BackendNodeId>> {
         let sel = selector.to_string();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Backend(node))?;
-            let seq = a.current_seq();
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
+            let key = w.doc_key(0);
             w.with_doc(|d| d.query_selector(n, &sel))
-                .map(|r| r.map(|x| agent::backend_id(seq, x)))
+                .map(|r| r.map(|x| agent::backend_id(key, x)))
                 .map_err(|_| HostError::new("DOM Error while querying"))
         })
     }
@@ -880,19 +937,19 @@ impl PageHost for CdpHost {
         selector: &str,
     ) -> HostResult<Vec<BackendNodeId>> {
         let sel = selector.to_string();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &NodeRef::Backend(node))?;
-            let seq = a.current_seq();
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &NodeRef::Backend(node))?;
+            let key = w.doc_key(0);
             w.with_doc(|d| d.query_selector_all(n, &sel))
-                .map(|v| v.into_iter().map(|x| agent::backend_id(seq, x)).collect())
+                .map(|v| v.into_iter().map(|x| agent::backend_id(key, x)).collect())
                 .map_err(|_| HostError::new("DOM Error while querying"))
         })
     }
 
     fn outer_html(&self, target_id: &str, node: &NodeRef) -> HostResult<String> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             Ok(if n == agent::DOCUMENT {
                 w.content()
             } else {
@@ -903,8 +960,8 @@ impl PageHost for CdpHost {
 
     fn box_model(&self, target_id: &str, node: &NodeRef) -> HostResult<BoxModel> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             w.with_layout_engine(|l, d| l.box_model(d, n))
                 .map(|m| lb_cdp::convert::box_model(&m))
                 .ok_or_else(|| HostError::new("Could not compute box model."))
@@ -912,14 +969,31 @@ impl PageHost for CdpHost {
     }
 
     fn content_quads(&self, target_id: &str, node: &NodeRef) -> HostResult<Vec<Quad>> {
+        use lb_webapi::rt::frames;
+
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             let rects = w.with_layout_engine(|l, d| l.client_rects(d, n));
+            let (mut x, mut y) = (0.0, 0.0);
+            let mut frame = w;
+            while let Some(parent) = frames::parent(&frame) {
+                let content = frames::frame_element(&frame)
+                    .and_then(|el| parent.with_layout_engine(|l, d| l.box_model(d, el)))
+                    .ok_or_else(|| HostError::new("Frame owner has no layout box"))?
+                    .content;
+                x += content.x;
+                y += content.y;
+                frame = parent;
+            }
             Ok(rects
-                .iter()
+                .into_iter()
                 .filter(|r| r.width > 0.0 && r.height > 0.0)
-                .map(|r| lb_cdp::convert::rect(r).quad())
+                .map(|mut r| {
+                    r.x += x;
+                    r.y += y;
+                    lb_cdp::convert::rect(&r).quad()
+                })
                 .collect())
         })
     }
@@ -931,8 +1005,8 @@ impl PageHost for CdpHost {
         _rect: Option<Rect>,
     ) -> HostResult<()> {
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             if !w.with_doc(|d| d.is_connected(n)) {
                 return Err(HostError::new("Node is detached from document"));
             }
@@ -1262,10 +1336,16 @@ impl PageHost for CdpHost {
             |v| (v.width, v.height),
         );
         let keep = viewport.map(|_| (vw, vh));
-        self.post(target_id, move |_, p, a| {
+        self.post(target_id, move |ws, p, a| {
             a.st.borrow_mut().viewport = keep;
             if let Some(w) = p.window() {
                 w.with_layout_engine(|l, _| l.set_viewport(vw as f32, vh as f32));
+                let realm = w.realm();
+                ws.with_engine(|engine| {
+                    let mut js = lb_webapi::rt::EngineJs { engine, realm };
+                    lb_webapi::rt::notify_media_lists(&mut js, &w);
+                });
+                agent::settle(ws, &w);
             }
         })
     }
@@ -1363,8 +1443,8 @@ impl PageHost for CdpHost {
             chosen.push((bytes, mime_from_name(&name).to_owned(), name, modified));
         }
         let node = node.clone();
-        self.blocking(target_id, move |ws, a, w| {
-            let n = a.node(ws, w, &node)?;
+        self.blocking(target_id, move |ws, a, top| {
+            let (w, n) = a.node(ws, top, &node)?;
             let file_input = w.with_doc(|d| {
                 d.is_html_element_named(n, &lb_dom::local_name!("input"))
                     && d.get_attribute(n, "type")
@@ -1373,16 +1453,16 @@ impl PageHost for CdpHost {
             if !file_input {
                 return Err(HostError::new("Node is not a file input element"));
             }
-            lb_webapi::rt::files::set_input_files(w, 0, n, chosen);
+            lb_webapi::rt::files::set_input_files(&w, 0, n, chosen);
             // `input`, then `change`, as Blink's file input fires them.
             let target = w.node_ref(0, n);
             let realm = w.realm();
             ws.with_engine(|engine| {
                 let mut js = lb_webapi::rt::EngineJs { engine, realm };
-                lb_webapi::rt::fire_event(&mut js, w, target, "input", true, false);
-                lb_webapi::rt::fire_event(&mut js, w, target, "change", true, false);
+                lb_webapi::rt::fire_event(&mut js, &w, target, "input", true, false);
+                lb_webapi::rt::fire_event(&mut js, &w, target, "change", true, false);
             });
-            agent::settle(ws, w);
+            agent::settle(ws, &w);
             Ok(())
         })
     }
@@ -1410,11 +1490,12 @@ impl PageHost for CdpHost {
     }
 
     fn set_emulated_media(&self, target_id: &str, media: lb_css::MediaOverrides) -> HostResult<()> {
-        self.post(target_id, move |_, p, a| {
+        self.post(target_id, move |ws, p, a| {
+            a.st.borrow_mut().media = media.clone();
             if let Some(w) = p.window() {
-                w.with_layout_engine(|l, _| l.set_media_overrides(&media));
+                agent::apply_media_tree(ws, &w, &media);
+                agent::settle(ws, &w);
             }
-            a.st.borrow_mut().media = media;
         })
     }
 
@@ -1508,7 +1589,7 @@ impl PageHost for CdpHost {
 
     fn ax_tree(&self, target_id: &str) -> HostResult<Vec<AxNode>> {
         self.blocking(target_id, move |_, a, w| {
-            let ids = a.ids();
+            let ids = agent::Agent::ids(w);
             let tree = w.with_layout_engine(|l, d| l.accessibility_tree(d));
             Ok(lb_cdp::convert::ax_nodes(&tree, &ids, &a.target))
         })

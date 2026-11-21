@@ -41,7 +41,7 @@ pub use props::{
     FontWeightSpec, LonghandId, Sv, SystemFont, declaration_longhands, is_valid_declaration,
 };
 pub use serialize::{computed_property_names, computed_value, longhand_value};
-pub use sheet::{ImportRule, Origin, StyleRule, Stylesheet};
+pub use sheet::{ImportRule, Origin, StyleRule, Stylesheet, supports};
 pub use ua::ua_stylesheet;
 pub use values::{
     Align, BorderStyle, BoxSizing, Calc, Clear, Color, ColorValue, Direction, Display,

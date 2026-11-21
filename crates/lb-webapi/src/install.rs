@@ -871,12 +871,19 @@ fn interface_spec(
             spec = spec.named_enumerator(f.clone());
         }
         spec.named_unenumerable = registry.is_named_unenumerable(d.name.get());
+        spec.named_non_masking = registry.is_named_non_masking(d.name.get());
     }
     if let Some(f) = registry.indexed_getter_for(d.name.get()) {
         spec = spec.indexed_getter(f.clone());
         if let Some(f) = registry.indexed_length_for(d.name.get()) {
             spec = spec.indexed_length(f.clone());
         }
+    }
+    if let Some(f) = registry.call_as_function_for(d.name.get()) {
+        spec.call_as_function = Some(f.clone());
+    }
+    if registry.is_undetectable(d.name.get()) {
+        spec.undetectable = true;
     }
     Ok(spec)
 }

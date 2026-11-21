@@ -18,6 +18,7 @@ USAGE:
   lightbrowser serve [--port 9222] [--persona FILE] [--remote-allow-origins O]
                     [--profiles-dir DIR] [--insecure] [--workers N]
                     [--proxy URL] [--proxy-bypass-list LIST]
+                    [--tcp-profile NAME]
                                             CDP server on 127.0.0.1 for Playwright
                                             connectOverCDP
   lightbrowser fetch <url> [OPTIONS]
@@ -47,6 +48,7 @@ FETCH OPTIONS:
                          persona (the persona's tcp_profile_id) | off | a
                          profile id from profiles/tcp. Default: off. Windows and
                          macOS profiles need `tcp-shim` running (ADR 0031).
+                         Also accepted by `serve` (every CDP context; T10).
   --insecure             accept invalid certificates (local test servers only)
   --proxy URL            proxy for every request: http://[user:pass@]host:port
                          (CONNECT for https/wss, forward for http) or
@@ -62,8 +64,9 @@ TCP-SHIM OPTIONS:
   --tcp-dir DIR          TCP profiles (default: nearest profiles/tcp)
   --no-rules             do not install the iptables rule; you manage it
   Rewrites the SYN, IP ID and SYN retransmissions of connections marked by
-  `fetch --tcp-profile`. Needs CAP_NET_ADMIN and CAP_NET_RAW. If it stops, marked connections fail: they never leak the
-  host's own stack. Runs until Ctrl-C.
+  `fetch`/`serve --tcp-profile`. Needs CAP_NET_ADMIN and CAP_NET_RAW. If it
+  stops, marked connections fail: they never leak the host's own stack.
+  Runs until Ctrl-C.
 
 Exit code: 0 on 2xx/3xx, 1 on other statuses or errors, 2 on bad usage.
 ";
@@ -582,6 +585,8 @@ struct ServeArgs {
     workers: Option<usize>,
     proxy: Option<String>,
     proxy_bypass: Option<String>,
+    /// Same as `fetch --tcp-profile` (T10): persona | off | profile id.
+    tcp_profile: Option<String>,
 }
 
 fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
@@ -595,6 +600,7 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
         workers: None,
         proxy: None,
         proxy_bypass: None,
+        tcp_profile: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -623,6 +629,7 @@ fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
             "--insecure" => out.insecure = true,
             "--proxy" => out.proxy = Some(value("--proxy")?),
             "--proxy-bypass-list" => out.proxy_bypass = Some(value("--proxy-bypass-list")?),
+            "--tcp-profile" => out.tcp_profile = Some(value("--tcp-profile")?),
             "--workers" => {
                 out.workers = Some(
                     value("--workers")?
@@ -708,6 +715,9 @@ fn serve_with(
     config: lb_cdp::ServerConfig,
 ) -> Result<(), String> {
     let label = persona.profile_id.clone();
+    // Validate TLS/H2 again so we can run the same TCP OS check as fetch.
+    let (net_persona, tls_profile) = network_for(&persona, &tls_dir)?;
+    let tcp_id_default = net_persona.tcp_profile_id.clone();
     let mut opts = lb_page::CdpHostOptions::new(Arc::new(persona), tls_dir);
     opts.accept_invalid_certs = args.insecure;
     if let Some(p) = &args.proxy {
@@ -716,6 +726,30 @@ fn serve_with(
             .map_err(|e| format!("--proxy: {e}"))?;
         opts.proxy_server = Some(p.clone());
         opts.proxy_bypass_list = args.proxy_bypass.clone();
+    }
+    if let Some(t) = &args.tcp_profile {
+        // Fail at start when the profile is missing, OS-mismatched, or the
+        // shim rule is absent (Windows/macOS on Linux).
+        opts.tcp_profile = Some(t.clone());
+        if t != "off" {
+            let id = if t == "persona" {
+                tcp_id_default.as_str()
+            } else {
+                t.as_str()
+            };
+            let tcp_dir = args
+                .profiles_dir
+                .as_ref()
+                .and_then(|d| d.parent().map(|p| p.join("tcp")))
+                .or_else(|| find_profiles_dir("tcp"))
+                .ok_or("no profiles/tcp directory found; pass --profiles-dir")?;
+            let path = tcp_dir.join(format!("{id}.json"));
+            let tcp = lb_net::tcpfp::TcpProfile::load(&path)
+                .map_err(|e| format!("loading {}: {e}", path.display()))?;
+            lb_net::fetch::NetContext::new(Arc::new(net_persona), Arc::new(tls_profile))
+                .and_then(|n| n.with_tcp_profile(Arc::new(tcp)))
+                .map_err(|e| format!("--tcp-profile: {e}"))?;
+        }
     }
     if let Some(n) = args.workers {
         opts.workers = n.max(1);
@@ -993,6 +1027,8 @@ mod tests {
         assert_eq!(p.port, 0);
         assert_eq!(p.persona.as_deref(), Some(Path::new("p.json")));
         assert_eq!(p.allow_origins, ["http://a", "http://b"]);
+        let t = a(&["--tcp-profile", "persona"]).unwrap();
+        assert_eq!(t.tcp_profile.as_deref(), Some("persona"));
         assert!(!p.unchecked);
         assert!(a(&["--port", "x"]).is_err());
         assert!(a(&["--bogus"]).is_err());

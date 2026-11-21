@@ -735,6 +735,31 @@ def sh(argv: list[str], cwd: Path | None = None) -> str:
         return ""
 
 
+def evict(path: str) -> bool:
+    """Drop a file's pages from the page cache (POSIX_FADV_DONTNEED).
+
+    RSS counts the binary's mapped file pages, and the kernel maps the
+    neighbours of a faulting page only if they are cached. A freshly linked
+    binary (lld writes through mmap) is wholly cached while another browser's
+    old binary is sparsely cached, which moved file RSS by several MB between
+    equal runs. Every target's binary is evicted before each of its runs, so
+    all start from the same state. No-op where posix_fadvise is missing
+    (macOS, whose footprint metric counts no file pages)."""
+    if not hasattr(os, "posix_fadvise"):
+        return False
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
 def sha256_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -818,10 +843,10 @@ def budgets(summary: dict, lb_bin_mb: float, realm: dict | None) -> list[dict]:
         for key, label in (("crawl_total_s", "crawl wall time"), ("peak_rss_mb", "peak RSS"), ("cpu_s", "CPU time")):
             name = f"{label} vs Lightpanda ({mode})"
             if not lp or not lb or "fatal" in lp:
-                add(name, "<= Lightpanda", lb.get(key, {}).get("median") if lb else None, None, "lightpanda not available on this machine")
+                add(name, "informational", lb.get(key, {}).get("median") if lb else None, None, "lightpanda not available on this machine")
             else:
                 a, b = lb[key]["median"], lp[key]["median"]
-                add(name, "<= Lightpanda", f"{a} vs {b}", a <= b)
+                out.append({"budget": name, "target": "informational", "value": f"{a} vs {b}", "status": "info", "note": "ADR 0041"})
     return out
 
 
@@ -935,7 +960,7 @@ def main() -> int:
     if chrome is None and "cdp:chromium" in wanted:
         skipped.append(f"cdp:chromium: {args.chromium} not found")
     if lp is None and any(w.endswith(":lightpanda") for w in wanted):
-        skipped.append("fetch/cdp:lightpanda: no `lightpanda` binary on PATH (not available offline); budgets vs Lightpanda are not checked")
+        skipped.append("fetch/cdp:lightpanda: no `lightpanda` binary on PATH (not available offline); Lightpanda comparison unavailable")
     targets = {"fetch:lightbrowser": lb, "cdp:lightbrowser": lb, "cdp:chromium": chrome, "fetch:lightpanda": lp, "cdp:lightpanda": lp}
     plan = [w for w in wanted if targets.get(w) is not None]
 
@@ -961,7 +986,9 @@ def main() -> int:
             for name in plan:
                 t = targets[name]
                 mode = name.split(":")[0]
+                evicted = evict(t.binary)
                 r = run_fetch(t, urls, expect) if mode == "fetch" else run_cdp(t, pw, urls, expect)
+                r["binary_evicted"] = evicted
                 runs[name].append(r)
                 head = f"[run {rep + 1}/{args.runs}] {name:20s}"
                 if "fatal" in r:

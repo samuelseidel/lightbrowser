@@ -81,6 +81,11 @@ pub enum EventExtra {
         reason: String,
         was_clean: bool,
     },
+    /// `MediaQueryListEvent`.
+    MediaQuery {
+        media: String,
+        matches: bool,
+    },
 }
 
 /// One event object.
@@ -1094,6 +1099,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         "PageTransitionEvent",
         "StorageEvent",
         "BeforeUnloadEvent",
+        "MediaQueryListEvent",
     ] {
         ctor(reg, rt, iface, move |cx, w| {
             need_args(cx, 1, "", iface).map_err(|_| {
@@ -1113,6 +1119,12 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             if iface == "PageTransitionEvent" {
                 e.extra = EventExtra::PageTransition {
                     persisted: d.bool(cx, "persisted")?,
+                };
+            }
+            if iface == "MediaQueryListEvent" {
+                e.extra = EventExtra::MediaQuery {
+                    media: d.string(cx, "media")?.unwrap_or_default(),
+                    matches: d.bool(cx, "matches")?,
                 };
             }
             d.release(cx);
@@ -1441,6 +1453,14 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }));
     extra_get!("PageTransitionEvent", "persisted", |cx, x| cx
         .ret(matches!(x, EventExtra::PageTransition { persisted: true })));
+    extra_get!("MediaQueryListEvent", "media", |cx, x| cx.ret(match x {
+        EventExtra::MediaQuery { media, .. } => media,
+        _ => String::new(),
+    }));
+    extra_get!("MediaQueryListEvent", "matches", |cx, x| cx.ret(match x {
+        EventExtra::MediaQuery { matches, .. } => matches,
+        _ => false,
+    }));
     // `BeforeUnloadEvent.returnValue` is a string; a non-empty one cancels
     // the event (asks the user to confirm leaving).
     getter(reg, rt, "BeforeUnloadEvent", "returnValue", |cx, w| {

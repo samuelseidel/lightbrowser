@@ -68,8 +68,11 @@ handshake. Without a profile the host SYN shows; with the shim stopped none leav
 - Linux only. Windows and macOS personas need root; a Linux persona does not.
 - Only the first packet is shaped here; ADR 0032 adds SYN retransmit timing and
   IP ID. Still not mimicked: later window sizes, ECN and RST behaviour.
-- Direct connections only. Behind a proxy (M2) the server sees the proxy's SYN.
-  NAT, load balancers and MSS clamping can still alter packets.
+- Direct connections only. Behind a proxy (ADR 0027) the server sees the
+  proxy's SYN; `serve`/`CdpHost` warn when both `--tcp-profile` and a proxy
+  are set (T13). NAT, load balancers and MSS clamping can still alter packets.
+- CDP/`serve`: pass `--tcp-profile persona` (or the SDK `tcp_profile=`) so
+  every context gets the persona's SYN (T10). Still off by default.
 - `TCP_WINDOW_CLAMP` caps the receive window at `2^(15+scale)` (2 MiB for macOS:
   about 20 MB/s at 100 ms RTT). Fine for pages.
 - **Windows and macOS values come from public p0f and JA4T signatures, not our

@@ -70,9 +70,13 @@ must also be unreachable from the parent, as in Chrome.
 - A frame costs a realm (same cost as a navigation). Script-created frames
   build it inside the inserting callback.
 - Gaps: host refs were per window, so nodes of one frame passed to
-  another frame's DOM methods were not supported (fixed by ADR 0017), and
-  `DOM.*`/`Input.*` on nodes inside frames (clicks into frames) are
-  refused for now; no named frame
-  access (`window.frameName`), `sandbox`, `<frame>`/`<object>` browsing
-  contexts; `postMessage` clones through JSON; network events of frame
-  requests are attributed to the main frame.
+  another frame's DOM methods were not supported (fixed by ADR 0017).
+  Object-id `DOM.getContentQuads` / `getBoxModel` /
+  `scrollIntoViewIfNeeded` and `Input.dispatchMouseEvent` now reach
+  child-frame nodes (iframe hit-test descent + viewport sync; Playwright
+  `frameLocator.click` / `fill`). `beforeunload` walks the frame tree.
+  Backend node ids encode the runtime document key (ADR 0017), so
+  `DOM.requestNode` / `resolveNode` / box geometry work for child frames
+  too. Still open: `sandbox`, `<frame>`/`<object>` browsing contexts;
+  `postMessage` clones through JSON; network events of frame requests are
+  attributed to the main frame. Named access (`window.frameName`) is done.

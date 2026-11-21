@@ -1,16 +1,77 @@
 //! CSSStyleDeclaration (inline `style` attribute and `getComputedStyle`),
 //! geometry (`getBoundingClientRect`, `offset*`, `client*`, `scroll*`,
-//! `elementFromPoint`) and `matchMedia`, backed by lb-css / lb-layout.
+//! `elementFromPoint`), `matchMedia`, `ResizeObserver` and
+//! `IntersectionObserver`, backed by lb-css / lb-layout.
 
 use std::rc::Rc;
 
 use lb_dom::NodeId;
-use lb_js::{Arg, CallCtx, HostError, HostRef};
+use lb_js::{Arg, CallCtx, Handle, HostError, HostRef, ValueKind};
 
 use super::{
-    K_OBJ, Obj, Runtime, Window, getter, illegal, method, need_args, setter, this_node, this_obj,
+    Dict, K_OBJ, Obj, Runtime, TaskSource, Window, ctor, getter, illegal, method, need_args,
+    setter, this_node, this_obj,
 };
 use crate::registry::Registry;
+
+/// Observed box for a `ResizeObserver` target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RoBox {
+    Content,
+    Border,
+    DevicePixelContent,
+}
+
+/// One observed element of a `ResizeObserver`.
+#[derive(Clone, Debug)]
+pub(crate) struct RoTarget {
+    slot: u32,
+    node: NodeId,
+    box_: RoBox,
+    /// Last delivered (inline, block); `None` until the first observation.
+    last: Option<(f64, f64)>,
+}
+
+/// `ResizeObserver` host state.
+pub(crate) struct RoData {
+    callback: Handle,
+    targets: Vec<RoTarget>,
+}
+
+/// One `ResizeObserverEntry` (sizes captured when delivered).
+#[derive(Clone, Debug)]
+pub(crate) struct RoEntry {
+    slot: u32,
+    target: NodeId,
+    /// Content box as `DOMRectReadOnly` `[x, y, w, h]`.
+    content_rect: [f64; 4],
+    content: (f64, f64),
+    border: (f64, f64),
+    device_pixel: (f64, f64),
+}
+
+/// `IntersectionObserver` host state (viewport root; enough for Turnstile).
+pub(crate) struct IoData {
+    callback: Handle,
+    targets: Vec<(u32, NodeId)>,
+    /// Last delivered intersecting flag per target index.
+    last: Vec<Option<bool>>,
+    root_margin: String,
+    thresholds: Vec<f64>,
+}
+
+/// One `IntersectionObserverEntry`.
+#[derive(Clone, Debug)]
+pub(crate) struct IoEntry {
+    slot: u32,
+    target: NodeId,
+    bounding: [f64; 4],
+    intersection: [f64; 4],
+    root_bounds: [f64; 4],
+    ratio: f64,
+    is_intersecting: bool,
+    time: f64,
+}
 
 /// CSS property names recognised by the named getter/setter (Chrome's
 /// common set; unknown names stay ordinary JS properties).
@@ -973,38 +1034,746 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     method(reg, rt, "Window", "matchMedia", |cx, w| {
         need_args(cx, 1, "matchMedia", "Window")?;
         let q = cx.arg_string(0)?;
-        let media = w.with_layout(0, |l, _| l.styles().match_media(&q).media);
-        let id = w.new_obj(Obj::MediaQueryList { media });
+        let (media, matches) = if super::frames::is_detached(w) {
+            let media = lb_css::MediaQueryList::parse(&q).to_css();
+            (media, false)
+        } else {
+            let r = w.with_layout(0, |l, _| l.styles().match_media(&q));
+            (r.media, r.matches)
+        };
+        let id = w.new_obj(Obj::MediaQueryList { media, matches });
         cx.ret(w.obj_arg(id))
     });
-    fn mql(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<String, HostError> {
+    fn mql_id(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<u32, HostError> {
         let id = this_obj(cx)?;
+        match w.with_obj(id, |o| matches!(o, Obj::MediaQueryList { .. })) {
+            Some(true) => Ok(id),
+            _ => Err(illegal()),
+        }
+    }
+    fn mql_media(w: &Window, id: u32) -> String {
         w.with_obj(id, |o| match o {
-            Obj::MediaQueryList { media } => Some(media.clone()),
-            _ => None,
+            Obj::MediaQueryList { media, .. } => media.clone(),
+            _ => String::new(),
         })
-        .flatten()
-        .ok_or_else(illegal)
+        .unwrap_or_default()
     }
     getter(reg, rt, "MediaQueryList", "media", |cx, w| {
-        let m = mql(cx, w)?;
-        cx.ret(m)
+        let id = mql_id(cx, w)?;
+        cx.ret(mql_media(w, id))
     });
     getter(reg, rt, "MediaQueryList", "matches", |cx, w| {
-        let m = mql(cx, w)?;
+        let id = mql_id(cx, w)?;
         if super::frames::is_detached(w) {
             return cx.ret(false);
         }
-        cx.ret(w.with_layout(0, |l, _| l.styles().match_media(&m).matches))
+        let m = mql_media(w, id);
+        let matches = w.with_layout(0, |l, _| l.styles().match_media(&m).matches);
+        w.with_obj(id, |o| {
+            if let Obj::MediaQueryList {
+                matches: cached, ..
+            } = o
+            {
+                *cached = matches;
+            }
+        });
+        cx.ret(matches)
     });
+    // Legacy aliases for addEventListener/removeEventListener('change', ...).
     method(reg, rt, "MediaQueryList", "addListener", |cx, w| {
-        mql(cx, w)?;
+        need_args(cx, 1, "addListener", "MediaQueryList")?;
+        let id = mql_id(cx, w)?;
+        if matches!(
+            cx.arg_kind(0),
+            lb_js::ValueKind::Undefined | lb_js::ValueKind::Null
+        ) {
+            return Ok(());
+        }
+        if !matches!(
+            cx.arg_kind(0),
+            lb_js::ValueKind::Object | lb_js::ValueKind::Function
+        ) {
+            return Err(HostError::type_error(
+                "Failed to execute 'addListener' on 'MediaQueryList': parameter 1 is not of type 'Object'.",
+            ));
+        }
+        let t = HostRef::new(K_OBJ, id);
+        let cb = cx.arg_handle(0);
+        let existing: Vec<_> = w
+            .listeners
+            .borrow()
+            .get(&t)
+            .map(|l| {
+                l.iter()
+                    .filter(|l| l.type_ == "change" && !l.capture && !l.removed.get())
+                    .filter_map(|l| match &l.kind {
+                        super::events::ListenerKind::Callback(h) => Some(*h),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if existing.into_iter().any(|h| cx.strict_equals(h, cb)) {
+            cx.release(cb);
+            return Ok(());
+        }
+        w.listeners
+            .borrow_mut()
+            .entry(t)
+            .or_default()
+            .push(std::rc::Rc::new(super::events::Listener {
+                type_: "change".into(),
+                kind: super::events::ListenerKind::Callback(cb),
+                capture: false,
+                once: false,
+                passive: false,
+                removed: std::cell::Cell::new(false),
+                realm: cx.realm(),
+            }));
         Ok(())
     });
     method(reg, rt, "MediaQueryList", "removeListener", |cx, w| {
-        mql(cx, w)?;
+        need_args(cx, 1, "removeListener", "MediaQueryList")?;
+        let id = mql_id(cx, w)?;
+        if !matches!(
+            cx.arg_kind(0),
+            lb_js::ValueKind::Object | lb_js::ValueKind::Function
+        ) {
+            return Ok(());
+        }
+        let t = HostRef::new(K_OBJ, id);
+        let cb = cx.arg_handle(0);
+        let candidates: Vec<_> = w
+            .listeners
+            .borrow()
+            .get(&t)
+            .map(|l| {
+                l.iter()
+                    .filter(|l| l.type_ == "change" && !l.capture)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        for l in candidates {
+            if let super::events::ListenerKind::Callback(h) = &l.kind
+                && cx.strict_equals(*h, cb)
+            {
+                super::events::remove_listener(w, t, &l);
+                break;
+            }
+        }
+        cx.release(cb);
         Ok(())
     });
+
+    // ResizeObserver -------------------------------------------------------
+    ctor(reg, rt, "ResizeObserver", |cx, w| {
+        if cx.arg_kind(0) != ValueKind::Function {
+            return Err(HostError::type_error(
+                "Failed to construct 'ResizeObserver': parameter 1 is not of type 'Function'.",
+            ));
+        }
+        let cb = cx.arg_handle(0);
+        let id = w.new_obj(Obj::ResizeObserver(Box::new(RoData {
+            callback: cb,
+            targets: Vec::new(),
+        })));
+        w.resize_observers.borrow_mut().push(id);
+        cx.init_this(HostRef::new(K_OBJ, id))
+    });
+    method(reg, rt, "ResizeObserver", "observe", |cx, w| {
+        need_args(cx, 1, "observe", "ResizeObserver")?;
+        let id = this_obj(cx)?;
+        let Some((slot, node)) = cx.arg_host(0).and_then(|h| w.decode_node(h)) else {
+            return Err(HostError::type_error(
+                "Failed to execute 'observe' on 'ResizeObserver': parameter 1 is not of type 'Element'.",
+            ));
+        };
+        if !w.doc_slot(slot, |d| d.is_element(node)) {
+            return Err(HostError::type_error(
+                "Failed to execute 'observe' on 'ResizeObserver': parameter 1 is not of type 'Element'.",
+            ));
+        }
+        let d = Dict::arg(cx, 1);
+        let box_ = match d.string(cx, "box")?.as_deref() {
+            Some("border-box") => RoBox::Border,
+            Some("device-pixel-content-box") => RoBox::DevicePixelContent,
+            _ => RoBox::Content,
+        };
+        d.release(cx);
+        let ok = w
+            .with_obj(id, |o| {
+                if let Obj::ResizeObserver(m) = o {
+                    if let Some(t) = m
+                        .targets
+                        .iter_mut()
+                        .find(|t| t.slot == slot && t.node == node)
+                    {
+                        t.box_ = box_;
+                        t.last = None;
+                    } else {
+                        m.targets.push(RoTarget {
+                            slot,
+                            node,
+                            box_,
+                            last: None,
+                        });
+                    }
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if !ok {
+            return Err(illegal());
+        }
+        schedule_ro(w);
+        Ok(())
+    });
+    method(reg, rt, "ResizeObserver", "unobserve", |cx, w| {
+        need_args(cx, 1, "unobserve", "ResizeObserver")?;
+        let id = this_obj(cx)?;
+        let Some((slot, node)) = cx.arg_host(0).and_then(|h| w.decode_node(h)) else {
+            return Ok(());
+        };
+        w.with_obj(id, |o| {
+            if let Obj::ResizeObserver(m) = o {
+                m.targets.retain(|t| !(t.slot == slot && t.node == node));
+            }
+        });
+        Ok(())
+    });
+    method(reg, rt, "ResizeObserver", "disconnect", |cx, w| {
+        let id = this_obj(cx)?;
+        w.with_obj(id, |o| {
+            if let Obj::ResizeObserver(m) = o {
+                m.targets.clear();
+            }
+        });
+        Ok(())
+    });
+
+    getter(reg, rt, "ResizeObserverEntry", "target", |cx, w| {
+        let (slot, n) = ro_entry(cx, w, |e| (e.slot, e.target))?;
+        cx.ret(w.node_arg(slot, n))
+    });
+    getter(reg, rt, "ResizeObserverEntry", "contentRect", |cx, w| {
+        let r = ro_entry(cx, w, |e| e.content_rect)?;
+        cx.ret(w.obj_arg(w.new_obj(Obj::Rect(r))))
+    });
+    for (name, which) in [
+        ("contentBoxSize", 0u8),
+        ("borderBoxSize", 1),
+        ("devicePixelContentBoxSize", 2),
+    ] {
+        getter(reg, rt, "ResizeObserverEntry", name, move |cx, w| {
+            let (inline, block) = ro_entry(cx, w, |e| match which {
+                0 => e.content,
+                1 => e.border,
+                _ => e.device_pixel,
+            })?;
+            let size = w.obj_arg(w.new_obj(Obj::ResizeObserverSize { inline, block }));
+            let arr = Arg::Array(vec![size]);
+            if let Some(freeze) = w.helpers.borrow().freeze {
+                let h = cx.make_handle(arr)?;
+                let _ = cx.try_call(freeze, Arg::Undefined, &[Arg::Handle(h)]);
+                cx.ret(Arg::Handle(h))
+            } else {
+                cx.ret(arr)
+            }
+        });
+    }
+    getter(reg, rt, "ResizeObserverSize", "inlineSize", |cx, w| {
+        let v = ro_size(cx, w, |i, _| i)?;
+        cx.ret(v)
+    });
+    getter(reg, rt, "ResizeObserverSize", "blockSize", |cx, w| {
+        let v = ro_size(cx, w, |_, b| b)?;
+        cx.ret(v)
+    });
+
+    // IntersectionObserver -------------------------------------------------
+    ctor(reg, rt, "IntersectionObserver", |cx, w| {
+        if cx.arg_kind(0) != ValueKind::Function {
+            return Err(HostError::type_error(
+                "Failed to construct 'IntersectionObserver': parameter 1 is not of type 'Function'.",
+            ));
+        }
+        let cb = cx.arg_handle(0);
+        let d = Dict::arg(cx, 1);
+        let root_margin = d.string(cx, "rootMargin")?.unwrap_or_else(|| "0px".into());
+        let thresholds = match d.get(cx, "threshold")? {
+            Some(h) => {
+                let v = cx.handle_value(h);
+                cx.release(h);
+                match v {
+                    lb_js::JsValue::Number(n) => vec![n.clamp(0.0, 1.0)],
+                    lb_js::JsValue::Json(s) => serde_json::from_str::<Vec<f64>>(&s)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|n| n.clamp(0.0, 1.0))
+                        .collect(),
+                    _ => vec![0.0],
+                }
+            }
+            None => vec![0.0],
+        };
+        let thresholds = if thresholds.is_empty() {
+            vec![0.0]
+        } else {
+            thresholds
+        };
+        d.release(cx);
+        let id = w.new_obj(Obj::IntersectionObserver(Box::new(IoData {
+            callback: cb,
+            targets: Vec::new(),
+            last: Vec::new(),
+            root_margin,
+            thresholds,
+        })));
+        w.intersection_observers.borrow_mut().push(id);
+        cx.init_this(HostRef::new(K_OBJ, id))
+    });
+    method(reg, rt, "IntersectionObserver", "observe", |cx, w| {
+        need_args(cx, 1, "observe", "IntersectionObserver")?;
+        let id = this_obj(cx)?;
+        let Some((slot, node)) = cx.arg_host(0).and_then(|h| w.decode_node(h)) else {
+            return Err(HostError::type_error(
+                "Failed to execute 'observe' on 'IntersectionObserver': parameter 1 is not of type 'Element'.",
+            ));
+        };
+        if !w.doc_slot(slot, |d| d.is_element(node)) {
+            return Err(HostError::type_error(
+                "Failed to execute 'observe' on 'IntersectionObserver': parameter 1 is not of type 'Element'.",
+            ));
+        }
+        let ok = w
+            .with_obj(id, |o| {
+                if let Obj::IntersectionObserver(m) = o {
+                    if !m.targets.iter().any(|(s, n)| *s == slot && *n == node) {
+                        m.targets.push((slot, node));
+                        m.last.push(None);
+                    }
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if !ok {
+            return Err(illegal());
+        }
+        schedule_io(w);
+        Ok(())
+    });
+    method(reg, rt, "IntersectionObserver", "unobserve", |cx, w| {
+        need_args(cx, 1, "unobserve", "IntersectionObserver")?;
+        let id = this_obj(cx)?;
+        let Some((slot, node)) = cx.arg_host(0).and_then(|h| w.decode_node(h)) else {
+            return Ok(());
+        };
+        w.with_obj(id, |o| {
+            if let Obj::IntersectionObserver(m) = o
+                && let Some(i) = m.targets.iter().position(|(s, n)| *s == slot && *n == node)
+            {
+                m.targets.remove(i);
+                if i < m.last.len() {
+                    m.last.remove(i);
+                }
+            }
+        });
+        Ok(())
+    });
+    method(reg, rt, "IntersectionObserver", "disconnect", |cx, w| {
+        let id = this_obj(cx)?;
+        w.with_obj(id, |o| {
+            if let Obj::IntersectionObserver(m) = o {
+                m.targets.clear();
+                m.last.clear();
+            }
+        });
+        Ok(())
+    });
+    method(reg, rt, "IntersectionObserver", "takeRecords", |cx, _w| {
+        cx.ret(Arg::Array(Vec::new()))
+    });
+    getter(reg, rt, "IntersectionObserver", "root", |cx, _w| {
+        this_obj(cx)?;
+        cx.ret(Arg::Null)
+    });
+    getter(reg, rt, "IntersectionObserver", "rootMargin", |cx, w| {
+        let id = this_obj(cx)?;
+        let m = w
+            .with_obj(id, |o| match o {
+                Obj::IntersectionObserver(m) => Some(m.root_margin.clone()),
+                _ => None,
+            })
+            .flatten()
+            .ok_or_else(illegal)?;
+        cx.ret(m)
+    });
+    getter(reg, rt, "IntersectionObserver", "thresholds", |cx, w| {
+        let id = this_obj(cx)?;
+        let t = w
+            .with_obj(id, |o| match o {
+                Obj::IntersectionObserver(m) => Some(m.thresholds.clone()),
+                _ => None,
+            })
+            .flatten()
+            .ok_or_else(illegal)?;
+        cx.ret(Arg::Array(t.into_iter().map(Arg::Number).collect()))
+    });
+    getter(reg, rt, "IntersectionObserverEntry", "target", |cx, w| {
+        let (slot, n) = io_entry(cx, w, |e| (e.slot, e.target))?;
+        cx.ret(w.node_arg(slot, n))
+    });
+    getter(
+        reg,
+        rt,
+        "IntersectionObserverEntry",
+        "isIntersecting",
+        |cx, w| {
+            let v = io_entry(cx, w, |e| e.is_intersecting)?;
+            cx.ret(v)
+        },
+    );
+    getter(
+        reg,
+        rt,
+        "IntersectionObserverEntry",
+        "intersectionRatio",
+        |cx, w| {
+            let v = io_entry(cx, w, |e| e.ratio)?;
+            cx.ret(v)
+        },
+    );
+    getter(reg, rt, "IntersectionObserverEntry", "time", |cx, w| {
+        let v = io_entry(cx, w, |e| e.time)?;
+        cx.ret(v)
+    });
+    for (name, which) in [
+        ("boundingClientRect", 0u8),
+        ("intersectionRect", 1),
+        ("rootBounds", 2),
+    ] {
+        getter(reg, rt, "IntersectionObserverEntry", name, move |cx, w| {
+            let r = io_entry(cx, w, |e| match which {
+                0 => e.bounding,
+                1 => e.intersection,
+                _ => e.root_bounds,
+            })?;
+            cx.ret(w.obj_arg(w.new_obj(Obj::Rect(r))))
+        });
+    }
+}
+
+fn ro_entry<R>(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    f: impl FnOnce(&RoEntry) -> R,
+) -> Result<R, HostError> {
+    let id = this_obj(cx)?;
+    w.with_obj(id, |o| match o {
+        Obj::ResizeObserverEntry(e) => Some(f(e)),
+        _ => None,
+    })
+    .flatten()
+    .ok_or_else(illegal)
+}
+
+fn ro_size<R>(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    f: impl FnOnce(f64, f64) -> R,
+) -> Result<R, HostError> {
+    let id = this_obj(cx)?;
+    w.with_obj(id, |o| match o {
+        Obj::ResizeObserverSize { inline, block } => Some(f(*inline, *block)),
+        _ => None,
+    })
+    .flatten()
+    .ok_or_else(illegal)
+}
+
+fn schedule_ro(w: &Rc<Window>) {
+    if w.ro_queued.get() {
+        return;
+    }
+    w.ro_queued.set(true);
+    w.queue_task(
+        TaskSource::DomManipulation,
+        Box::new(|js, w| deliver_resize_observations(js, w)),
+    );
+}
+
+fn io_entry<R>(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    f: impl FnOnce(&IoEntry) -> R,
+) -> Result<R, HostError> {
+    let id = this_obj(cx)?;
+    w.with_obj(id, |o| match o {
+        Obj::IntersectionObserverEntry(e) => Some(f(e)),
+        _ => None,
+    })
+    .flatten()
+    .ok_or_else(illegal)
+}
+
+fn schedule_io(w: &Rc<Window>) {
+    if w.io_queued.get() {
+        return;
+    }
+    w.io_queued.set(true);
+    w.queue_task(
+        TaskSource::DomManipulation,
+        Box::new(|js, w| deliver_intersection_observations(js, w)),
+    );
+}
+
+/// Deliver `IntersectionObserver` notifications (viewport root). First
+/// observe reports whether the target's box intersects the viewport.
+pub(crate) fn deliver_intersection_observations(js: &mut dyn super::Js, w: &Rc<Window>) {
+    w.io_queued.set(false);
+    let vp = super::window::screen_dims(w);
+    let root = [
+        0.0,
+        0.0,
+        f64::from(vp.inner_width),
+        f64::from(vp.inner_height),
+    ];
+    let observers = w.intersection_observers.borrow().clone();
+    let now = w.clock.now();
+    for ob in observers {
+        let targets = w
+            .with_obj(ob, |o| match o {
+                Obj::IntersectionObserver(m) => m.targets.clone(),
+                _ => Vec::new(),
+            })
+            .unwrap_or_default();
+        if targets.is_empty() {
+            continue;
+        }
+        let mut entries: Vec<u32> = Vec::new();
+        let mut updates: Vec<(usize, bool)> = Vec::new();
+        for (i, (slot, node)) in targets.iter().enumerate() {
+            let r = w.with_layout(*slot, |l, d| l.bounding_client_rect(d, *node));
+            let bounding = [
+                f64::from(r.x),
+                f64::from(r.y),
+                f64::from(r.width),
+                f64::from(r.height),
+            ];
+            let left = bounding[0].max(root[0]);
+            let top = bounding[1].max(root[1]);
+            let right = (bounding[0] + bounding[2]).min(root[0] + root[2]);
+            let bottom = (bounding[1] + bounding[3]).min(root[1] + root[3]);
+            let iw = (right - left).max(0.0);
+            let ih = (bottom - top).max(0.0);
+            let area = bounding[2] * bounding[3];
+            let ratio = if area > 0.0 {
+                (iw * ih / area).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let is_intersecting = ratio > 0.0 || (bounding[2] == 0.0 && bounding[3] == 0.0);
+            // Zero-size targets still count as intersecting when in view
+            // for first paint of hidden Turnstile hosts.
+            let is_intersecting = if bounding[2] == 0.0 && bounding[3] == 0.0 {
+                bounding[0] < root[2] && bounding[1] < root[3]
+            } else {
+                is_intersecting
+            };
+            let prev = w
+                .with_obj(ob, |o| match o {
+                    Obj::IntersectionObserver(m) => m.last.get(i).copied().flatten(),
+                    _ => None,
+                })
+                .flatten();
+            if prev == Some(is_intersecting) {
+                continue;
+            }
+            updates.push((i, is_intersecting));
+            let eid = w.new_obj(Obj::IntersectionObserverEntry(Box::new(IoEntry {
+                slot: *slot,
+                target: *node,
+                bounding,
+                intersection: [left, top, iw, ih],
+                root_bounds: root,
+                ratio: if is_intersecting && ratio == 0.0 {
+                    1.0
+                } else {
+                    ratio
+                },
+                is_intersecting,
+                time: now,
+            })));
+            entries.push(eid);
+        }
+        if entries.is_empty() {
+            continue;
+        }
+        w.with_obj(ob, |o| {
+            if let Obj::IntersectionObserver(m) = o {
+                for (i, v) in updates {
+                    if let Some(slot) = m.last.get_mut(i) {
+                        *slot = Some(v);
+                    }
+                }
+            }
+        });
+        let cb = w
+            .with_obj(ob, |o| match o {
+                Obj::IntersectionObserver(m) => Some(m.callback),
+                _ => None,
+            })
+            .flatten();
+        let Some(cb) = cb else { continue };
+        let arr = Arg::Array(entries.into_iter().map(|e| w.obj_arg(e)).collect());
+        let me = w.obj_arg(ob);
+        if let Err(e) = js.call(cb, me.clone(), &[arr, me]) {
+            super::events::report_exception(js, w, &e);
+        }
+    }
+}
+
+/// Deliver pending `ResizeObserver` observations (first observe and size
+/// changes). Queued as a DOM task so Turnstile (and similar) see a callback
+/// after `observe()` returns.
+pub(crate) fn deliver_resize_observations(js: &mut dyn super::Js, w: &Rc<Window>) {
+    w.ro_queued.set(false);
+    let dpr = super::window::screen_dims(w).device_pixel_ratio;
+    let observers = w.resize_observers.borrow().clone();
+    for ob in observers {
+        let targets = w
+            .with_obj(ob, |o| match o {
+                Obj::ResizeObserver(m) => m.targets.clone(),
+                _ => Vec::new(),
+            })
+            .unwrap_or_default();
+        if targets.is_empty() {
+            continue;
+        }
+        let mut entries: Vec<u32> = Vec::new();
+        let mut updates: Vec<(usize, (f64, f64))> = Vec::new();
+        for (i, t) in targets.iter().enumerate() {
+            let (cw, ch) = w.with_layout(t.slot, |l, d| {
+                let (w, h) = l.client_size(d, t.node);
+                (f64::from(w), f64::from(h))
+            });
+            let (bw, bh) = w.with_layout(t.slot, |l, d| {
+                let r = l.bounding_client_rect(d, t.node);
+                (f64::from(r.width), f64::from(r.height))
+            });
+            let content = (cw, ch);
+            let border = (bw, bh);
+            let device_pixel = (cw * dpr, ch * dpr);
+            let reported = match t.box_ {
+                RoBox::Content => content,
+                RoBox::Border => border,
+                RoBox::DevicePixelContent => device_pixel,
+            };
+            if t.last == Some(reported) {
+                continue;
+            }
+            updates.push((i, reported));
+            let eid = w.new_obj(Obj::ResizeObserverEntry(Box::new(RoEntry {
+                slot: t.slot,
+                target: t.node,
+                content_rect: [0.0, 0.0, content.0, content.1],
+                content,
+                border,
+                device_pixel,
+            })));
+            entries.push(eid);
+        }
+        if entries.is_empty() {
+            continue;
+        }
+        w.with_obj(ob, |o| {
+            if let Obj::ResizeObserver(m) = o {
+                for (i, reported) in updates {
+                    if let Some(t) = m.targets.get_mut(i) {
+                        t.last = Some(reported);
+                    }
+                }
+            }
+        });
+        let cb = w
+            .with_obj(ob, |o| match o {
+                Obj::ResizeObserver(m) => Some(m.callback),
+                _ => None,
+            })
+            .flatten();
+        let Some(cb) = cb else { continue };
+        let arr = Arg::Array(entries.into_iter().map(|e| w.obj_arg(e)).collect());
+        let me = w.obj_arg(ob);
+        if let Err(e) = js.call(cb, me.clone(), &[arr, me]) {
+            super::events::report_exception(js, w, &e);
+        }
+    }
+}
+
+/// Re-evaluate every `MediaQueryList` of `w` and fire `change` when
+/// `matches` flips (CDP media emulation and viewport resize).
+pub fn notify_media_lists(js: &mut dyn super::Js, w: &Rc<Window>) {
+    if super::frames::is_detached(w) {
+        return;
+    }
+    let ids: Vec<u32> = w
+        .objs
+        .borrow()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, o)| match o {
+            Some(Obj::MediaQueryList { .. }) => Some(i as u32),
+            _ => None,
+        })
+        .collect();
+    for id in ids {
+        let media = w
+            .with_obj(id, |o| match o {
+                Obj::MediaQueryList { media, .. } => Some(media.clone()),
+                _ => None,
+            })
+            .flatten();
+        let Some(media) = media else {
+            continue;
+        };
+        let matches = w.with_layout(0, |l, _| l.styles().match_media(&media).matches);
+        let changed = w
+            .with_obj(id, |o| match o {
+                Obj::MediaQueryList {
+                    matches: cached, ..
+                } => {
+                    if *cached == matches {
+                        false
+                    } else {
+                        *cached = matches;
+                        true
+                    }
+                }
+                _ => false,
+            })
+            .unwrap_or(false);
+        if !changed {
+            continue;
+        }
+        super::events::fire_event_with(
+            js,
+            w,
+            HostRef::new(K_OBJ, id),
+            "MediaQueryListEvent",
+            "change",
+            false,
+            false,
+            super::events::EventExtra::MediaQuery {
+                media: media.clone(),
+                matches,
+            },
+        );
+    }
 }
 
 #[cfg(test)]

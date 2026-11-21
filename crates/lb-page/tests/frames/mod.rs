@@ -20,6 +20,62 @@ fn s(v: JsValue) -> String {
 }
 
 #[tokio::test]
+async fn iframe_in_closed_shadow_navigates_when_host_connects() {
+    // Turnstile builds the challenge <iframe> inside a closed shadow root
+    // on a host that is only appended to the document afterwards.
+    let srv = serve(vec![
+        (
+            "/",
+            Resource::html(
+                "<body><script>\
+                 window.log = [];\
+                 const host = document.createElement('div');\
+                 const shadow = host.attachShadow({mode: 'closed'});\
+                 const f = document.createElement('iframe');\
+                 f.setAttribute('src', '/child');\
+                 f.onload = () => log.push('load:' + (f.contentWindow && f.contentWindow.document.title));\
+                 shadow.appendChild(f);\
+                 log.push('before-connect:' + window.length);\
+                 document.body.appendChild(host);\
+                 log.push('after-connect:' + window.length);\
+                 </script></body>",
+            ),
+        ),
+        (
+            "/child",
+            Resource::html("<title>shadow-iframe</title><body>ok</body>"),
+        ),
+    ])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &srv.url("/"), WaitUntil::Load).await;
+    for _ in 0..50 {
+        let log = s(eval(&page, "log.join('|')").await);
+        if log.contains("load:shadow-iframe") {
+            assert!(
+                log.contains("before-connect:0") && log.contains("after-connect:1"),
+                "got {log}"
+            );
+            let paths: Vec<String> = srv
+                .requests()
+                .into_iter()
+                .map(|(m, p, ..)| format!("{m} {p}"))
+                .collect();
+            assert!(
+                paths.iter().any(|p| p.contains("/child")),
+                "child not fetched: {paths:?}"
+            );
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!(
+        "shadow iframe did not load: {}",
+        s(eval(&page, "log.join('|')").await)
+    );
+}
+
+#[tokio::test]
 async fn dynamic_about_blank_iframe_is_synchronous() {
     let srv = serve(vec![(
         "/",
@@ -107,6 +163,43 @@ async fn srcdoc_and_same_origin_src_load_and_message() {
 }
 
 #[tokio::test]
+async fn named_access_on_window() {
+    // HTML named access: element id, form/img name, iframe name → window,
+    // multi-match HTMLCollection, and IDL members must not be shadowed.
+    let srv = serve(vec![(
+        "/",
+        Resource::html(
+            "<body>\
+             <div id=foo>d</div>\
+             <form name=bar></form>\
+             <img name=bar src=data:,>\
+             <iframe name=kid></iframe>\
+             <div id=document>should-not-shadow</div>\
+             <script>\
+             window.log = [];\
+             try {\
+               log.push('id:' + (window.foo === document.getElementById('foo')) + ':' + foo.tagName);\
+               log.push('name:' + (window.bar instanceof HTMLCollection) + ':' + bar.length + ':' + (bar[0] === document.forms[0]));\
+               log.push('frame:' + (window.kid === frames[0]) + ':' + (kid === frames[0]) + ':' + frames[0].name);\
+               log.push('idl:' + (window.document === document) + ':' + (typeof document.getElementById));\
+             } catch (e) { log.push('ERR ' + e); }\
+             </script></body>",
+        ),
+    )])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &srv.url("/"), WaitUntil::Load).await;
+    let log = s(eval(&page, "log.join('\\n')").await);
+    let want = [
+        "id:true:DIV",
+        "name:true:2:true",
+        "frame:true:true:kid",
+        "idl:true:function",
+    ];
+    assert_eq!(log, want.join("\n"));
+}
+
+#[tokio::test]
 async fn removal_detaches_and_cross_origin_is_blocked() {
     let other = serve(vec![("/x", Resource::html("<p>other</p>"))]).await;
     let other_url = other.url("/x");
@@ -133,4 +226,33 @@ async fn removal_detaches_and_cross_origin_is_blocked() {
     .await);
     assert!(r.starts_with("null|function|true|SecurityError: "), "{r}");
     assert!(r.contains("Blocked a frame with origin"), "{r}");
+}
+
+#[tokio::test]
+async fn cross_origin_post_message_reaches_parent() {
+    // Bound methods on the cross-origin WindowProxy, and MessageEvent.source
+    // identical to iframe.contentWindow (Turnstile checks that).
+    let other = serve(vec![(
+        "/x",
+        Resource::html(
+            "<script>try { parent.postMessage({ok:1}, '*'); } \
+             catch (e) { parent.postMessage({err: String(e.message)}, '*'); }</script>",
+        ),
+    )])
+    .await;
+    let other_url = other.url("/x");
+    let srv = serve(vec![(
+        "/",
+        Resource::html(&format!(
+            "<body><script>window.log = []; \
+             addEventListener('message', e => log.push(JSON.stringify(e.data) + ':' + (e.source === frames[0])));</script>\
+             <iframe src='{other_url}'></iframe></body>"
+        )),
+    )])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &srv.url("/"), WaitUntil::Load).await;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let log = s(eval(&page, "log.join('|')").await);
+    assert!(log.contains("{\"ok\":1}:true"), "{log}");
 }

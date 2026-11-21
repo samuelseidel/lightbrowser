@@ -372,10 +372,15 @@ impl DeclarationBlock {
 /// Splits a trailing `!important` off a value.
 pub(crate) fn split_important(text: &str) -> (&str, bool) {
     let t = text.trim_end();
-    if t.len() >= 9 && t[t.len() - 9..].eq_ignore_ascii_case("important") {
-        let rest = t[..t.len() - 9].trim_end();
-        if let Some(r) = rest.strip_suffix('!') {
-            return (r.trim(), true);
+    // "important" is 9 ASCII bytes; only slice when the cut is a char
+    // boundary so values with multi-byte UTF-8 (e.g. `·`) do not panic.
+    if t.len() >= 9 {
+        let cut = t.len() - 9;
+        if t.is_char_boundary(cut) && t[cut..].eq_ignore_ascii_case("important") {
+            let rest = t[..cut].trim_end();
+            if let Some(r) = rest.strip_suffix('!') {
+                return (r.trim(), true);
+            }
         }
     }
     (t.trim(), false)
@@ -1484,6 +1489,15 @@ mod tests {
         assert_eq!(d[0].value, Decl::Value(Sv::Display(Display::Flex)));
         assert!(d[1].important);
         assert_eq!(d[2].id, LonghandId::Width);
+    }
+
+    #[test]
+    fn split_important_utf8_middle_dot() {
+        // U+00B7 MIDDLE DOT is two UTF-8 bytes; a naive `len()-9` slice
+        // used to panic when the cut landed inside it.
+        assert_eq!(split_important("content: '·'"), ("content: '·'", false));
+        assert_eq!(split_important("'a·b' !important"), ("'a·b'", true));
+        assert_eq!(split_important("x·important"), ("x·important", false));
     }
 
     #[test]

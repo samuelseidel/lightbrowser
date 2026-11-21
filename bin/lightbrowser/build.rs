@@ -60,6 +60,7 @@ fn main() {
             order.display()
         );
         println!("cargo:rustc-link-arg-bins=-Wl,--no-warn-symbol-ordering");
+        warn_if_other_rustc(&order);
     }
     println!("cargo:rustc-link-arg-bins=-Wl,--icf=safe");
     println!("cargo:rustc-link-arg-bins=-Wl,-z,pack-relative-relocs");
@@ -73,5 +74,40 @@ fn main() {
         )
         .expect("write linker script");
         println!("cargo:rustc-link-arg-bins=-Wl,-T,{}", script.display());
+    }
+}
+
+/// Rust symbol names carry per-crate hashes that change with the rustc
+/// build, so a list made with another toolchain orders no Rust code (lld
+/// drops the names without a word). The list's first line names the rustc
+/// that made it (`# rustc 1.99.1 58cf8f9c3`; lld skips `#` lines).
+fn warn_if_other_rustc(order: &std::path::Path) {
+    let Some(stamp) = std::fs::read_to_string(order)
+        .ok()
+        .and_then(|s| s.lines().next().map(str::to_owned))
+        .and_then(|l| l.strip_prefix("# rustc ").map(str::to_owned))
+    else {
+        return;
+    };
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let Ok(out) = std::process::Command::new(rustc).arg("-vV").output() else {
+        return;
+    };
+    let vv = String::from_utf8_lossy(&out.stdout);
+    let field = |k: &str| {
+        vv.lines()
+            .find_map(|l| l.strip_prefix(k))
+            .map(str::trim)
+            .unwrap_or("?")
+            .to_owned()
+    };
+    let commit = field("commit-hash:");
+    let now = format!("{} {}", field("release:"), &commit[..commit.len().min(9)]);
+    if stamp.trim() != now {
+        println!(
+            "cargo:warning=hot-symbols.txt was made with rustc {}, this build uses {now}: \
+             Rust code is not ordered; run tools/hot_symbols/remap.py",
+            stamp.trim()
+        );
     }
 }

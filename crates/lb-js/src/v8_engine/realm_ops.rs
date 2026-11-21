@@ -104,6 +104,12 @@ pub trait RealmOps {
     /// each other's globals (same-origin frames); V8 denies access
     /// between globals whose tokens differ (`TypeError: no access`).
     fn set_security_token(&mut self, realm: RealmId, token: &str) -> Result<(), JsError>;
+    /// The partition of the engine's compiled-script cache this realm's
+    /// classic scripts use (ADR 0039): scripts are reused only between
+    /// realms of one partition (the host keys it by browser context and
+    /// top-level site, as Chrome's per-site renderers and code cache are
+    /// split). 0 until set.
+    fn set_script_partition(&mut self, realm: RealmId, partition: u64);
     /// Replace the realm's module loader (`import()`, module scripts), for
     /// a realm made before its document was known.
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>);
@@ -203,6 +209,13 @@ fn delete_configurable<'s>(
 fn set_loader(state: &SharedState, realm: RealmId, loader: Option<ModuleLoader>) {
     if let Some(r) = state.borrow_mut().realms.get_mut(&realm) {
         r.loader = loader;
+    }
+}
+
+/// Shared body of [`RealmOps::set_script_partition`].
+fn set_partition(state: &SharedState, realm: RealmId, partition: u64) {
+    if let Some(r) = state.borrow_mut().realms.get_mut(&realm) {
+        r.partition = partition;
     }
 }
 
@@ -328,6 +341,9 @@ impl RealmOps for Engine {
     }
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
         set_loader(&self.state, realm, loader);
+    }
+    fn set_script_partition(&mut self, realm: RealmId, partition: u64) {
+        set_partition(&self.state, realm, partition);
     }
     fn finish_dynamic_import(
         &mut self,
@@ -602,6 +618,9 @@ impl RealmOps for CallCtx<'_, '_, '_> {
     }
     fn set_module_loader(&mut self, realm: RealmId, loader: Option<ModuleLoader>) {
         set_loader(&self.state, realm, loader);
+    }
+    fn set_script_partition(&mut self, realm: RealmId, partition: u64) {
+        set_partition(&self.state, realm, partition);
     }
     fn finish_dynamic_import(
         &mut self,

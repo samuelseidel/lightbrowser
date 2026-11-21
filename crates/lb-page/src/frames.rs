@@ -22,7 +22,7 @@ use std::rc::{Rc, Weak};
 use lb_js::RealmOps;
 use lb_webapi::host::{Destination, NetResponse, decode_text};
 use lb_webapi::rt::frames::{self as wf, FrameHooks, FrameNavigation};
-use lb_webapi::rt::{TaskSource, Window, fire_event};
+use lb_webapi::rt::{EngineJs, TaskSource, Window, fire_event};
 
 use crate::browser::WorkerState;
 use crate::page::PageState;
@@ -106,6 +106,18 @@ async fn navigate_frame(
         parent: parent.clone(),
         id,
     };
+    // `beforeunload` of this frame and its descendants: staying aborts.
+    let go = ws.with_engine(|engine| {
+        let mut js = EngineJs {
+            engine,
+            realm: old.realm(),
+        };
+        old.before_unload(&mut js)
+    });
+    if !go.unwrap_or(true) {
+        done.cancel();
+        return;
+    }
     if let Some(a) = page.agent() {
         a.frame_started_loading(id);
     }
@@ -202,6 +214,24 @@ async fn navigate_frame(
         .map(|u| u.to_string())
         .unwrap_or_default();
     let w = Window::new(&rt, init);
+    {
+        let mut li = w.load_info.borrow_mut();
+        // See nav.rs: body is post-Content-Encoding; approximate wire size.
+        let decoded = resp.body.len() as u64;
+        let encoded = if resp
+            .header("content-encoding")
+            .is_some_and(|e| !e.trim().is_empty())
+        {
+            ((decoded as f64) * 0.34).round() as u64
+        } else {
+            decoded
+        };
+        li.encoded_body_size = Some(encoded);
+        li.decoded_body_size = Some(decoded);
+        if li.connection_info.is_none() && resp.url.scheme() == "https" {
+            li.connection_info = Some("h2".into());
+        }
+    }
     w.set_worker_host(parent.worker_host());
     w.set_sw_host(parent.sw_host());
     w.set_idb_backend(parent.idb_backend());

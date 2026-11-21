@@ -9,6 +9,17 @@ use lb_js::{Arg, HostError, IndexedGetter, NamedGetter, PropCtx, ValueKind};
 use super::{K_OBJ, Obj, Runtime, Window, getter, illegal, method, need_args, setter, this_obj};
 use crate::registry::Registry;
 
+/// ECMAScript canonical numeric index string (array index name).
+fn is_array_index_name(s: &str) -> bool {
+    if s == "0" {
+        return true;
+    }
+    if s.is_empty() || s.starts_with('0') {
+        return false;
+    }
+    s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<u32>().is_ok()
+}
+
 /// What a NodeList holds.
 pub(crate) enum NodeListSrc {
     /// `querySelectorAll` results.
@@ -40,6 +51,9 @@ pub(crate) enum Filter {
     ChildLocal(&'static str),
     /// `tr.cells`: `td` and `th` children.
     Cells,
+    /// Named access on `window`: HTML `embed`/`form`/`img`/`object` with
+    /// `name`, or any HTML element with that `id` (HTML living standard).
+    WindowNamed(String),
 }
 
 /// A live collection: recomputed when the document generation changes.
@@ -73,6 +87,11 @@ impl Collection {
     }
 }
 
+/// Elements that HTML named access on `window` resolves for `name`.
+pub(crate) fn window_named_elements(d: &Document, root: NodeId, name: &str) -> Vec<NodeId> {
+    compute(d, root, &Filter::WindowNamed(name.to_owned()))
+}
+
 fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
     match f {
         Filter::Children => return d.element_children(root).collect(),
@@ -95,6 +114,15 @@ fn compute(d: &Document, root: NodeId, f: &Filter) -> Vec<NodeId> {
             match f {
                 Filter::Children | Filter::TableRows | Filter::ChildLocal(_) | Filter::Cells => {
                     unreachable!()
+                }
+                Filter::WindowNamed(name) => {
+                    if !html {
+                        return false;
+                    }
+                    let by_id = d.element_id(n) == Some(name.as_str());
+                    let by_name = matches!(&*q.local, "embed" | "form" | "img" | "object")
+                        && d.get_attribute(n, "name") == Some(name.as_str());
+                    by_id || by_name
                 }
                 Filter::All => true,
                 Filter::TagName(t) => {
@@ -420,6 +448,44 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             );
         }
     }
+    // document.all: IsHTMLDDA + LegacyCallAsFunction (Chrome: typeof
+    // undefined, falsy, callable as item/namedItem).
+    reg.named_unenumerable("HTMLAllCollection");
+    reg.undetectable("HTMLAllCollection");
+    reg.call_as_function(
+        "HTMLAllCollection",
+        super::wf(rt, |cx, w| {
+            let id = this_obj(cx)?;
+            if cx.is_empty() {
+                return cx.ret(Arg::Null);
+            }
+            // Numeric indices via ToUint32; other values as names.
+            if matches!(cx.arg_kind(0), ValueKind::Number | ValueKind::Bool) {
+                let i = cx.arg_u32(0)?;
+                return match item_at(w, id, i) {
+                    Some((slot, n)) => cx.ret(w.opt_node_arg(slot, n)),
+                    None => cx.ret(Arg::Null),
+                };
+            }
+            let name = cx.arg_string(0)?;
+            if name.is_empty() {
+                return cx.ret(Arg::Null);
+            }
+            // Array-index property names: digits only, no leading zeros
+            // except "0".
+            if is_array_index_name(&name) {
+                let i: u32 = name.parse().unwrap_or(0);
+                return match item_at(w, id, i) {
+                    Some((slot, n)) => cx.ret(w.opt_node_arg(slot, n)),
+                    None => cx.ret(Arg::Null),
+                };
+            }
+            match named_item(w, id, &name) {
+                Some((slot, n)) => cx.ret(w.node_arg(slot, n)),
+                None => cx.ret(Arg::Null),
+            }
+        }),
+    );
     // NodeList entries/keys/values/forEach are Array.prototype intrinsics.
 
     // DOMTokenList

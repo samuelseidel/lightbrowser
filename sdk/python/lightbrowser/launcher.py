@@ -109,9 +109,15 @@ def build_serve_args(
     insecure: bool = False,
     profiles_dir: str | os.PathLike[str] | None = None,
     workers: int | None = None,
+    tcp_profile: str | None = None,
     extra_args: Sequence[str] = (),
 ) -> list[str]:
-    """The command line for `lightbrowser serve`. The server always binds 127.0.0.1."""
+    """The command line for `lightbrowser serve`. The server always binds 127.0.0.1.
+
+    `tcp_profile` is `persona` | `off` | a `profiles/tcp` id (T10). Default
+    (None) leaves the host stack; pass `persona` so CDP contexts send the
+    persona's SYN. Windows and macOS profiles need `tcp-shim`.
+    """
     if not 0 <= int(port) <= 65535:
         raise ValueError(f"port out of range: {port}")
     cmd = [str(binary), "serve", "--port", str(int(port))]
@@ -125,6 +131,8 @@ def build_serve_args(
         if workers < 1:
             raise ValueError("workers must be >= 1")
         cmd += ["--workers", str(int(workers))]
+    if tcp_profile is not None:
+        cmd += ["--tcp-profile", str(tcp_profile)]
     cmd += [str(a) for a in extra_args]
     return cmd
 

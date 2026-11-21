@@ -129,6 +129,22 @@ a user who switches to dark mode. `lb-cdp` parses the request into
 page keeps them for its next documents, and `lb-layout` applies them on
 top of the persona's media environment (`print` included: `@media print`
 matches and `screen` does not). An empty value returns to the persona's.
-The results equal Chrome's (`tests/playwright/media.spec.mjs`). Not done:
-`change` events on `MediaQueryList`s (none fire for viewport changes
-either); frames other than the main one keep the persona's media.
+The results equal Chrome's (`tests/playwright/media.spec.mjs`).
+`MediaQueryList` `change` events fire when emulation or the viewport
+flips `matches` (`addEventListener` / legacy `addListener`,
+`MediaQueryListEvent`); see revision 4. Child frames share the page's
+emulated media (revision 5).
+
+## Revision 4: MediaQueryList change events (2026-11-15)
+
+`matchMedia` lists cache `matches`. `Emulation.setEmulatedMedia` and
+viewport resize re-evaluate every list on the page and dispatch a
+trusted `MediaQueryListEvent` `change` when the bit flips (same for
+legacy `addListener`). Checked in `tests/playwright/media.spec.mjs`.
+
+## Revision 5: media emulation in child frames (2026-11-15)
+
+`Emulation.setEmulatedMedia` applies to every frame of the page (and
+fires `MediaQueryList` `change` there). A newly committed child document
+gets the same overrides. Checked in
+`lb-page` `cdp_host::emulate_media_reaches_child_frames`.

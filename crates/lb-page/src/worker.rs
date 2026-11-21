@@ -275,6 +275,12 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
         },
     )
     .map_err(|e| e.to_string())?;
+    // V8's foreground tasks (ADR 0038) wake the loop from any thread.
+    let v8_tasks = std::sync::Arc::new(Notify::new());
+    {
+        let n = v8_tasks.clone();
+        engine.set_task_waker(std::sync::Arc::new(move || n.notify_one()));
+    }
     let mut reg = Registry::new();
     let rt = Runtime::new(&mut reg);
     let bindings =
@@ -320,7 +326,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
     )));
     if let Some(a) = &agent {
         let a = a.clone();
-        w.set_console_sink(Some(Rc::new(move |m| a.console(m))));
+        w.set_console_sink(Some(Rc::new(move |_, m| a.console(m))));
     }
     w.set_sw_host(Some(crate::sw::host(&ctx)));
     w.set_idb_backend(Some(ctx.idb().clone()));
@@ -407,7 +413,7 @@ async fn run(wctx: WeakContext, start: WorkerStart, inspect: Inspect) -> Result<
         }));
     }
 
-    event_loop(&mut engine, &w, &notify, link.as_mut()).await;
+    event_loop(&mut engine, &w, &notify, &v8_tasks, link.as_mut()).await;
     if let Some(a) = &agent {
         a.abandon();
     }
@@ -449,12 +455,13 @@ async fn prefetch_modules(ctx: &BrowserContext, w: &Rc<Window>, url: &Url, sourc
 }
 
 /// The worker's event loop: tasks, due timers, animation frames (60 Hz),
-/// a microtask checkpoint after each. Ends when the worker is closed or
-/// terminated.
+/// V8's foreground tasks (ADR 0038), a microtask checkpoint after each.
+/// Ends when the worker is closed or terminated.
 async fn event_loop(
     engine: &mut Engine,
     w: &Rc<Window>,
     notify: &Notify,
+    v8_tasks: &Notify,
     mut link: Option<&mut crate::cdp::workers::Link>,
 ) {
     let realm = w.realm();
@@ -471,6 +478,10 @@ async fn event_loop(
         // CDP commands and awaited evaluations (ADR 0029).
         if let Some(l) = link.as_deref_mut() {
             l.poll(engine, w);
+        }
+        if engine.run_foreground_tasks() {
+            tokio::task::yield_now().await;
+            continue;
         }
         // A timer that came due before the next task was queued runs
         // first, as in the page loop (`Window::next_task_queued_at`).
@@ -543,23 +554,36 @@ async fn event_loop(
             tokio::task::yield_now().await;
             continue;
         }
+        let v8_due = engine.next_task_due();
         let cmd = match deadline {
             Some(d) => {
                 let ms = (d - now).max(0.0);
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs_f64(ms / 1000.0)) => None,
                     _ = notify.notified() => None,
+                    _ = v8_tasks.notified() => None,
+                    _ = sleep_until(v8_due) => None,
                     c = next_cmd(&mut link) => c,
                 }
             }
             None => tokio::select! {
                 _ = notify.notified() => None,
+                _ = v8_tasks.notified() => None,
+                _ = sleep_until(v8_due) => None,
                 c = next_cmd(&mut link) => c,
             },
         };
         if let (Some(c), Some(l)) = (cmd, link.as_deref_mut()) {
             l.handle(engine, w, c);
         }
+    }
+}
+
+/// Until `at`; never without one.
+async fn sleep_until(at: Option<std::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at.into()).await,
+        None => std::future::pending().await,
     }
 }
 

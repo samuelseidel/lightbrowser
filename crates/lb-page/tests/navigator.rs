@@ -48,7 +48,13 @@ const PROBE: &str = r#"<!DOCTYPE html><body><script>
   const b = await n.getBattery();
   r.battery = [b.charging, b.level, b.chargingTime, b.dischargingTime === Infinity, n.getBattery() === n.getBattery(), b === await n.getBattery()];
   r.devices = (await n.mediaDevices.enumerateDevices()).map((d) => [d.kind, d.deviceId, d.label, d.groupId, Object.prototype.toString.call(d)]);
-  const v = speechSynthesis.getVoices();
+  let v = speechSynthesis.getVoices();
+  if (!v.length) {
+    await new Promise((resolve) => {
+      speechSynthesis.addEventListener('voiceschanged', resolve, { once: true });
+    });
+    v = speechSynthesis.getVoices();
+  }
   r.voices = [v.length, v.filter((x) => x.default).map((x) => x.name), v.length && v[0] === speechSynthesis.getVoices()[0]];
   r.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   r.locale = Intl.DateTimeFormat().resolvedOptions().locale;

@@ -44,15 +44,25 @@ page can observe it:
   out again at the paper's content width (restored afterwards; the page
   sees no `resize`), cuts it into page-high slices, paints each at about
   150 dpi and embeds it as a JPEG in a minimal PDF written by hand.
-  Paper size, margins, scale, landscape and page ranges are honoured;
-  `transferMode: ReturnAsStream` goes through a new `IO.read`/`IO.close`.
+  An invisible Helvetica text layer (WinAnsi, render mode 3) is written
+  from the display list's text lines so selection and search work; glyph
+  metrics are stretched toward the layout width and are not the page's
+  fonts. Paper size, margins, scale, landscape and page ranges are
+  honoured; `transferMode: ReturnAsStream` goes through a new
+  `IO.read`/`IO.close`.
 
 ## Consequences
 
-- PDFs look like the page but hold no text (it cannot be selected or
-  searched), media queries answer `screen`, `printBackground` is ignored
-  (backgrounds always print), and headers and footers are not drawn.
-- Not covered: permission overrides in workers' `navigator.permissions`,
-  `watchPosition` updates after the first position, file drops from the
-  OS other than through `Input.dispatchDragEvent`, `beforeunload`
-  dialogs.
+- PDFs look like the page (JPEG slices). Text is selectable/searchable via
+  the Helvetica overlay; characters outside WinAnsi become `?`, and
+  webfonts / emoji / complex scripts are not embedded. Media queries
+  answer `screen`, `printBackground` is ignored (backgrounds always
+  print), and headers and footers are not drawn.
+- Not covered: file drops from the OS other than through
+  `Input.dispatchDragEvent`. (`beforeunload` dialogs, permission
+  overrides in workers, and `watchPosition` updates are done elsewhere.)
+
+## Revision 1: selectable PDF text (2026-11-15)
+
+Invisible standard-14 Helvetica faces on top of the JPEG pages, driven by
+`lb-layout`'s display-list text lines (`lb-page` `cdp/screenshot.rs`).

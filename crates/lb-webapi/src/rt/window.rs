@@ -12,11 +12,22 @@ use url::Url;
 
 use super::events::{EventExtra, coarse_now, fire_event_with};
 use super::{
-    HistEntry, Js, K_OBJ, NavRequest, Obj, Runtime, TaskSource, TimerCallback, WINDOW_REF, Window,
-    getter, illegal, method, need_args, setter, this_obj,
+    Dict, HistEntry, Js, K_OBJ, NavRequest, Obj, Runtime, TaskSource, TimerCallback, WINDOW_REF,
+    Window, ctor, getter, illegal, method, need_args, setter, this_obj,
 };
 use crate::host::ConsoleMessage;
-use crate::registry::{Registry, host_fn};
+use crate::registry::{ImplKind, Registry, host_fn};
+use lb_js::Handle;
+
+/// `PerformanceObserver` host state (constructable; entry delivery lands
+/// with the full Performance Timeline — enough for Turnstile to get past
+/// `new PerformanceObserver`).
+pub(crate) struct PoData {
+    #[allow(dead_code)] // kept so the callback handle is not released
+    callback: Handle,
+    /// Observed entry type names (`type` / `entryTypes`).
+    types: Vec<String>,
+}
 
 // ---------------------------------------------------------------------------
 // console
@@ -150,13 +161,16 @@ fn console_call(
         "dir" | "dirxml" | "table" | "trace" => "log",
         l => l,
     };
-    w.log(ConsoleMessage {
-        level: level.into(),
-        text,
-        url: None,
-        line: None,
-        from_worker: false,
-    });
+    w.log_from(
+        cx.realm(),
+        ConsoleMessage {
+            level: level.into(),
+            text,
+            url: None,
+            line: None,
+            from_worker: false,
+        },
+    );
     Ok(())
 }
 
@@ -797,10 +811,22 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             });
         };
     }
-    win_num!("innerWidth", |w| w.with_layout(0, |l, _| l.viewport().0)
-        as f64);
-    win_num!("innerHeight", |w| w.with_layout(0, |l, _| l.viewport().1)
-        as f64);
+    // Child frames: match viewport to the <iframe> content box before
+    // reporting inner size (Turnstile challenge frames are 1×1).
+    for name in ["innerWidth", "innerHeight"] {
+        let width = name == "innerWidth";
+        getter(reg, rt, "Window", name, move |cx, w| {
+            if super::frames::is_detached(w) {
+                return cx.ret(0);
+            }
+            super::frames::sync_viewport(w);
+            let v = w.with_layout(0, |l, _| {
+                let (vw, vh) = l.viewport();
+                if width { vw } else { vh }
+            }) as f64;
+            cx.ret(v)
+        });
+    }
     win_num!("outerWidth", |w| f64::from(screen_dims(w).outer_width));
     win_num!("outerHeight", |w| f64::from(screen_dims(w).outer_height));
     win_num!("devicePixelRatio", |w| screen_dims(w).device_pixel_ratio);
@@ -887,6 +913,15 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     });
     getter(reg, rt, "Window", "screen", |cx, w| {
         cx.ret(singleton(w, "screen", || Obj::Screen))
+    });
+    // Chrome always exposes a VisualViewport object. The generated Window
+    // attribute alone left this undefined, which dropped Turnstile soft-pass
+    // fingerprint fields (FO body lost ~17 `$` segments vs headed Chrome).
+    getter(reg, rt, "Window", "visualViewport", |cx, w| {
+        if super::frames::is_detached(w) {
+            return cx.ret(Arg::Null);
+        }
+        cx.ret(singleton(w, "visualViewport", || Obj::VisualViewport))
     });
     getter(reg, rt, "Window", "origin", |cx, w| {
         cx.ret(w.url().origin().ascii_serialization())
@@ -1334,18 +1369,350 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 .to_string(),
         ))
     });
+    method(reg, rt, "Performance", "getEntries", |cx, w| {
+        let _ = this_obj(cx)?;
+        ensure_nav_paint(w);
+        let ids = w.perf_entries.borrow().clone();
+        cx.ret(Arg::Array(
+            ids.into_iter().map(|id| w.obj_arg(id)).collect(),
+        ))
+    });
+    method(reg, rt, "Performance", "getEntriesByType", |cx, w| {
+        let _ = this_obj(cx)?;
+        need_args(cx, 1, "getEntriesByType", "Performance")?;
+        let ty = cx.arg_string(0)?;
+        ensure_nav_paint(w);
+        let ids: Vec<u32> = w
+            .perf_entries
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|&id| {
+                w.with_obj(id, |o| match o {
+                    Obj::PerfEntry { entry_type, .. } => *entry_type == ty,
+                    _ => false,
+                })
+                .unwrap_or(false)
+            })
+            .collect();
+        cx.ret(Arg::Array(
+            ids.into_iter().map(|id| w.obj_arg(id)).collect(),
+        ))
+    });
+    method(reg, rt, "Performance", "getEntriesByName", |cx, w| {
+        let _ = this_obj(cx)?;
+        need_args(cx, 1, "getEntriesByName", "Performance")?;
+        let name = cx.arg_string(0)?;
+        let ty = if cx.len() > 1 && cx.arg_kind(1) != ValueKind::Undefined {
+            Some(cx.arg_string(1)?)
+        } else {
+            None
+        };
+        ensure_nav_paint(w);
+        let ids: Vec<u32> = w
+            .perf_entries
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|&id| {
+                w.with_obj(id, |o| match o {
+                    Obj::PerfEntry {
+                        entry_type,
+                        name: n,
+                        ..
+                    } => n == &name && ty.as_deref().is_none_or(|t| t == *entry_type),
+                    _ => false,
+                })
+                .unwrap_or(false)
+            })
+            .collect();
+        cx.ret(Arg::Array(
+            ids.into_iter().map(|id| w.obj_arg(id)).collect(),
+        ))
+    });
+    method(reg, rt, "Performance", "clearMarks", |cx, w| {
+        let _ = this_obj(cx)?;
+        let name = if !cx.is_empty() && cx.arg_kind(0) != ValueKind::Undefined {
+            Some(cx.arg_string(0)?)
+        } else {
+            None
+        };
+        clear_perf(w, "mark", name.as_deref());
+        Ok(())
+    });
+    method(reg, rt, "Performance", "clearMeasures", |cx, w| {
+        let _ = this_obj(cx)?;
+        let name = if !cx.is_empty() && cx.arg_kind(0) != ValueKind::Undefined {
+            Some(cx.arg_string(0)?)
+        } else {
+            None
+        };
+        clear_perf(w, "measure", name.as_deref());
+        Ok(())
+    });
+    method(reg, rt, "Performance", "clearResourceTimings", |cx, w| {
+        let _ = this_obj(cx)?;
+        clear_perf(w, "resource", None);
+        Ok(())
+    });
+    method(
+        reg,
+        rt,
+        "Performance",
+        "setResourceTimingBufferSize",
+        |_cx, _w| Ok(()),
+    );
+
+    // PerformanceObserver (Chrome has a real constructor; without it the
+    // IDL interface throws Illegal constructor and Turnstile aborts).
+    ctor(reg, rt, "PerformanceObserver", |cx, w| {
+        if cx.is_empty() {
+            return Err(HostError::type_error(
+                "Failed to construct 'PerformanceObserver': 1 argument required, but only 0 present.",
+            ));
+        }
+        if cx.arg_kind(0) != ValueKind::Function {
+            return Err(HostError::type_error(
+                "Failed to construct 'PerformanceObserver': parameter 1 is not of type 'Function'.",
+            ));
+        }
+        let cb = cx.arg_handle(0);
+        let id = w.new_obj(Obj::PerformanceObserver(Box::new(PoData {
+            callback: cb,
+            types: Vec::new(),
+        })));
+        cx.init_this(HostRef::new(K_OBJ, id))
+    });
+    method(reg, rt, "PerformanceObserver", "observe", |cx, w| {
+        let id = this_obj(cx)?;
+        let pre = "Failed to execute 'observe' on 'PerformanceObserver': ";
+        match cx.arg_kind(0) {
+            ValueKind::Undefined | ValueKind::Null | ValueKind::Object | ValueKind::Function => {}
+            _ => {
+                return Err(HostError::type_error(format!(
+                    "{pre}The provided value is not of type 'PerformanceObserverInit'."
+                )));
+            }
+        }
+        let d = Dict::arg(cx, 0);
+        let entry_types = d.get(cx, "entryTypes")?;
+        let ty = d.get(cx, "type")?;
+        let _buffered = d.bool(cx, "buffered")?;
+        d.release(cx);
+        if entry_types.is_none() && ty.is_none() {
+            return Err(HostError::type_error(format!(
+                "{pre}An observe() call must include either entryTypes or type arguments."
+            )));
+        }
+        if entry_types.is_some() && ty.is_some() {
+            if let Some(h) = entry_types {
+                cx.release(h);
+            }
+            if let Some(h) = ty {
+                cx.release(h);
+            }
+            return Err(HostError::type_error(format!(
+                "{pre}An observe() call must not include both entryTypes and type arguments."
+            )));
+        }
+        let mut types = Vec::new();
+        if let Some(h) = entry_types {
+            // Best-effort: JSON arrays and empty / opaque values.
+            if let JsValue::Json(s) = cx.handle_value(h)
+                && let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(&s)
+            {
+                for x in v {
+                    if let serde_json::Value::String(n) = x {
+                        types.push(n);
+                    }
+                }
+            }
+            cx.release(h);
+        } else if let Some(h) = ty {
+            if let Ok(n) = cx.handle_string(h) {
+                types.push(n);
+            }
+            cx.release(h);
+        }
+        let ok = w
+            .with_obj(id, |o| {
+                if let Obj::PerformanceObserver(m) = o {
+                    m.types = types;
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if !ok {
+            return Err(illegal());
+        }
+        Ok(())
+    });
+    method(reg, rt, "PerformanceObserver", "disconnect", |cx, w| {
+        let id = this_obj(cx)?;
+        w.with_obj(id, |o| {
+            if let Obj::PerformanceObserver(m) = o {
+                m.types.clear();
+            }
+        });
+        Ok(())
+    });
+    method(reg, rt, "PerformanceObserver", "takeRecords", |cx, w| {
+        let _ = this_obj(cx)?;
+        // Chrome returns a PerformanceObserverEntryList, not a plain array.
+        cx.ret(w.obj_arg(w.new_obj(Obj::PerformanceObserverEntryList)))
+    });
+    reg.register(
+        "PerformanceObserver",
+        "supportedEntryTypes",
+        ImplKind::StaticGetter,
+        super::wf(rt, |cx, w| {
+            // Chrome 153 window order (ADR 0046); frozen when helpers exist.
+            let types = [
+                "element",
+                "event",
+                "first-input",
+                "interaction-contentful-paint",
+                "largest-contentful-paint",
+                "layout-shift",
+                "long-animation-frame",
+                "longtask",
+                "mark",
+                "measure",
+                "navigation",
+                "paint",
+                "resource",
+                "soft-navigation",
+                "visibility-state",
+            ];
+            let json = format!(
+                "[{}]",
+                types
+                    .iter()
+                    .map(|t| format!("\"{t}\""))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            let (parse, freeze) = {
+                let h = w.helpers.borrow();
+                (h.json_parse, h.freeze)
+            };
+            if let (Some(parse), Some(freeze)) = (parse, freeze) {
+                let arr = cx
+                    .try_call_handle(parse, Arg::Undefined, &[Arg::String(json)])
+                    .map_err(|e| HostError::Error(e.message))?;
+                let _ = cx.try_call(freeze, Arg::Undefined, &[Arg::Handle(arr)]);
+                let r = cx.ret(Arg::Handle(arr));
+                cx.release(arr);
+                return r;
+            }
+            cx.ret(Arg::Array(
+                types.iter().map(|t| Arg::String((*t).to_owned())).collect(),
+            ))
+        }),
+    );
     for name in ["getEntries", "getEntriesByType", "getEntriesByName"] {
-        method(reg, rt, "Performance", name, |cx, _w| {
+        method(reg, rt, "PerformanceObserverEntryList", name, |cx, _w| {
+            let _ = this_obj(cx)?;
             cx.ret(Arg::Array(Vec::new()))
         });
     }
-    for name in [
-        "clearMarks",
-        "clearMeasures",
-        "clearResourceTimings",
-        "setResourceTimingBufferSize",
-    ] {
-        method(reg, rt, "Performance", name, |_cx, _w| Ok(()));
+    method(reg, rt, "Performance", "mark", |cx, w| {
+        let _ = this_obj(cx)?;
+        need_args(cx, 1, "mark", "Performance")?;
+        let name = cx.arg_string(0)?;
+        let t = coarse_now(w);
+        let id = push_perf(w, "mark", name, t, 0.0);
+        cx.ret(w.obj_arg(id))
+    });
+    method(reg, rt, "Performance", "measure", |cx, w| {
+        let _ = this_obj(cx)?;
+        need_args(cx, 1, "measure", "Performance")?;
+        let name = cx.arg_string(0)?;
+        let end = coarse_now(w);
+        let start = if cx.len() > 1 && cx.arg_kind(1) != ValueKind::Undefined {
+            let start_mark = cx.arg_string(1)?;
+            find_mark_time(w, &start_mark).unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let end_t = if cx.len() > 2 && cx.arg_kind(2) != ValueKind::Undefined {
+            let end_mark = cx.arg_string(2)?;
+            find_mark_time(w, &end_mark).unwrap_or(end)
+        } else {
+            end
+        };
+        let id = push_perf(w, "measure", name, start, (end_t - start).max(0.0));
+        cx.ret(w.obj_arg(id))
+    });
+
+    for iface in ["PerformanceEntry", "PerformanceMark", "PerformanceMeasure"] {
+        getter(reg, rt, iface, "name", |cx, w| {
+            let id = this_obj(cx)?;
+            let v = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { name, .. } => Some(name.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            cx.ret(v)
+        });
+        getter(reg, rt, iface, "entryType", |cx, w| {
+            let id = this_obj(cx)?;
+            let v = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { entry_type, .. } => Some((*entry_type).to_owned()),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            cx.ret(v)
+        });
+        getter(reg, rt, iface, "startTime", |cx, w| {
+            let id = this_obj(cx)?;
+            let v = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { start_time, .. } => Some(*start_time),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            cx.ret(v)
+        });
+        getter(reg, rt, iface, "duration", |cx, w| {
+            let id = this_obj(cx)?;
+            let v = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { duration, .. } => Some(*duration),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            cx.ret(v)
+        });
+        method(reg, rt, iface, "toJSON", |cx, w| {
+            let id = this_obj(cx)?;
+            let json = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry {
+                        entry_type,
+                        name,
+                        start_time,
+                        duration,
+                    } => Some(serde_json::json!({
+                        "name": name,
+                        "entryType": entry_type,
+                        "startTime": start_time,
+                        "duration": duration,
+                    })),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            cx.ret(Arg::Json(json.to_string()))
+        });
     }
 
     // Screen
@@ -1378,6 +1745,119 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     scr!("colorDepth", |s| s.color_depth);
     scr!("pixelDepth", |s| s.pixel_depth);
     getter(reg, rt, "Screen", "isExtended", |cx, _w| cx.ret(false));
+
+    // VisualViewport: layout viewport geometry (no pinch-zoom → scale 1,
+    // offsets 0; pageLeft/pageTop track window scroll).
+    macro_rules! vv_num {
+        ($name:literal, |$w:ident| $e:expr) => {
+            getter(reg, rt, "VisualViewport", $name, |cx, $w| {
+                let _ = this_obj(cx)?;
+                if super::frames::is_detached($w) {
+                    return cx.ret(0);
+                }
+                super::frames::sync_viewport($w);
+                let v: f64 = $e;
+                cx.ret(v)
+            });
+        };
+    }
+    vv_num!("width", |w| w.with_layout(0, |l, _| l.viewport().0) as f64);
+    vv_num!("height", |w| w.with_layout(0, |l, _| l.viewport().1) as f64);
+    vv_num!("offsetLeft", |_w| 0.0);
+    vv_num!("offsetTop", |_w| 0.0);
+    vv_num!("pageLeft", |w| {
+        w.with_layout(0, |l, d| l.window_scroll(d).0) as f64
+    });
+    vv_num!("pageTop", |w| {
+        w.with_layout(0, |l, d| l.window_scroll(d).1) as f64
+    });
+    vv_num!("scale", |_w| 1.0);
+    for name in ["onresize", "onscroll", "onscrollend"] {
+        getter(reg, rt, "VisualViewport", name, |cx, w| {
+            let _ = this_obj(cx)?;
+            let _ = w;
+            cx.ret(Arg::Null)
+        });
+        setter(reg, rt, "VisualViewport", name, |cx, _w| {
+            let _ = this_obj(cx)?;
+            Ok(())
+        });
+    }
+}
+
+fn push_perf(
+    w: &Window,
+    entry_type: &'static str,
+    name: String,
+    start_time: f64,
+    duration: f64,
+) -> u32 {
+    let id = w.new_obj(Obj::PerfEntry {
+        entry_type,
+        name,
+        start_time,
+        duration,
+    });
+    w.perf_entries.borrow_mut().push(id);
+    id
+}
+
+fn clear_perf(w: &Window, entry_type: &str, name: Option<&str>) {
+    w.perf_entries.borrow_mut().retain(|&id| {
+        w.with_obj(id, |o| match o {
+            Obj::PerfEntry {
+                entry_type: t,
+                name: n,
+                ..
+            } => !(*t == entry_type && name.is_none_or(|want| want == n)),
+            _ => true,
+        })
+        .unwrap_or(true)
+    });
+}
+
+fn find_mark_time(w: &Window, name: &str) -> Option<f64> {
+    w.perf_entries.borrow().iter().rev().find_map(|&id| {
+        w.with_obj(id, |o| match o {
+            Obj::PerfEntry {
+                entry_type: "mark",
+                name: n,
+                start_time,
+                ..
+            } if n == name => Some(*start_time),
+            _ => None,
+        })
+        .flatten()
+    })
+}
+
+/// Seed a navigation entry when the timeline is still empty.
+///
+/// Do **not** invent paint/resource rows here: headed Chrome's first Turnstile
+/// FO from a challenge iframe reports `paint:0` and `resource:0` (only
+/// `navigation:1`). Premature `first-paint` / document-URL resource entries
+/// change the FO fingerprint and Cloudflare answers with `/eb/` instead of
+/// soft-pass. Paint/resource appear later from real loads (and Chrome only
+/// adds FP/FCP on the post-pass FO for 1×1 widgets, never for 0×0).
+fn ensure_nav_paint(w: &Window) {
+    let has_nav = w.perf_entries.borrow().iter().any(|&id| {
+        w.with_obj(id, |o| {
+            matches!(
+                o,
+                Obj::PerfEntry {
+                    entry_type: "navigation",
+                    ..
+                }
+            )
+        })
+        .unwrap_or(false)
+    });
+    if has_nav {
+        return;
+    }
+    let now = coarse_now(w);
+    let url = w.url.borrow().as_str().to_owned();
+    push_perf(w, "navigation", url, 0.0, now);
 }
 
 fn register_navigator(reg: &mut Registry, rt: &Runtime) {

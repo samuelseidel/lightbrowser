@@ -554,6 +554,32 @@ fn hit(w: &Window, x: f64, y: f64) -> Option<NodeId> {
     h.or_else(|| w.with_doc(|d| d.document_element()))
 }
 
+/// Hit-test through nested iframes: target window, node, and coordinates
+/// in that window's viewport (Playwright sends page-level `Input.*`).
+fn hit_deep(w: &Rc<Window>, x: f64, y: f64) -> Option<(Rc<Window>, NodeId, f64, f64)> {
+    let n = hit(w, x, y)?;
+    if w.with_doc(|d| d.is_html_element_named(n, &local_name!("iframe")))
+        && let Some(child) = super::frames::child_for(w, n)
+    {
+        let Some(content) = w.with_layout(0, |l, d| l.box_model(d, n).map(|m| m.content)) else {
+            return Some((w.clone(), n, x, y));
+        };
+        let lx = x - f64::from(content.x);
+        let ly = y - f64::from(content.y);
+        if lx < 0.0 || ly < 0.0 || lx >= f64::from(content.width) || ly >= f64::from(content.height)
+        {
+            return Some((w.clone(), n, x, y));
+        }
+        child.window.with_layout_engine(|l, _| {
+            l.set_viewport(content.width.max(1.0), content.height.max(1.0));
+        });
+        if let Some(deep) = hit_deep(&child.window, lx, ly) {
+            return Some(deep);
+        }
+    }
+    Some((w.clone(), n, x, y))
+}
+
 fn connected(w: &Window, n: NodeId) -> bool {
     w.with_doc(|d| d.is_connected(n))
 }
@@ -577,8 +603,37 @@ fn common_ancestor(w: &Window, a: NodeId, b: NodeId) -> Option<NodeId> {
 // Mouse
 // ---------------------------------------------------------------------------
 
-/// Dispatch one CDP mouse event.
-pub fn dispatch_mouse(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
+/// Dispatch one CDP mouse event, descending into iframes. Switches
+/// [`EngineJs`] to the target frame's realm so listeners run correctly.
+pub fn dispatch_mouse(js: &mut super::EngineJs<'_>, w: &Rc<Window>, ev: &MouseInput) {
+    // Descend into iframes: Playwright clicks use main-frame coordinates.
+    if let Some((tw, _, lx, ly)) = hit_deep(w, ev.x, ev.y)
+        && !Rc::ptr_eq(&tw, w)
+    {
+        if ev.kind == MouseKind::Press && w.focused.get().is_some() {
+            super::window::focus(js, w, None);
+        }
+        if let Some(n) = hit(w, ev.x, ev.y) {
+            update_hover(js, w, ev, n);
+        }
+        let local = MouseInput {
+            x: lx,
+            y: ly,
+            ..ev.clone()
+        };
+        let saved = js.realm;
+        js.realm = tw.realm();
+        dispatch_mouse(js, &tw, &local);
+        js.realm = saved;
+        w.input.borrow_mut().last = Some((ev.x, ev.y));
+        w.after_mutation(js);
+        return;
+    }
+    dispatch_mouse_here(js, w, ev);
+}
+
+/// Mouse events on one window (no iframe descent).
+fn dispatch_mouse_here(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     match ev.kind {
         MouseKind::Move => mouse_move(js, w, ev),
         MouseKind::Press => mouse_press(js, w, ev),
@@ -1562,7 +1617,15 @@ fn key_extra(ev: &KeyInput, key_code: u32, char_code: u32) -> EventExtra {
 }
 
 /// Dispatch one CDP key event.
-pub fn dispatch_key(js: &mut dyn Js, w: &Rc<Window>, ev: &KeyInput) {
+pub fn dispatch_key(js: &mut super::EngineJs<'_>, w: &Rc<Window>, ev: &KeyInput) {
+    let tw = focused_window(w);
+    let saved = js.realm;
+    js.realm = tw.realm();
+    dispatch_key_here(js, &tw, ev);
+    js.realm = saved;
+}
+
+fn dispatch_key_here(js: &mut dyn Js, w: &Rc<Window>, ev: &KeyInput) {
     let t = key_target(w);
     let key_code = if ev.key_code != 0 {
         ev.key_code
@@ -1683,7 +1746,7 @@ fn keypress_and_text(js: &mut dyn Js, w: &Rc<Window>, ev: &KeyInput, text: &str)
     } else if ev.key == " " && !focused_editable(w) {
         // Space on a button or checkbox clicks on key up.
     } else {
-        insert_text(js, w, text);
+        insert_text_here(js, w, text);
     }
 }
 
@@ -1873,9 +1936,27 @@ fn run_command(_js: &mut dyn Js, w: &Rc<Window>, cmd: &str) {
     }
 }
 
+/// The window that currently holds focus, searching `w` and its frames.
+fn focused_window(w: &Rc<Window>) -> Rc<Window> {
+    for c in super::frames::descendants(w) {
+        if c.focused.get().is_some_and(|f| connected(&c, f)) {
+            return focused_window(&c);
+        }
+    }
+    w.clone()
+}
+
 /// `Input.insertText` and typed characters: insert into the focused text
 /// control or contenteditable, replacing the selection.
-pub fn insert_text(js: &mut dyn Js, w: &Rc<Window>, text: &str) {
+pub fn insert_text(js: &mut super::EngineJs<'_>, w: &Rc<Window>, text: &str) {
+    let tw = focused_window(w);
+    let saved = js.realm;
+    js.realm = tw.realm();
+    insert_text_here(js, &tw, text);
+    js.realm = saved;
+}
+
+fn insert_text_here(js: &mut dyn Js, w: &Rc<Window>, text: &str) {
     let Some(f) = w.focused.get().filter(|&f| connected(w, f)) else {
         return;
     };

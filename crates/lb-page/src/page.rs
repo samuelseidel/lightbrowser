@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use lb_js::{Engine, JsValue, ScriptOrigin};
 use lb_webapi::host::{ConsoleMessage, StorageArea};
-use lb_webapi::rt::{EngineJs, Window};
+use lb_webapi::rt::{ConsoleSink, EngineJs, Window};
 use tokio::sync::{Notify, oneshot, watch};
 use url::Url;
 
@@ -196,16 +196,16 @@ impl PageState {
     }
 
     /// Console sink forwarding to the observer.
-    pub(crate) fn console_sink(self: &Rc<Self>) -> Rc<dyn Fn(&ConsoleMessage)> {
+    pub(crate) fn console_sink(self: &Rc<Self>) -> ConsoleSink {
         let me = Rc::downgrade(self);
-        Rc::new(move |m: &ConsoleMessage| {
+        Rc::new(move |realm, m| {
             if let Some(p) = me.upgrade() {
                 let obs = p.observer.borrow().clone();
                 if let Some(o) = obs {
                     o.console(m);
                 }
                 if let Some(a) = p.agent() {
-                    a.console(&p, m);
+                    a.console(realm, m);
                 }
             }
         })

@@ -1802,4 +1802,139 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         let (s, uid, _) = this_rule(cx, w)?;
         cx.ret(with_rule(w, s, uid, |e| e.raw.prelude.clone()).unwrap_or_default())
     });
+
+    // CSS namespace: `supports` / `escape` (IDL stubs were NotSupportedError;
+    // Turnstile's challenge aborts when `CSS.supports` throws).
+    method(reg, rt, "CSS", "supports", |cx, _w| {
+        need_args(cx, 1, "supports", "CSS")?;
+        if cx.len() >= 2 {
+            let prop = cx.arg_string(0)?;
+            let value = cx.arg_string(1)?;
+            let ok = prop.trim_start().starts_with("--")
+                || lb_css::is_valid_declaration(&prop, &value)
+                || chrome_supports_extra(&prop, &value);
+            return cx.ret(ok);
+        }
+        let cond = cx.arg_string(0)?;
+        // Single-arg form: also accept a few Chrome-true conditions our
+        // longhand table does not parse yet (color-mix, container-type, …).
+        let ok = lb_css::supports(&cond) || chrome_supports_condition(&cond);
+        cx.ret(ok)
+    });
+    method(reg, rt, "CSS", "escape", |cx, _w| {
+        need_args(cx, 1, "escape", "CSS")?;
+        let s = cx.arg_string(0)?;
+        cx.ret(css_escape(&s))
+    });
+}
+
+/// Chrome 153 `CSS.supports` positives we do not parse as longhands yet.
+/// Turnstile soft-pass FO includes these; returning false forced `/eb/`.
+fn chrome_supports_extra(prop: &str, value: &str) -> bool {
+    let p = prop.trim().to_ascii_lowercase();
+    let v = value.trim().to_ascii_lowercase();
+    if v.is_empty() {
+        return false;
+    }
+    match p.as_str() {
+        "color" => {
+            v.contains("color-mix(")
+                || v.starts_with("oklch(")
+                || v.starts_with("oklab(")
+                || v.starts_with("lab(")
+                || v.starts_with("lch(")
+        }
+        "container-type" => matches!(v.as_str(), "size" | "inline-size" | "normal"),
+        "accent-color"
+        | "appearance"
+        | "color-scheme"
+        | "content-visibility"
+        | "font-palette"
+        | "hyphens"
+        | "user-select"
+        | "touch-action"
+        | "paint-order"
+        | "mix-blend-mode"
+        | "isolation"
+        | "will-change"
+        | "overscroll-behavior"
+        | "scroll-snap-type"
+        | "text-wrap"
+        | "translate"
+        | "rotate"
+        | "scale"
+        | "view-timeline-name"
+        | "animation-timeline"
+        | "anchor-name"
+        | "position-anchor"
+        | "backdrop-filter"
+        | "mask-image"
+        | "clip-path"
+        | "offset-path"
+        | "-webkit-line-clamp"
+        | "-webkit-text-stroke" => true,
+        "background" => v.contains("conic-gradient("),
+        "font-size" => v.ends_with("lh") || v.ends_with("rlh"),
+        "width" | "height" => {
+            v.ends_with("cqw")
+                || v.ends_with("cqh")
+                || v.ends_with("cqi")
+                || v.ends_with("cqb")
+                || v.ends_with("cqmin")
+                || v.ends_with("cqmax")
+        }
+        "grid-template-columns" | "grid-template-rows" => v.contains("subgrid"),
+        _ => false,
+    }
+}
+
+fn chrome_supports_condition(cond: &str) -> bool {
+    let c = cond.trim();
+    // `(color: color-mix(...))` / `(container-type: inline-size)`
+    if let Some(inner) = c.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+        && let Some((p, v)) = inner.split_once(':')
+    {
+        return chrome_supports_extra(p.trim(), v.trim());
+    }
+    if let Some(rest) = c.strip_prefix("color:") {
+        return chrome_supports_extra("color", rest.trim());
+    }
+    false
+}
+
+/// `CSS.escape` (CSSOM): escape `ident` for use as a CSS identifier.
+fn css_escape(ident: &str) -> String {
+    let mut out = String::with_capacity(ident.len());
+    for (i, ch) in ident.chars().enumerate() {
+        let n = ch as u32;
+        if n == 0 {
+            out.push_str("\\u0000");
+            continue;
+        }
+        if (1..=0x1f).contains(&n) || n == 0x7f {
+            out.push('\\');
+            out.push_str(&format!("{n:x}"));
+            out.push(' ');
+            continue;
+        }
+        if i == 0 && ch.is_ascii_digit() {
+            out.push('\\');
+            out.push_str(&format!("{n:x}"));
+            out.push(' ');
+            continue;
+        }
+        if i == 1 && ch.is_ascii_digit() && ident.starts_with('-') {
+            out.push('\\');
+            out.push_str(&format!("{n:x}"));
+            out.push(' ');
+            continue;
+        }
+        if ch == '-' || ch == '_' || ch.is_ascii_alphanumeric() || n >= 0x80 {
+            out.push(ch);
+            continue;
+        }
+        out.push('\\');
+        out.push(ch);
+    }
+    out
 }

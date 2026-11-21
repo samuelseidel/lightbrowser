@@ -418,6 +418,8 @@ pub(super) fn spec_digest(spec: &InterfaceSpec) -> u64 {
     h.u32(spec.length);
     h.flag(spec.to_string_tag);
     h.flag(spec.immutable_proto);
+    h.flag(spec.undetectable);
+    h.flag(spec.call_as_function.is_some());
     h.u32(spec.prototype_from.map_or(u32::MAX, |p| p.0));
     for list in [&spec.statics, &spec.prototype, &spec.instance] {
         h.u32(list.len() as u32);
@@ -432,6 +434,7 @@ pub(super) fn spec_digest(spec: &InterfaceSpec) -> u64 {
     h.flag(spec.indexed_getter.is_some());
     h.flag(spec.indexed_length.is_some());
     h.flag(spec.named_unenumerable);
+    h.flag(spec.named_non_masking);
     h.u32(spec.reorder_last.len() as u32);
     for k in &spec.reorder_last {
         hash_key(&mut h, k);
@@ -459,6 +462,9 @@ fn push_spec_callbacks(st: &mut State, spec: InterfaceSpec) {
         .chain(&spec.instance)
     {
         push_member_callbacks(st, m);
+    }
+    if let Some(f) = spec.call_as_function {
+        st.push_callback(Callback::Fn(f));
     }
     if let Some(getter) = spec.named_getter {
         st.push_callback(Callback::Named(getter));
@@ -672,6 +678,10 @@ impl Engine {
             )
         };
         drop(persona);
+        // V8 tasks queued for this isolate go before it does (see
+        // `Engine::drop`), and again after `CreateBlob` disposed it.
+        let key = super::isolate_key(&isolate);
+        super::tasks::remove(key);
         // SAFETY: the SnapshotCreator exits and disposes the isolate once
         // when the blob is created, so it must be entered (once) then.
         unsafe { isolate.enter() };
@@ -699,7 +709,12 @@ impl Engine {
             })
         });
         let (meta, blob) = match result {
-            Ok(meta) => (meta, isolate.create_blob(v8::FunctionCodeHandling::Clear)),
+            Ok(meta) => {
+                let blob = isolate.create_blob(v8::FunctionCodeHandling::Clear);
+                // Still under `setup` (the creator holds ISOLATE_SETUP).
+                super::tasks::remove(key);
+                (meta, blob)
+            }
             Err(e) => {
                 // V8 only lets a creator go through `CreateBlob`: leak it,
                 // and keep counting it as alive.

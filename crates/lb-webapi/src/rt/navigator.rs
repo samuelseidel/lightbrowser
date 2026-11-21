@@ -816,6 +816,15 @@ fn persona_state(w: &Window, name: &str, default: &str) -> String {
     if let Some(s) = w.permission_override(key) {
         return s;
     }
+    // Cross-origin iframes without `allow=notifications` report denied
+    // (Chrome / Turnstile challenge frames). Leaving `default`/`prompt`
+    // here bloated the first FO fingerprint and forced `/eb/`.
+    if key == "notifications"
+        && let Some(p) = super::frames::parent(w)
+        && !super::frames::same_origin(w, &p)
+    {
+        return "denied".into();
+    }
     profile(w)
         .and_then(|p| p.permissions.get(key))
         .filter(|s| matches!(s.as_str(), "granted" | "denied" | "prompt"))
@@ -1386,6 +1395,32 @@ fn register_speech(reg: &mut Registry, rt: &Runtime) {
     }
     method(reg, rt, "SpeechSynthesis", "getVoices", |cx, w| {
         check(cx, w)?;
+        let st = w.nav_state.borrow();
+        if !st.voices_ready.get() {
+            if !st.voices_scheduled.get() {
+                st.voices_scheduled.set(true);
+                drop(st);
+                let speech_id = w.cached_obj((0, 0, "nav:speech", String::new()), || {
+                    Obj::Nav(Box::new(NavObj::Speech))
+                });
+                w.queue_task(
+                    super::TaskSource::DomManipulation,
+                    Box::new(move |js, w| {
+                        w.nav_state.borrow().voices_ready.set(true);
+                        super::fire_event(
+                            js,
+                            w,
+                            HostRef::new(super::K_OBJ, speech_id),
+                            "voiceschanged",
+                            false,
+                            false,
+                        );
+                    }),
+                );
+            }
+            return cx.ret(Arg::Array(Vec::new()));
+        }
+        drop(st);
         let list: Vec<Arg> = (0..voice_count(w).min(u16::MAX as usize))
             .map(|i| single(w, "nav:voice", i as u32, || NavObj::Voice(i as u16)))
             .collect();
@@ -1561,27 +1596,62 @@ const TIMING_FIELDS: [&str; 21] = [
 ];
 
 /// Legacy `performance.timing` value of `field` (ms since the epoch, 0
-/// when not reached). The window starts at commit; the fetch before it
-/// is placed in the first few milliseconds (a fast local load).
+/// when not reached). Network phase marks are scaled off `dcl_ms` so
+/// Navigation Timing matches Chrome's FO shape (fetch ≪ responseStart ≪
+/// DOMContentLoaded), not a 1–4 ms stub.
 fn timing_value(w: &Window, field: &str) -> f64 {
     let nav = w.clock.time_origin.floor();
     let li = w.load_info.borrow().clone();
     let at = |ms: Option<f64>| ms.map_or(0.0, |m| (w.clock.time_origin + m).floor());
     let https = w.url().scheme() == "https";
+    let dcl = li.dcl_ms.unwrap_or(100.0).max(20.0);
     match field {
         "navigationStart" => nav,
-        "fetchStart" | "domainLookupStart" | "domainLookupEnd" | "connectStart" => nav + 1.0,
-        "connectEnd" => nav + 1.0,
-        "secureConnectionStart" if https => nav + 1.0,
-        "requestStart" => nav + 2.0,
-        "responseStart" => nav + 3.0,
-        "responseEnd" | "domLoading" => nav + 4.0,
+        "fetchStart" | "domainLookupStart" | "domainLookupEnd" => nav + 1.0,
+        "connectStart" => nav + 2.0,
+        "secureConnectionStart" if https => nav + 2.0,
+        "connectEnd" | "requestStart" => nav + (dcl * 0.15).round().max(3.0),
+        "responseStart" => nav + (dcl * 0.55).round().max(5.0),
+        "responseEnd" | "domLoading" => nav + (dcl * 0.90).round().max(8.0),
         "domInteractive" | "domContentLoadedEventStart" | "domContentLoadedEventEnd" => {
             at(li.dcl_ms)
         }
         "domComplete" | "loadEventStart" | "loadEventEnd" => at(li.load_ms),
         _ => 0.0,
     }
+}
+
+/// `PerformanceNavigationTiming` / resource high-res times (ms since
+/// `timeOrigin`), from the same commit clock as `performance.timing`.
+fn nav_entry_rel(w: &Window, field: &str) -> f64 {
+    let abs = timing_value(w, field);
+    if abs == 0.0 {
+        return 0.0;
+    }
+    (abs - w.clock.time_origin.floor()).max(0.0)
+}
+
+/// Document transfer sizes for the navigation entry (from `LoadInfo`,
+/// filled at commit). Chrome's challenge FO reports ~200KB transfer;
+/// zeros were a fingerprint delta that forced `/eb/`.
+fn nav_body_sizes(w: &Window) -> (f64, f64, f64) {
+    let li = w.load_info.borrow();
+    let decoded = li
+        .decoded_body_size
+        .map(|n| n as f64)
+        .filter(|&n| n > 0.0)
+        .unwrap_or_else(|| w.content().len() as f64);
+    if decoded <= 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
+    let encoded = li
+        .encoded_body_size
+        .map(|n| n as f64)
+        .filter(|&n| n > 0.0)
+        .unwrap_or_else(|| (decoded / 3.0).round().max(1.0));
+    // Chrome: transferSize = encodedBodySize + response header overhead.
+    let transfer = encoded + 300.0;
+    (transfer, encoded, decoded)
 }
 
 fn register_timing(reg: &mut Registry, rt: &Runtime) {
@@ -1599,6 +1669,189 @@ fn register_timing(reg: &mut Registry, rt: &Runtime) {
             cx.ret(timing_value(w, field))
         });
     }
+    // NavTiming-only high-res fields (not on ResourceTiming).
+    for field in [
+        "unloadEventStart",
+        "unloadEventEnd",
+        "domInteractive",
+        "domContentLoadedEventStart",
+        "domContentLoadedEventEnd",
+        "domComplete",
+        "loadEventStart",
+        "loadEventEnd",
+        "activationStart",
+    ] {
+        getter(
+            reg,
+            rt,
+            "PerformanceNavigationTiming",
+            field,
+            move |cx, w| {
+                let id = this_obj(cx)?;
+                w.with_obj(id, |o| {
+                    matches!(
+                        o,
+                        Obj::PerfEntry {
+                            entry_type: "navigation",
+                            ..
+                        }
+                    )
+                })
+                .ok_or_else(illegal)?;
+                cx.ret(nav_entry_rel(w, field))
+            },
+        );
+    }
+    // ResourceTiming high-res fields (NavTiming inherits these). Stubs left
+    // fetchStart/responseStart/… at 0 while Chrome's FO reports real ms.
+    for field in [
+        "fetchStart",
+        "domainLookupStart",
+        "domainLookupEnd",
+        "connectStart",
+        "connectEnd",
+        "secureConnectionStart",
+        "requestStart",
+        "responseStart",
+        "responseEnd",
+        "workerStart",
+        "redirectStart",
+        "redirectEnd",
+    ] {
+        getter(reg, rt, "PerformanceResourceTiming", field, move |cx, w| {
+            let id = this_obj(cx)?;
+            let kind = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { entry_type, .. } => Some(*entry_type),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            if kind == "navigation" {
+                cx.ret(nav_entry_rel(w, field))
+            } else {
+                cx.ret(0)
+            }
+        });
+    }
+    getter(reg, rt, "PerformanceNavigationTiming", "type", |cx, w| {
+        let id = this_obj(cx)?;
+        w.with_obj(id, |o| {
+            matches!(
+                o,
+                Obj::PerfEntry {
+                    entry_type: "navigation",
+                    ..
+                }
+            )
+        })
+        .ok_or_else(illegal)?;
+        let t = match w.load_info.borrow().navigation_type.as_deref() {
+            Some("Reload") => "reload",
+            Some("BackForward") => "back_forward",
+            _ => "navigate",
+        };
+        cx.ret(t)
+    });
+    getter(
+        reg,
+        rt,
+        "PerformanceNavigationTiming",
+        "redirectCount",
+        |cx, w| {
+            let id = this_obj(cx)?;
+            w.with_obj(id, |o| {
+                matches!(
+                    o,
+                    Obj::PerfEntry {
+                        entry_type: "navigation",
+                        ..
+                    }
+                )
+            })
+            .ok_or_else(illegal)?;
+            cx.ret(0)
+        },
+    );
+    // transferSize / encodedBodySize / decodedBodySize / nextHopProtocol /
+    // initiatorType live on PerformanceResourceTiming in Blink's prototype
+    // chain (NavTiming inherits them). Registering only on NavTiming left
+    // the ResourceTiming stubs at 0 / "" — visible in Turnstile's FO.
+    for (name, which) in [
+        ("transferSize", 0usize),
+        ("encodedBodySize", 1),
+        ("decodedBodySize", 2),
+    ] {
+        getter(reg, rt, "PerformanceResourceTiming", name, move |cx, w| {
+            let id = this_obj(cx)?;
+            let kind = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { entry_type, .. } => Some(*entry_type),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            if kind == "navigation" {
+                let (t, e, d) = nav_body_sizes(w);
+                cx.ret([t, e, d][which])
+            } else {
+                cx.ret(0)
+            }
+        });
+    }
+    getter(
+        reg,
+        rt,
+        "PerformanceResourceTiming",
+        "nextHopProtocol",
+        |cx, w| {
+            let id = this_obj(cx)?;
+            let kind = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { entry_type, .. } => Some(*entry_type),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            if kind != "navigation" {
+                return cx.ret("");
+            }
+            let p = w
+                .load_info
+                .borrow()
+                .connection_info
+                .clone()
+                .unwrap_or_else(|| {
+                    if w.url().scheme() == "https" {
+                        "h2".into()
+                    } else {
+                        "http/1.1".into()
+                    }
+                });
+            cx.ret(p)
+        },
+    );
+    getter(
+        reg,
+        rt,
+        "PerformanceResourceTiming",
+        "initiatorType",
+        |cx, w| {
+            let id = this_obj(cx)?;
+            let kind = w
+                .with_obj(id, |o| match o {
+                    Obj::PerfEntry { entry_type, .. } => Some(*entry_type),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or_else(illegal)?;
+            cx.ret(if kind == "navigation" {
+                "navigation"
+            } else {
+                ""
+            })
+        },
+    );
     method(reg, rt, "PerformanceTiming", "toJSON", |cx, w| {
         this_nav(cx, w, |o| matches!(o, NavObj::Timing).then_some(()))?;
         let body: Vec<String> = TIMING_FIELDS
@@ -1735,6 +1988,12 @@ pub(crate) struct NavState {
     pub ice_events: std::collections::HashMap<u32, Option<u32>>,
     /// `performance.memory` support of each main-world realm.
     pub memory: std::collections::HashMap<lb_js::RealmId, MemoryProto>,
+    /// Chrome's `speechSynthesis.getVoices()` is empty until the engine
+    /// loads voices and fires `voiceschanged`. Eager persona voices on the
+    /// first call were visible in Turnstile's first FO (22 vs Chrome's 0).
+    pub voices_ready: std::cell::Cell<bool>,
+    /// A `voiceschanged` task was already queued for this window.
+    pub voices_scheduled: std::cell::Cell<bool>,
 }
 
 /// Capture the realm's intrinsic `Promise` and `Promise.resolve` (before

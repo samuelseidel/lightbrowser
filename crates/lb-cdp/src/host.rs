@@ -310,19 +310,52 @@ pub struct HostEvent {
 /// Where a host sends [`HostEvent`]s. Cheap to clone; `Send`.
 #[derive(Clone, Debug)]
 pub struct EventSink {
-    pub(crate) tx: mpsc::UnboundedSender<crate::server::Outgoing>,
+    inner: EventSinkInner,
+}
+
+#[derive(Clone, Debug)]
+enum EventSinkInner {
+    /// The CDP server's outgoing queue.
+    Server(mpsc::UnboundedSender<crate::server::Outgoing>),
+    /// Direct delivery for host tests without a WebSocket server.
+    Direct(mpsc::UnboundedSender<HostEvent>),
 }
 
 impl EventSink {
+    /// Sink used by the CDP server (wraps events in its outgoing queue).
+    pub(crate) fn for_server(tx: mpsc::UnboundedSender<crate::server::Outgoing>) -> Self {
+        EventSink {
+            inner: EventSinkInner::Server(tx),
+        }
+    }
+
+    /// Sink for host unit tests: each event is pushed to the returned
+    /// receiver (no WebSocket server).
+    pub fn channel() -> (Self, mpsc::UnboundedReceiver<HostEvent>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            EventSink {
+                inner: EventSinkInner::Direct(tx),
+            },
+            rx,
+        )
+    }
+
     /// Reports `event` for page `target_id`. Dropped silently once the
     /// server has stopped.
     pub fn emit(&self, target_id: &str, event: PageEvent) {
-        let _ = self
-            .tx
-            .send(crate::server::Outgoing::Host(Box::new(HostEvent {
-                target_id: target_id.to_string(),
-                event,
-            })));
+        let ev = HostEvent {
+            target_id: target_id.to_string(),
+            event,
+        };
+        match &self.inner {
+            EventSinkInner::Server(tx) => {
+                let _ = tx.send(crate::server::Outgoing::Host(Box::new(ev)));
+            }
+            EventSinkInner::Direct(tx) => {
+                let _ = tx.send(ev);
+            }
+        }
     }
 }
 
@@ -582,6 +615,10 @@ pub trait PageHost {
     }
 
     // ---- DOM ----
+
+    fn get_frame_owner(&self, _target_id: &str, _frame_id: &str) -> HostResult<BackendNodeId> {
+        Err(HostError::unsupported("DOM.getFrameOwner"))
+    }
 
     /// The document node with `depth` levels of children (`-1` = all).
     fn get_document(&self, _target_id: &str, _depth: i32, _pierce: bool) -> HostResult<DomNode> {

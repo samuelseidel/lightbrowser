@@ -28,9 +28,10 @@
 //!   origin and secure-context state.
 //!
 //! Gaps: nodes of one frame passed to another frame's DOM methods are not
-//! supported (host refs are per window); no named frame access
-//! (`window.frameName`); `<frame>`, `<object>` and `<embed>` get no
-//! browsing context; `sandbox` is ignored.
+//! supported (host refs are per window); `<frame>`, `<object>` and
+//! `<embed>` get no browsing context; `sandbox` is ignored. Named access
+//! on `window` (`window[id]`, `window.frameName`) follows the HTML living
+//! standard: child browsing context names first, then named elements.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -39,6 +40,7 @@ use lb_dom::{Document, Mutation, NodeId, local_name, ns};
 use lb_js::{Arg, CallCtx, Handle, HostError, JsError, JsValue, RealmOps};
 use url::Url;
 
+use super::coll::{self, Filter};
 use super::events::{EventExtra, fire_event, fire_event_with};
 use super::{
     K_NODE, Runtime, TaskSource, WINDOW_REF, Window, WindowInit, getter, method, need_args,
@@ -212,6 +214,72 @@ pub fn same_origin(a: &Window, b: &Window) -> bool {
     std::ptr::eq(a, b) || origin(a) == origin(b)
 }
 
+/// Match a child frame's layout viewport to its `<iframe>` content box.
+/// Turnstile's challenge iframes are 1×1 (or 0×0); without this, children
+/// keep the parent's viewport and soft-pass fingerprints fail.
+pub fn sync_viewport(w: &Window) {
+    let Some(parent) = parent(w) else {
+        return;
+    };
+    let Some(el) = frame_element(w) else {
+        return;
+    };
+    let from_box = parent.with_layout(0, |l, d| l.box_model(d, el).map(|m| m.content));
+    let declared = iframe_declared_size(&parent, el);
+    let (mut width, mut height) = if let Some(content) = from_box {
+        (content.width.max(0.0), content.height.max(0.0))
+    } else {
+        // Layout sometimes cannot box-model a fixed/opacity iframe yet.
+        declared.unwrap_or((0.0, 0.0))
+    };
+    // Prefer an explicit tiny CSS/attr size when layout reports the
+    // parent's full viewport (seen on Turnstile's position:fixed 1×1
+    // frames before the cascade settles).
+    if let Some((dw, dh)) = declared
+        && dw <= 5.0
+        && dh <= 5.0
+        && (width > 100.0 || height > 100.0)
+    {
+        width = dw;
+        height = dh;
+    }
+    w.with_layout_engine(|l, _| {
+        l.set_viewport(width, height);
+    });
+}
+
+/// `width`/`height` attributes or `style="width:Npx;height:Mpx"` on an iframe.
+fn iframe_declared_size(parent: &Window, el: NodeId) -> Option<(f32, f32)> {
+    parent.with_doc(|d| {
+        let parse_px = |s: &str| -> Option<f32> {
+            let s = s.trim();
+            if s.is_empty() {
+                return None;
+            }
+            if let Some(n) = s.strip_suffix("px") {
+                return n.trim().parse().ok();
+            }
+            s.parse().ok()
+        };
+        let mut w = d.get_attribute(el, "width").and_then(parse_px);
+        let mut h = d.get_attribute(el, "height").and_then(parse_px);
+        if let Some(style) = d.get_attribute(el, "style") {
+            for part in style.split(';') {
+                let part = part.trim();
+                if let Some(v) = part.strip_prefix("width:") {
+                    w = parse_px(v).or(w);
+                } else if let Some(v) = part.strip_prefix("height:") {
+                    h = parse_px(v).or(h);
+                }
+            }
+        }
+        match (w, h) {
+            (Some(w), Some(h)) => Some((w, h)),
+            _ => None,
+        }
+    })
+}
+
 /// A [`WindowInit`] for a new document in a frame of `parent`: same
 /// persona, network, clock mode and wake-up as the parent, the parent's
 /// storage areas (replace them for another origin).
@@ -271,6 +339,7 @@ pub fn commit_child(
         }
     }
     drop_window_tree(ops, &old.window, false);
+    sync_viewport(new);
     if let Some(h) = hooks(parent) {
         h.committed(ops, new, false);
     }
@@ -363,7 +432,14 @@ pub(crate) fn on_mutations(js: &mut dyn super::Js, w: &Rc<Window>, batch: &[(u32
                     if !d.is_connected(*node) {
                         continue;
                     }
-                    for n in d.inclusive_descendants(*node) {
+                    // Cross into shadow trees: Turnstile (and others) build
+                    // the <iframe> inside a closed shadow root on a host that
+                    // is only connected afterwards; light-tree descendants
+                    // alone would miss it. Include `node` itself (the helper
+                    // excludes the root).
+                    let mut nodes = vec![*node];
+                    nodes.extend(d.shadow_including_descendants(*node));
+                    for n in nodes {
                         if is_iframe(d, n) && !attach.contains(&n) {
                             attach.push(n);
                         }
@@ -414,6 +490,10 @@ pub(crate) fn on_mutations(js: &mut dyn super::Js, w: &Rc<Window>, batch: &[(u32
                     fire_event(js, w, w.node_ref(0, el), "load", false, false);
                 }
             }
+        } else if w.with_doc(|d| d.is_connected(el)) {
+            // `src` was set before the browsing context existed (common when
+            // the iframe is built inside a not-yet-connected shadow tree).
+            attach_iframe(js, w, el);
         }
     }
 }
@@ -491,6 +571,7 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
         id,
         window: child.clone(),
     });
+    sync_viewport(&child);
     if let Some(h) = hooks(parent) {
         h.committed(ops, &child, true);
     }
@@ -605,6 +686,11 @@ const CROSS_ORIGIN_OK: &[&str] = &[
     "then",
 ];
 
+/// Cross-origin methods: returned bound to the real Window. The stand-in is
+/// a JS `Proxy`, so an unbound IDL method's V8 Signature would see the Proxy
+/// as `this` and throw `Illegal invocation` (Turnstile's `parent.postMessage`).
+const CROSS_ORIGIN_METHODS: &[&str] = &["close", "focus", "blur", "postMessage"];
+
 /// A stand-in for cross-origin window `w` in `from`'s realm: a native
 /// `Proxy` whose traps forward the allowed members and throw Chrome's
 /// `SecurityError` for everything else. Built once per pair.
@@ -645,6 +731,21 @@ fn remote_window(
             "closed" => cx.ret(w.is_closed()),
             "length" => cx.ret(w.frames.children.borrow().len() as u32),
             "location" => Err(b(&rt, "location")),
+            key if CROSS_ORIGIN_METHODS.contains(&key) => {
+                let method = RealmOps::get_property(cx, w.realm(), g, key).map_err(js_err)?;
+                let bind = RealmOps::get_property(cx, w.realm(), method, "bind").map_err(js_err)?;
+                let bound = RealmOps::call_handle(
+                    cx,
+                    w.realm(),
+                    bind,
+                    Arg::Handle(method),
+                    &[Arg::Handle(g)],
+                )
+                .map_err(js_err)?;
+                RealmOps::release(cx, bind);
+                RealmOps::release(cx, method);
+                cx.ret(Arg::Handle(bound))
+            }
             _ => {
                 let v = RealmOps::get_property(cx, w.realm(), g, &key).map_err(js_err)?;
                 cx.ret(Arg::Handle(v))
@@ -808,6 +909,70 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         }),
     );
 
+    // HTML named access on the Window object (`window[id]`, bare ids in
+    // classic scripts, `window.frameName`). NON_MASKING so IDL members
+    // (`document`, …) win over an element with that id.
+    let r = rt.clone();
+    reg.named_getter(
+        "Window",
+        Rc::new(move |px: &mut lb_js::PropCtx<'_, '_, '_>, name: &str| {
+            if name.is_empty() {
+                return Ok(None);
+            }
+            let realm = px.holder_realm();
+            let Some(w) = r.window(realm) else {
+                return Ok(None);
+            };
+            // 1) Child browsing context with this name (first in attach order).
+            // Prefer `window.name`; also accept the `<iframe name>` attribute
+            // when the browsing-context name was not copied yet (srcdoc /
+            // navigations).
+            if let Some(c) = w
+                .frames
+                .children
+                .borrow()
+                .iter()
+                .find(|c| {
+                    window_name(&c.window) == name
+                        || w.with_doc(|d| d.get_attribute(c.element, "name") == Some(name))
+                })
+                .cloned()
+            {
+                if let Some(from) = r.window(px.realm())
+                    && !same_origin(&from, &c.window)
+                    && let Some((_, h)) = c
+                        .window
+                        .frames
+                        .remote
+                        .borrow()
+                        .iter()
+                        .find(|(rr, _)| *rr == from.realm())
+                {
+                    return Ok(Some(Arg::Handle(*h)));
+                }
+                return Ok(c.window.frames.global.get().map(Arg::Handle));
+            }
+            // 2–3) Named elements: embed/form/img/object `name`, any HTML `id`.
+            let els = w.doc_slot(0, |d| {
+                coll::window_named_elements(d, Document::DOCUMENT, name)
+            });
+            match els.as_slice() {
+                [] => Ok(None),
+                [n] => Ok(Some(w.node_arg(0, *n))),
+                _ => {
+                    let id = coll::collection(
+                        &w,
+                        0,
+                        Document::DOCUMENT,
+                        Filter::WindowNamed(name.to_owned()),
+                    );
+                    Ok(Some(w.obj_arg(id)))
+                }
+            }
+        }),
+    );
+    reg.named_non_masking("Window");
+
     let r = rt.clone();
     method(reg, rt, "Window", "postMessage", move |cx, target| {
         need_args(cx, 1, "postMessage", "Window")?;
@@ -877,7 +1042,13 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 None => Some(None),
             }
         };
-        let src_global = global_handle(cx, &source)?;
+        // `MessageEvent.source` must be the sender as the recipient sees it
+        // (`iframe.contentWindow`), including the cross-origin Proxy stand-in.
+        // The raw sender global fails Turnstile's `event.source === contentWindow`.
+        let src_seen = match window_for(cx, target, &source)? {
+            Arg::Handle(h) => h,
+            _ => global_handle(cx, &source)?,
+        };
         target.queue_task(
             TaskSource::PostedMessage,
             Box::new(move |js, w| {
@@ -901,7 +1072,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                     EventExtra::Message {
                         data,
                         origin: src_origin,
-                        source: Some(src_global),
+                        source: Some(src_seen),
                         ports: None,
                     },
                 );

@@ -317,6 +317,28 @@ pub(crate) async fn navigate_committed(
             history_len: page.history_len(),
         },
     );
+    {
+        let mut li = w.load_info.borrow_mut();
+        // `resp.body` is already Content-Encoding-decoded. Chrome's
+        // Navigation Timing reports the wire size as encodedBodySize;
+        // Turnstile fingerprints the pair. Approximate brotli/gzip as ~34%
+        // of decoded (Chrome challenge FO ~215KB / ~635KB) until lb-net
+        // exposes the pre-decompress length.
+        let decoded = resp.body.len() as u64;
+        let encoded = if resp
+            .header("content-encoding")
+            .is_some_and(|e| !e.trim().is_empty())
+        {
+            ((decoded as f64) * 0.34).round() as u64
+        } else {
+            decoded
+        };
+        li.encoded_body_size = Some(encoded);
+        li.decoded_body_size = Some(decoded);
+        if li.connection_info.is_none() && resp.url.scheme() == "https" {
+            li.connection_info = Some("h2".into());
+        }
+    }
     w.set_console_sink(Some(page.console_sink()));
     w.set_opened_parser_end(Some(opened_parser_end(&ws, &page, Doc::Main(seq))));
     w.set_dialog_host(Some(page.dialog_host()));

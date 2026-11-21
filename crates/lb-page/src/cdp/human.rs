@@ -8,8 +8,9 @@
 //!   elsewhere) and `behavior.seed` (default: a hash of the persona id and
 //!   fingerprint seeds). Call `n` on a page uses `mix_seed(seed, n)`, so the
 //!   same persona and the same calls give the same event streams.
-//! - Timing: events are dispatched at their offsets from the start of the
-//!   call with `tokio::time::sleep_until` on the page's worker, which keeps
+//! - Timing: real-clock events preserve their planned gaps after the prior
+//!   actual dispatch, so delayed work cannot compress holds or key rhythm.
+//!   `tokio::time::sleep_until` on the page's worker keeps
 //!   serving other pages meanwhile. With virtual time the clock is advanced
 //!   to each event's time instead of sleeping.
 //! - The pointer position persists per page (across navigations, like the
@@ -164,7 +165,7 @@ impl Human {
         ))
     }
 
-    /// Dispatch `events` at their offsets from now.
+    /// Dispatch `events` with their planned gaps between actual dispatches.
     async fn replay(&self, events: &[InputEvent]) -> HostResult<()> {
         let start_pointer = self.pointer()?;
         let cmds = events_to_cdp_with(
@@ -176,12 +177,14 @@ impl Human {
         let w = self.window()?;
         let virtual_time = w.clock.is_virtual();
         let (origin, base) = (w.clock.time_origin, w.clock.now());
-        let start = tokio::time::Instant::now();
+        let mut dispatched = tokio::time::Instant::now();
+        let mut previous_offset = 0;
         for c in cmds {
             let ts = if virtual_time {
                 Some((origin + base + c.offset_ms as f64) / 1000.0)
             } else {
-                tokio::time::sleep_until(start + Duration::from_millis(c.offset_ms)).await;
+                let gap = Duration::from_millis(c.offset_ms.saturating_sub(previous_offset));
+                tokio::time::sleep_until(dispatched + gap).await;
                 None
             };
             let params = c.command.params();
@@ -199,6 +202,8 @@ impl Human {
                 }
                 CdpInputCommand::InsertText(t) => super::input::text(&self.ws, &self.p, &t.text)?,
             }
+            dispatched = tokio::time::Instant::now();
+            previous_offset = c.offset_ms;
         }
         Ok(())
     }

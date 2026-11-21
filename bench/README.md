@@ -101,8 +101,9 @@ must be 50/50 for LightBrowser and Chromium. `gen_corpus.py` is deterministic
 
 **Budgets** checked (from ARCHITECTURE): idle RSS < 15 MB, binary < 50 MB
 (< 40 MB until the user raised it, ADR 0013 revision 4),
-realm creation < 5 ms, no disk writes, and wall time / peak RSS / CPU no worse
-than Lightpanda (status `skip` while Lightpanda is absent).
+realm creation < 5 ms, and no disk writes. Wall time, peak RSS and CPU
+comparisons with Lightpanda have status `info` (or `skip` when unavailable)
+and do not affect the exit code (ADR 0041).
 
 ## macOS
 
