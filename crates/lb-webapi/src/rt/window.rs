@@ -149,10 +149,7 @@ fn console_call(
     // A format string rewrites the text, so the typed list is omitted.
     let arguments = primitive_arguments(cx, start);
     let formats = !matches!(name, "dir" | "dirxml" | "table");
-    let text = substitute(
-        &parts,
-        formats && cx.arg_kind(start) == ValueKind::String,
-    );
+    let text = substitute(&parts, formats && cx.arg_kind(start) == ValueKind::String);
     let text = match (prefix.is_empty(), text.is_empty()) {
         (true, _) => text,
         (false, true) => prefix.to_owned(),
@@ -180,10 +177,7 @@ fn console_call(
 
 /// Primitive console arguments, when every argument from `start` is one.
 /// `None` when a leading format string will rewrite the message.
-fn primitive_arguments(
-    cx: &mut CallCtx<'_, '_, '_>,
-    start: usize,
-) -> Option<Vec<ConsoleArgument>> {
+fn primitive_arguments(cx: &mut CallCtx<'_, '_, '_>, start: usize) -> Option<Vec<ConsoleArgument>> {
     if cx.arg_kind(start) == ValueKind::String
         && cx.arg_string(start).unwrap_or_default().contains('%')
     {
@@ -247,11 +241,10 @@ fn substitute(parts: &[String], format: bool) -> String {
                     chars.next();
                     if let Some(a) = rest.next() {
                         match k {
-                            'd' | 'i' => {
-                                out.push_str(&a.parse::<f64>().map_or("NaN".to_owned(), |f| {
-                                    (f.trunc() as i64).to_string()
-                                }))
-                            }
+                            'd' | 'i' => out.push_str(
+                                &a.parse::<f64>()
+                                    .map_or("NaN".to_owned(), |f| (f.trunc() as i64).to_string()),
+                            ),
                             _ => out.push_str(a),
                         }
                     }
@@ -788,7 +781,6 @@ fn same_document_fragment(w: &Window, url: &Url) -> bool {
     b.set_fragment(None);
     a == b
 }
-
 
 /// `(screenX, screenY)`: the persona's `window_position()` (Wayland 0,0;
 /// else `screen.window_x/y` or the work-area origin).
