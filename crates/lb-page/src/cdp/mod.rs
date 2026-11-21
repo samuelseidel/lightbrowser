@@ -682,23 +682,6 @@ impl PageHost for CdpHost {
         })
     }
 
-    fn frame_owner(&self, target_id: &str, frame_id: &str) -> HostResult<BackendNodeId> {
-        let frame = frame_id.to_string();
-        self.blocking(target_id, move |_, agent, top| {
-            if frame == agent.target {
-                return Err(HostError::new(
-                    "Frame with the given id does not belong to the target.",
-                ));
-            }
-            let not_found = || HostError::new("Frame with the given id was not found.");
-            let id = agent.frame_of(&frame).ok_or_else(not_found)?;
-            let w = lb_webapi::rt::frames::find(top, id).ok_or_else(not_found)?;
-            let n = lb_webapi::rt::frames::frame_element(&w).ok_or_else(not_found)?;
-            let parent = lb_webapi::rt::frames::parent(&w).ok_or_else(not_found)?;
-            Ok(agent::backend_id(parent.doc_key(0), n))
-        })
-    }
-
     fn heap_usage(&self, target_id: &str) -> HostResult<(f64, f64)> {
         let page = self.page(target_id)?;
         page.call_blocking(BLOCK, |ws, _| {

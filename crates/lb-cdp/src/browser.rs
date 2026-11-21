@@ -2207,11 +2207,6 @@ fn dom_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError>
                 Ok(json!({ "nodeIds": host.query_selector_all(&t, node, sel).map_err(host_err)? }))
             }
         }
-        "DOM.getFrameOwner" => {
-            let frame = str_param(c.p, "frameId")?;
-            let id = host.frame_owner(&t, frame).map_err(host_err)?;
-            Ok(json!({ "backendNodeId": id }))
-        }
         "DOM.getOuterHTML" => {
             Ok(json!({ "outerHTML": host.outer_html(&t, &c.node_ref()?).map_err(host_err)? }))
         }

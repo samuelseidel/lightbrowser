@@ -8,7 +8,6 @@
 //! scale factor 1) keep the persona's screen and ratio (ADR 0009, revision
 //! 2).
 
-use lb_css::MediaEnv;
 use lb_persona::{BrowserFamily, PersonaProfile};
 use serde::Deserialize;
 use serde_json::Value;
@@ -455,6 +454,7 @@ pub fn parse_emulated_media(m: &EmulatedMedia) -> Result<lb_css::MediaOverrides,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lb_css::MediaEnv;
     use serde_json::json;
 
     fn persona() -> PersonaProfile {

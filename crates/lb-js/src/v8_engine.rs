@@ -4545,8 +4545,8 @@ fn apply_overflow_with<'s>(
         }
     };
     let reorder = reorder_last && !o.last.is_empty();
-    for i in 0..o.items.len() {
-        if !(reorder && o.deferred[i]) {
+    for (i, deferred) in o.deferred.iter().enumerate().take(o.items.len()) {
+        if !(reorder && *deferred) {
             define(scope, i);
         }
     }

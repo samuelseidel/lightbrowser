@@ -1144,8 +1144,9 @@ pub struct Window {
     /// Exceptions listeners threw (IndexedDB aborts a transaction whose
     /// request event handler threw).
     pub(crate) uncaught: Cell<u32>,
-    /// User Timing entries from `performance.mark` / `measure` (plus a
-    /// synthetic navigation row; paint/resource come from real activity).
+    /// User Timing entries from the pre-timeline stub. `rt/perf.rs` is the
+    /// live timeline; this list stays so the old entry objects still type-check.
+    #[allow(dead_code)]
     pub(crate) perf_entries: RefCell<Vec<u32>>,
 }
 
@@ -2338,9 +2339,12 @@ pub(crate) enum Obj {
     IntersectionObserver(Box<style::IoData>),
     /// One `IntersectionObserverEntry`.
     IntersectionObserverEntry(Box<style::IoEntry>),
-    /// `PerformanceObserver` (constructable; see `window`).
+    /// `PerformanceObserver` from the pre-timeline stub. Live observers are
+    /// `Obj::Perf` (`rt/perf.rs`).
+    #[allow(dead_code)]
     PerformanceObserver(Box<window::PoData>),
     /// `PerformanceObserverEntryList` handed to the observer callback.
+    #[allow(dead_code)]
     PerformanceObserverEntryList,
     Blob(Box<misc::BlobData>),
     /// Canvas contexts, gradients, patterns, paths, image data, metrics,
@@ -2369,6 +2373,7 @@ pub(crate) enum Obj {
     /// `navigator.storage` / `locks`, `cookieStore`, Navigation API.
     Platform(Box<platform_apis::PlatformObj>),
     /// Performance Timeline user timing (`PerformanceMark` / `PerformanceMeasure`).
+    #[allow(dead_code)]
     PerfEntry {
         entry_type: &'static str,
         name: String,

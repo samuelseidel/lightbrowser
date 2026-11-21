@@ -12,11 +12,11 @@ use url::Url;
 
 use super::events::{EventExtra, coarse_now, fire_event_with};
 use super::{
-    Dict, HistEntry, Js, K_OBJ, NavRequest, Obj, Runtime, TaskSource, TimerCallback, WINDOW_REF,
-    Window, ctor, getter, illegal, method, need_args, setter, this_obj,
+    HistEntry, Js, K_OBJ, NavRequest, Obj, Runtime, TaskSource, TimerCallback, WINDOW_REF, Window,
+    getter, illegal, method, need_args, setter, this_obj,
 };
 use crate::host::{ConsoleArgument, ConsoleMessage};
-use crate::registry::{ImplKind, Registry, host_fn};
+use crate::registry::{Registry, host_fn};
 use lb_js::Handle;
 
 /// `PerformanceObserver` host state (constructable; entry delivery lands
@@ -26,6 +26,7 @@ pub(crate) struct PoData {
     #[allow(dead_code)] // kept so the callback handle is not released
     callback: Handle,
     /// Observed entry type names (`type` / `entryTypes`).
+    #[allow(dead_code)]
     types: Vec<String>,
 }
 
@@ -1621,6 +1622,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }
 }
 
+#[allow(dead_code)] // superseded by `rt/perf.rs`; kept so the host objects still type-check
 fn push_perf(
     w: &Window,
     entry_type: &'static str,
@@ -1638,6 +1640,7 @@ fn push_perf(
     id
 }
 
+#[allow(dead_code)]
 fn clear_perf(w: &Window, entry_type: &str, name: Option<&str>) {
     w.perf_entries.borrow_mut().retain(|&id| {
         w.with_obj(id, |o| match o {
@@ -1652,6 +1655,7 @@ fn clear_perf(w: &Window, entry_type: &str, name: Option<&str>) {
     });
 }
 
+#[allow(dead_code)]
 fn find_mark_time(w: &Window, name: &str) -> Option<f64> {
     w.perf_entries.borrow().iter().rev().find_map(|&id| {
         w.with_obj(id, |o| match o {
@@ -1675,6 +1679,7 @@ fn find_mark_time(w: &Window, name: &str) -> Option<f64> {
 /// change the FO fingerprint and Cloudflare answers with `/eb/` instead of
 /// soft-pass. Paint/resource appear later from real loads (and Chrome only
 /// adds FP/FCP on the post-pass FO for 1×1 widgets, never for 0×0).
+#[allow(dead_code)]
 fn ensure_nav_paint(w: &Window) {
     let has_nav = w.perf_entries.borrow().iter().any(|&id| {
         w.with_obj(id, |o| {
