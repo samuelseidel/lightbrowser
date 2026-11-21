@@ -2,6 +2,8 @@
 //! Navigator, Storage, Performance, Screen, window geometry and the small
 //! globals (`atob`, `postMessage`, `structuredClone`, ...).
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use lb_dom::{Document, NodeFlags, NodeId, local_name};
@@ -20,9 +22,38 @@ use crate::registry::{Registry, host_fn};
 // console
 // ---------------------------------------------------------------------------
 
-/// Replace the message-producing methods of V8's `console` with native
-/// functions that log into the window. Same names, lengths and property
-/// positions as V8's own.
+/// The `console` methods Chrome's inspector handles, in V8's order. We
+/// replace V8's own (which do nothing without an inspector) with native
+/// functions of the same names, lengths and property positions.
+const CONSOLE_METHODS: [&str; 22] = [
+    "debug",
+    "error",
+    "info",
+    "log",
+    "warn",
+    "dir",
+    "dirxml",
+    "table",
+    "trace",
+    "group",
+    "groupCollapsed",
+    "groupEnd",
+    "clear",
+    "count",
+    "countReset",
+    "assert",
+    "profile",
+    "profileEnd",
+    "time",
+    "timeLog",
+    "timeEnd",
+    "timeStamp",
+];
+
+/// Replace V8's `console` methods with native functions that run exactly
+/// the page code Chrome runs for them (`CallCtx::console_args`,
+/// `CallCtx::console_label`; nothing else, whether or not a CDP client is
+/// attached) and log messages into the window.
 pub(crate) fn install_console(
     engine: &mut dyn lb_js::RealmOps,
     realm: RealmId,
@@ -30,20 +61,22 @@ pub(crate) fn install_console(
 ) -> Result<(), JsError> {
     let g = engine.global(realm)?;
     let console = engine.get_property(realm, g, "console")?;
-    for level in [
-        "debug", "error", "info", "log", "warn", "dir", "dirxml", "table", "trace", "assert",
-    ] {
+    // `console.time` labels of this realm: `timeLog` reads its other
+    // arguments only while the timer exists, as in Chrome.
+    let timers: Rc<RefCell<HashSet<String>>> = Rc::default();
+    for name in CONSOLE_METHODS {
         let rt = rt.clone();
+        let timers = timers.clone();
         let f = engine.new_function(
             realm,
-            level,
+            name,
             0,
             host_fn(move |cx| {
                 let w = rt.win(cx.realm())?;
-                console_call(cx, &w, level)
+                console_call(cx, &w, name, &timers)
             }),
         )?;
-        engine.set_property(realm, console, level, Arg::Handle(f))?;
+        engine.set_property(realm, console, name, Arg::Handle(f))?;
         engine.release(f);
     }
     engine.release(console);
@@ -54,117 +87,67 @@ pub(crate) fn install_console(
 fn console_call(
     cx: &mut CallCtx<'_, '_, '_>,
     w: &Window,
-    level: &'static str,
+    name: &'static str,
+    timers: &RefCell<HashSet<String>>,
 ) -> Result<(), HostError> {
-    let mut start = 0;
-    let mut prefix = String::new();
-    if level == "assert" {
-        if cx.arg_bool(0) {
+    let (parts, prefix, start) = match name {
+        "assert" => {
+            if cx.arg_bool(0) {
+                return Ok(());
+            }
+            (cx.console_args(1, true)?, "Assertion failed", 1)
+        }
+        // Only the label is converted; no message (yet).
+        "count" | "countReset" | "profile" | "profileEnd" | "timeStamp" => {
+            cx.console_label(0)?;
             return Ok(());
         }
-        start = 1;
-        prefix.push_str("Assertion failed");
-    }
-    let mut parts: Vec<String> = Vec::new();
-    for i in start..cx.len() {
-        parts.push(format_arg(cx, i));
-    }
-    let arguments = if level != "assert"
-        && !(cx.arg_kind(start) == ValueKind::String
-            && parts.first().is_some_and(|text| text.contains('%')))
-        && (start..cx.len()).all(|i| {
-            matches!(
-                cx.arg_kind(i),
-                ValueKind::Undefined
-                    | ValueKind::Null
-                    | ValueKind::Bool
-                    | ValueKind::Number
-                    | ValueKind::String
-                    | ValueKind::BigInt
-                    | ValueKind::Symbol
-            )
-        }) {
-        Some(
-            (start..cx.len())
-                .map(|i| {
-                    let kind = cx.arg_kind(i);
-                    let value = cx.arg_value(i);
-                    match (kind, value) {
-                        (ValueKind::BigInt, JsValue::Opaque(value)) => ConsoleArgument::BigInt(
-                            value.strip_suffix('n').unwrap_or(&value).to_owned(),
-                        ),
-                        (ValueKind::Symbol, JsValue::Opaque(value)) => ConsoleArgument::Symbol(
-                            value
-                                .strip_prefix("Symbol(")
-                                .and_then(|s| s.strip_suffix(')'))
-                                .unwrap_or(&value)
-                                .to_owned(),
-                        ),
-                        (_, value) => ConsoleArgument::Primitive(value),
-                    }
-                })
-                .collect(),
-        )
-    } else {
-        None
-    };
-    // printf-style substitutions in a leading string.
-    let text = if let Some(first) = parts
-        .first()
-        .filter(|_| cx.arg_kind(start) == ValueKind::String && parts[0].contains('%'))
-    {
-        let mut out = String::new();
-        let mut rest = parts[1..].iter();
-        let mut chars = first.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '%'
-                && let Some(&k) = chars.peek()
-            {
-                match k {
-                    's' | 'd' | 'i' | 'f' | 'o' | 'O' | 'j' => {
-                        chars.next();
-                        if let Some(a) = rest.next() {
-                            match k {
-                                'd' | 'i' => {
-                                    out.push_str(&a.parse::<f64>().map_or("NaN".to_owned(), |f| {
-                                        (f.trunc() as i64).to_string()
-                                    }))
-                                }
-                                _ => out.push_str(a),
-                            }
-                        }
-                        continue;
-                    }
-                    'c' => {
-                        chars.next();
-                        rest.next();
-                        continue;
-                    }
-                    '%' => {
-                        chars.next();
-                        out.push('%');
-                        continue;
-                    }
-                    _ => {}
-                }
+        "time" => {
+            let label = cx.console_label(0)?;
+            timers.borrow_mut().insert(label);
+            return Ok(());
+        }
+        "timeEnd" => {
+            let label = cx.console_label(0)?;
+            timers.borrow_mut().remove(&label);
+            return Ok(());
+        }
+        "timeLog" => {
+            let label = cx.console_label(0)?;
+            if timers.borrow().contains(&label) {
+                cx.console_args(1, false)?;
             }
-            out.push(c);
+            return Ok(());
         }
-        let tail: Vec<&str> = rest.map(String::as_str).collect();
-        if !tail.is_empty() {
-            out.push(' ');
-            out.push_str(&tail.join(" "));
+        "group" | "groupCollapsed" => {
+            cx.console_args(0, true)?;
+            return Ok(());
         }
-        out
-    } else {
-        parts.join(" ")
+        "groupEnd" | "clear" => {
+            cx.console_args(0, false)?;
+            return Ok(());
+        }
+        "dir" | "dirxml" | "table" => (cx.console_args(0, false)?, "", 0),
+        _ => (cx.console_args(0, true)?, "", 0),
     };
+    if parts.is_empty() && name != "assert" && name != "trace" {
+        // Chrome reports no message for a call without arguments.
+        return Ok(());
+    }
+    // Typed primitive arguments for CDP (bigint and symbol stay distinct).
+    // A format string rewrites the text, so the typed list is omitted.
+    let arguments = primitive_arguments(cx, start);
+    let formats = !matches!(name, "dir" | "dirxml" | "table");
+    let text = substitute(
+        &parts,
+        formats && cx.arg_kind(start) == ValueKind::String,
+    );
     let text = match (prefix.is_empty(), text.is_empty()) {
         (true, _) => text,
-        (false, true) => prefix,
+        (false, true) => prefix.to_owned(),
         (false, false) => format!("{prefix}: {text}"),
     };
-    let level = match level {
+    let level = match name {
         "warn" => "warning",
         "assert" => "error",
         "dir" | "dirxml" | "table" | "trace" => "log",
@@ -184,21 +167,106 @@ fn console_call(
     Ok(())
 }
 
-fn format_arg(cx: &mut CallCtx<'_, '_, '_>, i: usize) -> String {
-    match cx.arg_kind(i) {
-        ValueKind::String => cx.arg_string(i).unwrap_or_default(),
-        ValueKind::Undefined => "undefined".into(),
-        ValueKind::Null => "null".into(),
-        ValueKind::Symbol => match cx.arg_value(i) {
-            JsValue::Opaque(description) => description,
-            _ => "Symbol()".into(),
-        },
-        ValueKind::Object => match cx.arg_value(i) {
-            JsValue::Json(s) if s != "{}" => s,
-            _ => cx.arg_string(i).unwrap_or_default(),
-        },
-        _ => cx.arg_string(i).unwrap_or_default(),
+/// Primitive console arguments, when every argument from `start` is one.
+/// `None` when a leading format string will rewrite the message.
+fn primitive_arguments(
+    cx: &mut CallCtx<'_, '_, '_>,
+    start: usize,
+) -> Option<Vec<ConsoleArgument>> {
+    if cx.arg_kind(start) == ValueKind::String
+        && cx.arg_string(start).unwrap_or_default().contains('%')
+    {
+        return None;
     }
+    if !(start..cx.len()).all(|i| {
+        matches!(
+            cx.arg_kind(i),
+            ValueKind::Undefined
+                | ValueKind::Null
+                | ValueKind::Bool
+                | ValueKind::Number
+                | ValueKind::String
+                | ValueKind::BigInt
+                | ValueKind::Symbol
+        )
+    }) {
+        return None;
+    }
+    Some(
+        (start..cx.len())
+            .map(|i| {
+                let kind = cx.arg_kind(i);
+                let value = cx.arg_value(i);
+                match (kind, value) {
+                    (ValueKind::BigInt, JsValue::Opaque(value)) => ConsoleArgument::BigInt(
+                        value.strip_suffix('n').unwrap_or(&value).to_owned(),
+                    ),
+                    (ValueKind::Symbol, JsValue::Opaque(value)) => ConsoleArgument::Symbol(
+                        value
+                            .strip_prefix("Symbol(")
+                            .and_then(|s| s.strip_suffix(')'))
+                            .unwrap_or(&value)
+                            .to_owned(),
+                    ),
+                    (_, value) => ConsoleArgument::Primitive(value),
+                }
+            })
+            .collect(),
+    )
+}
+
+/// Our message text: printf-style substitution of a leading format string
+/// (`format`) with the converted arguments, the rest joined by spaces.
+fn substitute(parts: &[String], format: bool) -> String {
+    let Some(first) = parts
+        .first()
+        .filter(|f| format && parts.len() > 1 && f.contains('%'))
+    else {
+        return parts.join(" ");
+    };
+    let mut out = String::new();
+    let mut rest = parts[1..].iter();
+    let mut chars = first.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%'
+            && let Some(&k) = chars.peek()
+        {
+            match k {
+                's' | 'd' | 'i' | 'f' | 'o' | 'O' | 'j' => {
+                    chars.next();
+                    if let Some(a) = rest.next() {
+                        match k {
+                            'd' | 'i' => {
+                                out.push_str(&a.parse::<f64>().map_or("NaN".to_owned(), |f| {
+                                    (f.trunc() as i64).to_string()
+                                }))
+                            }
+                            _ => out.push_str(a),
+                        }
+                    }
+                    continue;
+                }
+                'c' | '_' => {
+                    chars.next();
+                    rest.next();
+                    continue;
+                }
+                '%' => {
+                    chars.next();
+                    out.push('%');
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(c);
+    }
+    let tail: Vec<&str> = rest.map(String::as_str).collect();
+    if !tail.is_empty() {
+        out.push(' ');
+        out.push_str(&tail.join(" "));
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -917,8 +985,47 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         Ok(())
     });
     getter(reg, rt, "Window", "status", |cx, _w| cx.ret(""));
+    // Dialogs: shown by the dialog host (a CDP client that handles them,
+    // see `Window::set_dialog_host`); WebIDL defaults for the messages
+    // (`alert()` shows "", `undefined` is "" for `confirm` and `prompt`).
+    method(reg, rt, "Window", "alert", |cx, w| {
+        let message = if cx.is_empty() {
+            String::new()
+        } else {
+            cx.arg_string(0)?
+        };
+        w.dialog(&super::DialogRequest {
+            kind: "alert",
+            message,
+            default_prompt: None,
+        });
+        Ok(())
+    });
+    method(reg, rt, "Window", "confirm", |cx, w| {
+        let message = super::opt_string(cx, 0)?.unwrap_or_default();
+        let accepted = w
+            .dialog(&super::DialogRequest {
+                kind: "confirm",
+                message,
+                default_prompt: None,
+            })
+            .is_some_and(|a| a.accept);
+        cx.ret(accepted)
+    });
+    method(reg, rt, "Window", "prompt", |cx, w| {
+        let message = super::opt_string(cx, 0)?.unwrap_or_default();
+        let default = super::opt_string(cx, 1)?.unwrap_or_default();
+        let answer = w.dialog(&super::DialogRequest {
+            kind: "prompt",
+            message,
+            default_prompt: Some(default.clone()),
+        });
+        match answer {
+            Some(a) if a.accept => cx.ret(a.text.unwrap_or(default)),
+            _ => cx.ret(Arg::Null),
+        }
+    });
     for name in [
-        "alert",
         "print",
         "stop",
         "focus",
@@ -929,8 +1036,6 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     ] {
         method(reg, rt, "Window", name, |_cx, _w| Ok(()));
     }
-    method(reg, rt, "Window", "confirm", |cx, _w| cx.ret(false));
-    method(reg, rt, "Window", "prompt", |cx, _w| cx.ret(Arg::Null));
     method(reg, rt, "Window", "open", |cx, _w| cx.ret(Arg::Null));
     method(reg, rt, "Window", "getSelection", |cx, _w| {
         cx.ret(Arg::Null)

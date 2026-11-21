@@ -111,12 +111,17 @@ cargo test -p lb-page --test wpt -- --nocapture   # WPT_VERBOSE=1, WPT_FILTER=x
 
 `tests/playwright/` runs stock Playwright `connectOverCDP` against
 `lightbrowser serve` (the real V8 page host) with `viewport: null` in every
-context (ADR 0009). 24 tests (one for shadow DOM, one for proxies per context with `Fetch.authRequired`, two for workers as CDP targets), all passing (debug and release binaries);
+context (ADR 0009). 38 tests (one for shadow DOM, one for proxies per context with `Fetch.authRequired`, two for workers as CDP targets, five in `content.spec.mjs` for `setContent` and JavaScript dialogs, ADR 0036, eight for uploads, permissions, geolocation, drag and drop and PDF, ADR 0037, one for a plain `newContext()`), all passing (debug and release binaries);
 `harness.mjs` starts `serve` and a local site.
 
 | Spec | Covers |
 |---|---|
 | `smoke.spec.mjs` | goto, evaluate, title, content, start-up wall time |
+| `content.spec.mjs` | `page.setContent` (document.open/write/close and the end of parsing, as in Chrome), `document.write`, `alert`/`confirm`/`prompt` through `page.on('dialog')`, auto-dismiss, closing a page with an open dialog (ADR 0036) |
+| `files.spec.mjs` | `File`, `FileList`, `DataTransfer`, `setInputFiles` with buffers and with local paths (`DOM.setFileInputFiles`), the multipart body a form posts |
+| `permissions.spec.mjs` | `grantPermissions` / `clearPermissions` states (as recorded in Chrome), geolocation from context options, `setGeolocation`, `watchPosition`, the timeout |
+| `dnd.spec.mjs` | `dragAndDrop`: accepted and rejected drops and a link, event logs equal to Chrome's; a drag on plain mouse input |
+| `pdf.spec.mjs` | `page.pdf`: page count, paper sizes, landscape, page ranges, the page unchanged afterwards |
 | `actions.spec.mjs` | click/dblclick event order and coordinates, fill/type/press, check/radio/selectOption, labels, getByRole/Text/Label, locator reads, waitForSelector/Function, link navigation, form submit |
 | `network.spec.mjs` | `page.route` fulfill/abort (fetch and navigation), cookies, two pages in one context, two contexts |
 | `stealth.spec.mjs` | no added or suspicious main-world globals, `navigator.webdriver` false, trusted events |

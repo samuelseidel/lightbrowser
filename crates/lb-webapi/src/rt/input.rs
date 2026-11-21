@@ -172,6 +172,8 @@ pub struct MouseData {
     /// ratio for trusted wheels (120 per notch), the init's values or
     /// `-delta` for `new WheelEvent(...)` (Blink).
     pub wheel_delta: [f64; 2],
+    /// `DragEvent.dataTransfer` (a `DataTransfer` object id).
+    pub data_transfer: Option<u32>,
 }
 
 /// State of a `KeyboardEvent`.
@@ -202,7 +204,60 @@ pub(crate) struct InputState {
     select_all: Option<NodeId>,
     /// Clock time of the last activation-triggering input.
     activation: Option<f64>,
+    /// The page has had a user gesture (sticky activation; `beforeunload`
+    /// dialogs need it).
+    sticky: bool,
+    /// A left press on a draggable element: (element, x, y).
+    drag_candidate: Option<(NodeId, f64, f64)>,
+    /// A drag in progress (HTML drag and drop).
+    drag: Option<DragState>,
 }
+
+/// A drag in progress.
+#[derive(Debug, Clone)]
+pub(crate) struct DragState {
+    /// The dragged element; `None` for a drag that came from outside
+    /// (`Input.dispatchDragEvent` with no drag of our own).
+    source: Option<NodeId>,
+    /// The source's drag data store (`DataTransfer` id): `dragstart`,
+    /// `drag`, `dragend`.
+    dt: u32,
+    /// The store targets see (`dragenter` ... `drop`), made from the
+    /// source's data as Chrome's browser process does: `effectAllowed`
+    /// from the operations, Chrome's type order.
+    target_dt: u32,
+    /// Current target (the last `dragenter`).
+    target: Option<NodeId>,
+    /// The drop effect a canceled `dragover` chose (`None`: no drop).
+    effect: Option<String>,
+    /// The client intercepts drags (`Input.setInterceptDrags`): it sends
+    /// `Input.dispatchDragEvent`; mouse input does not move this drag.
+    intercepted: bool,
+}
+
+/// Drag data as CDP's `Input.DragData` carries it.
+#[derive(Debug, Clone, Default)]
+pub struct DragData {
+    /// `(mimeType, data)` of each string item.
+    pub items: Vec<(String, String)>,
+    /// Files dropped from outside: (bytes, type, name, lastModified).
+    pub files: Vec<(Vec<u8>, String, String, f64)>,
+    /// `dragOperationsMask`: copy 1, link 2, move 16.
+    pub operations: u32,
+}
+
+/// `Input.dispatchDragEvent` types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragKind {
+    Enter,
+    Over,
+    Drop,
+    Cancel,
+}
+
+/// Decides whether a drag that started goes to the CDP client
+/// (`Input.dragIntercepted`; returns true) or runs here on mouse input.
+pub type DragIntercept = Rc<dyn Fn(&DragData) -> bool>;
 
 /// Selection of a text control, in UTF-16 code units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -403,7 +458,14 @@ const ACTIVATION_MS: f64 = 5000.0;
 /// Note a trusted activation-triggering input (mousedown, keydown other
 /// than Escape and modifiers).
 fn activate_user(w: &Window) {
-    w.input.borrow_mut().activation = Some(w.clock.now());
+    let mut input = w.input.borrow_mut();
+    input.activation = Some(w.clock.now());
+    input.sticky = true;
+}
+
+/// The window ever had user activation (HTML "sticky activation").
+pub(crate) fn has_sticky_activation(w: &Window) -> bool {
+    w.input.borrow().sticky
 }
 
 /// The window has transient user activation.
@@ -478,6 +540,7 @@ fn mouse_extra(
         }),
         wheel: None,
         wheel_delta: [0.0, 0.0],
+        data_transfer: None,
     }))
 }
 
@@ -649,6 +712,12 @@ fn update_hover(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput, target: NodeId
 }
 
 fn mouse_move(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
+    // During a drag the page gets drag events, not mouse events.
+    let dragging = w.input.borrow().drag.as_ref().map(|d| d.intercepted);
+    if dragging == Some(false) {
+        drag_update(js, w, ev.x, ev.y, ev.modifiers);
+        return;
+    }
     let Some(target) = hit(w, ev.x, ev.y) else {
         return;
     };
@@ -656,9 +725,23 @@ fn mouse_move(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
     let buttons = held(w, ev);
     let t = w.node_ref(0, target);
     let e = mouse_extra(w, ev.x, ev.y, -1, buttons, ev.modifiers, 0, None, true);
-    fire(js, w, t, "PointerEvent", "pointermove", true, true, e);
+    let ok = fire(js, w, t, "PointerEvent", "pointermove", true, true, e);
     let e = mouse_extra(w, ev.x, ev.y, 0, buttons, ev.modifiers, 0, None, false);
-    fire(js, w, t, "MouseEvent", "mousemove", true, true, e);
+    let ok = fire(js, w, t, "MouseEvent", "mousemove", true, true, e) && ok;
+    // A left drag past Blink's 4 px threshold from a draggable element
+    // starts drag and drop, after the mousemove.
+    let candidate = w.input.borrow().drag_candidate;
+    if let Some((source, x0, y0)) = candidate
+        && ok
+        && buttons & 1 != 0
+        && dragging.is_none()
+        && ((ev.x - x0).abs() > 4.0 || (ev.y - y0).abs() > 4.0)
+    {
+        w.input.borrow_mut().drag_candidate = None;
+        if connected(w, source) {
+            start_drag(js, w, source, ev.x, ev.y, ev.modifiers);
+        }
+    }
 }
 
 fn mouse_press(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
@@ -689,6 +772,12 @@ fn mouse_press(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
         prevented = !fire(js, w, t, "MouseEvent", "mousedown", true, true, e);
     }
     w.input.borrow_mut().down = Some(target);
+    // A canceled mousedown starts no drag (Blink).
+    let candidate = (!prevented && ev.button == MouseButton::Left)
+        .then(|| draggable(w, target))
+        .flatten()
+        .map(|n| (n, ev.x, ev.y));
+    w.input.borrow_mut().drag_candidate = candidate;
     if !prevented && ev.button == MouseButton::Left {
         // Focus the nearest focusable ancestor (or clear focus).
         let to = w.with_doc(|d| {
@@ -707,6 +796,13 @@ fn mouse_press(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
 }
 
 fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
+    w.input.borrow_mut().drag_candidate = None;
+    // Releasing the button ends a drag that runs here: drop, no mouseup.
+    let dragging = w.input.borrow().drag.as_ref().map(|d| d.intercepted);
+    if dragging == Some(false) {
+        drag_finish(js, w, ev.x, ev.y, ev.modifiers, true);
+        return;
+    }
     let Some(target) = hit(w, ev.x, ev.y) else {
         return;
     };
@@ -774,6 +870,376 @@ fn mouse_release(js: &mut dyn Js, w: &Rc<Window>, ev: &MouseInput) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Drag and drop
+// ---------------------------------------------------------------------------
+
+/// The element a drag from `n` would drag: the nearest element with
+/// `draggable="true"`, or a link or image that is draggable by default;
+/// `draggable="false"` stops the search.
+fn draggable(w: &Window, n: NodeId) -> Option<NodeId> {
+    w.with_doc(|d| {
+        for a in std::iter::once(n).chain(d.ancestors(n)) {
+            if !is_element(d, a) {
+                continue;
+            }
+            match d
+                .get_attribute(a, "draggable")
+                .map(str::to_ascii_lowercase)
+                .as_deref()
+            {
+                Some("true") => return Some(a),
+                Some("false") => return None,
+                _ => {}
+            }
+            let link = (d.is_html_element_named(a, &local_name!("a"))
+                || d.is_html_element_named(a, &local_name!("area")))
+                && d.has_attribute(a, "href");
+            if link || d.is_html_element_named(a, &local_name!("img")) {
+                return Some(a);
+            }
+        }
+        None
+    })
+}
+
+/// `dragOperationsMask` of an `effectAllowed` value.
+fn operations(effect_allowed: &str) -> u32 {
+    match effect_allowed {
+        "none" => 0,
+        "copy" => 1,
+        "link" => 2,
+        "move" => 16,
+        "copyLink" => 3,
+        "copyMove" => 17,
+        "linkMove" => 18,
+        _ => 19,
+    }
+}
+
+/// Fire a drag event at `n` with data store `dt`; false if it was
+/// canceled.
+#[allow(clippy::too_many_arguments)]
+fn fire_drag(
+    js: &mut dyn Js,
+    w: &Rc<Window>,
+    n: NodeId,
+    type_: &str,
+    cancelable: bool,
+    dt: u32,
+    x: f64,
+    y: f64,
+    modifiers: u32,
+) -> bool {
+    let buttons = w.input.borrow().buttons;
+    let mut e = mouse_extra(w, x, y, 0, buttons, modifiers, 0, None, false);
+    if let EventExtra::Mouse(m) = &mut e {
+        m.data_transfer = Some(dt);
+    }
+    fire(
+        js,
+        w,
+        w.node_ref(0, n),
+        "DragEvent",
+        type_,
+        true,
+        cancelable,
+        e,
+    )
+}
+
+/// `effectAllowed` of a `dragOperationsMask`.
+fn effect_allowed(ops: u32) -> &'static str {
+    match ops {
+        0 => "none",
+        1 => "copy",
+        2 => "link",
+        16 => "move",
+        3 => "copyLink",
+        17 => "copyMove",
+        18 => "linkMove",
+        _ => "all",
+    }
+}
+
+/// The `dropEffect` a target's `dragenter`/`dragover` starts with (HTML).
+fn default_drop_effect(effect_allowed: &str) -> &'static str {
+    match effect_allowed {
+        "none" => "none",
+        "link" | "linkMove" => "link",
+        "move" => "move",
+        _ => "copy",
+    }
+}
+
+/// The store targets see, from string items and files (Chrome's order:
+/// `text/plain`, `text/uri-list`, `text/html`, then the rest).
+fn target_store(w: &Window, items: &[(String, String)], files: Vec<u32>, ops: u32) -> u32 {
+    use super::files::{DataTransferData, DtItem, DtMode};
+    let rank = |t: &str| match t {
+        "text/plain" => 0,
+        "text/uri-list" => 1,
+        "text/html" => 2,
+        _ => 3,
+    };
+    let mut text: Vec<&(String, String)> = items.iter().collect();
+    text.sort_by_key(|(t, _)| rank(t));
+    let mut out: Vec<DtItem> = text
+        .into_iter()
+        .map(|(t, d)| DtItem::Text {
+            type_: t.to_ascii_lowercase(),
+            data: d.clone(),
+        })
+        .collect();
+    out.extend(files.into_iter().map(DtItem::File));
+    super::files::new_drag_data(
+        w,
+        DataTransferData {
+            items: out,
+            drop_effect: "none".into(),
+            effect_allowed: effect_allowed(ops).into(),
+            mode: DtMode::Protected,
+        },
+    )
+}
+
+fn set_drop_effect(w: &Window, dt: u32, effect: &str) {
+    super::files::update_drag_data(w, dt, |d| d.drop_effect = effect.to_owned());
+}
+
+fn start_drag(js: &mut dyn Js, w: &Rc<Window>, source: NodeId, x: f64, y: f64, modifiers: u32) {
+    use super::files::{DataTransferData, DtItem, DtMode};
+    // A link drags its URL, its text and its markup (Blink's
+    // DataTransfer::WriteURL).
+    let link = w.with_doc(|d| {
+        let is_link = d.is_html_element_named(source, &local_name!("a"))
+            || d.is_html_element_named(source, &local_name!("area"));
+        is_link
+            .then(|| d.get_attribute(source, "href").map(str::to_owned))
+            .flatten()
+            .map(|h| (h, d.outer_html(source)))
+    });
+    let mut items = Vec::new();
+    if let Some((href, markup)) = link
+        && let Some(u) = w.resolve_url(&href)
+    {
+        for (t, data) in [
+            ("text/uri-list", u.to_string()),
+            ("text/plain", u.to_string()),
+            ("text/html", markup),
+        ] {
+            items.push(DtItem::Text {
+                type_: t.into(),
+                data,
+            });
+        }
+    }
+    let dt = super::files::new_drag_data(
+        w,
+        DataTransferData {
+            items,
+            drop_effect: "none".into(),
+            effect_allowed: "uninitialized".into(),
+            mode: DtMode::ReadWrite,
+        },
+    );
+    if !fire_drag(js, w, source, "dragstart", true, dt, x, y, modifiers) {
+        return;
+    }
+    super::files::update_drag_data(w, dt, |d| d.mode = DtMode::Protected);
+    // The drag takes the pointer away from the page (Pointer Events).
+    if let Some(t) = hit(w, x, y) {
+        let buttons = w.input.borrow().buttons;
+        let e = mouse_extra(w, x, y, -1, buttons, modifiers, 0, None, true);
+        fire(
+            js,
+            w,
+            w.node_ref(0, t),
+            "PointerEvent",
+            "pointercancel",
+            true,
+            false,
+            e,
+        );
+    }
+    let store = super::files::drag_data(w, dt).unwrap_or_default();
+    let ops = operations(&store.effect_allowed);
+    let mut data = DragData {
+        items: Vec::new(),
+        files: Vec::new(),
+        operations: ops,
+    };
+    let mut files = Vec::new();
+    for i in &store.items {
+        match i {
+            DtItem::Text { type_, data: d } => data.items.push((type_.clone(), d.clone())),
+            DtItem::File(f) => files.push(*f),
+        }
+    }
+    let target_dt = target_store(w, &data.items, files, ops);
+    let hook = w.drag_intercept.borrow().clone();
+    let intercepted = hook.is_some_and(|h| h(&data));
+    w.input.borrow_mut().drag = Some(DragState {
+        source: Some(source),
+        dt,
+        target_dt,
+        target: None,
+        effect: None,
+        intercepted,
+    });
+}
+
+/// A step of the drag: `drag` at the source, `dragenter` at a new target
+/// and `dragleave` at the old one, then `dragover`, whose cancelation (with
+/// a `dropEffect` other than "none") accepts a drop.
+fn drag_update(js: &mut dyn Js, w: &Rc<Window>, x: f64, y: f64, modifiers: u32) {
+    let Some(st) = w.input.borrow().drag.clone() else {
+        return;
+    };
+    if let Some(src) = st.source.filter(|&s| connected(w, s)) {
+        fire_drag(js, w, src, "drag", true, st.dt, x, y, modifiers);
+    }
+    let Some(target) = hit(w, x, y) else {
+        return;
+    };
+    let allowed = super::files::drag_data(w, st.target_dt)
+        .map(|d| d.effect_allowed)
+        .unwrap_or_default();
+    let initial = default_drop_effect(&allowed);
+    if st.target != Some(target) {
+        set_drop_effect(w, st.target_dt, initial);
+        fire_drag(
+            js,
+            w,
+            target,
+            "dragenter",
+            true,
+            st.target_dt,
+            x,
+            y,
+            modifiers,
+        );
+        if let Some(old) = st.target.filter(|&o| connected(w, o)) {
+            set_drop_effect(w, st.target_dt, "none");
+            fire_drag(
+                js,
+                w,
+                old,
+                "dragleave",
+                false,
+                st.target_dt,
+                x,
+                y,
+                modifiers,
+            );
+        }
+    }
+    set_drop_effect(w, st.target_dt, initial);
+    let canceled = !fire_drag(
+        js,
+        w,
+        target,
+        "dragover",
+        true,
+        st.target_dt,
+        x,
+        y,
+        modifiers,
+    );
+    let effect = super::files::drag_data(w, st.target_dt)
+        .map(|d| d.drop_effect)
+        .filter(|e| canceled && e != "none");
+    if let Some(d) = w.input.borrow_mut().drag.as_mut() {
+        d.target = Some(target);
+        d.effect = effect;
+    }
+}
+
+/// End the drag: `drop` at the target if the last `dragover` accepted it
+/// (else `drag` at the source and `dragleave` at the target), then
+/// `dragend` at the source with the result; the button is up.
+fn drag_finish(js: &mut dyn Js, w: &Rc<Window>, x: f64, y: f64, modifiers: u32, drop: bool) {
+    use super::files::DtMode;
+    let Some(st) = w.input.borrow_mut().drag.take() else {
+        return;
+    };
+    let target = st.target.filter(|&t| connected(w, t));
+    let result = match (target, &st.effect) {
+        (Some(t), Some(effect)) if drop => {
+            super::files::update_drag_data(w, st.target_dt, |d| {
+                d.mode = DtMode::ReadOnly;
+                d.drop_effect = effect.clone();
+            });
+            fire_drag(js, w, t, "drop", true, st.target_dt, x, y, modifiers);
+            super::files::update_drag_data(w, st.target_dt, |d| d.mode = DtMode::Protected);
+            effect.clone()
+        }
+        (Some(t), _) => {
+            if let Some(src) = st.source.filter(|&s| connected(w, s)) {
+                fire_drag(js, w, src, "drag", true, st.dt, x, y, modifiers);
+            }
+            set_drop_effect(w, st.target_dt, "none");
+            fire_drag(js, w, t, "dragleave", false, st.target_dt, x, y, modifiers);
+            "none".to_owned()
+        }
+        (None, _) => "none".to_owned(),
+    };
+    {
+        let mut input = w.input.borrow_mut();
+        input.buttons = 0;
+        input.down = None;
+        input.drag_candidate = None;
+    }
+    if let Some(src) = st.source.filter(|&s| connected(w, s)) {
+        set_drop_effect(w, st.dt, &result);
+        fire_drag(js, w, src, "dragend", false, st.dt, x, y, modifiers);
+    }
+}
+
+/// `Input.dispatchDragEvent`: a step of a drag the client intercepted, or
+/// of one that comes from outside the page with `data`.
+pub fn dispatch_drag(
+    js: &mut dyn Js,
+    w: &Rc<Window>,
+    kind: DragKind,
+    x: f64,
+    y: f64,
+    data: &DragData,
+    modifiers: u32,
+) {
+    use super::files::{DataTransferData, DtMode};
+    if w.input.borrow().drag.is_none() {
+        let files: Vec<u32> = data
+            .files
+            .iter()
+            .map(|(bytes, ty, name, lm)| super::files::new_file(w, bytes.clone(), ty, name, *lm))
+            .collect();
+        let target_dt = target_store(w, &data.items, files, data.operations);
+        let dt = super::files::new_drag_data(
+            w,
+            DataTransferData {
+                mode: DtMode::Protected,
+                ..Default::default()
+            },
+        );
+        w.input.borrow_mut().drag = Some(DragState {
+            source: None,
+            dt,
+            target_dt,
+            target: None,
+            effect: None,
+            intercepted: true,
+        });
+    }
+    match kind {
+        DragKind::Enter | DragKind::Over => drag_update(js, w, x, y, modifiers),
+        DragKind::Drop => drag_finish(js, w, x, y, modifiers, true),
+        DragKind::Cancel => drag_finish(js, w, x, y, modifiers, false),
+    }
+    w.input.borrow_mut().last = Some((x, y));
+    w.after_mutation(js);
 }
 
 /// `wheelDelta` per CSS px of trusted wheels, from the persona's wheel
@@ -1819,6 +2285,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         "MouseEvent",
         "PointerEvent",
         "WheelEvent",
+        "DragEvent",
         "KeyboardEvent",
         "InputEvent",
         "FocusEvent",
@@ -1840,7 +2307,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             e.composed = d.bool(cx, "composed")?;
             let detail = d.number(cx, "detail")?.unwrap_or(0.0) as i32;
             e.extra = match iface {
-                "MouseEvent" | "PointerEvent" | "WheelEvent" => {
+                "MouseEvent" | "PointerEvent" | "WheelEvent" | "DragEvent" => {
                     let mut m = MouseData {
                         screen_x: dict_num(cx, &d, "screenX")?,
                         screen_y: dict_num(cx, &d, "screenY")?,
@@ -1856,7 +2323,16 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                         pointer: None,
                         wheel: None,
                         wheel_delta: [0.0, 0.0],
+                        data_transfer: None,
                     };
+                    if iface == "DragEvent" {
+                        m.data_transfer = dict_host(cx, &d, "dataTransfer")?
+                            .filter(|h| h.kind == K_OBJ)
+                            .map(|h| h.id)
+                            .filter(|&id| {
+                                w.with_obj(id, |o| matches!(o, Obj::DataTransfer(_))) == Some(true)
+                            });
+                    }
                     if iface == "PointerEvent" {
                         m.pointer = Some(PointerData {
                             id: dict_num(cx, &d, "pointerId")? as i32,
@@ -1989,6 +2465,13 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     mods!("KeyboardEvent", "ctrlKey", MOD_CTRL, key_of);
     mods!("KeyboardEvent", "metaKey", MOD_META, key_of);
     mods!("KeyboardEvent", "shiftKey", MOD_SHIFT, key_of);
+    getter(reg, rt, "DragEvent", "dataTransfer", |cx, w| {
+        let e = this_event_data(cx, w)?;
+        match mouse_of(&e).data_transfer {
+            Some(id) => cx.ret(w.obj_arg(id)),
+            None => cx.ret(Arg::Null),
+        }
+    });
     getter(reg, rt, "MouseEvent", "relatedTarget", |cx, w| {
         let e = this_event_data(cx, w)?;
         cx.ret(super::events::related_of(&e).map_or(Arg::Null, |r| w.host_arg(r)))

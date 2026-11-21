@@ -272,6 +272,9 @@ pub fn commit_child(
         .ok_or_else(|| JsError::new(lb_js::JsErrorKind::Host, "no bindings"))?;
     link(new, parent, old.element, frame, creator);
     new.set_console_sink(parent.console_sink.borrow().clone());
+    new.set_dialog_host(parent.dialog_host.borrow().clone());
+    new.set_permissions(parent.permissions.borrow().clone());
+    new.set_geolocation(parent.geolocation.borrow().clone());
     *new.window_name.borrow_mut() = old.window.window_name.borrow().clone();
     new.create_realm(ops, &bindings)?;
     let _ = global_handle(ops, new);
@@ -476,6 +479,9 @@ fn attach_iframe(js: &mut dyn super::Js, parent: &Rc<Window>, el: NodeId) {
     child.set_idb_backend(parent.idb_backend());
     link(&child, parent, el, id, Some(effective_url(parent)));
     child.set_console_sink(parent.console_sink.borrow().clone());
+    child.set_dialog_host(parent.dialog_host.borrow().clone());
+    child.set_permissions(parent.permissions.borrow().clone());
+    child.set_geolocation(parent.geolocation.borrow().clone());
     let name = parent.with_doc(|d| d.get_attribute(el, "name").map(str::to_owned));
     *child.window_name.borrow_mut() = name.unwrap_or_default();
     let ops = js.realm_ops();

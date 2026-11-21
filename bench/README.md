@@ -12,8 +12,9 @@ python3 bench/gen_corpus.py [--check]          # regenerate / verify bench/corpu
 ```
 
 Needs Python 3.10+, `playwright` (Python, any 1.5x or newer; only the client
-is used) and the Chromium at `/opt/pw-browsers/chromium-1243` (override with
-`--chromium`). `--binary` or `$LIGHTBROWSER_BIN` picks the LightBrowser
+is used) and the Chromium at `/opt/pw-browsers/chromium-1243` (on macOS
+Playwright's cache, `~/Library/Caches/ms-playwright/chromium-1243`; override
+with `--chromium`). `--binary` or `$LIGHTBROWSER_BIN` picks the LightBrowser
 binary (default `target/release/lightbrowser`). Exit code 1 if a budget
 fails or a browser did not render every page.
 
@@ -78,6 +79,11 @@ must be 50/50 for LightBrowser and Chromium. `gen_corpus.py` is deterministic
   start of the crawl.
 - *Idle RSS*: `serve`, no client connected, 1 s after the DevTools line. Also
   recorded: after connecting, and after the crawl once all pages are closed.
+- *Private memory* (Linux): `RssAnon`, the process's own anonymous memory,
+  sampled with RSS (`peak_anon_mb`), idle and after the crawl. RSS also
+  counts the binary's file pages, whose residency moves with the page
+  cache (on a ZFS machine by up to ~6 MB between otherwise equal runs);
+  `RssAnon` does not, so compare builds by it.
 - *Startup*: spawn to the DevTools line (`listen_ms`), and to
   `connect_over_cdp` returning (`connect_ms`); `first_page_ms` is the first
   `new_page`, `new_page_ms` the median of 15 more.
@@ -90,12 +96,35 @@ must be 50/50 for LightBrowser and Chromium. `gen_corpus.py` is deterministic
   rebuilt by the runner.
 - *Disk writes*: browsers run with an empty temp dir as cwd, `HOME` and
   `TMPDIR`; the budget passes if nothing is created there and
-  `/proc/PID/io` `write_bytes` stays 0 during the crawl.
+  `/proc/PID/io` `write_bytes` (on macOS `ri_diskio_byteswritten`) stays 0
+  during the crawl.
 
 **Budgets** checked (from ARCHITECTURE): idle RSS < 15 MB, binary < 50 MB
 (< 40 MB until the user raised it, ADR 0013 revision 4),
 realm creation < 5 ms, no disk writes, and wall time / peak RSS / CPU no worse
 than Lightpanda (status `skip` while Lightpanda is absent).
+
+## macOS
+
+The runner also works on macOS, which has no `/proc`. The same numbers come
+from `libproc` (`proc_pid_rusage`, `proc_listchildpids`), with these
+differences:
+
+- *Peak RSS* is the sampled sum of resident size (every 50 ms): macOS keeps
+  no resident-size high-water mark. `fetch` peaks still come from `wait4`
+  (`ru_maxrss` is in bytes on macOS; the spawner converts it to KB).
+- *Footprint* replaces PSS: `phys_footprint` is a process's private dirty
+  and compressed memory, what Activity Monitor shows as "Memory", and
+  leaves out shared clean pages (the binary, system libraries). Recorded as
+  `idle_footprint_mb`, `after_crawl_footprint_mb` and `peak_footprint_mb`
+  (each process's lifetime peak footprint, summed for the tree; for
+  `fetch`, read from the exited child before `wait4` reaps it).
+- *CPU* is user + system time (Mach ticks converted with
+  `mach_timebase_info`), *disk writes* `ri_diskio_byteswritten`.
+
+macOS RSS counts mapped pages of system libraries that Linux RSS leaves to
+the page cache, so compare RSS across systems with care; footprint is the
+better number there. The Lightpanda checks need its macOS build on PATH.
 
 ## Results
 

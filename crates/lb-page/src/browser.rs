@@ -1,11 +1,12 @@
 //! The browser process: worker threads, each with a `current_thread`
-//! tokio runtime, a `LocalSet` and one JS engine.
+//! tokio runtime, a `LocalSet` and one JS engine. Threads start on demand,
+//! up to [`BrowserOptions::workers`].
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use lb_js::{Engine, EngineOptions};
@@ -20,7 +21,9 @@ use crate::page::{Page, PageState};
 /// Browser-wide options.
 #[derive(Debug, Clone)]
 pub struct BrowserOptions {
-    /// Worker threads (default: available cores).
+    /// Most worker threads (default: available cores). A thread starts when
+    /// a page needs one: the first page, then a page opened while every
+    /// running worker has a page.
     pub workers: usize,
     /// JS heap cap per engine (worker).
     pub max_heap_bytes: Option<usize>,
@@ -32,6 +35,10 @@ pub struct BrowserOptions {
     /// its creation and the template set it holds cost ~3 MB of resident
     /// memory in `serve`.
     pub startup_snapshot: bool,
+    /// A worker with no pages for this long drops its JS engine and
+    /// bindings and hands the freed memory back to the OS; its next page
+    /// makes a new engine. `None` keeps engines for the browser's life.
+    pub idle_release: Option<std::time::Duration>,
 }
 
 impl Default for BrowserOptions {
@@ -40,6 +47,7 @@ impl Default for BrowserOptions {
             workers: std::thread::available_parallelism().map_or(1, |n| n.get()),
             max_heap_bytes: Some(512 << 20),
             startup_snapshot: false,
+            idle_release: Some(std::time::Duration::from_secs(30)),
         }
     }
 }
@@ -119,6 +127,21 @@ impl WorkerState {
         self.runtime.borrow().clone()
     }
 
+    /// Drop the engine and its bindings (no pages are left) and return the
+    /// freed memory to the OS. The next page makes a new engine; realm ids
+    /// are unique in the process, so nothing kept from this one can name a
+    /// realm of the next.
+    pub(crate) fn release_engine(&self) {
+        if !self.pages.borrow().is_empty() {
+            return;
+        }
+        self.runtime.borrow_mut().take();
+        if self.engine.borrow_mut().take().is_some() {
+            tracing::debug!("idle worker released its engine");
+        }
+        release_free_memory();
+    }
+
     /// Ask for one full GC (V8 low-memory notification) when this worker
     /// next has nothing queued, e.g. after a page closed: dropped realms
     /// are otherwise kept until the next allocation pressure.
@@ -129,46 +152,62 @@ impl WorkerState {
 
 /// The browser: worker threads that host pages.
 pub struct Browser {
+    pool: Mutex<Pool>,
+    opts: BrowserOptions,
+    next_page: Arc<AtomicU64>,
+}
+
+/// The worker threads started so far.
+#[derive(Default)]
+struct Pool {
     workers: Vec<WorkerHandle>,
     threads: Vec<JoinHandle<()>>,
-    next_page: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for Browser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Browser")
-            .field("workers", &self.workers.len())
+            .field("workers", &self.started_workers())
+            .field("max_workers", &self.opts.workers)
             .finish()
     }
 }
 
 impl Browser {
-    /// Start the worker threads.
-    pub fn new(opts: BrowserOptions) -> Result<Browser, PageError> {
-        let n = opts.workers.max(1);
-        let mut workers = Vec::with_capacity(n);
-        let mut threads = Vec::with_capacity(n);
-        for i in 0..n {
-            let (tx, rx) = mpsc::unbounded_channel::<Job>();
-            let handle = WorkerHandle {
-                tx,
-                pages: Arc::new(AtomicUsize::new(0)),
-            };
-            let count = handle.pages.clone();
-            let max_heap = opts.max_heap_bytes;
-            let snapshot = opts.startup_snapshot;
-            let t = std::thread::Builder::new()
-                .name(format!("lb-worker-{i}"))
-                .spawn(move || worker_main(rx, count, max_heap, snapshot))
-                .map_err(|e| PageError::Setup(e.to_string()))?;
-            workers.push(handle);
-            threads.push(t);
-        }
+    /// A browser with no worker threads yet: they start as pages need
+    /// them (see [`BrowserOptions::workers`]). An idle browser, such as
+    /// `serve` before its first page, then holds no runtimes, engines or
+    /// thread stacks of its own.
+    pub fn new(mut opts: BrowserOptions) -> Result<Browser, PageError> {
+        opts.workers = opts.workers.max(1);
         Ok(Browser {
-            workers,
-            threads,
+            pool: Mutex::new(Pool::default()),
+            opts,
             next_page: Arc::new(AtomicU64::new(1)),
         })
+    }
+
+    /// Worker threads started so far.
+    pub fn started_workers(&self) -> usize {
+        self.pool.lock().map_or(0, |p| p.workers.len())
+    }
+
+    /// Start worker thread `i`.
+    fn spawn_worker(&self, i: usize) -> Result<(WorkerHandle, JoinHandle<()>), PageError> {
+        let (tx, rx) = mpsc::unbounded_channel::<Job>();
+        let handle = WorkerHandle {
+            tx,
+            pages: Arc::new(AtomicUsize::new(0)),
+        };
+        let count = handle.pages.clone();
+        let max_heap = self.opts.max_heap_bytes;
+        let snapshot = self.opts.startup_snapshot;
+        let idle = self.opts.idle_release;
+        let t = std::thread::Builder::new()
+            .name(format!("lb-worker-{i}"))
+            .spawn(move || worker_main(rx, count, max_heap, snapshot, idle))
+            .map_err(|e| PageError::Setup(e.to_string()))?;
+        Ok((handle, t))
     }
 
     /// Open a page in `ctx`, pinned to the least loaded worker.
@@ -187,13 +226,29 @@ impl Browser {
         Page::open_unstarted(worker, id, ctx.clone()).await
     }
 
+    /// The least loaded worker (the first of equals). A new thread starts
+    /// only when every running worker has a page and fewer than the
+    /// maximum run, so pages land where they would if all threads had
+    /// started at once.
     fn pick_worker(&self) -> Result<WorkerHandle, PageError> {
-        let worker = self
+        let mut pool = self.pool.lock().map_err(|_| PageError::Closed)?;
+        let least = pool
             .workers
             .iter()
             .min_by_key(|w| w.pages.load(Ordering::Relaxed))
-            .ok_or(PageError::Closed)?
-            .clone();
+            .filter(|w| {
+                w.pages.load(Ordering::Relaxed) == 0 || pool.workers.len() >= self.opts.workers
+            })
+            .cloned();
+        let worker = match least {
+            Some(w) => w,
+            None => {
+                let (w, t) = self.spawn_worker(pool.workers.len())?;
+                pool.workers.push(w.clone());
+                pool.threads.push(t);
+                w
+            }
+        };
         worker.pages.fetch_add(1, Ordering::Relaxed);
         Ok(worker)
     }
@@ -216,10 +271,11 @@ impl Browser {
     }
 
     fn stop(&mut self) {
-        for w in self.workers.drain(..) {
+        let pool = std::mem::take(self.pool.get_mut().unwrap_or_else(|e| e.into_inner()));
+        for w in pool.workers {
             let _ = w.send(Box::new(|ws| ws.stop.set(true)));
         }
-        for t in self.threads.drain(..) {
+        for t in pool.threads {
             let _ = t.join();
         }
     }
@@ -236,6 +292,7 @@ fn worker_main(
     page_count: Arc<AtomicUsize>,
     max_heap: Option<usize>,
     startup_snapshot: bool,
+    idle_release: Option<std::time::Duration>,
 ) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -259,7 +316,22 @@ fn worker_main(
             stop: std::cell::Cell::new(false),
             gc_pending: std::cell::Cell::new(false),
         });
-        while let Some(job) = rx.recv().await {
+        loop {
+            // No pages and an engine: wait for work at most `idle_release`,
+            // then give the engine's memory back.
+            let idle = idle_release
+                .filter(|_| state.pages.borrow().is_empty() && state.engine.borrow().is_some());
+            let job = match idle {
+                Some(d) => tokio::select! {
+                    j = rx.recv() => j,
+                    _ = tokio::time::sleep(d) => {
+                        state.release_engine();
+                        continue;
+                    }
+                },
+                None => rx.recv().await,
+            };
+            let Some(job) = job else { break };
             job(&state);
             if state.stop.get() {
                 break;
@@ -279,4 +351,21 @@ fn worker_main(
         state.runtime.borrow_mut().take();
         state.engine.borrow_mut().take();
     });
+}
+
+/// Hand memory the allocator keeps but no longer uses back to the OS.
+fn release_free_memory() {
+    // SAFETY: plain allocator calls with no pointers of ours; both only
+    // release free memory.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::malloc_trim(0);
+    }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        unsafe extern "C" {
+            fn malloc_zone_pressure_relief(zone: *mut libc::c_void, goal: usize) -> usize;
+        }
+        malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+    }
 }

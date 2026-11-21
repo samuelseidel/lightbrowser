@@ -412,6 +412,7 @@ fn body_method(reg: &mut Registry, rt: &Runtime, iface: &'static str, name: &'st
                 let b = w.new_obj(Obj::Blob(Box::new(super::misc::BlobData {
                     bytes,
                     type_: mime_essence(&ct.unwrap_or_default()),
+                    file: None,
                 })));
                 let a = w.obj_arg(b);
                 cx.resolve_promise(r, a)
@@ -2163,6 +2164,7 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
                 let b = w.new_obj(Obj::Blob(Box::new(super::misc::BlobData {
                     bytes,
                     type_: mime_essence(&ct.unwrap_or_default()),
+                    file: None,
                 })));
                 cx.ret(w.obj_arg(b))
             }

@@ -7,7 +7,9 @@ const [mode, server, ...targets] = process.argv.slice(2);
 const b = await chromium.launch({
   executablePath: process.env.CHROME || '/opt/pw-browsers/chromium',
   args: ['--disable-background-networking'],
-  proxy: { server, bypass: '<-loopback>' },
+  // Playwright 1.65 and later answer a proxy's 407 from proxy.username;
+  // older versions from httpCredentials. Both are set.
+  proxy: { server, bypass: '<-loopback>', ...(mode === 'auth' ? { username: 'u1', password: 'p1' } : {}) },
 });
 console.error(b.version());
 const ctx = await b.newContext({

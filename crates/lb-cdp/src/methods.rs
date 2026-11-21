@@ -10,6 +10,9 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "close",
             "setDownloadBehavior",
             "getWindowForTarget",
+            "grantPermissions",
+            "resetPermissions",
+            "setPermission",
         ],
     ),
     (
@@ -50,6 +53,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "bringToFront",
             "close",
             "captureScreenshot",
+            "printToPDF",
         ],
     ),
     (
@@ -92,6 +96,8 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "dispatchKeyEvent",
             "insertText",
             "dispatchTouchEvent",
+            "setInterceptDrags",
+            "dispatchDragEvent",
         ],
     ),
     (
@@ -148,6 +154,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
         &["enable", "disable", "setIgnoreCertificateErrors"],
     ),
     ("Log", &["enable", "disable", "clear"]),
+    ("IO", &["read", "close"]),
     ("Performance", &["enable", "disable"]),
     (
         "LightBrowser",
@@ -164,6 +171,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
 
 /// Events by domain.
 pub const EVENTS: &[(&str, &[&str])] = &[
+    ("Input", &["dragIntercepted"]),
     (
         "Target",
         &[
@@ -187,6 +195,7 @@ pub const EVENTS: &[(&str, &[&str])] = &[
             "loadEventFired",
             "domContentEventFired",
             "javascriptDialogOpening",
+            "javascriptDialogClosed",
         ],
     ),
     (

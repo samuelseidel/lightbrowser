@@ -3153,6 +3153,281 @@ runs with both binaries evicted first, 6 of 6 in both
 vs 0.77 / 0.77 s, peak RSS 26.50 / 26.25 vs 29.04 / 29.05 MB, CPU 0.57 /
 0.58 vs 0.79 / 0.79 s.
 
+## Console side effects (2026-11-07)
+
+ADR 0034. `console.log` turned objects into text with `JSON.stringify`
+(or `ToString`) inside the page realm, so every call ran the page's
+getters, `toJSON`, own `toString` and proxy traps, with or without a CDP
+client. `console.log(new Proxy({}, …))` and `console.log(Object(Symbol()))`
+threw into the page. Chrome without DevTools runs none of that, so one
+`console.log({get x() {…}})` told a page it was not in Chrome. V8's own
+`count`/`time`/`group`/… ran nothing, where Chrome converts their labels
+and arguments.
+
+Now `lb-js` `v8_engine/console.rs` follows Chrome:
+- V8's `Formatter`: `%s`, `%d`/`%i` and `%f` conversions that throw into
+  the page;
+- the inspector's `V8ValueStringBuilder` for every argument, using V8's own
+  `Object.prototype.toString` and wrapper `valueOf`, kept per realm before
+  page scripts run; throws are swallowed;
+- `firstArgToString` for labels, which throws into the page.
+
+`lb-webapi` replaces all 22 console methods. The message text we report
+reads data properties only: plain objects and arrays as JSON without
+accessors or `toJSON`, everything else as the builder's text.
+
+`lb-page` `tests/console/` has 3 cases (75 recorded hits, including which
+calls throw), equal to Chrome for Testing 153.0.8010.12 recorded with
+`chrome-headless-shell --dump-dom` (no DevTools client; `record.sh`), plus
+a test of the message text.
+
+Still open: `count`, `time*`, `group*`, `clear` and `profile*` send no CDP
+message.
+
+Checks on macOS (arm64):
+- **Pass:** fmt; `lb-js`, `lb-webapi`, `lb-page` (`pages` 108, WPT,
+  every target), `lb-cdp`, `lightbrowser`; firefox package tests.
+- **Fail, not caused by this change:**
+  - `lb-js` `icu_data`/`unused_v8` archive tests expect GNU `ar`, and
+    macOS has a BSD-format `librusty_v8.a`.
+  - Clippy 1.99 flags `chunks_exact` in `lb-fptest`, `lb-gl` and
+    `lb-net`.
+  - `lb-net`'s unit tests do not compile on `integrate/all-branches`:
+    `BuildInput` lacks `hints`/`restart`.
+- **Not run:** Playwright (not installed here), bench and T-010.
+
+### Build health after the merge (2026-11-07)
+
+The three failures above are fixed:
+- `lb-net` `header_profile.rs`: the form-POST unit test sets `hints: &[]`
+  and `restart: false` (no `Accept-CH`, not a `Critical-CH` retry), so it
+  still checks the plain form-POST headers.
+- Clippy 1.99: constant-size `chunks_exact`/`chunks_exact_mut` became
+  `as_chunks`/`as_chunks_mut` (stable since Rust 1.88, our MSRV) in
+  `lb-fptest`, `lb-gl`, `lb-net`, `lb-paint` and `lb-webapi`. Same
+  behaviour: both skip a short tail.
+- `lb-js` `icu_data.rs` reads BSD `ar` archives (`__.SYMDEF` index,
+  `#1/<len>` names) and Mach-O objects as well as GNU `ar` and ELF; new
+  `archive_members`/`archive_symbols` serve the `icu_pack` example and the
+  tests. Only those use it: the binary embeds `icu/icudt78.dat.zch`, so
+  Linux is unchanged. The macOS arm64 archive's ICU data equals the
+  checked-in file. `stubs_name_archive_symbols` skips `WasmRevecPhase` off
+  x86_64, since V8 builds the revectorizer only for x64.
+- A review found three small gaps in the Mach-O and `ar` reader:
+  - only `S_ZEROFILL` was treated as having no file data (now all three
+    zerofill types are);
+  - offset sums taken from the file could overflow (now checked);
+  - several branches had no test (`/SYM64/`, `__.SYMDEF_64`, odd sizes, a
+    synthetic Mach-O object, now tested on every OS).
+- `lb-persona` `all_reference_personas_validate` loaded
+  `profiles/reference/tcp_public.json` (ADR 0033) as a persona; it now
+  reads only `reference/chrome` and `reference/firefox`. The two came
+  from different branches and met at the merge without a conflict.
+- Full checks on macOS arm64: fmt and both clippy runs clean;
+  `cargo test --workspace` 687 passed after the persona fix; firefox
+  package tests 15 passed. Playwright, the bench and T-010 were not run.
+
+## macOS: lazy ICU data, workers on demand, bench and Playwright (2026-11-07)
+
+First full run on macOS (Apple silicon, 10 cores, 16 GB, macOS 26.4,
+Node 26, Playwright 1.65 (npm) and 1.64.1 (PyPI, the newest there)). It
+found two memory costs that only macOS paid or that grew with the core
+count, and three gaps in what stock Playwright needs.
+
+**Memory and CPU.**
+- ICU data was decompressed whole on macOS (the lazy path needed `mremap`
+  and 4 KiB pages). It is now paged in lazily there too (ADR 0013
+  revision 5: a `mach_vm_remap` double mapping, one 16 KiB page per
+  fault, `SIGBUS`). 5 interleaved runs x 50 pages, release, before →
+  after: `fetch` peak RSS 39.8 → 25.6 MB, peak footprint 22.8 →
+  13.0 MB, CPU 3.36 → 1.53 s, wall 4.40 → 2.32 s; CDP crawl peak RSS
+  44.4 → 30.6 MB, peak footprint 28.4 → 19.0 MB, footprint after the
+  crawl 27.8 → 17.1 MB.
+- Page worker threads start on demand (ADR 0035): `serve` held one tokio
+  runtime per core before its first page. Idle `serve`: 1 thread instead
+  of 11, RSS 5.59 → 4.94 MB, footprint 3.25 → 2.69 MB (5 runs); after a
+  50-page crawl 12-13 threads instead of 21. Pages land on the same
+  workers as before.
+- A live-allocation trace after a crawl (`malloc_history`, all pages and
+  the context closed) found nothing else of ours that leaks: what stays
+  is V8's isolate and heap pages, the bindings' interface table and the
+  spare realm.
+
+**Playwright.**
+- `page.setContent` hung: `document.write` after `document.open()` was
+  refused (the parser took writes only while stopped at a script), and
+  nothing ran the end of parsing after `document.close()`. Now writes go
+  to the script-created parser, `document.open()` erases the document's
+  and window's listeners and handlers and sets readiness `loading`, and
+  `close()` runs the end of parsing inside the call, as in Chrome:
+  `interactive`, `DOMContentLoaded`, `complete`, `load` before `close()`
+  returns (recorded in local Chrome for Testing 1243 headless shell),
+  with their lifecycle events; loads the written markup started delay
+  `load` as in a navigation. Scripts written or inserted from an isolated
+  world run in the document's main world.
+- JavaScript dialogs: `alert`/`confirm`/`prompt` were silent no-ops, so
+  `page.on('dialog')` never fired. While a session attached to the page
+  has the Page domain on, a dialog sends `Page.javascriptDialogOpening`
+  and the page's worker waits until `Page.handleJavaScriptDialog`
+  answers it from the CDP thread (`Shared::dialogs`), then
+  `Page.javascriptDialogClosed`. Closing the page or losing the last such
+  session dismisses it. Without one, dialogs return at once as before.
+- Playwright 1.65 answers a proxy's 407 from `proxy.username/password`
+  instead of `httpCredentials`; `proxy.spec.mjs` and the Chrome recorder
+  pass both. Node 26 no longer resolves `node --test DIR` through
+  `package.json` `main`: the entry is `all.test.mjs`, which both find.
+- `tests/playwright/content.spec.mjs` (5 tests): `setContent` on
+  `about:blank` and after a navigation, readiness and event order,
+  erased listeners, `waitUntil: 'domcontentloaded'`, `document.write`,
+  all three dialogs accepted and dismissed, a dialog from a click
+  handler, auto-dismiss without a listener, closing a page with an open
+  dialog.
+
+**Bench on macOS.** `bench/run.py` measures through `libproc`
+(`bench/README.md`, "macOS"): footprint replaces PSS, peak RSS is
+sampled, `fetch` peaks come from `wait4` (bytes on macOS) and the exited
+child's lifetime peak footprint. Release binary with all of the above,
+3 runs x 50 pages, against headless Chromium 1243 on the same Mac,
+medians:
+
+| | `fetch` | CDP | Chromium (CDP) |
+|---|---|---|---|
+| crawl | 0.64 s | 0.26 s | 6.81 s |
+| page median | 11.1 ms | 5.0 ms | 137.5 ms |
+| CPU | 0.49 s | 0.23 s | 20.4 s |
+| peak RSS | 25.4 MB | 30.2 MB | 3,513 MB (summed) |
+| peak footprint | 12.8 MB | 17.2 MB | 2,178 MB |
+| idle RSS / footprint | | 5.0 / 2.7 MB | 1,154 / 477 MB |
+| footprint after crawl | | 16.5 MB | 1,822 MB |
+| new page | | 1.4 ms | 92 ms |
+
+Before this work on the same Mac (the first run of this section's
+bench, other builds running): `fetch` 29-39 ms per page and 1.4-1.9 s
+CPU, CDP peak footprint 27.6 MB. Binary 44.86 MB. No Lightpanda build
+here, so those checks are skipped.
+
+**Checks on macOS** (first pass). Playwright 29/29 (debug and release
+binaries); WPT 11737/12465 subtests (11734 before), 295/450 files; `lb-page` (108
+`pages` cases, every target), `lb-cdp`, `lb-webapi`, `lb-js` (with the
+lazy ICU tests on macOS), `lightbrowser`; firefox package tests and
+clippy; workspace clippy and fmt; bench tooling tests (the `/proc`
+parser test skips off Linux). Not run: T-010, Lightpanda.
+
+**Playwright, second pass** (ADR 0037, ADR 0009 revision 2). A probe of
+29 common Playwright calls beyond the suite found more gaps; all but the
+two deliberate refusals below now work, each checked against Chrome for
+Testing 1243 where a page can observe it:
+- `setInputFiles` with in-memory files and with local paths: `File`,
+  `FileList`, `DataTransfer` (Chrome's `files`/`items` identity), a file
+  input's `files` and `C:\fakepath\` value, `DOM.setFileInputFiles`
+  (`input`, `change`), multipart form posts with the bytes.
+- `grantPermissions` / `clearPermissions`: per-context overrides before
+  the persona's states, granted for the origin and the rest denied as in
+  Chrome (`Browser.grantPermissions`, `resetPermissions`,
+  `setPermission`).
+- `navigator.geolocation` (it did not exist) and
+  `Emulation.setGeolocationOverride`, so the `geolocation` context option
+  works: position, `watchPosition`, `toJSON` and the timeout error match
+  Chrome; an unanswered `prompt` waits (the headless shell denies).
+- `dragAndDrop`: `dragstart`, `pointercancel`, `Input.dragIntercepted`,
+  `Input.dispatchDragEvent`; the event logs of an accepted drop, a
+  rejected drop and a dragged link equal Chrome's. Drags also run on plain
+  mouse input when the client does not intercept them.
+- `page.pdf`: `Page.printToPDF` lays the page out at the paper's width,
+  paints page slices at about 150 dpi and embeds them as JPEGs (no
+  selectable text); `IO.read` / `IO.close` for the stream.
+- A plain `browser.newContext()` works (user decision): Playwright's
+  implicit screen and scale factor 1 keep the persona's screen and ratio;
+  an explicit contradicting `screen` or `deviceScaleFactor` is still
+  refused.
+
+New specs: `files.spec.mjs` (3), `permissions.spec.mjs` (2),
+`dnd.spec.mjs` (2, Chrome's logs as expectations), `pdf.spec.mjs` (1), one
+more in `smoke.spec.mjs`: **38/38** with debug and release binaries. WPT
+**11739/12471** (more subtests run now that `File` and `DataTransfer`
+exist). Binary 44.98 MB (+0.12 MB). Bench after these, with the machine
+under load (load average 12 on 10 cores; Chromium's crawl took 16 s
+instead of 6.8 s): CDP peak footprint 16.9 MB, idle RSS 4.94 MB, footprint
+after the crawl 16.3 MB, the same as before them; times are not
+comparable to the quiet run.
+
+**Playwright, third pass.** Also equal to Chrome now: `beforeunload`
+(`page.close({ runBeforeUnload: true })` through `Page.close`, and before
+every navigation; a dialog only after a user gesture; staying aborts a
+navigation with `net::ERR_ABORTED`), `watchPosition` updates on every new
+position until `clearWatch`, permission overrides in workers, and media
+emulation as the client asks (user decision, ADR 0009 revision 3:
+`emulateMedia` color scheme, reduced motion, print, kept across
+navigations). New tests in `content.spec.mjs`, `permissions.spec.mjs`
+and `media.spec.mjs`.
+
+**Still open (Playwright).** By decision: `exposeFunction` /
+`exposeBinding` (Playwright 1.65 needs a main-world binding; ADR 0009
+keeps bindings out of the main world, confirmed by the user). Missing:
+`change` events on `MediaQueryList`s, media emulation in child frames,
+`beforeunload` in child frames, vector text in PDFs. Console calls made
+in an isolated world are reported with the main world's context id.
+
+### Linux checks on rtx-dev, idle workers, V8's thread pool (2026-11-07)
+
+Builds and checks now run on `rtx-dev` (Ubuntu 24.04, x86_64, 24 cores,
+62 GB). For commit `2a7e09b`: build, fmt, WPT **11739/12471** (as on
+macOS), Playwright **41/41**, firefox tests; clippy (chrome and firefox)
+and nine `lb-cdp` tests failed on one lint and on the mock host refusing
+media emulation, both fixed after it. `apis::import_page` failed once
+under heavy load (its last line orders a fresh `import()` against a
+`setTimeout(0)`, a race with the loopback fetch) and passed 6 of 6 runs
+alone. Fixed at the cause: page and worker loops ran every queued task
+before any due timer, so a fast fetch could overtake a timer that was due
+first. Tasks now carry the time they were queued, and a timer that came
+due before the next task was queued runs first (real clock; virtual time
+unchanged), the order Chrome's scheduler serves queues of equal priority
+in. All 109 `pages` cases pass; `import_page` 24 of 24 with 8 runs at a
+time. Bench (5 x 50 pages; Chromium 1243 on the same machine):
+
+| | `fetch` | CDP | Chromium (CDP) |
+|---|---|---|---|
+| crawl | 0.80 s | 0.47 s | 3.10 s |
+| CPU | 0.70 s | 0.46 s | 12.8 s |
+| peak RSS | 17.8 MB | 22.4 MB | 2,811 MB (summed) |
+| peak PSS | | 19.5 MB | 1,241 MB |
+| idle RSS | | 5.50 MB | 918 MB |
+
+**Idle workers release their engine** (ADR 0035 revision 1). A worker
+with no pages for 30 s drops its engine, bindings and spare realm and
+calls `malloc_trim`; realm ids are now unique in the process. Linux,
+release, after a 50-page crawl over CDP: private memory (`RssAnon`)
+14.4 MB, 35 s later 8.1 MB (idle before any page: 1.4 MB); RSS 31.9 ->
+25.7 MB; the next page took 6-12 ms with its new engine. Closing the
+context frees little more (7.5 MB).
+
+**V8's background pool is 2 threads** instead of V8's default (cores - 1,
+up to 16): after a crawl on 24 cores the process has 6 threads instead
+of 20, private memory about 0.4 MB less, crawl times and CPU the same
+within the noise of 3-run benches; `LB_V8_THREADS` overrides.
+
+### Final commit verified on rtx-dev; private memory in the bench (2026-11-07)
+
+Commit `870ce76` checked out on rtx-dev and run through everything:
+build, fmt, clippy (chrome and firefox), the whole workspace test suite
+(73 suites, no failure), firefox tests, WPT **11739/12471**, Playwright
+**41/41**, release build (43.24 MB). `bench/run.py` now also records the
+private memory on Linux (`RssAnon`, sampled peak, idle, after the crawl):
+RSS counts the binary's file pages, whose residency moved by up to ~6 MB
+between otherwise equal runs on this ZFS machine (one run right after the
+builds showed CDP peak RSS 29 MB, the next ones 21 MB, same binary, same
+private memory). Bench on a quiet machine (3 x 50 pages, Chromium 1243):
+
+| | `fetch` | CDP | Chromium (CDP) |
+|---|---|---|---|
+| crawl | 0.67 s | 0.39 s | 3.00 s |
+| CPU | 0.60 s | 0.34 s | 12.4 s |
+| peak RSS | 17.6 MB | 21.0 MB | 2,883 MB (summed) |
+| peak private | | 9.9 MB | 1,345 MB |
+| idle private | | 1.37 MB | 290 MB |
+| private after crawl | | 8.7 MB | 1,325 MB |
+| new page | | 1.7 ms | 33.6 ms |
+
 ## Risks
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from

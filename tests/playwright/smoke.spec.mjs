@@ -59,3 +59,18 @@ test('serve + connectOverCDP + newPage + goto wall time', async () => {
   console.log(`# serve start + connect: ${startedMs.toFixed(0)} ms; connect + newPage + goto: ${warm.toFixed(0)} ms`);
   assert.ok(warm < 10000);
 });
+
+test('a plain newContext() works: the viewport on the persona screen (ADR 0009 rev. 2)', async () => {
+  const { browser } = await env();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.setContent('<p>x</p>');
+  const [w, h, sw, sh] = await page.evaluate(() => [innerWidth, innerHeight, screen.width, screen.height]);
+  assert.deepEqual([w, h], [1280, 720]);
+  assert.ok(sw >= 1280 && sh >= 720 && !(sw === 1280 && sh === 720), `persona screen ${sw}x${sh}`);
+  await context.close();
+  // A screen the client sets that contradicts the persona is refused.
+  const c2 = await browser.newContext({ screen: { width: 1024, height: 768 } });
+  await assert.rejects(c2.newPage(), /contradicts the persona/);
+  await c2.close();
+});

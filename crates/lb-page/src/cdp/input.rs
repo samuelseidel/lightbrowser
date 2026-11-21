@@ -67,6 +67,21 @@ pub(super) fn mouse(ws: &Rc<WorkerState>, p: &Rc<PageState>, ev: MouseEvent) -> 
     Ok(())
 }
 
+/// `Input.dispatchDragEvent`, with dropped files already read.
+pub(super) fn drag(
+    ws: &Rc<WorkerState>,
+    p: &Rc<PageState>,
+    kind: input::DragKind,
+    x: f64,
+    y: f64,
+    data: input::DragData,
+    modifiers: u32,
+) -> HostResult<()> {
+    with_main(ws, p, None, |js, w| {
+        input::dispatch_drag(js, w, kind, x, y, &data, modifiers)
+    })
+}
+
 pub(super) fn key(ws: &Rc<WorkerState>, p: &Rc<PageState>, ev: KeyEvent) -> HostResult<()> {
     let kind = match ev.kind.as_str() {
         "keyDown" => KeyKind::Down,

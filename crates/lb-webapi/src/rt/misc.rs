@@ -206,9 +206,51 @@ fn params_update(w: &Window, id: u32, f: impl FnOnce(&mut Vec<(String, String)>)
 // Blob, TextDecoder, MutationObserver data
 // ---------------------------------------------------------------------------
 
+/// The bytes of a `Blob`/`File` constructor's parts (argument `i`, a
+/// sequence of buffers, views, blobs and strings).
+pub(crate) fn blob_parts(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    i: usize,
+) -> Result<Vec<u8>, HostError> {
+    let mut bytes = Vec::new();
+    if i < cx.len() && cx.arg_kind(i) == ValueKind::Object {
+        let list = cx.arg_handle(i);
+        let len = cx.get_property(list, "length")?;
+        let n = match cx.handle_value(len) {
+            lb_js::JsValue::Number(n) => n as u32,
+            _ => 0,
+        };
+        cx.release(len);
+        for k in 0..n {
+            let item = cx.get_property(list, &k.to_string())?;
+            if let Some(b) = cx.handle_bytes(item) {
+                bytes.extend(b);
+            } else if let Some(Some(b)) =
+                cx.handle_host(item).filter(|h| h.kind == K_OBJ).map(|h| {
+                    w.with_obj(h.id, |o| match o {
+                        Obj::Blob(b) => Some(b.bytes.clone()),
+                        _ => None,
+                    })
+                    .flatten()
+                })
+            {
+                bytes.extend(b);
+            } else {
+                bytes.extend(cx.handle_string(item)?.into_bytes());
+            }
+            cx.release(item);
+        }
+        cx.release(list);
+    }
+    Ok(bytes)
+}
+
 pub(crate) struct BlobData {
     pub bytes: Vec<u8>,
     pub type_: String,
+    /// `Some` for a `File` (its name and `lastModified`).
+    pub file: Option<super::files::FileMeta>,
 }
 
 pub(crate) struct DecoderData {
@@ -1162,43 +1204,18 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
 
     // Blob
     ctor(reg, rt, "Blob", |cx, w| {
-        let mut bytes = Vec::new();
-        if !cx.is_empty() && cx.arg_kind(0) == ValueKind::Object {
-            let list = cx.arg_handle(0);
-            let len = cx.get_property(list, "length")?;
-            let n = match cx.handle_value(len) {
-                lb_js::JsValue::Number(n) => n as u32,
-                _ => 0,
-            };
-            cx.release(len);
-            for i in 0..n {
-                let item = cx.get_property(list, &i.to_string())?;
-                if let Some(b) = cx.handle_bytes(item) {
-                    bytes.extend(b);
-                } else if let Some(Some(b)) =
-                    cx.handle_host(item).filter(|h| h.kind == K_OBJ).map(|h| {
-                        w.with_obj(h.id, |o| match o {
-                            Obj::Blob(b) => Some(b.bytes.clone()),
-                            _ => None,
-                        })
-                        .flatten()
-                    })
-                {
-                    bytes.extend(b);
-                } else {
-                    bytes.extend(cx.handle_string(item)?.into_bytes());
-                }
-                cx.release(item);
-            }
-            cx.release(list);
-        }
+        let bytes = blob_parts(cx, w, 0)?;
         let d = Dict::arg(cx, 1);
         let ty = d
             .string(cx, "type")?
             .unwrap_or_default()
             .to_ascii_lowercase();
         d.release(cx);
-        let id = w.new_obj(Obj::Blob(Box::new(BlobData { bytes, type_: ty })));
+        let id = w.new_obj(Obj::Blob(Box::new(BlobData {
+            bytes,
+            type_: ty,
+            file: None,
+        })));
         cx.init_this(HostRef::new(K_OBJ, id))
     });
     fn blob(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<(Vec<u8>, String), HostError> {
@@ -1251,7 +1268,11 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
         } else {
             Vec::new()
         };
-        let id = w.new_obj(Obj::Blob(Box::new(BlobData { bytes, type_: ct })));
+        let id = w.new_obj(Obj::Blob(Box::new(BlobData {
+            bytes,
+            type_: ct,
+            file: None,
+        })));
         cx.ret(w.obj_arg(id))
     });
 

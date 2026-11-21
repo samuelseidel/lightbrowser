@@ -4,6 +4,9 @@
 //! value that contradicts it is rejected with an error that says which
 //! persona field it contradicts. A viewport smaller than the persona's
 //! screen is allowed (windows can be resized) and is passed to the host.
+//! Playwright's implicit defaults (a screen equal to the viewport, device
+//! scale factor 1) keep the persona's screen and ratio (ADR 0009, revision
+//! 2).
 
 use lb_css::MediaEnv;
 use lb_persona::{BrowserFamily, PersonaProfile};
@@ -62,6 +65,24 @@ pub fn check_device_metrics(
 ) -> Result<Option<ViewportOverride>, CdpError> {
     const M: &str = "Emulation.setDeviceMetricsOverride";
     let s = &p.screen;
+    // Playwright sends its viewport as the screen and a scale factor of 1
+    // unless the client set `screen` / `deviceScaleFactor`: a window of
+    // that size on the persona's own screen, at the persona's ratio.
+    let implicit = m.screen_width == Some(m.width)
+        && m.screen_height == Some(m.height)
+        && (m.device_scale_factor == 1.0 || m.device_scale_factor == 0.0);
+    let owned;
+    let m = if implicit {
+        owned = DeviceMetrics {
+            screen_width: None,
+            screen_height: None,
+            device_scale_factor: 0.0,
+            ..m.clone()
+        };
+        &owned
+    } else {
+        m
+    };
     if m.mobile != is_mobile(p) {
         return Err(reject(
             M,
@@ -355,38 +376,80 @@ pub struct MediaFeature {
     pub value: String,
 }
 
-/// Media type must be screen; each feature must be empty (no override) or
-/// equal what the persona's media environment answers.
-pub fn check_emulated_media(p: &PersonaProfile, m: &EmulatedMedia) -> Result<(), CdpError> {
-    const M: &str = "Emulation.setEmulatedMedia";
-    if let Some(media) = m.media.as_deref()
-        && !media.is_empty()
-        && media != "screen"
-    {
-        return Err(reject(
-            M,
-            format!("media type {media:?} is not supported (screen only)"),
-        ));
-    }
-    let env = MediaEnv::from_persona(p);
+/// The media a client asks for (ADR 0009 revision 3): applied as it is
+/// (the persona's preferences are only the defaults), as Chrome does. An
+/// empty value keeps the persona's; each call replaces the last one.
+/// Unknown features and values are errors.
+pub fn parse_emulated_media(m: &EmulatedMedia) -> Result<lb_css::MediaOverrides, CdpError> {
+    let print = match m.media.as_deref().unwrap_or("") {
+        "" => None,
+        "screen" => Some(false),
+        "print" => Some(true),
+        other => {
+            return Err(CdpError::invalid_params(format!(
+                "media type {other:?} is not supported (screen or print)"
+            )));
+        }
+    };
+    let mut o = lb_css::MediaOverrides {
+        print,
+        ..Default::default()
+    };
     for f in m.features.iter().flatten() {
         if f.value.is_empty() {
             continue;
         }
-        let want = env
-            .preference_keyword(&f.name)
-            .ok_or_else(|| reject(M, format!("media feature {:?} is not supported", f.name)))?;
-        if f.value != want {
-            return Err(reject(
-                M,
-                format!(
-                    "{} {:?} differs from the persona ({want:?})",
-                    f.name, f.value
-                ),
-            ));
+        let bad =
+            || CdpError::invalid_params(format!("{} {:?} is not a valid value", f.name, f.value));
+        match f.name.as_str() {
+            "prefers-color-scheme" => {
+                o.prefers_dark = Some(match f.value.as_str() {
+                    "dark" => true,
+                    "light" => false,
+                    _ => return Err(bad()),
+                })
+            }
+            "prefers-reduced-motion" => {
+                o.prefers_reduced_motion = Some(match f.value.as_str() {
+                    "reduce" => true,
+                    "no-preference" => false,
+                    _ => return Err(bad()),
+                })
+            }
+            "forced-colors" => {
+                o.forced_colors = Some(match f.value.as_str() {
+                    "active" => true,
+                    "none" => false,
+                    _ => return Err(bad()),
+                })
+            }
+            "prefers-contrast" => {
+                o.prefers_contrast = Some(match f.value.as_str() {
+                    "more" => "more",
+                    "less" => "less",
+                    "custom" => "custom",
+                    "no-preference" => "no-preference",
+                    _ => return Err(bad()),
+                })
+            }
+            "prefers-reduced-transparency" => {
+                o.prefers_reduced_transparency = Some(match f.value.as_str() {
+                    "reduce" => true,
+                    "no-preference" => false,
+                    _ => return Err(bad()),
+                })
+            }
+            // Not a feature lb-css evaluates (it always answers
+            // no-preference); accepted so clients that send it work.
+            "prefers-reduced-data" => {}
+            other => {
+                return Err(CdpError::invalid_params(format!(
+                    "media feature {other:?} is not supported"
+                )));
+            }
         }
     }
-    Ok(())
+    Ok(o)
 }
 
 #[cfg(test)]
@@ -426,29 +489,37 @@ mod tests {
                     value: value.into(),
                 }]),
             };
-            check_emulated_media(&p, &media(value)).unwrap();
-            assert!(check_emulated_media(&p, &media(conflicting)).is_err());
+            // The override is applied as asked (ADR 0009 rev 3), including a
+            // value that differs from the persona. matchMedia still follows
+            // the persona until that override is installed on the page.
+            parse_emulated_media(&media(value)).unwrap();
+            parse_emulated_media(&media(conflicting)).unwrap();
             assert!(
                 lb_css::match_media(&format!("({name}: {value})"), &MediaEnv::from_persona(&p))
                     .matches
             );
         }
-        let unsupported = EmulatedMedia {
-            media: None,
-            features: Some(vec![MediaFeature {
-                name: "prefers-reduced-data".into(),
-                value: "no-preference".into(),
-            }]),
-        };
-        assert!(check_emulated_media(&p, &unsupported).is_err());
     }
 
     #[test]
     fn device_metrics() {
         let p = persona();
-        // Playwright's default 1280x720 context: screen 1280x720 contradicts.
-        let e = check_device_metrics(&p, &metrics(json!({"width":1280,"height":720,"screenWidth":1280,"screenHeight":720,"deviceScaleFactor":1,"mobile":false}))).unwrap_err();
+        // Playwright's default 1280x720 context (screen = viewport, scale
+        // 1): the viewport on the persona's own screen (ADR 0009 rev. 2).
+        let v = check_device_metrics(&p, &metrics(json!({"width":1280,"height":720,"screenWidth":1280,"screenHeight":720,"deviceScaleFactor":1,"mobile":false}))).unwrap();
+        assert_eq!(
+            v,
+            Some(ViewportOverride {
+                width: 1280,
+                height: 720
+            })
+        );
+        // A screen chosen apart from the viewport still has to match.
+        let e = check_device_metrics(&p, &metrics(json!({"width":1280,"height":720,"screenWidth":1366,"screenHeight":768,"deviceScaleFactor":1,"mobile":false}))).unwrap_err();
         assert!(e.message.contains("screenWidth"), "{}", e.message);
+        // So does a scale factor other than 1 with the implicit screen.
+        let e = check_device_metrics(&p, &metrics(json!({"width":1280,"height":720,"screenWidth":1280,"screenHeight":720,"deviceScaleFactor":2,"mobile":false}))).unwrap_err();
+        assert!(e.message.contains("deviceScaleFactor"), "{}", e.message);
         // Same viewport with the persona screen is fine and applied.
         let v = check_device_metrics(&p, &metrics(json!({"width":1280,"height":720,"screenWidth":1920,"screenHeight":1080,"deviceScaleFactor":1,"mobile":false,"screenOrientation":{"type":"landscapePrimary","angle":0}}))).unwrap();
         assert_eq!(
@@ -539,14 +610,27 @@ mod tests {
         assert!(check_timezone(&p, "Europe/Berlin").is_err());
 
         let media = |v: Value| -> EmulatedMedia { serde_json::from_value(v).unwrap() };
-        check_emulated_media(&p, &media(json!({"media": "", "features": [{"name": "prefers-color-scheme", "value": "light"}, {"name": "prefers-reduced-motion", "value": ""}]}))).unwrap();
+        let o = parse_emulated_media(&media(json!({"media": "", "features": [{"name": "prefers-color-scheme", "value": "dark"}, {"name": "prefers-reduced-motion", "value": ""}]}))).unwrap();
+        assert_eq!(o.prefers_dark, Some(true));
+        assert_eq!(o.prefers_reduced_motion, None);
+        assert_eq!(
+            parse_emulated_media(&media(json!({"media": "print"})))
+                .unwrap()
+                .print,
+            Some(true)
+        );
+        assert!(parse_emulated_media(&media(json!({"media": "tv"}))).is_err());
         assert!(
-            check_emulated_media(
-                &p,
-                &media(json!({"features": [{"name": "prefers-color-scheme", "value": "dark"}]}))
-            )
+            parse_emulated_media(&media(
+                json!({"features": [{"name": "prefers-color-scheme", "value": "blue"}]})
+            ))
             .is_err()
         );
-        assert!(check_emulated_media(&p, &media(json!({"media": "print"}))).is_err());
+        assert!(
+            parse_emulated_media(&media(
+                json!({"features": [{"name": "nope", "value": "x"}]})
+            ))
+            .is_err()
+        );
     }
 }

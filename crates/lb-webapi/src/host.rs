@@ -391,3 +391,69 @@ mod tests {
         assert_eq!(s.len(), 1);
     }
 }
+
+/// Permission states a CDP client set for a browser context
+/// (`Browser.grantPermissions`, `Browser.setPermission`), per origin; the
+/// key "" holds the overrides for every origin. They come before the
+/// persona's states (`navigator.permissions.query`, `Notification`,
+/// media devices). Names are Permissions API names (`camera`,
+/// `clipboard-read`, ...).
+#[derive(Debug, Default)]
+pub struct PermissionOverrides {
+    by_origin: std::collections::HashMap<String, OriginPermissions>,
+}
+
+#[derive(Debug, Default)]
+struct OriginPermissions {
+    states: std::collections::HashMap<String, String>,
+    /// After `grantPermissions`: every permission not granted is denied
+    /// (Chrome's DevTools overrides).
+    others_denied: bool,
+}
+
+/// The overrides of one browser context, shared by its windows.
+pub type SharedPermissions = Arc<std::sync::RwLock<PermissionOverrides>>;
+
+impl PermissionOverrides {
+    /// Grant `names` for `origin` (`None`: every origin) and deny every
+    /// other permission there, replacing earlier overrides of that origin.
+    pub fn grant(&mut self, origin: Option<&str>, names: &[String]) {
+        let o = OriginPermissions {
+            states: names
+                .iter()
+                .map(|n| (n.clone(), "granted".to_owned()))
+                .collect(),
+            others_denied: true,
+        };
+        self.by_origin.insert(origin.unwrap_or("").to_owned(), o);
+    }
+
+    /// Set one permission's state for `origin` (`None`: every origin).
+    pub fn set(&mut self, origin: Option<&str>, name: &str, state: &str) {
+        self.by_origin
+            .entry(origin.unwrap_or("").to_owned())
+            .or_default()
+            .states
+            .insert(name.to_owned(), state.to_owned());
+    }
+
+    /// Drop every override (`Browser.resetPermissions`).
+    pub fn reset(&mut self) {
+        self.by_origin.clear();
+    }
+
+    /// The overridden state of `name` for `origin`, if any.
+    pub fn state(&self, origin: &str, name: &str) -> Option<String> {
+        for key in [origin, ""] {
+            if let Some(o) = self.by_origin.get(key) {
+                if let Some(s) = o.states.get(name) {
+                    return Some(s.clone());
+                }
+                if o.others_denied {
+                    return Some("denied".to_owned());
+                }
+            }
+        }
+        None
+    }
+}

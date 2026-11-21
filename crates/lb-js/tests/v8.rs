@@ -1066,15 +1066,15 @@ mod icu_data {
         );
     }
 
-    // Lazy paging (Linux): chunks read from many threads at once, in a
-    // scattered order, match the eager decompression byte for byte.
+    // Lazy paging (Linux, macOS): chunks read from many threads at once, in
+    // a scattered order, match the eager decompression byte for byte.
     #[test]
     fn lazy_chunks_match_from_many_threads() {
         let data = icu_data::data();
         let eager = icu_data::decompress_all();
         // SAFETY: the box holds at least data.len() initialised bytes.
         let eager = unsafe { std::slice::from_raw_parts(eager.as_ptr().cast::<u8>(), data.len()) };
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         assert!(
             icu_data::resident_chunks().is_some(),
             "lazy ICU paging is off"
@@ -1093,37 +1093,68 @@ mod icu_data {
             }
         });
         assert!(data == eager);
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         assert_eq!(icu_data::resident_chunks(), Some(chunks));
     }
 
     // A fault outside the ICU data is still a crash (the handler passes it
-    // on): run in a child process.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn other_faults_still_crash() {
+    // on): run in a child process. `test` names this test, `fault` makes
+    // the child fault after the ICU data is mapped.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn child_dies_with(test: &str, fault: fn(), signal: i32) {
         if std::env::var_os("LB_ICU_CRASH_CHILD").is_some() {
             let _ = icu_data::data();
-            // SAFETY: deliberately invalid; this child process must die.
-            unsafe { std::ptr::read_volatile(8usize as *const u8) };
+            fault();
             std::process::exit(0);
         }
         let out = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "icu_data::other_faults_still_crash",
-                "--nocapture",
-            ])
+            .args(["--exact", test, "--nocapture"])
             .env("LB_ICU_CRASH_CHILD", "1")
             .output()
             .unwrap();
         use std::os::unix::process::ExitStatusExt;
-        assert_eq!(out.status.signal(), Some(libc_sigsegv()), "{out:?}");
+        assert_eq!(out.status.signal(), Some(signal), "{out:?}");
     }
 
-    #[cfg(target_os = "linux")]
-    fn libc_sigsegv() -> i32 {
-        11
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn other_faults_still_crash() {
+        // SIGSEGV is 11 on both.
+        child_dies_with(
+            "icu_data::other_faults_still_crash",
+            || {
+                // SAFETY: deliberately invalid; this child process must die.
+                unsafe { std::ptr::read_volatile(8usize as *const u8) };
+            },
+            11,
+        );
+    }
+
+    // macOS raises SIGBUS for a protected page, like the ICU reservation's:
+    // one outside it still ends the process with SIGBUS.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn other_protected_pages_still_crash() {
+        child_dies_with(
+            "icu_data::other_protected_pages_still_crash",
+            || {
+                // SAFETY: a fresh PROT_NONE mapping, read on purpose; this
+                // child process must die.
+                unsafe {
+                    let p = libc::mmap(
+                        std::ptr::null_mut(),
+                        1 << 16,
+                        libc::PROT_NONE,
+                        libc::MAP_PRIVATE | libc::MAP_ANON,
+                        -1,
+                        0,
+                    );
+                    assert_ne!(p, libc::MAP_FAILED);
+                    std::ptr::read_volatile(p.cast::<u8>());
+                }
+            },
+            10, // SIGBUS on macOS
+        );
     }
 
     #[test]
@@ -1167,32 +1198,33 @@ mod unused_v8 {
     use super::*;
     use lb_js::{icu_data, unused_v8};
 
-    /// The global symbol names of the archive's index (GNU `/` member).
+    /// The global symbol names of the archive's index (GNU `/` member on
+    /// Linux, BSD `__.SYMDEF` on macOS, without Mach-O's leading `_`).
     fn archive_symbols() -> std::collections::HashSet<Vec<u8>> {
         let exe = std::env::current_exe().unwrap();
         let archive = icu_data::find_archive(&exe).expect("librusty_v8.a (RUSTY_V8_ARCHIVE)");
         let ar = std::fs::read(&archive).unwrap();
-        assert!(ar.starts_with(b"!<arch>\n"));
-        let hdr = &ar[8..68];
-        assert_eq!(&hdr[..2], b"/ ", "first member is the symbol index");
-        let size: usize = std::str::from_utf8(&hdr[48..58])
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        let body = &ar[68..68 + size];
-        let count = u32::from_be_bytes(body[..4].try_into().unwrap()) as usize;
-        body[4 + 4 * count..]
-            .split(|&b| b == 0)
-            .map(<[u8]>::to_vec)
-            .collect()
+        let syms = icu_data::archive_symbols(&ar).unwrap();
+        assert!(
+            !syms.is_empty(),
+            "empty symbol index in {}",
+            archive.display()
+        );
+        syms.into_iter().collect()
     }
 
     #[test]
     fn stubs_name_archive_symbols() {
         let syms = archive_symbols();
+        // V8 builds the Wasm revectorizer (`wasm-revec-phase.o`) only for
+        // x64 (`V8_ENABLE_WASM_SIMD256_REVEC`); elsewhere its stub defines
+        // a name nothing references.
+        let x64_only = |n: &str| n.contains("WasmRevecPhase");
         for (path, names) in unused_v8::STUBS {
             for n in *names {
+                if !cfg!(target_arch = "x86_64") && x64_only(n) {
+                    continue;
+                }
                 assert!(
                     syms.contains(n.as_bytes()),
                     "{path}: {n} is not in the V8 archive (renamed? update unused_v8.rs)"

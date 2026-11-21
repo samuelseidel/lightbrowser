@@ -464,6 +464,7 @@ fn on_event(js: &mut dyn Js, w: &Rc<Window>, id: u32, ev: WsEvent) {
                     let blob = w.new_obj(Obj::Blob(Box::new(BlobData {
                         bytes: b,
                         type_: String::new(),
+                        file: None,
                     })));
                     js.make(w.obj_arg(blob))
                 }

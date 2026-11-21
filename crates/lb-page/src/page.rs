@@ -49,6 +49,9 @@ pub(crate) struct PageState {
     pub id: u64,
     pub ctx: BrowserContext,
     pub window: RefCell<Option<Rc<Window>>>,
+    /// The page's geolocation override, shared by all its windows
+    /// (`Emulation.setGeolocationOverride`).
+    pub geolocation: lb_webapi::rt::GeoCell,
     /// Wakes the event loop.
     pub notify: Rc<Notify>,
     /// Wakes code waiting for subresource loads.
@@ -156,6 +159,39 @@ impl PageState {
         })
     }
 
+    /// Shows this page's JavaScript dialogs through its CDP agent (see
+    /// `Agent::dialog`); without an agent they return at once.
+    pub(crate) fn dialog_host(self: &Rc<Self>) -> lb_webapi::rt::DialogHost {
+        let me = Rc::downgrade(self);
+        Rc::new(move |w, req| me.upgrade()?.agent()?.dialog(w, req))
+    }
+
+    /// Sends a drag that started to the CDP client when it intercepts drags
+    /// (`Input.dragIntercepted`); otherwise the drag runs on mouse input.
+    pub(crate) fn drag_intercept(self: &Rc<Self>) -> lb_webapi::rt::input::DragIntercept {
+        let me = Rc::downgrade(self);
+        Rc::new(move |data| {
+            let Some(a) = me.upgrade().and_then(|p| p.agent()) else {
+                return false;
+            };
+            if !a.st.borrow().intercept_drags {
+                return false;
+            }
+            let items: Vec<serde_json::Value> = data
+                .items
+                .iter()
+                .map(|(t, d)| serde_json::json!({ "mimeType": t, "data": d }))
+                .collect();
+            a.emit(lb_cdp::PageEvent::DragIntercepted {
+                data: serde_json::json!({
+                    "items": items,
+                    "dragOperationsMask": data.operations,
+                }),
+            });
+            true
+        })
+    }
+
     /// Console sink forwarding to the observer.
     pub(crate) fn console_sink(self: &Rc<Self>) -> ConsoleSink {
         let me = Rc::downgrade(self);
@@ -178,7 +214,8 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
     let mut next_frame = 0.0f64;
     let mut gc_done = false;
     let mut quiet_since: Option<f64> = None;
-    // Tasks run before timers, but a page that keeps queueing tasks (an
+    // Tasks and due timers run in the order they became ready (below);
+    // with a virtual clock tasks go first. A page that keeps queueing tasks (an
     // IndexedDB request loop, a postMessage ping-pong) must not starve
     // its due timers: after this many tasks in a row a due timer goes
     // first (real clock only).
@@ -216,6 +253,31 @@ pub(crate) async fn event_loop(ws: Rc<WorkerState>, page: Rc<PageState>) {
             }
         }
         for x in wins.iter().filter(|_| !did) {
+            // A timer that came due before this window's next task was
+            // queued runs first (real clock; see `next_task_queued_at`).
+            let timer_first = !x.clock.is_virtual()
+                && matches!(
+                    (x.next_timer_due(), x.next_task_queued_at()),
+                    (Some(due), Some(queued)) if due <= x.clock.now() && due < queued
+                );
+            if timer_first {
+                let realm = x.realm();
+                let ran = ws
+                    .with_engine(|engine| {
+                        let mut js = EngineJs { engine, realm };
+                        let ran = x.run_due_timer(&mut js);
+                        if ran {
+                            js.engine.perform_microtask_checkpoint();
+                        }
+                        ran
+                    })
+                    .unwrap_or(false);
+                if ran {
+                    did = true;
+                    streak = 0;
+                    break;
+                }
+            }
             if let Some(task) = x.take_task() {
                 let realm = x.realm();
                 ws.with_engine(|engine| {
@@ -441,6 +503,7 @@ impl Page {
                     id,
                     ctx: c2,
                     window: RefCell::new(None),
+                    geolocation: Rc::default(),
                     notify: Rc::new(Notify::new()),
                     loads: Rc::new(Notify::new()),
                     life: life_tx,
@@ -538,6 +601,15 @@ impl Page {
                 f(ws, &p);
             }
         }))
+    }
+
+    /// Set or clear the page's geolocation (every window of it, and the
+    /// documents it loads later).
+    pub(crate) fn set_geolocation(
+        &self,
+        pos: Option<lb_webapi::rt::GeoOverride>,
+    ) -> Result<(), PageError> {
+        self.post(move |_, p| p.geolocation.set(pos))
     }
 
     /// The context this page belongs to.

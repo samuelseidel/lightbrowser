@@ -11,8 +11,10 @@ first and do not contradict them. Current state (Chrome build): M1 (network),
 M2 (DOM + V8), M3 (layout + CDP), M4 (Chrome fingerprints), M5 (human input
 and Python SDK), most of M6 and M7 (OS personas) are done. `lightbrowser serve` runs real V8
 pages through `lb_page::CdpHost`; stock Playwright `connectOverCDP` passes
-24 tests (including screenshots, shadow DOM, proxies and workers); the WPT subset
-passes 11734/12465 (2566/2788 of the pre-shadow-DOM files, the same per
+38 tests (including screenshots, shadow DOM, proxies, workers, `setContent`,
+dialogs, file uploads, permissions and geolocation, drag and drop, PDF, and
+a plain `newContext()`); the WPT subset
+passes 11739/12471 (11734/12465 before `setContent` and `File`; 2566/2788 of the pre-shadow-DOM files, the same per
 file as the previous code here; 1249/1288 of the IndexedDB files). On our
 detection engine (`tests/detect-bench`, ADR 0007) T-010 scores fp 0 for all
 8 reference Chrome personas, with the M7 OS rules at full weight. With
@@ -170,7 +172,18 @@ requests and navigations, `Clients`, messages both ways, `caches`, update
 checks after navigations; 11 Chrome-recorded cases in `lb-page`
 `tests/service_workers/`; the bench rule `sw_navigator_mismatch` and 63
 worker checks (dedicated, shared, service) in `fingerprint-report`.
-See "Where we stand" and the status sections in `docs/ROADMAP.md`.
+macOS (arm64, ROADMAP "macOS: lazy ICU data, workers on demand, bench and
+Playwright"): Playwright 38/38 (Node 26, Playwright 1.65), lazy ICU paging
+(`mach_vm_remap` double mapping, `SIGBUS`), `bench/run.py` measures through
+`libproc` (footprint instead of PSS); file uploads, permission overrides,
+geolocation, drag and drop and `Page.printToPDF` (ADR 0037); Playwright's
+implicit 1280x720 viewport keeps the persona's screen (ADR 0009 revision 2)
+and media emulation applies as the client asks (revision 3); `beforeunload`.
+Idle workers drop their engine after 30 s (ADR 0035 revision 1); V8's
+background pool is 2 threads (`LB_V8_THREADS`). Builds and checks also run
+on the `rtx-dev` Linux box (ROADMAP "Linux checks on rtx-dev").
+See "Where we stand" and the status
+sections in `docs/ROADMAP.md`.
 
 ## Internal use and legal
 - Internal only. Never push binaries to public repos or registries.
@@ -181,17 +194,17 @@ See "Where we stand" and the status sections in `docs/ROADMAP.md`.
 | Crate | Role | State |
 |---|---|---|
 | `lb-persona` | Persona model, `BrowserFamily`, consistency rules, `sfc32` | v2 schema + loader, rules R01–R26, sfc32 done; OS axis and per-OS accessors (M7), `profiles/catalog/` + `gen_personas` example; optional `preferences`, media devices, battery |
-| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch, `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
+| `lb-js` | `JsEngine` trait; V8 (chrome) or SpiderMonkey (firefox) | V8 backend done (lazy interfaces and templates, ADR 0016; startup snapshot made in memory, optional, ADR 0013; ICU data in 4 KiB zstd chunks paged in on first touch on Linux and macOS (ADR 0013 revisions 3-5), `v8_engine/icu_data.rs`, `LB_ICU_EAGER=1` for valgrind and lldb; code cache for large scripts compiled again; V8 objects only off-by-default flags reach are stubbed out, `v8_engine/unused_v8.rs`, so `init_v8` refuses those flags; `RealmOps`, native `inspect` for CDP); SpiderMonkey M4b |
 | `lb-net` | BoringSSL, own h1 writer, forked h2 (`vendor/h2`), cookies, decoding, `fetch`, per-destination headers (`profiles/headers`), `Accept-CH` client hints, connection pool (`pool.rs`, ADR 0018), WebSocket client (`websocket.rs`, ADR 0025), proxies (`proxy.rs`, ADR 0027), `tcpfp` (TCP SYN profiles and the packet shim, ADRs 0031-0033) | Done for Chrome; M1b `tcpfp` done (direct connections only, Linux); cookies shared across clones; Firefox headers generic; keep-alive, HTTP/2 sessions and TLS resumption per context (a `NetContext` without a pool still uses one connection per request); HTTP `CONNECT`/forward and SOCKS5 proxies per context; cache, HTTPS/SOCKS4 proxies, HTTP/2 coalescing open |
 | `lb-fptest` | Test support only, never shipped: ClientHello parser, JA3/JA4, Akamai H2, loopback capture server, profile builder, `site` page server that records connection use, TCP SYN capture and JA4T (`tcp-capture`, Linux) | M1, M1b done; `site` (ADR 0018) |
 | `lb-dom` | Arena DOM, html5ever sink, selectors, shadow trees | Done (one arena per document; `import_node_mapped` for adoption across documents; `ParseStep::StyleSheet` pauses for style sheets; shadow roots, slots, flat tree and declarative roots in `shadow.rs`; custom element state and `is` values; `ParseStep::CustomElement` pauses) |
 | `lb-webidl-gen` | WebIDL to Rust codegen (build time) | Own parser + Chrome generator done; table in `lb-webapi/src/generated/` |
-| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`), shadow DOM (`rt/shadow.rs`), custom elements (`rt/custom.rs`), `ElementInternals` and `FormData` (`rt/internals.rs`), Web Crypto (`rt/crypto/`), WebSocket (`rt/websocket.rs`), dynamic `import()` (`rt/modules.rs`), `blob:`/`data:` fetches and synchronous XHR (`rt/net.rs`), IndexedDB (`rt/idb/`, ADR 0028), WebGL rendering through lb-gl (`rt/webgl_pipe.rs`, ADR 0030) |
+| `lb-webapi` | Bindings installer, DOM/events/window/network APIs, input pipeline, canvas 2D, images, navigator surface, WebGL, audio, fonts, frames, workers, service workers | Done (chrome), including the HTMLTable* APIs (`rt/table.rs`), the OS-gated surface (share, bluetooth, codecs, keyboard, gpu), style sheet loading and CSSOM (`rt/sheets.rs`), CSS background images (`rt/bgimage.rs`), workers, message ports and structured clone (`rt/worker.rs`, `Bindings::define_worker`), service workers and the Cache API (`rt/sw.rs`), shadow DOM (`rt/shadow.rs`), custom elements (`rt/custom.rs`), `ElementInternals` and `FormData` (`rt/internals.rs`), Web Crypto (`rt/crypto/`), WebSocket (`rt/websocket.rs`), dynamic `import()` (`rt/modules.rs`), `blob:`/`data:` fetches and synchronous XHR (`rt/net.rs`), IndexedDB (`rt/idb/`, ADR 0028), WebGL rendering through lb-gl (`rt/webgl_pipe.rs`, ADR 0030), `File`/`FileList`/`DataTransfer` and file inputs (`rt/files.rs`), geolocation and permission overrides (`rt/navigator.rs`), HTML drag and drop (`rt/input.rs`), JavaScript dialogs (ADRs 0036, 0037) |
 | `lb-css` | Lazy cascade, backgrounds and decorations (`bg.rs`), CSSOM rule lists (`cssom.rs`) | Done (88 longhands incl. background layers, radii, `box-shadow`; shadow tree scoping with `:host`/`::slotted`, flat-tree inheritance; no pseudo-elements, animations) |
 | `lb-layout` | taffy layout on demand, font metrics, hit testing, AX tree | Done (approximate inline layout); per-persona scrollbars, generic fonts, Linux aliases; `display_list` for screenshots |
 | `lb-gl` | Software WebGL (ADR 0030): GLSL ES 1.00/3.00 preprocessor, parser and checker (`glsl/`), inlining codegen, 16-lane interpreter (`exec.rs`), rasterizer (`raster.rs`), textures, images and formats, program linking | Done (no transform feedback, queries, compressed-texture decoding or translated shader source; one thread) |
 | `lb-paint` | tiny-skia canvas 2D, text, PNG/JPEG/WebP codecs, seeded readback noise, page screenshots (ADR 0014, 0020; `decor.rs`: backgrounds, gradients, radius, shadows) | Done (no filters or shaping; screenshots lack transforms, outlines, SVG background images) |
-| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, worker threads (`worker.rs`), service worker registry (`sw.rs`, idle stop after 30 s) done; workers as CDP targets (`cdp/workers.rs`, ADR 0029); no popups |
+| `lb-page` | Event loop, navigation, frames, workers, CDP page host, fingerprint report | Page worker threads start on demand (ADR 0035); event loop, navigation, iframes, `CdpHost`, `fingerprint_report`, human-input replay (`cdp/human.rs`), `Page.captureScreenshot`, `Page.printToPDF` (`cdp/screenshot.rs`, ADR 0037), worker threads (`worker.rs`), service worker registry (`sw.rs`, idle stop after 30 s) done; workers as CDP targets (`cdp/workers.rs`, ADR 0029); no popups |
 | `lb-cdp` | CDP server | Done; real host is `lb_page::CdpHost`, `MockHost` is for lb-cdp tests and the firefox build |
 | `lb-behavior` | Human input models (Fitts, minimum jerk, log-normal keys, wheel/trackpad), rewritten from the vendored stealth-browser crate | Done; replayed by `LightBrowser.human*` |
 | `sdk/python` | `lightbrowser` package: launcher, `Persona`, sync/async Playwright wrappers with `human_*` and `verify_fingerprint`, scenarios T-001..T-007 | Done; needs Python Playwright >= 1.63 |
@@ -236,7 +249,7 @@ cargo test -p lb-page --test connections
 ./target/debug/lightbrowser fetch https://127.0.0.1:PORT/ --insecure --dump text
 # WPT subset (loopback) and the Playwright CDP smoke test
 cargo test -p lb-page --test wpt -- --nocapture
-cargo build -p lightbrowser && node --test tests/playwright/   # 24 tests; LIGHTBROWSER_BIN overrides
+cargo build -p lightbrowser && node --test tests/playwright/   # 38 tests; LIGHTBROWSER_BIN overrides
 # Workers as CDP targets vs Chrome: record the CDP traffic of either browser, compare (loopback)
 node tests/playwright/workers/record.mjs chrome > /tmp/c.json; node tests/playwright/workers/record.mjs lightbrowser > /tmp/l.json
 node tests/playwright/workers/record.mjs compare /tmp/c.json /tmp/l.json
@@ -262,6 +275,9 @@ cargo test -p lb-net --test proxy
 # Shadow DOM and custom elements vs Chrome (9 cases)
 cargo test -p lb-page --test pages shadow
 # re-record: crates/lb-page/tests/shadow/{serve.py,chrome.mjs} (python3 serve.py 18971 &)
+# Console calls run exactly Chrome's page code (getters, toString, %s; 3 cases, ADR 0034)
+cargo test -p lb-page --test pages console
+# re-record (no DevTools client): CHROME=/path/to/chrome-headless-shell sh crates/lb-page/tests/console/record.sh > crates/lb-page/tests/console/chrome.json
 # Image reuse within a document vs Chrome (5 cases, with request counts)
 cargo test -p lb-page --test pages images
 # re-record: crates/lb-page/tests/images/{serve.py,chrome.mjs}

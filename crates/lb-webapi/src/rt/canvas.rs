@@ -836,6 +836,7 @@ fn register_element(reg: &mut Registry, rt: &Runtime) {
                     let id = w.new_obj(Obj::Blob(Box::new(super::misc::BlobData {
                         bytes,
                         type_: ty.to_owned(),
+                        file: None,
                     })));
                     w.obj_arg(id)
                 };
@@ -993,6 +994,7 @@ fn register_offscreen(reg: &mut Registry, rt: &Runtime) {
         let b = w.new_obj(Obj::Blob(Box::new(super::misc::BlobData {
             bytes,
             type_: ty.to_owned(),
+            file: None,
         })));
         let arg = w.obj_arg(b);
         cx.resolve_promise(r, arg)

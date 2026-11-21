@@ -251,6 +251,17 @@ pub enum PageEvent {
         kind: String,
         default_prompt: Option<String>,
     },
+    /// A drag started while the client intercepts drags
+    /// (`Input.dragIntercepted`); `data` is CDP's `Input.DragData`.
+    DragIntercepted {
+        data: Value,
+    },
+    /// The dialog was accepted (`result`) or dismissed; `user_input` is the
+    /// prompt's text.
+    JavascriptDialogClosed {
+        result: bool,
+        user_input: String,
+    },
     RequestWillBeSent(Box<RequestWillBeSent>),
     ResponseReceived(Box<ResponseReceived>),
     LoadingFinished(LoadingFinished),
@@ -443,6 +454,16 @@ pub trait PageHost {
         Err(HostError::unsupported("Page.captureScreenshot"))
     }
 
+    /// `Page.close` runs `beforeunload` first: true to close the page.
+    async fn run_before_unload(&self, _target_id: &str) -> HostResult<bool> {
+        Ok(true)
+    }
+
+    /// `Page.printToPDF`: the PDF, base64-encoded.
+    fn print_to_pdf(&self, _target_id: &str, _params: &Value) -> HostResult<String> {
+        Err(HostError::unsupported("Page.printToPDF"))
+    }
+
     /// Scroll offset and content size for `Page.getLayoutMetrics`. `None`
     /// (the default) reports no scroll and the viewport as content size.
     fn page_metrics(&self, _target_id: &str) -> HostResult<Option<PageMetrics>> {
@@ -467,6 +488,68 @@ pub trait PageHost {
     ) -> HostResult<()> {
         Err(HostError::new("No dialog is showing"))
     }
+
+    /// `Emulation.setEmulatedMedia`: media the client asked for (an empty
+    /// set restores the persona's).
+    fn set_emulated_media(
+        &self,
+        _target_id: &str,
+        media: lb_css::MediaOverrides,
+    ) -> HostResult<()> {
+        if media == lb_css::MediaOverrides::default() {
+            Ok(())
+        } else {
+            Err(HostError::unsupported("Emulation.setEmulatedMedia"))
+        }
+    }
+
+    /// `Emulation.setGeolocationOverride`: the page's position
+    /// (`latitude`, `longitude`, `accuracy`), or `None` to clear it.
+    fn set_geolocation_override(
+        &self,
+        _target_id: &str,
+        position: Option<(f64, f64, f64)>,
+    ) -> HostResult<()> {
+        match position {
+            None => Ok(()),
+            Some(_) => Err(HostError::unsupported("Emulation.setGeolocationOverride")),
+        }
+    }
+
+    /// `Browser.grantPermissions`: grant these CDP permission types for
+    /// `origin` (`None`: every origin) in `context` and deny the others.
+    fn grant_permissions(
+        &self,
+        _context: &str,
+        _origin: Option<&str>,
+        _permissions: &[String],
+    ) -> HostResult<()> {
+        Err(HostError::unsupported("Browser.grantPermissions"))
+    }
+
+    /// `Browser.setPermission`: one permission (a Permissions API name) to
+    /// `granted`, `denied` or `prompt`.
+    fn set_permission(
+        &self,
+        _context: &str,
+        _origin: Option<&str>,
+        _name: &str,
+        _setting: &str,
+    ) -> HostResult<()> {
+        Err(HostError::unsupported("Browser.setPermission"))
+    }
+
+    /// `Browser.resetPermissions`: drop the context's overrides.
+    fn reset_permissions(&self, _context: &str) -> HostResult<()> {
+        Err(HostError::unsupported("Browser.resetPermissions"))
+    }
+
+    /// Whether some session attached to `target_id` has the Page domain
+    /// enabled. While one has, a JavaScript dialog is reported
+    /// (`Page.javascriptDialogOpening`) and the page waits for
+    /// `Page.handleJavaScriptDialog`, as in Chrome; otherwise dialogs return
+    /// at once. Called on every change (idempotent).
+    fn set_dialog_handling(&self, _target_id: &str, _on: bool) {}
 
     // ---- Runtime ----
 
@@ -591,6 +674,26 @@ pub trait PageHost {
 
     async fn dispatch_mouse_event(&self, _target_id: &str, _ev: MouseEvent) -> HostResult<()> {
         Err(HostError::unsupported("Input.dispatchMouseEvent"))
+    }
+
+    /// `Input.setInterceptDrags`: drags that start go to the client as
+    /// `Input.dragIntercepted` instead of running on mouse input.
+    fn set_intercept_drags(&self, _target_id: &str, _enabled: bool) -> HostResult<()> {
+        Err(HostError::unsupported("Input.setInterceptDrags"))
+    }
+
+    /// `Input.dispatchDragEvent` (`kind`: dragEnter, dragOver, drop,
+    /// dragCancel; `data`: CDP's `Input.DragData`).
+    async fn dispatch_drag_event(
+        &self,
+        _target_id: &str,
+        _kind: String,
+        _x: f64,
+        _y: f64,
+        _data: Value,
+        _modifiers: u32,
+    ) -> HostResult<()> {
+        Err(HostError::unsupported("Input.dispatchDragEvent"))
     }
 
     async fn dispatch_key_event(&self, _target_id: &str, _ev: KeyEvent) -> HostResult<()> {

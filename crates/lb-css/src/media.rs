@@ -102,6 +102,45 @@ pub struct MediaEnv {
     /// Default fonts: initial family, generic families and the system
     /// font keywords (persona `font_defaults`).
     pub fonts: Arc<FontDefaults>,
+    /// The media type is `print` (CDP `Emulation.setEmulatedMedia`,
+    /// printing); `screen` otherwise.
+    pub print: bool,
+}
+
+/// Media a CDP client asked for (`Emulation.setEmulatedMedia`); `None`
+/// keeps the persona's value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MediaOverrides {
+    pub print: Option<bool>,
+    pub prefers_dark: Option<bool>,
+    pub prefers_reduced_motion: Option<bool>,
+    pub forced_colors: Option<bool>,
+    pub prefers_contrast: Option<&'static str>,
+    pub prefers_reduced_transparency: Option<bool>,
+}
+
+impl MediaOverrides {
+    /// Apply to `env` (made from the persona).
+    pub fn apply(&self, env: &mut MediaEnv) {
+        if let Some(v) = self.print {
+            env.print = v;
+        }
+        if let Some(v) = self.prefers_dark {
+            env.prefers_dark = v;
+        }
+        if let Some(v) = self.prefers_reduced_motion {
+            env.prefers_reduced_motion = v;
+        }
+        if let Some(v) = self.forced_colors {
+            env.forced_colors = v;
+        }
+        if let Some(v) = self.prefers_contrast {
+            env.prefers_contrast = v;
+        }
+        if let Some(v) = self.prefers_reduced_transparency {
+            env.prefers_reduced_transparency = v;
+        }
+    }
 }
 
 impl Default for MediaEnv {
@@ -128,6 +167,7 @@ impl Default for MediaEnv {
             high_dynamic_range: false,
             scrollbar_width: 0.0,
             fonts: Arc::new(OsKind::Windows.font_defaults()),
+            print: false,
         }
     }
 }
@@ -171,6 +211,7 @@ impl MediaEnv {
             high_dynamic_range: prefs.high_dynamic_range,
             scrollbar_width: p.scrollbar_width() as f32,
             fonts: Arc::new(p.font_defaults()),
+            print: false,
         }
     }
 }
@@ -340,7 +381,12 @@ impl MediaQuery {
         if self.invalid {
             return false;
         }
-        let type_ok = matches!(self.media_type.as_deref(), None | Some("all" | "screen"));
+        let type_ok = match self.media_type.as_deref() {
+            None | Some("all") => true,
+            Some("screen") => !env.print,
+            Some("print") => env.print,
+            _ => false,
+        };
         let r = type_ok && self.cond.as_ref().is_none_or(|c| c.eval(env));
         r != self.not
     }

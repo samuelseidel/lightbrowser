@@ -45,8 +45,8 @@ fn chrome_mac() -> PersonaProfile {
 
 #[test]
 fn all_reference_personas_validate() {
-    // Personas live in one folder per family; reference/ also holds
-    // tcp_public.json (ADR 0033), which is not a persona.
+    // Personas only: `reference/` also holds the public TCP data
+    // (`tcp_public.json`, ADR 0033).
     let mut files = json_files("reference/chrome");
     files.extend(json_files("reference/firefox"));
     assert!(

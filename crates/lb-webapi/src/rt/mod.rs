@@ -55,6 +55,7 @@ mod crypto;
 mod custom;
 mod dom;
 mod events;
+pub mod files;
 mod fonts;
 mod form;
 pub mod frames;
@@ -481,6 +482,7 @@ impl Runtime {
         window::register(reg, &rt);
         net::register(reg, &rt);
         misc::register(reg, &rt);
+        files::register(reg, &rt);
         canvas::register(reg, &rt);
         image::register(reg, &rt);
         webgl::register(reg, &rt);
@@ -677,6 +679,95 @@ const SOURCES: usize = 5;
 /// A queued task. Runs from the event loop with no JS on the stack.
 pub type TaskFn = Box<dyn FnOnce(&mut dyn Js, &Rc<Window>)>;
 
+/// A JavaScript dialog the page opened (`alert`, `confirm`, `prompt`).
+#[derive(Debug, Clone)]
+pub struct DialogRequest {
+    /// `alert`, `confirm` or `prompt`.
+    pub kind: &'static str,
+    pub message: String,
+    /// `prompt`'s default text.
+    pub default_prompt: Option<String>,
+}
+
+/// How a dialog was closed.
+#[derive(Debug, Clone)]
+pub struct DialogAnswer {
+    pub accept: bool,
+    /// `prompt`'s text; `None` keeps the default.
+    pub text: Option<String>,
+}
+
+/// A position a CDP client set for a page (`Emulation.setGeolocationOverride`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeoOverride {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub accuracy: f64,
+}
+
+/// A page's geolocation override, shared by its windows (set from the
+/// page's worker), and the windows with `watchPosition` watches, which get
+/// each new position as Chrome reports it to them.
+#[derive(Default)]
+pub struct GeoState {
+    pos: Cell<Option<GeoOverride>>,
+    watchers: RefCell<Vec<std::rc::Weak<Window>>>,
+}
+
+impl GeoState {
+    pub fn get(&self) -> Option<GeoOverride> {
+        self.pos.get()
+    }
+
+    /// Set or clear the position; watching windows get a new one.
+    pub fn set(&self, p: Option<GeoOverride>) {
+        let changed = self.pos.get() != p;
+        self.pos.set(p);
+        let Some(p) = p.filter(|_| changed) else {
+            return;
+        };
+        let windows: Vec<Rc<Window>> = {
+            let mut v = self.watchers.borrow_mut();
+            v.retain(|w| w.strong_count() > 0);
+            v.iter().filter_map(std::rc::Weak::upgrade).collect()
+        };
+        for w in windows {
+            navigator::geo_moved(&w, p);
+        }
+    }
+
+    /// `w` has a watch: tell it about new positions.
+    pub(crate) fn watch(&self, w: &Rc<Window>) {
+        let mut v = self.watchers.borrow_mut();
+        if !v.iter().any(|x| std::ptr::eq(x.as_ptr(), Rc::as_ptr(w))) {
+            v.push(Rc::downgrade(w));
+        }
+    }
+}
+
+/// See [`GeoState`].
+pub type GeoCell = Rc<GeoState>;
+
+/// A point of the end of parsing of a document `document.open()` started
+/// (see [`Window::set_opened_parser_end`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenedEnd {
+    /// `DOMContentLoaded` fired.
+    DomContentLoaded,
+    /// `load` fired.
+    Load,
+    /// Loads still delay the load event: once they are done, call
+    /// [`script::finish_opened_load`].
+    LoadsPending,
+}
+
+/// See [`Window::set_opened_parser_end`].
+pub type OpenedParserEnd = Rc<dyn Fn(&Rc<Window>, OpenedEnd)>;
+
+/// Shows dialogs (see [`Window::set_dialog_host`]): blocks until the dialog
+/// is closed, or returns `None` at once when nobody shows dialogs.
+pub type DialogHost = Rc<dyn Fn(&Window, &DialogRequest) -> Option<DialogAnswer>>;
+
 /// `document.readyState`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadyState {
@@ -857,7 +948,9 @@ pub struct Window {
     pub(crate) cache: RefCell<HashMap<(u32, u32, &'static str, String), u32>>,
     pub(crate) listeners: RefCell<HashMap<HostRef, Vec<Rc<events::Listener>>>>,
     pub(crate) handlers: RefCell<HashMap<(HostRef, String), HandlerValue>>,
-    tasks: RefCell<[VecDeque<TaskFn>; SOURCES]>,
+    /// Queued tasks by source, each with the page clock time it was
+    /// queued at (see [`Window::next_task_queued_at`]).
+    tasks: RefCell<[VecDeque<(f64, TaskFn)>; SOURCES]>,
     pub(crate) timers: RefCell<BTreeMap<u32, Timer>>,
     next_timer: Cell<u32>,
     timer_seq: Cell<u64>,
@@ -866,6 +959,21 @@ pub struct Window {
     next_raf: Cell<u32>,
     pub(crate) console: RefCell<Vec<ConsoleMessage>>,
     console_sink: RefCell<Option<ConsoleSink>>,
+    /// Told about the end of parsing after `document.close()` ended a
+    /// parser that `document.open()` started (see
+    /// [`Window::set_opened_parser_end`]).
+    opened_parser_end: RefCell<Option<OpenedParserEnd>>,
+    pub(crate) dialog_host: RefCell<Option<DialogHost>>,
+    /// The context's permission overrides (CDP `Browser.grantPermissions`).
+    pub(crate) permissions: RefCell<Option<crate::host::SharedPermissions>>,
+    /// The page's geolocation override (`navigator.geolocation`).
+    pub(crate) geolocation: RefCell<Option<GeoCell>>,
+    /// Asks the page layer whether a drag goes to the CDP client.
+    pub(crate) drag_intercept: RefCell<Option<input::DragIntercept>>,
+    /// Active `watchPosition` watches (success and error callbacks) by
+    /// id, and the next id.
+    pub(crate) geo_watches: RefCell<HashMap<u32, (Handle, Option<Handle>)>>,
+    pub(crate) geo_next_watch: Cell<u32>,
     pub clock: Clock,
     pub(crate) layout: RefCell<Option<lb_layout::LayoutEngine>>,
     /// Style sheets: loads, blocking counters, CSSOM (`sheets.rs`).
@@ -898,6 +1006,8 @@ pub struct Window {
     pub(crate) focused: Cell<Option<NodeId>>,
     /// Dirty values of form controls (`input.value`), by (slot, node).
     pub(crate) values: RefCell<HashMap<(u32, NodeId), String>>,
+    /// `FileList` (object id) of each file input that has one (`files.rs`).
+    pub(crate) input_files: RefCell<HashMap<(u32, NodeId), u32>>,
     /// Intervals cleared while their own callback ran.
     pub(crate) cleared: RefCell<std::collections::HashSet<u32>>,
     pub(crate) window_name: RefCell<String>,
@@ -992,6 +1102,13 @@ impl Window {
             next_raf: Cell::new(1),
             console: RefCell::new(Vec::new()),
             console_sink: RefCell::new(None),
+            opened_parser_end: RefCell::new(None),
+            dialog_host: RefCell::new(None),
+            permissions: RefCell::new(None),
+            geolocation: RefCell::new(None),
+            drag_intercept: RefCell::new(None),
+            geo_watches: RefCell::new(HashMap::new()),
+            geo_next_watch: Cell::new(1),
             clock,
             layout: RefCell::new(None),
             css: RefCell::new(sheets::CssState::default()),
@@ -1017,6 +1134,7 @@ impl Window {
             closed: Cell::new(false),
             focused: Cell::new(None),
             values: RefCell::new(HashMap::new()),
+            input_files: RefCell::new(HashMap::new()),
             cleared: RefCell::new(std::collections::HashSet::new()),
             window_name: RefCell::new(String::new()),
             opened: Cell::new(false),
@@ -1381,6 +1499,62 @@ impl Window {
         *self.console_sink.borrow_mut() = sink;
     }
 
+    /// Who hears about the end of parsing after `document.close()` ended a
+    /// parser that `document.open()` started: the page layer reports
+    /// lifecycle events (Playwright's `setContent` waits for them) and,
+    /// when loads still delay the load event, finishes it later with
+    /// [`script::finish_opened_load`].
+    pub fn set_opened_parser_end(&self, end: Option<OpenedParserEnd>) {
+        *self.opened_parser_end.borrow_mut() = end;
+    }
+
+    /// Tell the page layer about a point of an opened document's end of
+    /// parsing.
+    pub(crate) fn opened_parser_point(self: &Rc<Self>, point: OpenedEnd) {
+        let end = self.opened_parser_end.borrow().clone();
+        if let Some(end) = end {
+            end(self, point);
+        }
+    }
+
+    /// Who shows this window's JavaScript dialogs. Without one (no client
+    /// handles dialogs), `alert` returns at once, `confirm` returns false
+    /// and `prompt` null, as in Chrome when nothing shows them.
+    pub fn set_dialog_host(&self, host: Option<DialogHost>) {
+        *self.dialog_host.borrow_mut() = host;
+    }
+
+    /// Who decides whether a drag that starts goes to the CDP client
+    /// (`Input.setInterceptDrags`).
+    pub fn set_drag_intercept(&self, h: Option<input::DragIntercept>) {
+        *self.drag_intercept.borrow_mut() = h;
+    }
+
+    /// The page's geolocation override cell (shared with its frames).
+    pub fn set_geolocation(&self, g: Option<GeoCell>) {
+        *self.geolocation.borrow_mut() = g;
+    }
+
+    /// The browser context's permission overrides (`Browser.grantPermissions`).
+    pub fn set_permissions(&self, p: Option<crate::host::SharedPermissions>) {
+        *self.permissions.borrow_mut() = p;
+    }
+
+    /// A permission state a CDP client set for this window's origin, if
+    /// any. `name` may use `_` for `-` (the persona's keys).
+    pub(crate) fn permission_override(&self, name: &str) -> Option<String> {
+        let p = self.permissions.borrow().clone()?;
+        let origin = self.url().origin().ascii_serialization();
+        let name = name.replace('_', "-");
+        p.read().ok()?.state(&origin, &name)
+    }
+
+    /// Show a dialog; `None` when nobody shows dialogs.
+    pub(crate) fn dialog(&self, req: &DialogRequest) -> Option<DialogAnswer> {
+        let host = self.dialog_host.borrow().clone();
+        host.and_then(|h| h(self, req))
+    }
+
     /// Every console message so far.
     pub fn console_messages(&self) -> Vec<ConsoleMessage> {
         self.console.borrow().clone()
@@ -1434,7 +1608,8 @@ impl Window {
 
     /// Queue a task and wake the event loop.
     pub fn queue_task(&self, source: TaskSource, f: TaskFn) {
-        self.tasks.borrow_mut()[source as usize].push_back(f);
+        let at = self.clock.now();
+        self.tasks.borrow_mut()[source as usize].push_back((at, f));
         self.wake();
     }
 
@@ -1443,7 +1618,18 @@ impl Window {
         // IndexedDB: transactions of the previous task become inactive.
         idb::task_boundary(self);
         let mut q = self.tasks.borrow_mut();
-        q.iter_mut().find_map(|q| q.pop_front())
+        q.iter_mut().find_map(|q| q.pop_front()).map(|(_, f)| f)
+    }
+
+    /// When the task [`Window::take_task`] would return next was queued
+    /// (page clock ms). The page loop runs a timer that came due before
+    /// it first: tasks and timers in the order they became ready, as
+    /// Chrome's scheduler serves queues of equal priority.
+    pub fn next_task_queued_at(&self) -> Option<f64> {
+        self.tasks
+            .borrow()
+            .iter()
+            .find_map(|q| q.front().map(|(at, _)| *at))
     }
 
     /// Number of queued tasks.
@@ -1662,6 +1848,44 @@ impl Window {
         href.and_then(|h| url.join(&h).ok()).unwrap_or(url)
     }
 
+    /// `beforeunload` before the page navigates away or closes: true to go
+    /// on. A handler that cancels it (or sets a non-empty `returnValue`)
+    /// asks the user through the dialog host (type `beforeunload`, empty
+    /// message), and only after a user gesture on the page, as in Chrome.
+    /// Without a dialog host the page goes on.
+    pub fn before_unload(self: &Rc<Self>, js: &mut dyn Js) -> bool {
+        if self.is_closed() {
+            return true;
+        }
+        let ev = events::new_event(
+            self,
+            "BeforeUnloadEvent",
+            "beforeunload",
+            false,
+            true,
+            EventExtra::BeforeUnload(String::new()),
+        );
+        let not_canceled = events::dispatch(js, self, WINDOW_REF, ev);
+        let wants = !not_canceled
+            || self
+                .with_obj(ev, |o| match o {
+                    Obj::Event(e) => {
+                        matches!(&e.extra, EventExtra::BeforeUnload(s) if !s.is_empty())
+                    }
+                    _ => false,
+                })
+                .unwrap_or(false);
+        if !wants || !input::has_sticky_activation(self) {
+            return true;
+        }
+        self.dialog(&DialogRequest {
+            kind: "beforeunload",
+            message: String::new(),
+            default_prompt: None,
+        })
+        .is_none_or(|a| a.accept)
+    }
+
     /// Release JS state before the realm is dropped.
     /// The unload steps of the document, as Chrome runs them when the page
     /// navigates away or closes: `pagehide` (only after `pageshow`, i.e. once
@@ -1788,6 +2012,16 @@ pub(crate) enum Obj {
     InternalsValidity(u32, NodeId),
     /// `FormData` entries (string values).
     FormData(Vec<(String, String)>),
+    /// `FileList`: `File` object ids (`files.rs`).
+    FileList(Vec<u32>),
+    DataTransfer(Box<files::DataTransferData>),
+    /// `DataTransferItemList` of a `DataTransfer` (its object id).
+    DataTransferItemList(u32),
+    /// Item `index` of `DataTransfer` `dt`.
+    DataTransferItem {
+        dt: u32,
+        index: usize,
+    },
     /// `new EventTarget()`.
     EventTarget,
     NodeList(coll::NodeListSrc),
@@ -1922,7 +2156,12 @@ impl Obj {
             Obj::XmlSerializer => "XMLSerializer",
             Obj::MutationObserver(_) => "MutationObserver",
             Obj::MutationRecord(_) => "MutationRecord",
+            Obj::Blob(b) if b.file.is_some() => "File",
             Obj::Blob(_) => "Blob",
+            Obj::FileList(_) => "FileList",
+            Obj::DataTransfer(_) => "DataTransfer",
+            Obj::DataTransferItemList(_) => "DataTransferItemList",
+            Obj::DataTransferItem { .. } => "DataTransferItem",
             Obj::Paint(p) => p.iface_name(),
             Obj::Gl(g) => g.iface_name(),
             Obj::Audio(a) => a.iface_name(),

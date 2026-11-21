@@ -1,0 +1,39 @@
+<!doctype html><html><body><pre id=out></pre><script>
+const hits = [];
+const hit = n => () => { hits.push(n); return 'x'; };
+const cases = {
+  getter: () => console.log({ get a() { hit('getter')(); return 1; } }),
+  toJSON: () => console.log({ toJSON: hit('toJSON') }),
+  toStringObj: () => console.log({ toString: hit('toStringObj') }),
+  toPrimitive: () => console.log({ [Symbol.toPrimitive]: hit('toPrimitive') }),
+  toStringTag: () => console.log({ get [Symbol.toStringTag]() { hit('toStringTag')(); return 'T'; } }),
+  proxyGet: () => console.log(new Proxy({}, { get: (t, k) => { hit('proxyGet:' + String(k))(); return undefined; } })),
+  proxyKeys: () => console.log(new Proxy({}, { ownKeys: () => { hit('proxyKeys')(); return []; } })),
+  proxyProto: () => console.log(new Proxy({}, { getPrototypeOf: () => { hit('proxyProto')(); return Object.prototype; } })),
+  fnToString: () => { const f = function () {}; f.toString = hit('fnToString'); console.log(f); },
+  errName: () => { const e = new Error('m'); Object.defineProperty(e, 'name', { get: hit('errName') }); console.log(e); },
+  errMessage: () => { const e = new Error('m'); Object.defineProperty(e, 'message', { get: hit('errMessage') }); console.log(e); },
+  errStack: () => { const e = new Error('m'); Object.defineProperty(e, 'stack', { get: hit('errStack') }); console.log(e); },
+  errStackDebug: () => { const e = new Error('m'); Object.defineProperty(e, 'stack', { get: hit('errStackDebug') }); console.debug(e); },
+  dateToString: () => { const d = new Date(0); d.toString = hit('dateToString'); console.log(d); },
+  regexpSource: () => { const r = /a/; Object.defineProperty(r, 'source', { get: hit('regexpSource') }); console.log(r); },
+  arrayIndex: () => { const a = [1]; Object.defineProperty(a, 0, { get: hit('arrayIndex') }); console.log(a); },
+  arrayToString: () => { const a = [1]; a.toString = hit('arrayToString'); console.log(a); },
+  nestedArrayGetter: () => { const a = [{ get b() { hit('nestedArrayGetter')(); } }]; console.log(a); },
+  secondArgGetter: () => console.log('x', { get a() { hit('secondArgGetter')(); } }),
+  fmtS: () => console.log('%s', { toString: hit('fmtS') }),
+  fmtD: () => console.log('%d', { valueOf: hit('fmtD'), [Symbol.toPrimitive]: hit('fmtD:prim') }),
+  fmtO: () => console.log('%o', { get a() { hit('fmtO')(); } }),
+  fmtC: () => console.log('%c', { toString: hit('fmtC') }),
+  stringObj: () => { const s = new String('s'); s.toString = hit('stringObj'); console.log(s); },
+  numberObj: () => { const n = new Number(1); n.valueOf = hit('numberObj'); n.toString = hit('numberObj:ts'); console.log(n); },
+  dir: () => console.dir({ get a() { hit('dir')(); } }),
+  table: () => console.table([{ get a() { hit('table')(); } }]),
+  assert: () => console.assert(false, { toString: hit('assert') }),
+  error: () => console.error({ toString: hit('error') }),
+  trace: () => console.trace({ toString: hit('trace') }),
+  domToString: () => { const d = document.createElement('div'); d.toString = hit('domToString'); console.log(d); },
+};
+for (const [k, f] of Object.entries(cases)) { try { f(); } catch (e) { hits.push(k + ':threw:' + e); } }
+window.HITS = JSON.stringify(hits); document.getElementById('out').textContent = 'HITS=' + window.HITS;
+</script></body></html>

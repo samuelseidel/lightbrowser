@@ -73,6 +73,8 @@ struct Shared {
     /// The context's TCP/IP SYN profile (ADR 0031): set once, before the
     /// first request (`fetch --tcp-profile`). `None` sends the host's SYN.
     tcp_profile: std::sync::OnceLock<Arc<lb_net::tcpfp::TcpProfile>>,
+    /// Permission states a CDP client set (`Browser.grantPermissions`).
+    permissions: lb_webapi::host::SharedPermissions,
     /// IndexedDB databases of every origin, in memory (ADR 0028), chrome
     /// build.
     #[cfg(feature = "chrome")]
@@ -189,6 +191,7 @@ impl BrowserContext {
             connections: ConnectionPool::new(),
             proxy: std::sync::OnceLock::new(),
             tcp_profile: std::sync::OnceLock::new(),
+            permissions: Default::default(),
             #[cfg(feature = "chrome")]
             idb: Default::default(),
             #[cfg(feature = "chrome")]
@@ -280,6 +283,11 @@ impl BrowserContext {
             .map_err(|e| PageError::Setup(e.to_string()))?;
         let _ = self.0.tcp_profile.set(tcp);
         Ok(())
+    }
+
+    /// Permission states a CDP client set for this context.
+    pub fn permissions(&self) -> &lb_webapi::host::SharedPermissions {
+        &self.0.permissions
     }
 
     /// The context's IndexedDB backend (ADR 0028).

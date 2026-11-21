@@ -112,6 +112,10 @@ pub(crate) struct State {
     pub sessions: HashMap<String, Session>,
     pub exec: HashMap<TargetId, Vec<ExecutionContext>>,
     pub next_conn: ConnId,
+    /// `IO` streams by handle (`Page.printToPDF` with `ReturnAsStream`):
+    /// base64 text and the read position.
+    pub streams: HashMap<String, (String, usize)>,
+    pub next_stream: u64,
 }
 
 impl State {
@@ -232,7 +236,11 @@ impl<H: PageHost + 'static> Shared<H> {
     /// Drops a connection's sessions and the contexts it asked to dispose
     /// on detach.
     pub fn close_conn(&self, conn: ConnId) {
-        let (owned, mut workers): (Vec<BrowserContextId>, Vec<TargetId>) = {
+        let (owned, mut workers, dialog_targets): (
+            Vec<BrowserContextId>,
+            Vec<TargetId>,
+            Vec<TargetId>,
+        ) = {
             let mut st = self.state.borrow_mut();
             st.conns.remove(&conn);
             let gone: Vec<String> = st
@@ -240,6 +248,12 @@ impl<H: PageHost + 'static> Shared<H> {
                 .iter()
                 .filter(|(_, s)| s.conn == conn)
                 .map(|(k, _)| k.clone())
+                .collect();
+            let pages: Vec<TargetId> = st
+                .sessions
+                .values()
+                .filter(|s| s.conn == conn)
+                .filter_map(|s| s.target.clone())
                 .collect();
             st.sessions.retain(|_, s| s.conn != conn);
             // Workers waiting for these sessions run now; every worker's
@@ -259,11 +273,14 @@ impl<H: PageHost + 'static> Shared<H> {
                 .filter(|c| c.owner == Some(conn))
                 .map(|c| c.id.clone())
                 .collect();
-            (owned, workers)
+            (owned, workers, pages)
         };
         for w in workers.drain(..) {
             self.count_worker_sessions(&w);
             self.maybe_resume(&w);
+        }
+        for t in dialog_targets {
+            self.sync_dialog_handling(&t);
         }
         for ctx in owned {
             let _ = self.dispose_context(&ctx);
@@ -493,8 +510,23 @@ impl<H: PageHost + 'static> Shared<H> {
         sid
     }
 
+    /// Tell the host whether a session attached to `target` has the Page
+    /// domain on (it then holds JavaScript dialogs for the client).
+    fn sync_dialog_handling(&self, target: &str) {
+        let on = self
+            .state
+            .borrow()
+            .sessions
+            .values()
+            .any(|s| s.target.as_deref() == Some(target) && s.domains.contains("Page"));
+        self.host.set_dialog_handling(target, on);
+    }
+
     fn detach_session(&self, sid: &str) {
         let removed = self.state.borrow_mut().sessions.remove(sid);
+        if let Some(t) = removed.as_ref().and_then(|s| s.target.clone()) {
+            self.sync_dialog_handling(&t);
+        }
         if let Some(s) = removed
             && let (Some(parent), Some(target)) = (s.parent, s.target)
         {
@@ -918,6 +950,16 @@ fn translate(target: &str, ev: &PageEvent) -> Vec<(Gate, String, Value)> {
             }
             one("Page", "Page.javascriptDialogOpening", p)
         }
+        PageEvent::DragIntercepted { data } => vec![(
+            Gate::Always,
+            "Input.dragIntercepted".to_string(),
+            json!({ "data": data }),
+        )],
+        PageEvent::JavascriptDialogClosed { result, user_input } => one(
+            "Page",
+            "Page.javascriptDialogClosed",
+            json!({ "result": result, "userInput": user_input }),
+        ),
         PageEvent::RequestWillBeSent(e) => one("Network", "Network.requestWillBeSent", to_value(e)),
         PageEvent::ResponseReceived(e) => one("Network", "Network.responseReceived", to_value(e)),
         PageEvent::LoadingFinished(e) => one("Network", "Network.loadingFinished", to_value(e)),
@@ -980,13 +1022,22 @@ impl<H: PageHost + 'static> Call<'_, H> {
     }
 
     fn enable(&self, domain: &str, on: bool) -> Result<Value, CdpError> {
-        let mut st = self.sh.state.borrow_mut();
-        if let Some(s) = st.sessions.get_mut(&self.key) {
+        let target = {
+            let mut st = self.sh.state.borrow_mut();
+            let Some(s) = st.sessions.get_mut(&self.key) else {
+                return Ok(json!({}));
+            };
             if on {
                 s.domains.insert(domain.to_string());
             } else {
                 s.domains.remove(domain);
             }
+            s.target.clone()
+        };
+        if domain == "Page"
+            && let Some(t) = target
+        {
+            self.sh.sync_dialog_handling(&t);
         }
         Ok(json!({}))
     }
@@ -1154,8 +1205,39 @@ pub(crate) async fn dispatch<H: PageHost + 'static>(
         "Emulation" => emulation_domain(&c),
         "Accessibility" => accessibility_domain(&c),
         "Security" | "Log" | "Performance" => misc_domain(&c),
+        "IO" => io_domain(&c),
         "LightBrowser" => lightbrowser_domain(&c).await,
         _ => Err(CdpError::method_not_found(&cmd.method)),
+    }
+}
+
+/// `IO.read` / `IO.close` on streams made by `Page.printToPDF`. Chunks
+/// end on 4-character boundaries, so each is valid base64 on its own.
+fn io_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, CdpError> {
+    let handle = str_param(c.p, "handle")?.to_owned();
+    let mut st = c.sh.state.borrow_mut();
+    match c.method {
+        "IO.read" => {
+            let (data, pos) = st
+                .streams
+                .get_mut(&handle)
+                .ok_or_else(|| CdpError::server("Invalid stream handle"))?;
+            // `size` counts bytes; 3 bytes are 4 base64 characters.
+            let size =
+                c.p.get("size")
+                    .and_then(Value::as_u64)
+                    .map_or(1 << 20, |s| s.max(3) as usize);
+            let chars = (size / 3 * 4).max(4);
+            let end = (*pos + chars).min(data.len());
+            let chunk = data[*pos..end].to_owned();
+            *pos = end;
+            Ok(json!({ "base64Encoded": true, "data": chunk, "eof": end >= data.len() }))
+        }
+        "IO.close" => {
+            st.streams.remove(&handle);
+            Ok(json!({}))
+        }
+        _ => Err(CdpError::method_not_found(c.method)),
     }
 }
 
@@ -1190,6 +1272,41 @@ async fn browser_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value,
             }
         }
         "Browser.getWindowForTarget" => Err(CdpError::server("Browser window not found")),
+        "Browser.grantPermissions" | "Browser.resetPermissions" | "Browser.setPermission" => {
+            let explicit =
+                c.p.get("browserContextId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+            let ctx = c.cookie_context(explicit);
+            let origin = c.p.get("origin").and_then(Value::as_str);
+            let host = &c.sh.host;
+            match c.method {
+                "Browser.grantPermissions" => {
+                    let perms: Vec<String> =
+                        c.p.get("permissions")
+                            .and_then(Value::as_array)
+                            .ok_or_else(|| CdpError::invalid_params("permissions: array expected"))?
+                            .iter()
+                            .filter_map(|v| v.as_str().map(str::to_owned))
+                            .collect();
+                    host.grant_permissions(&ctx, origin, &perms)
+                }
+                "Browser.setPermission" => {
+                    let name =
+                        c.p.get("permission")
+                            .and_then(|p| p.get("name"))
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| {
+                                CdpError::invalid_params("permission.name: string expected")
+                            })?;
+                    let setting = str_param(c.p, "setting")?;
+                    host.set_permission(&ctx, origin, name, setting)
+                }
+                _ => host.reset_permissions(&ctx),
+            }
+            .map_err(host_err)?;
+            Ok(json!({}))
+        }
         _ => Err(CdpError::method_not_found(c.method)),
     }
 }
@@ -1578,11 +1695,29 @@ async fn page_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cd
             Ok(json!({}))
         }
         "Page.close" => {
-            c.sh.close_target(&t)?;
+            // Chrome answers at once, runs `beforeunload` (which may ask
+            // the user through a dialog) and closes unless the user stays.
+            let sh = c.sh.clone();
+            tokio::task::spawn_local(async move {
+                if sh.host.run_before_unload(&t).await.unwrap_or(true) {
+                    let _ = sh.close_target(&t);
+                }
+            });
             Ok(json!({}))
         }
         "Page.captureScreenshot" => {
             let data = host.capture_screenshot(&t, c.p).map_err(host_err)?;
+            Ok(json!({ "data": data }))
+        }
+        "Page.printToPDF" => {
+            let data = host.print_to_pdf(&t, c.p).map_err(host_err)?;
+            if c.p.get("transferMode").and_then(Value::as_str) == Some("ReturnAsStream") {
+                let mut st = c.sh.state.borrow_mut();
+                st.next_stream += 1;
+                let handle = st.next_stream.to_string();
+                st.streams.insert(handle.clone(), (data, 0));
+                return Ok(json!({ "data": "", "stream": handle }));
+            }
             Ok(json!({ "data": data }))
         }
         _ => Err(CdpError::method_not_found(c.method)),
@@ -1859,6 +1994,30 @@ async fn input_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, C
                 .await
                 .map_err(host_err)?;
         }
+        "Input.setInterceptDrags" => {
+            host.set_intercept_drags(&t, bool_param(c.p, "enabled"))
+                .map_err(host_err)?;
+        }
+        "Input.dispatchDragEvent" => {
+            let kind = str_param(c.p, "type")?.to_owned();
+            if !matches!(
+                kind.as_str(),
+                "dragEnter" | "dragOver" | "drop" | "dragCancel"
+            ) {
+                return Err(CdpError::invalid_params(format!(
+                    "unknown drag event type {kind:?}"
+                )));
+            }
+            let num = |k: &str| c.p.get(k).and_then(Value::as_f64);
+            let (Some(x), Some(y)) = (num("x"), num("y")) else {
+                return Err(CdpError::invalid_params("x and y are required"));
+            };
+            let data = c.p.get("data").cloned().unwrap_or(Value::Null);
+            let modifiers = num("modifiers").unwrap_or(0.0) as u32;
+            host.dispatch_drag_event(&t, kind, x, y, data, modifiers)
+                .await
+                .map_err(host_err)?;
+        }
         "Input.dispatchTouchEvent" => {
             let touch = c.persona().hardware.max_touch_points > 0;
             return Err(CdpError::server(if touch {
@@ -2046,7 +2205,10 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
         "Emulation.setFocusEmulationEnabled" => host
             .set_focus_emulation(&t, bool_param(c.p, "enabled"))
             .map_err(host_err)?,
-        "Emulation.setEmulatedMedia" => emulation::check_emulated_media(&persona, &params(c.p)?)?,
+        "Emulation.setEmulatedMedia" => {
+            let o = emulation::parse_emulated_media(&params(c.p)?)?;
+            host.set_emulated_media(&t, o).map_err(host_err)?;
+        }
         "Emulation.setTouchEmulationEnabled" => {
             let has_touch = persona.hardware.max_touch_points > 0;
             if bool_param(c.p, "enabled") != has_touch {
@@ -2076,11 +2238,27 @@ fn emulation_domain<H: PageHost + 'static>(c: &Call<'_, H>) -> Result<Value, Cdp
                 .map_err(host_err)?;
         }
         "Emulation.setGeolocationOverride" => {
-            if c.p.get("latitude").is_some() || c.p.get("longitude").is_some() {
-                return Err(CdpError::server(
-                    "Emulation.setGeolocationOverride: the persona has no geolocation; only clearing is accepted",
-                ));
-            }
+            let num = |k: &str| c.p.get(k).and_then(Value::as_f64);
+            let position = match (num("latitude"), num("longitude")) {
+                (Some(lat), Some(lon)) => {
+                    let acc = num("accuracy").unwrap_or(0.0);
+                    if !(-90.0..=90.0).contains(&lat)
+                        || !(-180.0..=180.0).contains(&lon)
+                        || acc < 0.0
+                    {
+                        return Err(CdpError::invalid_params("Invalid geolocation"));
+                    }
+                    Some((lat, lon, acc))
+                }
+                (None, None) => None,
+                _ => {
+                    return Err(CdpError::invalid_params(
+                        "latitude and longitude must be given together",
+                    ));
+                }
+            };
+            host.set_geolocation_override(&t, position)
+                .map_err(host_err)?;
         }
         _ => return Err(CdpError::method_not_found(c.method)),
     }

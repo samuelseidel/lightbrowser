@@ -52,6 +52,7 @@ class Stats(unittest.TestCase):
         s = run.spread([3, 1, 2, None])
         self.assertEqual((s["median"], s["min"], s["max"], s["n"]), (2, 1, 3, 3))
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "/proc is Linux-only")
     def test_stat_parsing_survives_odd_comm(self):
         f = run._stat_fields(os.getpid())
         self.assertIsNotNone(f)
@@ -65,6 +66,16 @@ class Stats(unittest.TestCase):
         finally:
             p.kill()
             p.wait()
+
+
+    @unittest.skipUnless(sys.platform == "darwin", "libproc probes are macOS-only")
+    def test_macos_probes(self):
+        sum(i * i for i in range(300_000))  # some CPU time
+        me = os.getpid()
+        self.assertGreater(run.cpu_s(me), 0)
+        self.assertGreater(run.footprint_kb(me), 0)
+        self.assertGreaterEqual(run.footprint_peak_kb(me), run.footprint_kb(me))
+        self.assertGreater(run.tree_footprint_mb(me), 0)
 
 
 class Report(unittest.TestCase):
