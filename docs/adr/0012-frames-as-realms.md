@@ -72,8 +72,13 @@ must also be unreachable from the parent, as in Chrome.
 - Gaps: host refs were per window, so nodes of one frame passed to
   another frame's DOM methods were not supported (fixed by ADR 0017), and
   Playwright click and fill work in direct and nested child frames.
-  `DOM.getFrameOwner` returns an ID scoped to the owner's document realm.
-  Child box models and content quads use page coordinates. Other gaps include named frame
-  access (`window.frameName`), `sandbox`, `<frame>`/`<object>` browsing
-  contexts; `postMessage` clones through JSON; network events of frame
-  requests are attributed to the main frame.
+  Object-id `DOM.getContentQuads` / `getBoxModel` /
+  `scrollIntoViewIfNeeded` and `Input.dispatchMouseEvent` reach child-frame
+  nodes (iframe hit-test descent, viewport sync, page coordinates).
+  `DOM.getFrameOwner` returns the owner's node. Backend node ids encode the
+  runtime document key (ADR 0017), so `DOM.requestNode` / `resolveNode` /
+  box geometry work for child frames and not for a replaced document.
+  `beforeunload` walks the frame tree. Named access (`window.frameName`) is
+  done. Still open: `sandbox`, `<frame>`/`<object>` browsing contexts;
+  `postMessage` clones through JSON; network events of frame requests are
+  attributed to the main frame.

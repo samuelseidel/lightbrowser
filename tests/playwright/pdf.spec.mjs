@@ -1,6 +1,7 @@
 // page.pdf: Page.printToPDF with transferMode ReturnAsStream, read through
 // IO.read / IO.close. Pages are laid out at the paper's width and embedded
-// as images (no selectable text); the page does not notice the print.
+// as images plus an invisible Helvetica text layer; the page does not
+// notice the print.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,7 +19,10 @@ test('page.pdf: pages, paper size, landscape, page ranges; the page is unchanged
   const before = await page.evaluate(() => [innerWidth, document.documentElement.scrollWidth]);
   const pdf = await page.pdf();
   assert.equal(pdf.subarray(0, 8).toString(), '%PDF-1.4');
-  assert.ok(pdf.toString('latin1').trimEnd().endsWith('%%EOF'));
+  const latin = pdf.toString('latin1');
+  assert.ok(latin.trimEnd().endsWith('%%EOF'));
+  assert.ok(latin.includes('/BaseFont /Helvetica'), 'selectable Helvetica text layer');
+  assert.ok(latin.includes('(Report)') || latin.includes('Report'), 'heading text in PDF');
   const letter = boxes(pdf);
   assert.ok(letter.length >= 4 && letter.length <= 6, `${letter.length} pages`);
   assert.deepEqual(letter[0], [612, 792]);

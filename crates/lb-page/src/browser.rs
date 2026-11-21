@@ -79,6 +79,9 @@ pub(crate) struct WorkerState {
     stop: std::cell::Cell<bool>,
     /// A page closed: collect garbage once the job queue is empty.
     gc_pending: std::cell::Cell<bool>,
+    /// Woken (from any thread) when V8 posts a foreground task for this
+    /// worker's engine (ADR 0038).
+    v8_tasks: Arc<tokio::sync::Notify>,
 }
 
 impl WorkerState {
@@ -111,6 +114,8 @@ impl WorkerState {
         if snapshot.is_some() {
             tracing::debug!("engine snapshot: {:?}", engine.snapshot_status());
         }
+        let notify = self.v8_tasks.clone();
+        engine.set_task_waker(Arc::new(move || notify.notify_one()));
         *self.engine.borrow_mut() = Some(engine);
         *self.runtime.borrow_mut() = Some((rt, bindings));
         Ok(())
@@ -315,7 +320,9 @@ fn worker_main(
             page_count,
             stop: std::cell::Cell::new(false),
             gc_pending: std::cell::Cell::new(false),
+            v8_tasks: Arc::new(tokio::sync::Notify::new()),
         });
+        tokio::task::spawn_local(run_v8_tasks(state.clone()));
         loop {
             // No pages and an engine: wait for work at most `idle_release`,
             // then give the engine's memory back.
@@ -351,6 +358,28 @@ fn worker_main(
         state.runtime.borrow_mut().take();
         state.engine.borrow_mut().take();
     });
+}
+
+/// Run V8's foreground tasks for the worker's engine (ADR 0038): GC steps,
+/// `FinalizationRegistry` cleanups. A task of the worker's local set, so
+/// they run between page tasks and jobs, never inside one.
+async fn run_v8_tasks(state: Rc<WorkerState>) {
+    loop {
+        if state.stop.get() {
+            return;
+        }
+        match state.with_engine(|e| e.next_task_due()).flatten() {
+            Some(at) if at <= std::time::Instant::now() => {
+                state.with_engine(|e| e.run_foreground_tasks());
+                tokio::task::yield_now().await;
+            }
+            Some(at) => tokio::select! {
+                _ = state.v8_tasks.notified() => {}
+                _ = tokio::time::sleep_until(at.into()) => {}
+            },
+            None => state.v8_tasks.notified().await,
+        }
+    }
 }
 
 /// Hand memory the allocator keeps but no longer uses back to the OS.

@@ -8,7 +8,8 @@ It presents a coherent persona, either **Chrome** or **Firefox**. The persona co
 - the JavaScript surface
 - device fingerprints: canvas, WebGL, audio, fonts and screen
 
-It does this with less CPU, RAM and disk than Lightpanda.
+The primary acceptance goal is passing our internal detection tests with a
+coherent persona and realistic behavior (ADR 0041).
 
 It exists for **internal bot-detection validation**, the same purpose as
 GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
@@ -17,7 +18,7 @@ GeckoPhantom (`stealth-browser`). Test runs target our own detection engine.
 
 | Metric | Target |
 |---|---|
-| Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | ≤ Lightpanda on the same machine |
+| Lightpanda crawl benchmark (wall time, peak RSS, CPU time) | Informational comparison |
 | Idle process RSS | < 15 MB |
 | Binary size (per family, stripped) | < 50 MB (ADR 0013; raised from < 40 MB by user decision, revision 4). Chrome: 40.39 MB with the prebuilt V8 (code that only off-by-default V8 flags reach is not linked; ICU data in lazily paged 4 KiB zstd chunks) |
 | Disk writes during a session | none by default |
@@ -43,10 +44,28 @@ Lightpanda (0.80-0.83 vs 0.74 s); since "CDP crawl speed" (2026-11-04, ADRs
 CDP wall 0.67 vs 0.77 / 0.76 s, `fetch` peak RSS 23.72 / 23.79 vs 24.36 /
 24.40 MB; binary 41.22 MB, idle RSS 6.3-6.4 MB, realm 1.29 / 0.82 ms.
 
+Historical comparison checks measured crawls doing the same fetches. They are wall time,
+peak RSS and CPU time, for `fetch` and for the CDP crawl. LightBrowser loads
+images and style sheets, as Chrome does (ADRs 0019 and 0020), and that
+loading stays. Lightpanda 1.1.0-nightly.11887 fetches neither, so the
+rtx-dev record from 2026-11-07 is a different amount of work and does not
+score an equivalent workload. That record is `bench/run.py`, 5 x 50 pages, tree
+`ec1c096`, loopback, telemetry off: 2 of 6. `fetch` wall 0.73 s vs 0.81 s
+and `fetch` CPU 0.65 s vs 0.78 s. CDP wall 0.413 s vs 0.289 s, CDP CPU
+0.36 s vs 0.33 s, CDP peak RSS 20.98 MB vs 20.95 MB, `fetch` peak RSS
+17.93 MB vs 16.31 MB. The gap is `goto` (4.03 ms vs 1.98 ms). A fresh bench
+did not run on 2026-11-11: this machine has no Lightpanda binary, and none
+was downloaded.
+
+The comparative performance results above are historical. Since 2026-11-19,
+Lightpanda comparisons do not gate acceptance (ADR 0041).
+
 ## Decisions (see `docs/adr/`)
 
 | # | Decision |
 |---|---|
+| 0042 | Real-clock human input preserves planned gaps after actual dispatches under load |
+| 0041 | Internal detection tests define acceptance; Lightpanda comparisons are informational |
 | 0001 | Rust for everything we write |
 | 0002 | Embed the JS engine instead of writing one: V8 for Chrome, SpiderMonkey for Firefox |
 | 0003 | BoringSSL + forked `h2` for network fingerprints |
@@ -82,7 +101,9 @@ CDP wall 0.67 vs 0.77 / 0.76 s, `fetch` peak RSS 23.72 / 23.79 vs 24.36 /
 | 0034 | Console calls run the page code Chrome runs, and no other |
 | 0035 | Page worker threads start on demand, up to one per core: a new one only when every running worker has a page |
 | 0036 | JavaScript dialogs are reported over CDP and block the page's worker until `Page.handleJavaScriptDialog` (only while a session has the Page domain on) |
-| 0037 | Playwright file uploads, permission overrides per context, geolocation, HTML drag and drop with drag interception, `Page.printToPDF` as images of a print-width layout |
+| 0037 | Playwright file uploads, permission overrides per context, geolocation, HTML drag and drop with drag interception, `Page.printToPDF` as JPEG slices of a print-width layout plus an invisible Helvetica text layer |
+| 0038 | V8's foreground tasks (GC steps, `FinalizationRegistry` cleanups) go to a custom platform that wakes the isolate's owner, which runs them between its tasks |
+| 0039 | Compiled classic scripts are kept per engine (bounded, kept on the second compile) and bound again to realms of the same partition (browser context and top-level origin); they survive the per-close memory-reducing GC that clears V8's compilation cache |
 | 0025 | Web Crypto on BoringSSL with Blink's normalization and Chromium's status texts (randomness from the OS CSPRNG); WebSocket through lb-net's own client with Chrome's handshake and an http/1.1-only ClientHello; dynamic `import()` through an engine hook sharing the module map; `blob:`/`data:` in `fetch()`/XHR; synchronous XHR blocking the calling thread |
 
 ## Layers
@@ -258,6 +279,11 @@ personas (ROADMAP, Risks).
   started when a page makes the worker; dedicated workers end with their
   document, shared workers (per context, by URL and name) with the
   context. Messages cross threads as structured clones through inboxes.
+- **V8's foreground tasks** (ADR 0038) are posted from any thread to the
+  isolate's queue and wake its owner: a page worker runs them from a task
+  of its local set, a web worker at the top of its loop.
+  Isolate disposal and final queue cleanup hold the isolate creation lock
+  together, preventing address reuse from removing a new isolate's tasks.
   Service workers (ADR 0022) are workers too: one thread per version,
   started by the context's registry, ending when the version becomes
   redundant or the context goes away.
@@ -356,7 +382,7 @@ Steps are in `tests/README.md`. Both modes use our own local server only.
 
 - **Browser:** getVersion, close, setDownloadBehavior, grantPermissions, resetPermissions, setPermission (overrides per context, ADR 0037)
 - **Target:** setAutoAttach (flatten), createBrowserContext, disposeBrowserContext, createTarget, attachToTarget, closeTarget, getTargets, setDiscoverTargets
-- **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, navigatedWithinDocument, captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014), javascriptDialogOpening / Closed and handleJavaScriptDialog (ADR 0036), printToPDF (images of a print-width layout, ADR 0037)
+- **Page:** enable, navigate, reload, getFrameTree, getLayoutMetrics (real scroll and document size), createIsolatedWorld, addScriptToEvaluateOnNewDocument, lifecycleEvent, setLifecycleEventsEnabled, navigatedWithinDocument, captureScreenshot (png/jpeg/webp, clip and scale, captureBeyondViewport; ADR 0014), javascriptDialogOpening / Closed and handleJavaScriptDialog (ADR 0036), printToPDF (JPEG slices of a print-width layout plus selectable Helvetica text, ADR 0037)
 - **Runtime:** enable, evaluate, callFunctionOn, getProperties, releaseObject, executionContextCreated / Destroyed, consoleAPICalled
 - **DOM:** getDocument, describeNode, resolveNode, getBoxModel, getContentQuads, getFrameOwner, scrollIntoViewIfNeeded, setFileInputFiles (ADR 0037)
 - **Input:** dispatchMouseEvent, dispatchKeyEvent, insertText, setInterceptDrags, dispatchDragEvent, dragIntercepted (ADR 0037)
@@ -385,7 +411,7 @@ process and is controlled over CDP.
 - One arena per document. Node structs are kept small (≤ 64 bytes). Attribute and text storage use interned atoms.
 - No layout or style data until something asks for it. `lb_layout::LayoutEngine::drop_layout` frees it; dropping it under memory pressure is not wired up yet.
 - No paint layers or compositor. A screenshot builds a display list from the current layout, paints it and drops it (ADR 0014).
-- JS heap cap per engine (512 MB). The engine gets a low-memory notification when a page's event loop has been quiet for 2 s, and one memory-reducing full GC (V8's critical memory-pressure path) when a worker's queue drains after a page closed.
+- JS heap cap per engine (512 MB). The engine gets a low-memory notification when a page's event loop has been quiet for 2 s, and one memory-reducing full GC (V8's critical memory-pressure path) when a worker's queue drains after a page closed. That path also clears V8's compilation cache, so compiled classic scripts are kept by the engine instead (ADR 0039). V8's own GC tasks run on the isolate's thread (ADR 0038).
 - Window realms come from the startup snapshot: about 1.6 MB of V8 heap each, with far less garbage than building them. A realm built without the snapshot (one-page `fetch`) defines the global's ~1,200 members after context creation, which is linear; V8's template instantiation of them was O(n²).
 - ICU data (10.9 MB) is paged in when ICU first reads it, on Linux and macOS (ADR 0013 revisions 3-5): one 4 KiB chunk per fault, or one 16 KiB page (four chunks) on Apple silicon; a page load makes about 0.1 MB resident on Linux. Elsewhere it is decompressed at once.
 - Font metric tables and the UA stylesheet are parsed once per worker and OS (`lb_layout::LayoutBase`), not per document.

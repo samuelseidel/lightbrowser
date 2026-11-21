@@ -179,7 +179,7 @@ impl<H: PageHost + 'static> Shared<H> {
         let default_context = ids.hex32();
         let browser_target_id = ids.hex32();
         let browser_ws_id = ids.uuid();
-        host.set_event_sink(EventSink { tx: out.clone() });
+        host.set_event_sink(EventSink::for_server(out.clone()));
         host.create_context(
             &default_context,
             ContextOptions {

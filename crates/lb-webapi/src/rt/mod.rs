@@ -70,7 +70,9 @@ mod misc;
 pub mod modules;
 mod navigator;
 mod net;
+mod platform_apis;
 mod rtc;
+mod scheduler;
 pub mod screenshot;
 pub mod script;
 mod serializer;
@@ -80,6 +82,7 @@ mod style;
 pub mod sw;
 mod table;
 mod tags;
+mod trusted;
 mod webgl;
 mod webgl_ext;
 mod websocket;
@@ -110,6 +113,7 @@ pub use chrome::LoadInfo;
 pub use events::{EventData, EventExtra, fire_event, fire_event_with};
 pub use image::{load_visible_lazy_images, schedule_lazy_image_check};
 pub use script::ScriptKind;
+pub use style::notify_media_lists;
 pub(crate) use webgl::{extension_names, extension_spec};
 pub use worker::{
     Inbox, InboxRx, RemoteTask, ScopeInit, WorkerControl, WorkerHost, WorkerKind, WorkerStart,
@@ -500,6 +504,9 @@ impl Runtime {
         worker::register(reg, &rt);
         sw::register(reg, &rt);
         crypto::register(reg, &rt);
+        trusted::register(reg, &rt);
+        scheduler::register(reg, &rt);
+        platform_apis::register(reg, &rt);
         websocket::register(reg, &rt);
         idb::register(reg, &rt);
         inherit_redeclared(reg);
@@ -575,8 +582,9 @@ impl Runtime {
     }
 
     /// The window that made document `key` and the document's slot there,
-    /// while that window lives.
-    pub(crate) fn doc_owner(&self, key: u32) -> Option<(Rc<Window>, u32)> {
+    /// while that window lives. CDP backend node ids use the key so a
+    /// child frame's nodes resolve to that frame (ADR 0017).
+    pub fn doc_owner(&self, key: u32) -> Option<(Rc<Window>, u32)> {
         let docs = self.0.docs.borrow();
         let e = docs.get(&key)?;
         Some((e.owner.upgrade()?, e.slot))
@@ -984,6 +992,14 @@ pub struct Window {
     pub(crate) history: RefCell<History>,
     pub(crate) observers: RefCell<Vec<u32>>,
     pub(crate) mo_queued: Cell<bool>,
+    /// Live `ResizeObserver` object ids (see `style`).
+    pub(crate) resize_observers: RefCell<Vec<u32>>,
+    pub(crate) ro_queued: Cell<bool>,
+    /// Live `IntersectionObserver` object ids (see `style`).
+    pub(crate) intersection_observers: RefCell<Vec<u32>>,
+    pub(crate) io_queued: Cell<bool>,
+    /// Same-window `BroadcastChannel` ids by channel name (see `worker`).
+    pub(crate) broadcast: RefCell<HashMap<String, Vec<u32>>>,
     /// Slot assignments of the main document's shadow trees as last seen
     /// (to signal `slotchange`), and the signal slots (DOM "signal slot
     /// list"), fired after the mutation observers.
@@ -1040,6 +1056,9 @@ pub struct Window {
     /// Exceptions listeners threw (IndexedDB aborts a transaction whose
     /// request event handler threw).
     pub(crate) uncaught: Cell<u32>,
+    /// User Timing entries from `performance.mark` / `measure` (plus a
+    /// synthetic navigation row; paint/resource come from real activity).
+    pub(crate) perf_entries: RefCell<Vec<u32>>,
 }
 
 impl std::fmt::Debug for Window {
@@ -1122,6 +1141,11 @@ impl Window {
             }),
             observers: RefCell::new(Vec::new()),
             mo_queued: Cell::new(false),
+            resize_observers: RefCell::new(Vec::new()),
+            ro_queued: Cell::new(false),
+            intersection_observers: RefCell::new(Vec::new()),
+            io_queued: Cell::new(false),
+            broadcast: RefCell::new(HashMap::new()),
             slot_state: RefCell::new(shadow::SlotState::default()),
             ce: RefCell::new(custom::CeState::default()),
             internals: RefCell::new(internals::InternalsState::default()),
@@ -1150,6 +1174,7 @@ impl Window {
             sw: sw::SwSide::default(),
             idb: idb::IdbSide::default(),
             uncaught: Cell::new(0),
+            perf_entries: RefCell::new(Vec::new()),
         });
         rt.register_doc(key, &w, 0, &doc);
         w
@@ -1192,6 +1217,7 @@ impl Window {
         self.realm.set(realm);
         self.rt.attach(realm, self.clone());
         engine.set_security_token(realm, &frames::origin(self))?;
+        engine.set_script_partition(realm, script_partition(self));
         self.setup_realm(engine, realm)?;
         Ok(realm)
     }
@@ -1217,6 +1243,7 @@ impl Window {
         )?;
         self.rt.attach(realm, self.clone());
         engine.set_security_token(realm, &frames::origin(self))?;
+        engine.set_script_partition(realm, script_partition(self));
         window::install_console(engine, realm, &self.rt)?;
         // Per-realm navigator state (UA-CH promises, performance.memory).
         navigator::setup_realm(self, engine, realm)?;
@@ -1353,8 +1380,9 @@ impl Window {
             .is_none_or(|(o, _)| std::ptr::eq(&*o, self))
     }
 
-    /// The runtime-wide key of the document in `slot`.
-    pub(crate) fn doc_key(&self, slot: u32) -> u32 {
+    /// The runtime-wide key of the document in `slot`. Used in node host
+    /// refs and in CDP backend node ids (same key across frames).
+    pub fn doc_key(&self, slot: u32) -> u32 {
         self.docs.borrow()[slot as usize].key
     }
 
@@ -1848,44 +1876,65 @@ impl Window {
         href.and_then(|h| url.join(&h).ok()).unwrap_or(url)
     }
 
-    /// `beforeunload` before the page navigates away or closes: true to go
-    /// on. A handler that cancels it (or sets a non-empty `returnValue`)
-    /// asks the user through the dialog host (type `beforeunload`, empty
-    /// message), and only after a user gesture on the page, as in Chrome.
-    /// Without a dialog host the page goes on.
-    pub fn before_unload(self: &Rc<Self>, js: &mut dyn Js) -> bool {
-        if self.is_closed() {
-            return true;
+    /// `beforeunload` for this window and every descendant frame (HTML
+    /// prompt-to-unload order: parent, then children). True to go on. A
+    /// handler that cancels it (or sets a non-empty `returnValue`) asks the
+    /// user through the dialog host (type `beforeunload`, empty message),
+    /// and only after a user gesture on that frame, as in Chrome. Without a
+    /// dialog host the page goes on. `js.realm` is restored afterwards.
+    pub fn before_unload(self: &Rc<Self>, js: &mut EngineJs<'_>) -> bool {
+        let saved = js.realm;
+        let mut stack = vec![self.clone()];
+        while let Some(w) = stack.pop() {
+            js.realm = w.realm();
+            if !before_unload_one(&w, js) {
+                js.realm = saved;
+                return false;
+            }
+            let kids = frames::children(&w);
+            for c in kids.into_iter().rev() {
+                stack.push(c.window);
+            }
         }
-        let ev = events::new_event(
-            self,
-            "BeforeUnloadEvent",
-            "beforeunload",
-            false,
-            true,
-            EventExtra::BeforeUnload(String::new()),
-        );
-        let not_canceled = events::dispatch(js, self, WINDOW_REF, ev);
-        let wants = !not_canceled
-            || self
-                .with_obj(ev, |o| match o {
-                    Obj::Event(e) => {
-                        matches!(&e.extra, EventExtra::BeforeUnload(s) if !s.is_empty())
-                    }
-                    _ => false,
-                })
-                .unwrap_or(false);
-        if !wants || !input::has_sticky_activation(self) {
-            return true;
-        }
-        self.dialog(&DialogRequest {
-            kind: "beforeunload",
-            message: String::new(),
-            default_prompt: None,
-        })
-        .is_none_or(|a| a.accept)
+        js.realm = saved;
+        true
     }
+}
 
+/// One document's prompt-to-unload step (no descendants).
+fn before_unload_one(w: &Rc<Window>, js: &mut dyn Js) -> bool {
+    if w.is_closed() {
+        return true;
+    }
+    let ev = events::new_event(
+        w,
+        "BeforeUnloadEvent",
+        "beforeunload",
+        false,
+        true,
+        EventExtra::BeforeUnload(String::new()),
+    );
+    let not_canceled = events::dispatch(js, w, WINDOW_REF, ev);
+    let wants = !not_canceled
+        || w.with_obj(ev, |o| match o {
+            Obj::Event(e) => {
+                matches!(&e.extra, EventExtra::BeforeUnload(s) if !s.is_empty())
+            }
+            _ => false,
+        })
+        .unwrap_or(false);
+    if !wants || !input::has_sticky_activation(w) {
+        return true;
+    }
+    w.dialog(&DialogRequest {
+        kind: "beforeunload",
+        message: String::new(),
+        default_prompt: None,
+    })
+    .is_none_or(|a| a.accept)
+}
+
+impl Window {
     /// Release JS state before the realm is dropped.
     /// The unload steps of the document, as Chrome runs them when the page
     /// navigates away or closes: `pagehide` (only after `pageshow`, i.e. once
@@ -2058,11 +2107,15 @@ pub(crate) enum Obj {
     },
     Performance,
     Screen,
+    /// `window.visualViewport` (layout viewport; Turnstile fingerprints it).
+    VisualViewport,
     DomImplementation {
         slot: u32,
     },
     MediaQueryList {
         media: String,
+        /// Last evaluated `matches` (for `change` events).
+        matches: bool,
     },
     Rect([f64; 4]),
     RectList(Vec<[f64; 4]>),
@@ -2083,6 +2136,29 @@ pub(crate) enum Obj {
     XmlSerializer,
     MutationObserver(Box<misc::MoData>),
     MutationRecord(Box<misc::MoRecord>),
+    /// `NodeIterator` from `Document.createNodeIterator` (see `dom`).
+    NodeIterator(Box<dom::NodeIteratorData>),
+    /// `TreeWalker` from `Document.createTreeWalker` (see `dom`).
+    TreeWalker(Box<dom::TreeWalkerData>),
+    /// `ResizeObserver` (geometry; see `style`).
+    ResizeObserver(Box<style::RoData>),
+    /// One `ResizeObserverEntry`.
+    ResizeObserverEntry(Box<style::RoEntry>),
+    /// One `ResizeObserverSize` (`inlineSize` / `blockSize`).
+    ResizeObserverSize {
+        inline: f64,
+        block: f64,
+    },
+    /// `BroadcastChannel` (same-window; see `worker`).
+    BroadcastChannel(Box<worker::BcData>),
+    /// `IntersectionObserver` (geometry; see `style`).
+    IntersectionObserver(Box<style::IoData>),
+    /// One `IntersectionObserverEntry`.
+    IntersectionObserverEntry(Box<style::IoEntry>),
+    /// `PerformanceObserver` (constructable; see `window`).
+    PerformanceObserver(Box<window::PoData>),
+    /// `PerformanceObserverEntryList` handed to the observer callback.
+    PerformanceObserverEntryList,
     Blob(Box<misc::BlobData>),
     /// Canvas contexts, gradients, patterns, paths, image data, metrics,
     /// offscreen canvases and matrices.
@@ -2103,6 +2179,19 @@ pub(crate) enum Obj {
     Css(Box<sheets::CssObj>),
     /// `Crypto`, `SubtleCrypto` and `CryptoKey`.
     Crypto(Box<crypto::CryptoObj>),
+    /// Trusted Types (`trustedTypes`, policies, TrustedHTML/Script/ScriptURL).
+    Trusted(Box<trusted::TrustedObj>),
+    /// Prioritized Task Scheduling (`scheduler`).
+    Scheduler,
+    /// `navigator.storage` / `locks`, `cookieStore`, Navigation API.
+    Platform(Box<platform_apis::PlatformObj>),
+    /// Performance Timeline user timing (`PerformanceMark` / `PerformanceMeasure`).
+    PerfEntry {
+        entry_type: &'static str,
+        name: String,
+        start_time: f64,
+        duration: f64,
+    },
     /// `WebSocket`.
     WebSocket(Box<websocket::WsState>),
     /// IndexedDB objects and `DOMStringList` (ADR 0028).
@@ -2137,6 +2226,7 @@ impl Obj {
             Obj::Storage { .. } => "Storage",
             Obj::Performance => "Performance",
             Obj::Screen => "Screen",
+            Obj::VisualViewport => "VisualViewport",
             Obj::DomImplementation { .. } => "DOMImplementation",
             Obj::MediaQueryList { .. } => "MediaQueryList",
             Obj::Rect(_) => "DOMRect",
@@ -2156,6 +2246,16 @@ impl Obj {
             Obj::XmlSerializer => "XMLSerializer",
             Obj::MutationObserver(_) => "MutationObserver",
             Obj::MutationRecord(_) => "MutationRecord",
+            Obj::NodeIterator(_) => "NodeIterator",
+            Obj::TreeWalker(_) => "TreeWalker",
+            Obj::ResizeObserver(_) => "ResizeObserver",
+            Obj::ResizeObserverEntry(_) => "ResizeObserverEntry",
+            Obj::ResizeObserverSize { .. } => "ResizeObserverSize",
+            Obj::BroadcastChannel(_) => "BroadcastChannel",
+            Obj::IntersectionObserver(_) => "IntersectionObserver",
+            Obj::IntersectionObserverEntry(_) => "IntersectionObserverEntry",
+            Obj::PerformanceObserver(_) => "PerformanceObserver",
+            Obj::PerformanceObserverEntryList => "PerformanceObserverEntryList",
             Obj::Blob(b) if b.file.is_some() => "File",
             Obj::Blob(_) => "Blob",
             Obj::FileList(_) => "FileList",
@@ -2171,6 +2271,17 @@ impl Obj {
             Obj::Sw(x) => x.iface_name(),
             Obj::Css(c) => c.iface_name(),
             Obj::Crypto(c) => c.iface_name(),
+            Obj::Trusted(t) => t.iface_name(),
+            Obj::Scheduler => "Scheduler",
+            Obj::Platform(p) => p.iface_name(),
+            Obj::PerfEntry { entry_type, .. } => match *entry_type {
+                "measure" => "PerformanceMeasure",
+                "mark" => "PerformanceMark",
+                "navigation" => "PerformanceNavigationTiming",
+                "paint" => "PerformancePaintTiming",
+                "resource" => "PerformanceResourceTiming",
+                _ => "PerformanceEntry",
+            },
             Obj::WebSocket(_) => "WebSocket",
             Obj::Idb(x) => x.iface_name(),
             Obj::RuleStyle { .. } => "CSSStyleDeclaration",
@@ -2514,4 +2625,18 @@ pub(crate) fn truthy(v: &JsValue) -> bool {
         JsValue::String(s) => !s.is_empty(),
         JsValue::Json(_) | JsValue::Opaque(_) => true,
     }
+}
+
+/// The partition of the engine's compiled-script cache for this window's
+/// realms (ADR 0039): its browser context (one network host each) and the
+/// origin of its top-level document. Chrome's renderers are split by site
+/// and its code cache by top-level site, so scripts compiled for one site
+/// are never reused for another there either. Never 0, the partition of
+/// the engine's own helper scripts.
+fn script_partition(w: &Rc<Window>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (Rc::as_ptr(&w.net) as *const () as usize).hash(&mut h);
+    frames::origin(&frames::top(w)).hash(&mut h);
+    h.finish() | 1
 }

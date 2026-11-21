@@ -1,7 +1,8 @@
 //! Canvas 2D on lb-paint: `HTMLCanvasElement` (`getContext`, `toDataURL`,
 //! `toBlob`, size semantics), `CanvasRenderingContext2D`,
 //! `OffscreenCanvas` + its 2D context, `CanvasGradient`, `CanvasPattern`,
-//! `Path2D`, `ImageData` and `TextMetrics`.
+//! `Path2D`, `ImageData`, `TextMetrics`, `ImageBitmap` and
+//! `createImageBitmap`.
 //!
 //! - Every canvas element with a context has a [`CanvasCtx`] in the
 //!   window's [`PaintState`]; the bitmap is an `lb_paint::Canvas2d`
@@ -165,6 +166,12 @@ pub(crate) enum PaintObj {
     },
     Metrics(Box<TextMetrics>),
     Offscreen(Box<Offscreen>),
+    /// `ImageBitmap` from `createImageBitmap` (premultiplied RGBA).
+    ImageBitmap {
+        pixels: Rc<Pixmap>,
+        clean: bool,
+        closed: bool,
+    },
     Matrix(Box<super::matrix::Matrix>),
 }
 
@@ -182,6 +189,7 @@ impl PaintObj {
             PaintObj::ImageData { .. } => "ImageData",
             PaintObj::Metrics(_) => "TextMetrics",
             PaintObj::Offscreen(_) => "OffscreenCanvas",
+            PaintObj::ImageBitmap { .. } => "ImageBitmap",
             PaintObj::Matrix(m) => m.iface_name(),
         }
     }
@@ -470,22 +478,43 @@ pub(crate) fn image_source(
             _ => Err(bad()),
         };
     }
-    if h.kind == K_OBJ
-        && let Some((size, ctx)) = paint(w, h.id, |p| match p {
+    if h.kind == K_OBJ {
+        if let Some((size, ctx)) = paint(w, h.id, |p| match p {
             PaintObj::Offscreen(o) => Some(((o.width, o.height), o.ctx.clone())),
             _ => None,
-        })
-    {
-        if size.0 == 0 || size.1 == 0 {
-            return Err(w.rt.err(
-                "InvalidStateError",
-                format!(
-                    "Failed to execute '{op}' on '{iface}': The image argument is an OffscreenCanvas element with a width or height of 0."
-                ),
-            ));
+        }) {
+            if size.0 == 0 || size.1 == 0 {
+                return Err(w.rt.err(
+                    "InvalidStateError",
+                    format!(
+                        "Failed to execute '{op}' on '{iface}': The image argument is an OffscreenCanvas element with a width or height of 0."
+                    ),
+                ));
+            }
+            let clean = !matches!(&ctx, Some(CanvasCtx::TwoD { ctx, .. }) if ctx.borrow().tainted);
+            return Ok(snapshot_of(ctx, size).map_or(Source::Nothing, |p| Source::Pixels(p, clean)));
         }
-        let clean = !matches!(&ctx, Some(CanvasCtx::TwoD { ctx, .. }) if ctx.borrow().tainted);
-        return Ok(snapshot_of(ctx, size).map_or(Source::Nothing, |p| Source::Pixels(p, clean)));
+        if let Some(src) = paint(w, h.id, |p| match p {
+            PaintObj::ImageBitmap {
+                pixels,
+                clean,
+                closed,
+            } => {
+                if *closed {
+                    Some(Err(w.rt.err(
+                        "InvalidStateError",
+                        format!(
+                            "Failed to execute '{op}' on '{iface}': The image source is a detached ImageBitmap."
+                        ),
+                    )))
+                } else {
+                    Some(Ok(Source::Pixels(pixels.clone(), *clean)))
+                }
+            }
+            _ => None,
+        }) {
+            return src;
+        }
     }
     Err(bad())
 }
@@ -621,6 +650,7 @@ const CTX: [&str; 2] = [
 pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_element(reg, rt);
     register_offscreen(reg, rt);
+    register_image_bitmap(reg, rt);
     for iface in CTX {
         register_state(reg, rt, iface);
         register_drawing(reg, rt, iface);
@@ -635,6 +665,230 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     }
     register_objects(reg, rt);
     super::matrix::register(reg, rt);
+}
+
+/// `ImageBitmap` and `createImageBitmap` (canvas/image/blob/ImageData).
+fn register_image_bitmap(reg: &mut Registry, rt: &Runtime) {
+    for global in ["Window", "WorkerGlobalScope"] {
+        method(reg, rt, global, "createImageBitmap", create_image_bitmap);
+    }
+    getter(reg, rt, "ImageBitmap", "width", |cx, w| {
+        let id = this_obj(cx)?;
+        let wdt = paint(w, id, |p| match p {
+            PaintObj::ImageBitmap { pixels, closed, .. } => {
+                Some(if *closed { 0 } else { pixels.width() })
+            }
+            _ => None,
+        })
+        .ok_or_else(illegal)?;
+        cx.ret(wdt)
+    });
+    getter(reg, rt, "ImageBitmap", "height", |cx, w| {
+        let id = this_obj(cx)?;
+        let h = paint(w, id, |p| match p {
+            PaintObj::ImageBitmap { pixels, closed, .. } => {
+                Some(if *closed { 0 } else { pixels.height() })
+            }
+            _ => None,
+        })
+        .ok_or_else(illegal)?;
+        cx.ret(h)
+    });
+    method(reg, rt, "ImageBitmap", "close", |cx, w| {
+        let id = this_obj(cx)?;
+        let ok = paint(w, id, |p| match p {
+            PaintObj::ImageBitmap { closed, .. } => {
+                *closed = true;
+                Some(())
+            }
+            _ => None,
+        });
+        if ok.is_none() {
+            return Err(illegal());
+        }
+        Ok(())
+    });
+}
+
+fn create_image_bitmap(cx: &mut CallCtx<'_, '_, '_>, w: &Rc<Window>) -> Result<(), HostError> {
+    const OP: &str = "createImageBitmap";
+    const IFACE: &str = "Window";
+    need_args(cx, 1, OP, IFACE)?;
+    let r = cx.ret_new_promise()?;
+    // Optional sx,sy,sw,sh before options: present when arg1 is a number.
+    let cropped = cx.len() >= 5 && matches!(cx.arg_kind(1), ValueKind::Number);
+    let (sx, sy, sw, sh) = if cropped {
+        (
+            cx.arg_f64(1)?,
+            cx.arg_f64(2)?,
+            cx.arg_f64(3)?,
+            cx.arg_f64(4)?,
+        )
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
+    if cropped && (sw == 0.0 || sh == 0.0) {
+        return cx.reject_promise(
+            r,
+            w.rt.err(
+                "IndexSizeError",
+                format!(
+                    "Failed to execute '{OP}' on '{IFACE}': The crop rect width or height is 0."
+                ),
+            ),
+        );
+    }
+
+    let source = bitmap_source(cx, w, 0, OP, IFACE);
+    let (pixels, clean) = match source {
+        Ok(Source::Pixels(p, c)) => (p, c),
+        Ok(Source::Nothing) => {
+            return cx.reject_promise(
+                r,
+                w.rt.err(
+                    "InvalidStateError",
+                    format!(
+                        "Failed to execute '{OP}' on '{IFACE}': The source image could not be decoded."
+                    ),
+                ),
+            );
+        }
+        Err(e) => return cx.reject_promise(r, e),
+    };
+
+    let pm = if cropped {
+        let (iw, ih) = (pixels.width() as f64, pixels.height() as f64);
+        let (mut sx, mut sy, mut sw, mut sh) = (sx, sy, sw, sh);
+        if sw < 0.0 {
+            sx += sw;
+            sw = -sw;
+        }
+        if sh < 0.0 {
+            sy += sh;
+            sh = -sh;
+        }
+        // Clip to source; empty → reject.
+        let x0 = sx.max(0.0).min(iw);
+        let y0 = sy.max(0.0).min(ih);
+        let x1 = (sx + sw).max(0.0).min(iw);
+        let y1 = (sy + sh).max(0.0).min(ih);
+        let cw = (x1 - x0).floor() as u32;
+        let ch = (y1 - y0).floor() as u32;
+        if cw == 0 || ch == 0 {
+            return cx.reject_promise(
+                r,
+                w.rt.err(
+                    "IndexSizeError",
+                    format!(
+                        "Failed to execute '{OP}' on '{IFACE}': The crop rect width or height is 0."
+                    ),
+                ),
+            );
+        }
+        let mut out = match Pixmap::new(cw, ch) {
+            Some(p) => p,
+            None => {
+                return cx.reject_promise(
+                    r,
+                    HostError::range_error("Out of memory at ImageBitmap creation"),
+                );
+            }
+        };
+        // Draw source crop into out via a temporary Canvas2d.
+        let mut c = Canvas2d::new(env(w), cw, ch, true);
+        c.draw_image(
+            &pixels,
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            0.0,
+            0.0,
+            cw as f64,
+            ch as f64,
+        );
+        if let Some(snap) = c.snapshot() {
+            out = snap;
+        }
+        Rc::new(out)
+    } else {
+        pixels
+    };
+
+    let id = new_paint(
+        w,
+        PaintObj::ImageBitmap {
+            pixels: pm,
+            clean,
+            closed: false,
+        },
+    );
+    cx.resolve_promise(r, w.obj_arg(id))
+}
+
+/// `createImageBitmap` source: canvas image sources, Blob, or ImageData.
+fn bitmap_source(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    i: usize,
+    op: &str,
+    iface: &str,
+) -> Result<Source, HostError> {
+    let bad = || {
+        HostError::type_error(format!(
+            "Failed to execute '{op}' on '{iface}': The provided value is not of type '(HTMLImageElement or SVGImageElement or HTMLVideoElement or HTMLCanvasElement or Blob or ImageData or ImageBitmap or OffscreenCanvas or VideoFrame)'."
+        ))
+    };
+    if let Some(h) = cx.arg_host(i)
+        && h.kind == K_OBJ
+    {
+        if let Some(bmp) = paint(w, h.id, |p| match p {
+            PaintObj::ImageData {
+                width,
+                height,
+                data,
+            } => Some((*width, *height, *data)),
+            _ => None,
+        }) {
+            let (width, height, data) = bmp;
+            let mut bytes = cx.handle_bytes(data).unwrap_or_default();
+            bytes.resize(width as usize * height as usize * 4, 0);
+            lb_paint::decode::premultiply(&mut bytes);
+            let pm = Pixmap::from_vec(
+                bytes,
+                tiny_size(width, height).ok_or_else(|| {
+                    HostError::range_error("Out of memory at ImageBitmap creation")
+                })?,
+            )
+            .ok_or_else(|| HostError::range_error("Out of memory at ImageBitmap creation"))?;
+            return Ok(Source::Pixels(Rc::new(pm), true));
+        }
+        if let Some(blob) = w
+            .with_obj(h.id, |o| match o {
+                Obj::Blob(b) => Some((b.bytes.clone(), b.type_.clone())),
+                _ => None,
+            })
+            .flatten()
+        {
+            let (bytes, ty) = blob;
+            match lb_paint::decode::decode(&bytes, Some(ty.as_str()).filter(|s| !s.is_empty())) {
+                Ok(pm) => return Ok(Source::Pixels(Rc::new(pm), true)),
+                Err(_) => {
+                    return Err(w.rt.err(
+                        "InvalidStateError",
+                        format!(
+                            "Failed to execute '{op}' on '{iface}': The source image could not be decoded."
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    match image_source(cx, w, i, op, iface) {
+        Ok(src) => Ok(src),
+        Err(HostError::TypeError(_)) => Err(bad()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Creates (or returns) the 2D context of a canvas.

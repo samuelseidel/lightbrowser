@@ -352,7 +352,22 @@
     for (const d of await n.mediaDevices.enumerateDevices()) c[d.kind] = (c[d.kind] || 0) + 1;
     return c;
   });
-  await probe('voices', () => (typeof speechSynthesis === 'undefined' ? null : speechSynthesis.getVoices().map((v) => v.name)));
+  await probe('voices', async () => {
+    if (typeof speechSynthesis === 'undefined') return null;
+    let voices = speechSynthesis.getVoices();
+    if (!voices.length) {
+      await new Promise((resolve) => {
+        const ready = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(() => {
+          speechSynthesis.removeEventListener('voiceschanged', ready);
+          resolve();
+        }, 1000);
+        speechSynthesis.addEventListener('voiceschanged', ready, { once: true });
+      });
+      voices = speechSynthesis.getVoices();
+    }
+    return voices.map((v) => v.name);
+  });
   await probe('media', () => ({
     dark: matchMedia('(prefers-color-scheme: dark)').matches,
     reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,

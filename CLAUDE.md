@@ -71,8 +71,9 @@ run you compare. After "Workers as CDP targets" (5294bae, binary 42.18 MB,
 evicted): 6 of 6 in two 5 x 50 runs (`fetch` peak RSS 21.86 / 21.75 vs
 23.21 / 23.22 MB, CDP wall 0.73 / 0.79 vs 0.81 / 0.84 s). `tools/surface_diff` compares the page-visible
 surface of two builds. Open: Firefox (M4b: no SpiderMonkey backend, TLS
-gaps in ADR 0003), the thin `fetch` peak RSS margin (above). Also open: named access on
-`window` (full list in ROADMAP "Close-out verification"). Software WebGL
+gaps in ADR 0003), the thin `fetch` peak RSS margin (above). Named access on
+`window` (`window[id]`, `window.frameName`) is done. Remaining close-outs
+are in ROADMAP "Close-out verification". Software WebGL
 (ADR 0030, ROADMAP "Software WebGL"): `lb-gl` compiles GLSL ES 1.00/3.00
 with ANGLE's checks and info logs (72 Chrome-recorded logs match), runs
 shaders on a 16-lane interpreter and rasterizes with clipping, 4x MSAA,

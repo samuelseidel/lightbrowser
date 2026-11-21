@@ -66,5 +66,4 @@ local Chrome for Testing 153.0.8010.12 on loopback pages (`lb-page`
 - Not modelled: scoped registries beyond `new CustomElementRegistry()`,
   constructable style sheets (`adoptedStyleSheets` is empty), `::part`,
   `:host-context()`, user-agent shadow roots, form state restore,
-  `FormData` file entries, named access on `window` (affects some WPT
-  files).
+  `FormData` file entries. Named access on `window` is done separately.

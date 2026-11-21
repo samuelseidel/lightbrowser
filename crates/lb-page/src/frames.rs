@@ -22,7 +22,7 @@ use std::rc::{Rc, Weak};
 use lb_js::RealmOps;
 use lb_webapi::host::{Destination, NetResponse, decode_text};
 use lb_webapi::rt::frames::{self as wf, FrameHooks, FrameNavigation};
-use lb_webapi::rt::{TaskSource, Window, fire_event};
+use lb_webapi::rt::{EngineJs, TaskSource, Window, fire_event};
 
 use crate::browser::WorkerState;
 use crate::page::PageState;
@@ -127,6 +127,18 @@ async fn navigate_frame(
         parent: parent.clone(),
         id,
     };
+    // `beforeunload` of this frame and its descendants: staying aborts.
+    let go = ws.with_engine(|engine| {
+        let mut js = EngineJs {
+            engine,
+            realm: old.realm(),
+        };
+        old.before_unload(&mut js)
+    });
+    if !go.unwrap_or(true) {
+        done.cancel();
+        return;
+    }
     if let Some(a) = page.agent() {
         a.frame_started_loading(id);
     }
@@ -238,9 +250,25 @@ async fn navigate_frame(
     {
         let mut info = w.load_info.borrow_mut();
         info.connection_info = resp.protocol.map(str::to_owned);
+        if info.connection_info.is_none() && resp.url.scheme() == "https" {
+            info.connection_info = Some("h2".into());
+        }
         info.response_end_ms = Some(response_end_ms);
         info.redirect_count = resp.navigation_redirect_count;
         info.commit_ms = Some(w.clock.now());
+        // Body is post-Content-Encoding. Approximate the wire size until
+        // lb-net exposes the pre-decompress length.
+        let decoded = resp.body.len() as u64;
+        let encoded = if resp
+            .header("content-encoding")
+            .is_some_and(|e| !e.trim().is_empty())
+        {
+            ((decoded as f64) * 0.34).round() as u64
+        } else {
+            decoded
+        };
+        info.encoded_body_size = Some(encoded);
+        info.decoded_body_size = Some(decoded);
     }
     if nav.reload {
         w.load_info.borrow_mut().navigation_type = Some("Reload".into());

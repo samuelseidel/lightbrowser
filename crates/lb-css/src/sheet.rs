@@ -290,6 +290,13 @@ fn supports_in_parens<'i>(p: &mut Parser<'i>) -> PResult<bool> {
     }
 }
 
+/// `CSS.supports(conditionText)`: true when the `@supports` condition
+/// parses and evaluates as supported (declarations we parse, `selector()`).
+pub fn supports(condition: &str) -> bool {
+    let mut p = Parser::new(condition.trim());
+    p.parse_entirely(supports_condition).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

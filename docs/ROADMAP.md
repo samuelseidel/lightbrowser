@@ -2,6 +2,12 @@
 
 Each milestone ends with something we can run and measure.
 
+As of 2026-11-19, passing our internal detection tests with coherent
+personas and realistic behavior is the primary acceptance goal (ADR 0041).
+Lightpanda comparisons below are historical diagnostics. Relative speed,
+CPU and memory do not gate completion. Existing absolute resource budgets
+remain in effect.
+
 | Milestone | Scope | Done when |
 |---|---|---|
 | **M0 Foundations** | Architecture docs, ADRs, workspace skeleton, CI, SFC32 port | `cargo build/test/clippy` green for both families ✅ |
@@ -20,11 +26,11 @@ Each milestone ends with something we can run and measure.
 | Milestone | Chrome | Open |
 |---|---|---|
 | M0, M1, M2, M3, M4 | Done; connection reuse (keep-alive, HTTP/2 sessions, TLS resumption) done 2026-11-04 (ADR 0018); style sheets block scripts and the parser as in Chrome, `@import`, CSSOM (2026-11-04, ADR 0019); dedicated and shared workers on their own threads and isolates, worker globals from a Chrome capture, V8 structured clone, message ports (2026-11-04, ADR 0021); service workers and the Cache API in memory per context, fetch interception, clients (2026-11-04, ADR 0022); shadow DOM (slots, retargeting, scoped style, flat tree, declarative roots) and custom elements (reactions, parser construction, built-ins, `ElementInternals`) (2026-11-04, ADR 0026); proxies per context (ADR 0027) and IndexedDB in memory (ADR 0028) (2026-11-04); workers (dedicated, shared, service) as CDP targets for Playwright, idle service workers stopped after 30 s as in Chrome, `fromServiceWorker` (2026-11-04, ADR 0029) | M2/M3/M4 leftovers in their status sections (Web Crypto, WebSocket, dynamic `import()`, `blob:` fetches and synchronous XHR done 2026-11-04, ADR 0025) |
-| M1b TCP stack | Done for `fetch` on Linux: Windows, macOS and Linux SYN, IP ID and SYN retransmits (ADRs 0031-0033), direct connections only; merged with the M2-M7 branch on 2026-11-07 | Windows and macOS profiles not captured on real devices; `serve` contexts not wired (T10); proxies (T13); the rest of T1-T15 in [tcp-handshake/REMAINING-STEPS.md](tcp-handshake/REMAINING-STEPS.md) |
+| M1b TCP stack | Done for `fetch` on Linux: Windows, macOS and Linux SYN, IP ID and SYN retransmits (ADRs 0031-0033), direct connections only; merged with the M2-M7 branch on 2026-11-07; `serve --tcp-profile` / SDK `tcp_profile=` wire the profile into every CDP context (T10, still off by default) | Windows and macOS profiles not captured on real devices; proxies (T13 partial: warn when both proxy and tcp-profile); the rest of T1-T15 in [tcp-handshake/REMAINING-STEPS.md](tcp-handshake/REMAINING-STEPS.md) |
 | M4b Firefox | Not started: no SpiderMonkey backend; the firefox build parses pages but runs no scripts and `serve` uses `MockHost` | All of it, plus the Firefox TLS gaps in ADR 0003 |
 | M5 Behavior + SDK | Done: T-010 `--input human` passes for both reference personas (own seeds beh 0; seeds 1-20: Windows 20/20, macOS 19/20) | The SDK's own T-004 still types one short word (see "M5 status"); form POSTs now send a POST (see "M4 status: form POST navigations") |
-| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP is the host's under `serve` (M1b shapes `fetch` only). See "M7 status: WP-E" |
-| M6 Performance | Snapshot, memory, binary size (41.69 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018); service workers (ADR 0022); CDP crawl faster than Lightpanda again (0.67 vs 0.76-0.77 s, 6 of 6 checks in two 5 x 50 runs; ADRs 0023, 0024, "CDP crawl speed") | `fetch` peak RSS margin 0.6 MB (23.7-23.8 vs 24.4 MB): above the run-to-run spread seen here (~0.4 MB) but not by much; see "CDP crawl speed" |
+| M7 OS personas | WP-A done: Linux ground truth (`tools/os_truth`, `tests/fixtures/os/`), 16 OS rules in the bench, `serve --unchecked-persona`. WP-B done: OS axis and accessors in `lb-persona`, rules R17-R26, `profiles/catalog/` and generator, 8 Chrome reference personas (Windows 10/11, macOS Intel/Apple Silicon, Ubuntu X11, Fedora Wayland), 11 adversarial ones. WP-C done: scrollbars, default and generic fonts, Linux aliases, emoji and `font:` keywords per persona. WP-D done: Web Share and Web Bluetooth only on Windows/macOS (OS overlay, deleted per realm), media type answers and `mediaCapabilities`, `navigator.keyboard`, `navigator.gpu`, WebGL backends, audio defaults, `screenX/Y`, wheel and select-all per OS. WP-E done: high-entropy `Sec-CH-UA-*` after `Accept-CH` per origin, `Critical-CH` restart, same-origin delegation, header order from a new capture. T-010 fp 0 for every reference persona with every OS rule | Windows/macOS values not captured; no `Permissions-Policy` delegation or device/preference hints; TCP/IP under `serve` is the host's unless `--tcp-profile persona` (T10). See "M7 status: WP-E" |
+| M6 Performance | Snapshot, memory, binary size (41.69 MB, < 50 MB met), `bench/` runner, screenshots (with CSS background images, gradients, radius and shadows since 2026-11-04, ADR 0020), lazy interfaces (ADR 0016), Lightpanda comparison done; HTTP keep-alive and connection reuse (ADR 0018); service workers (ADR 0022); CDP crawl faster than Lightpanda again (0.67 vs 0.76-0.77 s, 6 of 6 checks in two 5 x 50 runs; ADRs 0023, 0024, "CDP crawl speed") | `fetch` peak RSS margin 0.6 MB (23.7-23.8 vs 24.4 MB): above the run-to-run spread seen here (~0.4 MB) but not by much; see "CDP crawl speed". Nightly 11887 (rtx-dev, 2026-11-07) fetches no images or style sheets; its 2 of 6 is outside the budget, which compares crawls that do the same fetches. No fresh run on 2026-11-11. See "Lightpanda on Linux" |
 
 Budgets (ARCHITECTURE.md), with the evidence for each:
 
@@ -34,7 +40,7 @@ Budgets (ARCHITECTURE.md), with the evidence for each:
 | Binary < 50 MB (user decision 2026-11-03; < 40 MB before, < 56 MB in between) | Met: 42.72 MB (42,721,144 bytes, +537 KB for `lb-gl`) after "Software WebGL"; 42.18 MB (42,184,568 bytes) after "Workers as CDP targets"; 42.07 MB (42,073,976 bytes) after "Proxies and IndexedDB"; 41.69 MB (41,693,048 bytes) after "Shadow DOM and custom elements"; 41.50 MB (41,496,440 bytes) after "Web platform APIs"; 41.22 MB (41,222,008 bytes) after "CDP crawl speed"; 41.19 MB (41,193,336 bytes) after "Service workers"; 40.95 MB (40,951,672 bytes) after "Workers"; 40.76 MB (40,763,256 bytes) after "Style sheets and screenshot decorations"; 40.51 MB (40,505,208 bytes) after "Connection reuse"; 40.41 MB (40,411,000 bytes) after "Frames fidelity"; 40.39 MB (40,386,424 bytes) with ICU data in 4 KiB chunks; 39.84 MB after M7 WP-E | ADR 0013 revision 4, "M6 status: Lightpanda comparison" |
 | Realm creation < 5 ms | Met: 1.28 / 0.82 ms and 1.36 / 0.84 ms after "Software WebGL"; 1.51 / 0.87 ms and 1.42 / 0.85 ms after "Workers as CDP targets"; 1.41 / 0.86 ms and 1.42 / 0.85 ms after "Proxies and IndexedDB"; 1.45 / 0.85 ms and 1.47 / 0.87 ms (`realm_bench` snapshot line) after "Shadow DOM and custom elements"; 1.29 ms first, 0.82 ms next after "CDP crawl speed" (a realm built without the snapshot, as `serve` and `fetch` make them: 1.59 → 0.92 ms, `realm_loop` median); 1.28 ms first, 1.08 ms next after "Service workers"; 1.37 ms first, 1.11 ms next with lazy interfaces (ADR 0016; `realm_bench`'s snapshot line); 3.17 ms first, 2.45 ms next after M7 WP-D (Linux realms, OS gate deletion included); 3.13 / 2.47 ms at the end of M6 (2.39 / 2.06 ms in an earlier session; 2.6 / 2.3 ms for the old code in the same session) | `realm_bench`; `bench/run.py` |
 | No disk writes by default | Met: 0 files, `write_bytes` 0 | `bench/run.py` |
-| Wall time, peak RSS and CPU <= Lightpanda | After "Software WebGL" (de4a7c4, binaries evicted): 6 of 6 in both runs (`bench/results/2026-11-04-de4a7c4-1.json`, `2026-11-04-de4a7c4.json`; `fetch` peak RSS 21.50 / 21.35 vs 23.18 / 23.18 MB, CDP wall 0.68 / 0.68 vs 0.77 / 0.77 s; see that section). After "Workers as CDP targets" (5294bae): 6 of 6 in both runs, binaries' page cache evicted before each (`fetch` peak RSS 21.86 / 21.75 vs 23.21 / 23.22 MB; CDP wall 0.73 / 0.79 vs 0.81 / 0.84 s; see that section). After "Proxies and IndexedDB" (fca2955): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.20 vs 23.195 MB; see that section). After "Shadow DOM and custom elements" (7d6707e): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.28 vs 23.23 MB; see that section). After "Web platform APIs" (a57aee9): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.23 vs 23.20 MB, Lightpanda's low end; see that section). **Met, 6 of 6 in both runs** after "CDP crawl speed" (2026-11-04, same binary, sha256 in the files). Run 1 (`bench/results/2026-11-04-14b1a77-1.json`): `fetch` wall 0.97 vs 1.09 s, peak RSS 23.72 vs 24.36 MB, CPU 0.85 vs 1.08 s; CDP wall 0.67 vs 0.77 s, peak RSS 29.02 vs 31.29 MB, CPU 0.57 vs 0.78 s. Run 2 (`2026-11-04-e5abb20.json`): `fetch` 0.97 vs 1.05 s, 23.79 vs 24.40 MB, 0.85 vs 1.04 s; CDP 0.67 vs 0.76 s, 29.01 vs 31.29 MB, 0.57 vs 0.77 s. Before: close-out re-run on the clean committed tree 27e7f1a (2026-11-04, "Close-out verification", `bench/results/2026-11-04-27e7f1a.json`): 5 of 6; a first run of the same binary passed 4 of 6. Second run: `fetch` wall 0.98 vs 1.08 s, peak RSS 23.72 vs 24.45 MB, CPU 0.85 vs 1.06 s; CDP wall **0.80 vs 0.74 s (fails)**, peak RSS 28.90 vs 31.39 MB, CPU 0.62 vs 0.76 s. First run: `fetch` peak RSS 23.71 vs 23.17 MB (**fails**, Lightpanda's own peak moves between 23.2 and 24.4 MB; ours stays at 23.7), CDP wall 0.83 vs 0.74 s (fails). 5 of 6 after "Service workers" (`bench/results/2026-11-04-a4fc4ca.json`): `fetch` wall 0.98 vs 1.07 s, peak RSS 23.66 vs 24.41 MB, CPU 0.86 vs 1.06 s; CDP wall **0.84 vs 0.77 s (fails)**, peak RSS 28.62 vs 31.31 MB, CPU 0.64 vs 0.78 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.89 vs 23.21 MB; an A/B against the previous binary shows no rise, see "Service workers"). 5 of 6 after "Workers" (`bench/results/2026-11-04-67c904b.json`): `fetch` wall 0.99 vs 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs 0.79 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.91 vs 23.28 MB, see "Workers"). 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
+| Lightpanda comparison (informational since ADR 0041) | The six checks compare crawls that do the same fetches (2026-11-11). Nightly 11887 on rtx-dev (2026-11-07, 5 x 50, tree `ec1c096`) is 2 of 6 and fetches no images or style sheets, so it is a different crawl: `fetch` wall 0.73 vs 0.81 s, `fetch` CPU 0.65 vs 0.78 s, CDP wall 0.413 vs 0.289 s, CDP CPU 0.36 vs 0.33 s, CDP peak RSS 20.98 vs 20.95 MB, `fetch` peak RSS 17.93 vs 16.31 MB. A fresh bench did not run on 2026-11-11. See "Lightpanda on Linux". After "Software WebGL" (de4a7c4, binaries evicted): 6 of 6 in both runs (`bench/results/2026-11-04-de4a7c4-1.json`, `2026-11-04-de4a7c4.json`; `fetch` peak RSS 21.50 / 21.35 vs 23.18 / 23.18 MB, CDP wall 0.68 / 0.68 vs 0.77 / 0.77 s; see that section). After "Workers as CDP targets" (5294bae): 6 of 6 in both runs, binaries' page cache evicted before each (`fetch` peak RSS 21.86 / 21.75 vs 23.21 / 23.22 MB; CDP wall 0.73 / 0.79 vs 0.81 / 0.84 s; see that section). After "Proxies and IndexedDB" (fca2955): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.20 vs 23.195 MB; see that section). After "Shadow DOM and custom elements" (7d6707e): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.28 vs 23.23 MB; see that section). After "Web platform APIs" (a57aee9): 6 of 6 in run 2, 5 of 6 in run 1 (`fetch` peak RSS 23.23 vs 23.20 MB, Lightpanda's low end; see that section). **Met, 6 of 6 in both runs** after "CDP crawl speed" (2026-11-04, same binary, sha256 in the files). Run 1 (`bench/results/2026-11-04-14b1a77-1.json`): `fetch` wall 0.97 vs 1.09 s, peak RSS 23.72 vs 24.36 MB, CPU 0.85 vs 1.08 s; CDP wall 0.67 vs 0.77 s, peak RSS 29.02 vs 31.29 MB, CPU 0.57 vs 0.78 s. Run 2 (`2026-11-04-e5abb20.json`): `fetch` 0.97 vs 1.05 s, 23.79 vs 24.40 MB, 0.85 vs 1.04 s; CDP 0.67 vs 0.76 s, 29.01 vs 31.29 MB, 0.57 vs 0.77 s. Before: close-out re-run on the clean committed tree 27e7f1a (2026-11-04, "Close-out verification", `bench/results/2026-11-04-27e7f1a.json`): 5 of 6; a first run of the same binary passed 4 of 6. Second run: `fetch` wall 0.98 vs 1.08 s, peak RSS 23.72 vs 24.45 MB, CPU 0.85 vs 1.06 s; CDP wall **0.80 vs 0.74 s (fails)**, peak RSS 28.90 vs 31.39 MB, CPU 0.62 vs 0.76 s. First run: `fetch` peak RSS 23.71 vs 23.17 MB (**fails**, Lightpanda's own peak moves between 23.2 and 24.4 MB; ours stays at 23.7), CDP wall 0.83 vs 0.74 s (fails). 5 of 6 after "Service workers" (`bench/results/2026-11-04-a4fc4ca.json`): `fetch` wall 0.98 vs 1.07 s, peak RSS 23.66 vs 24.41 MB, CPU 0.86 vs 1.06 s; CDP wall **0.84 vs 0.77 s (fails)**, peak RSS 28.62 vs 31.31 MB, CPU 0.64 vs 0.78 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.89 vs 23.21 MB; an A/B against the previous binary shows no rise, see "Service workers"). 5 of 6 after "Workers" (`bench/results/2026-11-04-67c904b.json`): `fetch` wall 0.99 vs 1.11 s, peak RSS 23.85 vs 24.40 MB, CPU 0.86 vs 1.10 s; CDP wall **0.84 vs 0.75 s (fails)**, peak RSS 28.81 vs 31.32 MB, CPU 0.64 vs 0.79 s; a first run of the same build passed 4 of 6 (`fetch` peak RSS 23.91 vs 23.28 MB, see "Workers"). 5 of 6 after "Style sheets and screenshot decorations" (`bench/results/2026-11-04-5490a8e.json`): `fetch` wall 0.95 vs 1.06 s, peak RSS 22.68 vs 24.41 MB, CPU 0.83 vs 1.05 s; CDP wall **0.82 vs 0.74 s (fails)**, peak RSS 27.97 vs 31.29 MB, CPU 0.63 vs 0.76 s. 5 of 6 since the bench server fix (2026-11-04, `bench/results/2026-11-04-cb0a5b0.json`, "Connection reuse"): `fetch` wall 0.93 vs 1.09 s, peak RSS 22.4 vs 24.4 MB, CPU 0.82 vs 1.07 s; CDP wall **0.82 vs 0.78 s (fails)**, peak RSS 27.3 vs 31.4 MB, CPU 0.62 vs 0.80 s. The corpus server used to stall every reused connection 40 ms (Nagle and delayed ACK), which slowed Lightpanda; the old build fails CDP wall on the fixed server too (0.91 s). Before the fix: met (Lightpanda 1.1.0-nightly.11582, `bench/results/2026-11-03-af2c264.json`): `fetch` wall 1.08 vs 3.37 s, peak RSS 22.06 vs 24.48 MB, CPU 0.88 vs 1.23 s; CDP wall 0.99 vs 5.04 s, peak RSS 26.95 vs 31.40 MB, CPU 0.68 vs 0.95 s. Independent re-run (`2026-11-03-02ca87f.json`, clean tree): also 6 of 6, `fetch` peak RSS 23.09 vs 23.20 MB. After "Frames fidelity" (`2026-11-03-cf3ac89.json`): 6 of 6, `fetch` peak RSS 21.92 vs 23.19 MB | "M6 status: Lightpanda comparison" (second pass) |
 
 ## M1 status (2026-11-02)
 
@@ -271,7 +277,8 @@ Open (CDP and page host):
 
 - No popups; workers (since "Workers") are not CDP targets. Screenshots landed in M6 (see "M6 status: screenshots").
 - Playwright can click and fill inside direct and nested child frames. Backend
-  node IDs resolve in the document that owns the node.
+  node IDs encode the document key (ADR 0017) so a child frame's nodes resolve
+  and a replaced document's ids do not.
 - Script-driven history changes and fragment navigation report
   `navigatedWithinDocument`. Top-level `Page.navigate` to a fragment keeps
   the current document and omits the loader ID in its response.
@@ -341,8 +348,10 @@ Known gaps after M4 (details in the sections below):
   values, not captured from a device (`profiles/README.md`).
 - Header sets that the page adds beyond the captured ones are placed
   approximately; no preflight is issued; Firefox uses a generic overlay.
-- Clicks into iframes, `window.frameName`, `sandbox` and structured clone
-  for `postMessage` are missing.
+- ~~Clicks into iframes~~ / ~~`window.frameName`~~ (frame `DOM.*` object
+  ids + `Input.*` hit-test descent, and named access; see Close-out /
+  Playwright). `sandbox` and structured clone for `postMessage` are
+  missing.
 - Behaviour (M5): the T-010 behaviour rules still fire with Playwright
   input (`beh` 85.4, target `<=30`); with `LightBrowser.human*` input see
   "M5 status: human input".
@@ -687,10 +696,11 @@ have landed for the Chrome build.
   `iframe_mismatch` and `extra_globals` pass. Still firing:
   `header_order`, `no_interaction`, `favicon_missing`.
 
-Open: no named frame access (`window.frameName`), `sandbox`, or
-browsing contexts for `<frame>`/`<object>`/`<embed>`; nodes passed between
-frames' DOM methods are not supported; frame network events are
-attributed to the main frame; workers landed 2026-11-04 (see "Workers").
+Open: `sandbox`, and browsing contexts for `<frame>`/`<object>`/`<embed>`;
+nodes passed between frames' DOM methods are not supported; frame
+network events are attributed to the main frame. Named frame access
+(`window.frameName`), child-frame `DOM.*` / `Input.*`, and workers are
+done (see the close-out notes and "Workers").
 
 ## M4 status: detect-bench target and determinism (2026-11-03)
 
@@ -2849,9 +2859,11 @@ the subset. Their subtests: 7912/8389 pass (6908 of them in
 `declarative/gethtml.html`; 1004/1481 in the other files). The earlier
 files: 2568/2788 (2556 before; the null-namespace fix). Whole subset:
 10480/11177, 117/243 files fully pass, 18 harness errors or timeouts.
-Most remaining failures need named access on `window` (`window[id]`,
-not implemented), iframes or attribute/`Range`/`NamedNodeMap` APIs that
-are stubs.
+Named access on `window` (`window[id]`, `window.frameName`) is
+implemented (HTML living standard: child browsing-context names, then
+`embed`/`form`/`img`/`object` `name`, then element `id`; IDL members are
+not masked). Remaining failures need iframes or attribute/`Range`/
+`NamedNodeMap` APIs that are stubs.
 
 Checks (release build 7d6707e, hot-symbol order regenerated):
 
@@ -2873,12 +2885,13 @@ The machine was slower than earlier today (Lightpanda's `fetch` wall
 Open: scoped registries beyond `new CustomElementRegistry()`;
 constructable style sheets (`adoptedStyleSheets` is an empty array);
 `::part`, `:host-context()`; user-agent shadow roots (`<input>`,
-`<details>`); form state restoration; `FormData` file entries; named
-access on `window`; `innerText` is still text-based (not the flat
-tree's rendering); `[CEReactions]` are approximated by running reactions
-when an operation's mutations are processed (attribute reflection
-setters, `Range`, `NamedNodeMap` and `DOMTokenList` reactions follow
-only where those APIs mutate through the DOM).
+`<details>`); form state restoration; `FormData` file entries;
+`innerText` is still text-based (not the flat tree's rendering);
+`[CEReactions]` are approximated by running reactions when an
+operation's mutations are processed (attribute reflection setters,
+`Range`, `NamedNodeMap` and `DOMTokenList` reactions follow only where
+those APIs mutate through the DOM). Named access on `window` done
+(see above).
 
 ## Proxies and IndexedDB (2026-11-04)
 
@@ -3334,8 +3347,9 @@ Testing 1243 where a page can observe it:
   rejected drop and a dragged link equal Chrome's. Drags also run on plain
   mouse input when the client does not intercept them.
 - `page.pdf`: `Page.printToPDF` lays the page out at the paper's width,
-  paints page slices at about 150 dpi and embeds them as JPEGs (no
-  selectable text); `IO.read` / `IO.close` for the stream.
+  paints page slices at about 150 dpi and embeds them as JPEGs, with an
+  invisible Helvetica text layer for selection/search (ADR 0037 revision 1);
+  `IO.read` / `IO.close` for the stream.
 - A plain `browser.newContext()` works (user decision): Playwright's
   implicit screen and scale factor 1 keep the persona's screen and ratio;
   an explicit contradicting `screen` or `deviceScaleFactor` is still
@@ -3363,10 +3377,16 @@ and `media.spec.mjs`.
 
 **Still open (Playwright).** By decision: `exposeFunction` /
 `exposeBinding` (Playwright 1.65 needs a main-world binding; ADR 0009
-keeps bindings out of the main world, confirmed by the user). Missing:
-`change` events on `MediaQueryList`s, media emulation in child frames,
-`beforeunload` in child frames, vector text in PDFs. Console calls made
-in an isolated world are reported with the main world's context id.
+keeps bindings out of the main world, confirmed by the user). Done in
+this close-out wave: `MediaQueryList` `change` (emulation and viewport;
+ADR 0009 revision 4), `frameLocator` click/fill via frame-aware `DOM.*`
+object ids plus iframe hit-test descent (ADR 0012), and media emulation
+in child frames (ADR 0009 revision 5). Done later in this wave: child-frame
+`beforeunload` (frame-tree prompt-to-unload; ADR 0036) and isolated-world
+console `executionContextId` (regression in `cdp_host`). Done later in this
+wave: backend DOM node ids for child frames (document-key encoding) and
+selectable PDF text (invisible Helvetica layer). By decision still open:
+`exposeFunction` / `exposeBinding`.
 
 ### Linux checks on rtx-dev, idle workers, V8's thread pool (2026-11-07)
 
@@ -3428,16 +3448,177 @@ private memory). Bench on a quiet machine (3 x 50 pages, Chromium 1243):
 | private after crawl | | 8.7 MB | 1,325 MB |
 | new page | | 1.7 ms | 33.6 ms |
 
+### Timer order repeated, lock file, Lightpanda on Linux (2026-11-07)
+
+**Timer order, repeated.** The fix in `870ce76` had been checked with 24
+runs. On rtx-dev, test binaries of `870ce76` and of its parent `273392c`
+(the same code apart from the fix) ran `apis::import_page` side by side:
+
+- 60 rounds 20 s apart (23 minutes), 16 copies per build at a time, and
+  the whole `pages` suite on the fixed build every fifth round. At that
+  load (load average 1-3 on 24 cores) both builds passed 960 of 960, and
+  the suite passed 12 of 12 (109 cases each). This load does not provoke
+  the race.
+- Under contention: both builds confined to 4 cores (`taskset`) with 8
+  busy loops, 8 copies at a time, 150 rounds. Before the fix 1064 of 1200
+  passed; all 136 failures logged `order fresh import,timeout` (Chrome:
+  `timeout,import`). With the fix 1200 of 1200 passed.
+
+**Lock file.** `273392c` added `libc` to `lb-page` without recording it in
+`Cargo.lock`, so `cargo build --locked` failed. Fixed.
+
+**`exposeFunction`, checked in Playwright 1.65's code.** On Chromium it
+calls `Runtime.addBinding` for `__playwright__binding__` with no context
+(so every main world gets it) and adds a main-world init script that
+sets `window.__playwright__binding__controller__` as an ordinary
+property; the exposed function itself is a further global. A page would
+see both helper names, so the decision stands: bindings stay out of the
+main world (ADR 0009).
+
+**Lightpanda on Linux.** No Lightpanda binary existed on rtx-dev; the user
+approved the nightly (`1.1.0-nightly.11887+740996260`, sha256
+`a3e9b0ba…`, the 1.1.0 nightly line of the earlier comparisons), run on
+loopback with telemetry off. `bench/run.py`, 5 x 50 pages, `ec1c096`:
+
+| | LightBrowser | Lightpanda |
+|---|---|---|
+| CDP crawl | 0.413 s | **0.289 s** |
+| CDP CPU | 0.36 s | **0.33 s** |
+| CDP peak RSS | 20.98 MB | 20.95 MB |
+| CDP peak private | 9.9 MB | **7.3 MB** |
+| idle private | **1.37 MB** | 2.2 MB |
+| new page | **1.74 ms** | 2.47 ms |
+| `fetch` crawl | **0.73 s** | 0.81 s |
+| `fetch` CPU | **0.65 s** | 0.78 s |
+| `fetch` peak RSS | 17.93 MB | **16.31 MB** |
+
+2 of the 6 checks passed: this nightly crawls over CDP far faster than the
+one compared on 2026-11-04 (0.77 s then, on another machine). Lightpanda
+fetches no images or style sheets by default; LightBrowser loads both, as
+Chrome does. Per step (4 x 50 pages, medians): new page 1.40 vs 2.55 ms,
+`goto` 4.03 vs 1.98 ms, `evaluate` 1.38 vs 1.39 ms, close 0.41 vs 0.47 ms;
+the gap is in `goto`.
+
+**Equivalent work (2026-11-11).** The six checks compare crawls that do the
+same fetches. LightBrowser keeps loading images and style sheets, as Chrome
+does (ADRs 0019 and 0020). Nightly 11887 fetches neither, so the 2 of 6 in
+the table above records that unequal crawl. The budget applies when both
+crawls fetch the same URLs. The two checks at or under Lightpanda are
+`fetch` wall (0.73 s vs 0.81 s) and `fetch` CPU (0.65 s vs 0.78 s). CDP wall
+is 0.413 s vs 0.289 s, CDP CPU 0.36 s vs 0.33 s, CDP peak RSS 20.98 MB vs
+20.95 MB and `fetch` peak RSS 17.93 MB vs 16.31 MB. A fresh `bench/run.py`
+did not run on 2026-11-11: this machine has no Lightpanda binary on PATH or
+on disk from the approved nightly, and none was downloaded. The numbers are
+the rtx-dev record. ADRs 0038 and 0039, the hot-symbol remap and releasing
+V8's snapshot pages came after that run; there is no new 6-of-6 result.
+
+**Where a CDP page's CPU went** (perf, `cpu-clock` over all threads and
+both core types of the hybrid 285K, 500 pages): V8 runtime and objects 22%
+(two thirds of it realm creation: two realms per page cycle, ~0.76 ms
+each), kernel 16% (page faults, zeroing, unmapping, TLB shootdowns), GC
+13%, parse and compile 8%, malloc 8%, layout 4%, style 3%. The
+memory-reducing GC after each closed page (V8's critical memory-pressure
+path) also clears V8's compilation cache, empties its page pool and
+discards free memory inside pages, so each page compiled the same scripts
+again and faulted fresh pages in. Against no forced GC, over 300 pages:
+GC +250 ms, kernel +211 ms, compile +175 ms. Investigation, reviews and the
+ranked plan came from a 13-agent workflow; the plan's steps are worked
+through below.
+
+**V8's foreground tasks run** (ADR 0038). Nothing pumped them: a page's
+`FinalizationRegistry` callbacks never fired (0 of 2000 after three forced
+full GCs; Chrome for Testing 1243: 2000 of 2000 within a second of
+`gc()`), and V8 never finished a GC it started itself. A custom platform now
+hands each task to its isolate's owner, which runs it between tasks.
+
+**Compiled scripts are kept** (ADR 0039): bounded per engine, kept on the
+second compile, partitioned by browser context and top-level origin, and
+surviving the per-close GC. Over 300 pages (P-cores, instruction counts,
+median of 3): 18.4 G instructions without, 17.2 G with (-6.5%);
+`evaluate` 1.23-1.28 ms -> 0.73-0.91 ms. The 16 KB code cache is gone.
+
+**Hot-code order on rtx-dev.** The list made on 2026-11-04 with another
+rustc matched none of its 4,312 Rust names (crate hashes differ), so Rust
+code was not ordered at all. `tools/hot_symbols/remap.py` carries the list
+over by demangled name (4,164 match); the list now names its rustc and the
+release build warns on another one. `fetch` peak RSS 17.41 / 17.73 ->
+16.85 / 17.18 MB, CDP 20.88 / 20.89 -> 20.39 / 20.63 MB (2 x 2 runs).
+
+**Bench.** `bench/run.py` evicts each browser's binary from the page cache
+before each of its runs (CLAUDE.md asked for it; nothing did it).
+
+**V8's built-in snapshot pages are released** after an isolate is made
+(Linux): the read-only, startup and shared-heap parts are copied into the
+heap and never read again, so `MADV_DONTNEED` drops them from RSS.
+
+## Close-out: MediaQueryList change and iframe Input (2026-11-15)
+
+Landed for Chrome (after named access and T10 TCP wiring):
+
+- **MediaQueryList `change`:** lists cache `matches`; CDP media emulation and
+  viewport resize fire `MediaQueryListEvent` (`addEventListener` /
+  `addListener`). ADR 0009 revision 4; `tests/playwright/media.spec.mjs`,
+  `lb-page` `cdp_host::media_query_list_change_on_emulation`.
+- **Iframe clicks / fills:** object-id `DOM.getContentQuads` /
+  `getBoxModel` / `scrollIntoViewIfNeeded` resolve child-frame nodes;
+  `Input.dispatchMouseEvent` hit-tests into iframes (child realm +
+  viewport sync). ADR 0012; `cdp_host::click_reaches_button_inside_iframe`,
+  `tests/playwright/frames.spec.mjs` frameLocator click/fill.
+- **Child-frame media emulation:** `setEmulatedMedia` walks the frame
+  tree; new child documents inherit the page's overrides (ADR 0009
+  revision 5; `cdp_host::emulate_media_reaches_child_frames`).
+
+## Close-out: child-frame beforeunload and console context (2026-11-15)
+
+- **Child-frame `beforeunload`:** `Window::before_unload` walks the frame
+  tree (parent then children), switching realm per frame; sticky
+  activation and the dialog are per frame. Top navigations, `Page.close`
+  (`run_before_unload`), and child-frame navigations all use it. ADR 0036;
+  `cdp_host::beforeunload_reaches_child_frames`.
+- **Isolated-world console context id:** `Runtime.consoleAPICalled`
+  carries the isolated world's `executionContextId` (lookup by realm).
+  Gated by `cdp_host::console_reports_isolated_world_context_id`;
+  `EventSink::channel` for host tests without a WebSocket server.
+
+## Close-out: child-frame backend node ids and PDF text (2026-11-15)
+
+- **Backend DOM node ids across frames:** CDP backend ids encode the
+  runtime document key (ADR 0017) in the high bits and the arena index in
+  the low bits, so `DOM.requestNode` / `resolveNode` / `getBoxModel` /
+  `querySelector*` and `DOM.getFrameOwner` work for child-frame nodes
+  (same document-key identity as node host refs). Gated by
+  `cdp_host::request_node_reaches_child_frame`. ADR 0012 updated.
+- **PDF selectable text:** `Page.printToPDF` still paints JPEG page
+  slices for visuals; an invisible Helvetica (WinAnsi) text layer from
+  the display list makes text selectable/searchable. Limits: no embedded
+  webfonts/emoji, approximate metrics. ADR 0037 revision 1;
+  `cdp_host::print_to_pdf_has_selectable_text`,
+  `lb-page` `cdp::screenshot::print_tests`.
+
+Still open from Playwright leftovers, by decision: `exposeFunction` /
+`exposeBinding` (ADR 0009).
+
+## Human input under load (2026-11-20)
+
+Real-clock input now waits the generated gap after each actual dispatch
+(ADR 0042). Fixed deadlines could compress delayed events into a burst,
+including a 9.3 ms press hold observed during baseline verification.
+Virtual-clock replay retains deterministic offsets.
+
 ## Risks
+
+- **V8 teardown race (2026-11-19).** Repeated parallel engine tests exposed
+  queue deletion after an isolate address was reused. Disposal now holds
+  the creation lock through final queue cleanup (ADR 0038).
 
 - **TCP profiles drift from real stacks.** Windows and macOS values are from
   public signatures until re-captured; a wrong value is worse than the Linux
   default because it is consistently wrong. The profile's `provenance.status`
   says which are verified.
 
-- **TCP/IP fingerprint outside `fetch --tcp-profile`.** `serve` (CDP) contexts
-  still send the host's SYN, so a passive TCP/IP fingerprint can contradict a
-  Windows or macOS persona there until T10 wires `tcp_profile_id` through CDP.
+- **TCP/IP fingerprint off by default on `serve`.** CDP contexts send the host's
+  SYN unless `serve --tcp-profile persona` (or the SDK `tcp_profile="persona"`)
+  is set (T10). Windows and macOS profiles still need `tcp-shim`.
 - **Windows and macOS ground truth.** M7's Windows and macOS values come from
   a surface reference, not captures (only Linux was captured, on a machine
   without a GPU). They need internal captures; see "M7 status: verification

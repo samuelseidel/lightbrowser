@@ -140,6 +140,11 @@ pub struct Registry {
     named_enum: KeyMap<&'static str, NamedEnumerator>,
     indexed_len: KeyMap<&'static str, IndexedLength>,
     unenumerable: std::collections::HashSet<&'static str, BuildHasherDefault<KeyHasher>>,
+    non_masking: std::collections::HashSet<&'static str, BuildHasherDefault<KeyHasher>>,
+    /// Call-as-function handler for instances (`document.all("id")`).
+    call_as_fns: KeyMap<&'static str, HostFn>,
+    /// V8 undetectable / IsHTMLDDA (`document.all`).
+    undetectable_ifaces: std::collections::HashSet<&'static str, BuildHasherDefault<KeyHasher>>,
     dom_exceptions: DomExceptions,
     inherit: Option<Rc<Inherit>>,
 }
@@ -243,10 +248,37 @@ impl Registry {
         self
     }
 
+    /// Call instances of `iface` as a function (`document.all("x")`).
+    pub fn call_as_function(&mut self, iface: &'static str, f: HostFn) -> &mut Self {
+        self.call_as_fns.insert(iface, f);
+        self
+    }
+
+    /// Mark instances of `iface` as V8 undetectable (IsHTMLDDA).
+    pub fn undetectable(&mut self, iface: &'static str) -> &mut Self {
+        self.undetectable_ifaces.insert(iface);
+        self
+    }
+
+    pub fn call_as_function_for(&self, iface: &'static str) -> Option<&HostFn> {
+        self.call_as_fns.get(iface)
+    }
+
+    pub fn is_undetectable(&self, iface: &'static str) -> bool {
+        self.undetectable_ifaces.contains(iface)
+    }
+
     /// `[LegacyUnenumerableNamedProperties]` for `iface`; needs a named
     /// getter.
     pub fn named_unenumerable(&mut self, iface: &'static str) -> &mut Self {
         self.unenumerable.insert(iface);
+        self
+    }
+
+    /// Named properties must not mask own or prototype members of `iface`
+    /// (Window HTML named access). Needs a named getter.
+    pub fn named_non_masking(&mut self, iface: &'static str) -> &mut Self {
+        self.non_masking.insert(iface);
         self
     }
 
@@ -256,6 +288,10 @@ impl Registry {
 
     pub fn is_named_unenumerable(&self, iface: &'static str) -> bool {
         self.unenumerable.contains(iface)
+    }
+
+    pub fn is_named_non_masking(&self, iface: &'static str) -> bool {
+        self.non_masking.contains(iface)
     }
 
     pub fn named_setter_for(&self, iface: &'static str) -> Option<&NamedSetter> {
@@ -347,6 +383,9 @@ impl Registry {
         self.named_enum.shrink_to_fit();
         self.indexed_len.shrink_to_fit();
         self.unenumerable.shrink_to_fit();
+        self.non_masking.shrink_to_fit();
+        self.call_as_fns.shrink_to_fit();
+        self.undetectable_ifaces.shrink_to_fit();
     }
 
     /// Number of registered functions (getters, setters, methods, ...).

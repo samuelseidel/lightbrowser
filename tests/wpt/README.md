@@ -27,5 +27,6 @@ cargo test -p lb-page --test wpt -- --nocapture
 The runner prints per-file results and the totals, and fails if the
 number of passing subtests drops below the baseline in
 `crates/lb-page/tests/wpt.rs`. Tests that need iframes, XML documents,
-named access on `window` or layout-dependent features fail today; that is expected and
-tracked by the pass count, not hidden.
+layout-dependent features, iframes, or stub DOM APIs fail today; that is
+expected and tracked by the pass count, not hidden. Named access on
+`window` (`window[id]`) is implemented.

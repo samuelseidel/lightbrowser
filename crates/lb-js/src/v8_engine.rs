@@ -27,6 +27,8 @@ pub mod icu_data;
 mod inspect;
 mod realm_ops;
 mod snapshot;
+mod tasks;
+pub use tasks::TaskWaker;
 #[doc(hidden)]
 pub mod unused_v8;
 pub use clone::{HostWriter, Serialized};
@@ -77,7 +79,9 @@ pub fn init_v8(flags: &str) -> bool {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(2);
-        let platform = v8::new_default_platform(threads, false).make_shared();
+        // Foreground tasks go to their isolate's owner (ADR 0038, `tasks`).
+        let platform =
+            v8::new_custom_platform(threads, false, false, tasks::Platform).make_shared();
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();
         did = true;
@@ -482,6 +486,16 @@ pub struct InterfaceSpec {
     pub to_string_tag: bool,
     /// Make instances immutable-prototype exotic objects (the global).
     pub immutable_proto: bool,
+    /// Mark instances as V8 undetectable (`[[IsHTMLDDA]]`): `typeof` is
+    /// `"undefined"`, they are falsy, and `== null` is true, while
+    /// property access still works. Chrome's `document.all`
+    /// (`HTMLAllCollection`) needs this; without it Turnstile's soft-pass
+    /// fingerprint treats the collection as a normal object.
+    pub undetectable: bool,
+    /// Call instances as a function (`document.all("id")`). Required with
+    /// [`Self::undetectable`] so the object stays callable like Chrome's
+    /// HTMLAllCollection (Blink's LegacyCallAsFunction).
+    pub call_as_function: Option<HostFn>,
     /// A `[LegacyFactoryFunction]` (`Image`): `X.prototype` is this
     /// interface's prototype object (read-only, not enumerable, not
     /// configurable), as in Chrome, so `Image.prototype ===
@@ -499,6 +513,12 @@ pub struct InterfaceSpec {
     /// read-only and not enumerable (`Object.keys` skips them,
     /// `getOwnPropertyNames` lists them). Needs a named getter.
     pub named_unenumerable: bool,
+    /// Named interceptor does not mask own or prototype properties
+    /// (`v8::PropertyHandlerFlags::NON_MASKING`). Needed for Window's
+    /// HTML named access (`window[id]`) so `document` and IDL members win
+    /// over an element with that id. Storage and collections leave this
+    /// off: their keys are meant to be visible as own-looking properties.
+    pub named_non_masking: bool,
     /// For a global interface: own properties of the global (its
     /// `instance` members or the engine's built-ins) moved to the end, in
     /// this order, once the members are defined, in every realm
@@ -519,6 +539,8 @@ impl InterfaceSpec {
             instance: Vec::new(),
             to_string_tag: true,
             immutable_proto: false,
+            undetectable: false,
+            call_as_function: None,
             prototype_from: None,
             named_getter: None,
             indexed_getter: None,
@@ -527,6 +549,7 @@ impl InterfaceSpec {
             named_enumerator: None,
             indexed_length: None,
             named_unenumerable: false,
+            named_non_masking: false,
             reorder_last: Vec::new(),
         }
     }
@@ -992,6 +1015,8 @@ struct RealmEntry {
     /// V8's own functions the console's string builder calls, taken before
     /// any page script ran ([`CallCtx::console_args`]).
     console: Option<console::ConsoleBuiltins>,
+    /// Its partition of [`State::scripts`] ([`RealmOps::set_script_partition`]).
+    partition: u64,
 }
 
 /// Shared with the near-heap-limit callback through a raw pointer.
@@ -1027,10 +1052,11 @@ struct State {
     snap: SnapState,
     /// The snapshot context while it is being made (it is no realm).
     creating: Option<Rc<RealmMat>>,
-    /// Large classic scripts compiled in this engine, most recent last,
-    /// with their V8 code cache once they were compiled twice (see
-    /// `run_script`).
-    code_cache: Vec<(u64, Option<Rc<[u8]>>)>,
+    /// Compiled classic scripts kept for reuse, most recent last (ADR
+    /// 0039, `run_script`).
+    scripts: VecDeque<KeptScript>,
+    /// Keys of scripts compiled once and not kept (yet), oldest first.
+    scripts_seen: VecDeque<u64>,
     /// The value of the last exception turned into a [`JsError`], for
     /// `ErrorEvent.error` ([`Engine::take_exception`]).
     last_exception: Option<v8::Global<v8::Value>>,
@@ -1039,19 +1065,37 @@ struct State {
     /// `import()`s settled in the next microtask: (realm, resolver, module
     /// URL or `TypeError` message).
     ready_imports: VecDeque<(RealmId, Resolver, Result<String, String>)>,
+    /// Host objects marked `[IsCodeLike]` (TrustedScript): `eval` /
+    /// `Function` / similar unwrap to this source via the isolate's
+    /// modify-codegen-from-strings callback.
+    code_like: HashMap<(u32, u32), String>,
 }
 
 type SharedState = Rc<RefCell<State>>;
 
-/// Classic scripts this long or longer that are compiled a second time
-/// get a V8 code cache, used when the same source is compiled again. Playwright
-/// evaluates its ~100 KB utility script in the main world of every new
-/// document; V8's own compilation cache does not outlive the GC that runs
-/// after a page closes, so without this it is parsed and compiled anew
-/// each time. Consuming a code cache changes nothing a script can observe.
-const CODE_CACHE_MIN: usize = 16 * 1024;
-/// Scripts remembered per engine.
-const CODE_CACHE_ENTRIES: usize = 8;
+/// A compiled classic script, run again by binding it to the next context
+/// of its partition that runs the same source from the same URL and
+/// position (ADR 0039). That is what a hit in V8's own compilation cache
+/// does; V8's cache does not outlive the memory-reducing GC that runs after
+/// a page closes, this one does.
+struct KeptScript {
+    key: u64,
+    partition: u64,
+    source: Rc<str>,
+    url: Rc<str>,
+    line: u32,
+    column: u32,
+    script: v8::Global<v8::UnboundScript>,
+}
+
+/// Scripts kept per engine, and their total source length. A page cycle in
+/// a crawl runs about ten distinct scripts (Playwright's utility script,
+/// shared site scripts, our helpers); every page's own inline scripts are
+/// kept only once seen twice, so they do not push those out.
+const KEPT_SCRIPTS: usize = 32;
+const KEPT_SCRIPT_BYTES: usize = 512 * 1024;
+/// Keys of scripts seen once, remembered for the second sighting.
+const SEEN_SCRIPTS: usize = 128;
 
 impl State {
     fn push_callback(&mut self, cb: Callback) -> u32 {
@@ -1226,10 +1270,15 @@ impl Engine {
                 .external_references(snapshot::external_refs())
                 .snapshot_blob(v8::StartupData::from(v8_part))
         };
+        // Made from V8's built-in snapshot (not ours, not a creator).
+        let mut builtin = false;
         let mut isolate = match build {
             Build::Plain => match plain_blob {
                 Some(blob) => v8::Isolate::new(from_blob(params, blob)),
-                None => v8::Isolate::new(params),
+                None => {
+                    builtin = true;
+                    v8::Isolate::new(params)
+                }
             },
             Build::Creator => {
                 snap = SnapState::Creating(Default::default());
@@ -1245,11 +1294,17 @@ impl Engine {
                     snap = SnapState::Rejected(reason);
                     match setup.blob {
                         Some(blob) => v8::Isolate::new(from_blob(params, blob)),
-                        None => v8::Isolate::new(params),
+                        None => {
+                            builtin = true;
+                            v8::Isolate::new(params)
+                        }
                     }
                 }
             },
         };
+        if builtin {
+            release_builtin_snapshot();
+        }
         // `Isolate::new` enters the isolate; undo that so engines can be
         // created and dropped in any order. Every operation enters again.
         // SAFETY: pairs the enter done by `Isolate::new` on this thread.
@@ -1285,10 +1340,12 @@ impl Engine {
             heap: heap.clone(),
             snap,
             creating: None,
-            code_cache: Vec::new(),
+            scripts: VecDeque::new(),
+            scripts_seen: VecDeque::new(),
             last_exception: None,
             dyn_hook: None,
             ready_imports: VecDeque::new(),
+            code_like: HashMap::new(),
         }));
         {
             let mut iso = Entered::new(&mut isolate);
@@ -1296,6 +1353,10 @@ impl Engine {
             iso.set_slot(state.clone());
             iso.set_host_initialize_import_meta_object_callback(import_meta);
             iso.set_host_import_module_dynamically_callback(dynamic_import);
+            // TrustedScript `[IsCodeLike]`: eval/Function of a marked host
+            // object compile its source string (rusty_v8 has no
+            // ObjectTemplate::SetCodeLike; this callback is the same hook).
+            iso.set_modify_code_generation_from_strings_callback(modify_codegen_from_strings);
             // As Blink: errors keep a detailed stack trace, whose top frame
             // is where error events say the error happened.
             iso.set_capture_stack_trace_for_uncaught_exceptions(true, 10);
@@ -1878,21 +1939,92 @@ impl Engine {
         after_run(&mut iso, &self.state);
     }
 
-    /// Tell V8 the page is idle: collect garbage aggressively.
+    /// Tell V8 the page is idle: collect garbage aggressively. Kept
+    /// scripts stay (`run_script`), as V8's memory reducer keeps Chrome's
+    /// compilation cache.
     pub fn low_memory_notification(&mut self) {
         let mut iso = Entered::new(&mut self.isolate);
         iso.low_memory_notification();
     }
 
     /// One full, memory-reducing GC (V8's critical memory-pressure path:
-    /// compaction, new space shrunk, unused pages released), then back to
-    /// no pressure. Cheaper than [`Engine::low_memory_notification`], which
-    /// repeats full GCs until nothing more is freed and also drops the
-    /// compilation cache.
+    /// compaction, new space shrunk, unused and pooled pages released, the
+    /// compilation cache cleared), then back to no pressure. Cheaper than
+    /// [`Engine::low_memory_notification`], which repeats full GCs until
+    /// nothing more is freed. Compiled scripts this engine keeps
+    /// (`run_script`) survive it.
     pub fn reduce_memory(&mut self) {
         let mut iso = Entered::new(&mut self.isolate);
         iso.memory_pressure_notification(v8::MemoryPressureLevel::Critical);
         iso.memory_pressure_notification(v8::MemoryPressureLevel::None);
+    }
+
+    /// One full GC that keeps what a memory-reducing one gives up: pooled
+    /// pages, unused memory inside pages, the new space's size and the
+    /// compilation cache (ADR 0040). It is V8's own `%CollectGarbage`
+    /// (`Runtime_CollectGarbage`: `PreciseCollectAllGarbage` without
+    /// flags); the public API only offers it behind `--expose-gc`, which
+    /// would give every context a `gc` global.
+    pub fn collect_garbage(&mut self) {
+        unsafe extern "C" {
+            // `Address Runtime_CollectGarbage(int, Address*, Isolate*)`, a
+            // V8 runtime function (plain C ABI for a free function). A
+            // rename at a V8 upgrade fails at link time.
+            #[link_name = "_ZN2v88internal22Runtime_CollectGarbageEiPmPNS0_7IsolateE"]
+            fn runtime_collect_garbage(
+                args_length: i32,
+                args: *mut usize,
+                isolate: *mut c_void,
+            ) -> usize;
+        }
+        let isolate = isolate_key(&self.isolate) as *mut c_void;
+        let _iso = Entered::new(&mut self.isolate);
+        // The one (unused) argument slot; the call reads none in release
+        // builds.
+        let mut arg = 0usize;
+        // SAFETY: the isolate is entered on its own thread and no JS runs
+        // (callers are the worker loops), so a precise full GC is safe here.
+        unsafe { runtime_collect_garbage(1, &mut arg, isolate) };
+    }
+
+    /// Called, from any thread, when V8 posts a foreground task for this
+    /// engine (ADR 0038); the owner then calls
+    /// [`Engine::run_foreground_tasks`] on the engine's thread.
+    pub fn set_task_waker(&mut self, waker: TaskWaker) {
+        tasks::set_waker(isolate_key(&self.isolate), waker);
+    }
+
+    /// Run V8's due foreground tasks (GC steps and finalization,
+    /// `FinalizationRegistry` cleanups), then a microtask checkpoint, as
+    /// Blink runs them as tasks of their own. Call it between tasks, never
+    /// while JS runs. At most 32 per call, so page tasks get their turn.
+    /// Returns whether any ran.
+    pub fn run_foreground_tasks(&mut self) -> bool {
+        let key = isolate_key(&self.isolate);
+        let mut ran = false;
+        for _ in 0..32 {
+            let Some(task) = tasks::take_due(key, std::time::Instant::now()) else {
+                break;
+            };
+            let _iso = Entered::new(&mut self.isolate);
+            task.run();
+            ran = true;
+        }
+        if ran {
+            self.perform_microtask_checkpoint();
+        }
+        ran
+    }
+
+    /// When this engine's next foreground task is due (now if one is
+    /// ready).
+    pub fn next_task_due(&self) -> Option<std::time::Instant> {
+        tasks::next_due(isolate_key(&self.isolate))
+    }
+
+    /// Compiled classic scripts kept for reuse (ADR 0039, `run_script`).
+    pub fn kept_scripts(&self) -> usize {
+        self.state.borrow().scripts.len()
     }
 
     pub fn heap_stats(&mut self) -> HeapStats {
@@ -1915,6 +2047,10 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        // Queued V8 tasks go while the isolate still exists (deleting a
+        // cancelable task tells its isolate's task manager).
+        let key = isolate_key(&self.isolate);
+        tasks::remove(key);
         let heap = {
             let mut st = self.state.borrow_mut();
             st.wrappers.clear();
@@ -1923,6 +2059,7 @@ impl Drop for Engine {
             st.realms.clear();
             st.interfaces.clear();
             st.callbacks.clear();
+            st.scripts.clear();
             st.heap.take()
         };
         // SAFETY: `OwnedIsolate::drop` asserts the isolate is the current one
@@ -1947,8 +2084,95 @@ impl Drop for Engine {
                 std::mem::forget(extra);
             }
         } else {
+            // Hold the creation lock across disposal and queue cleanup:
+            // disposal frees the address, which a new isolate could reuse
+            // before we remove tasks posted during teardown.
+            let _setup = isolate_setup_lock();
             drop(isolate);
+            tasks::remove(key);
         }
+    }
+}
+
+/// Drops the pages of V8's built-in startup snapshot that making an isolate
+/// read (its read-only, startup and shared-heap parts) from this process's
+/// RSS (Linux). V8 copies those into the new isolate's heap; afterwards only
+/// the header and the context part are read again, for each new context.
+/// The blob is a clean part of the binary's read-only mapping, so this only
+/// unmaps pages (`MADV_DONTNEED`), and a later isolate maps them again from
+/// the page cache. Skipped when the header names another V8 version (its
+/// layout is V8's `SnapshotImpl`).
+fn release_builtin_snapshot() {
+    #[cfg(target_os = "linux")]
+    {
+        #[repr(C)]
+        struct StartupData {
+            data: *const u8,
+            raw_size: i32,
+        }
+        unsafe extern "C" {
+            // V8's accessor of its built-in blob: an internal function, as
+            // no public API hands out the built-in snapshot.
+            #[link_name = "_ZN2v88internal8Snapshot19DefaultSnapshotBlobEv"]
+            fn default_snapshot_blob() -> *const StartupData;
+        }
+        // Header: contexts, rehashability, checksum and read-only checksum
+        // (u32 each), the version string (64 bytes), then the offsets of the
+        // startup part, the shared heap and the first context (u32 each).
+        const VERSION: std::ops::Range<usize> = 16..80;
+        const FIRST_CONTEXT: usize = 88;
+        // SAFETY: a V8 function without arguments returning a pointer to a
+        // static `StartupData` (or null without a built-in snapshot).
+        let blob = unsafe { default_snapshot_blob() };
+        if blob.is_null() {
+            return;
+        }
+        // SAFETY: the static V8 returned; its bytes live for the process.
+        let (data, size) = unsafe { ((*blob).data, (*blob).raw_size) };
+        let Ok(size) = usize::try_from(size) else {
+            return;
+        };
+        if data.is_null() || size < FIRST_CONTEXT + 4 {
+            return;
+        }
+        // SAFETY: `size` bytes at `data`, read-only for the process's life.
+        let bytes = unsafe { std::slice::from_raw_parts(data, size) };
+        let version = bytes[VERSION].split(|b| *b == 0).next().unwrap_or(&[]);
+        if version != v8::V8::get_version().as_bytes() {
+            return;
+        }
+        let mut word = [0u8; 4];
+        word.copy_from_slice(&bytes[FIRST_CONTEXT..FIRST_CONTEXT + 4]);
+        let context = u32::from_le_bytes(word) as usize;
+        if context > size {
+            return;
+        }
+        let start = data as usize;
+        let first = (start + FIRST_CONTEXT + 4).next_multiple_of(4096);
+        let last = (start + context) & !4095;
+        if last > first {
+            // SAFETY: whole pages inside V8's immutable blob; MADV_DONTNEED
+            // on a private file mapping that was never written leaves its
+            // contents unchanged.
+            unsafe {
+                libc::madvise(
+                    first as *mut libc::c_void,
+                    last - first,
+                    libc::MADV_DONTNEED,
+                );
+            }
+        }
+    }
+}
+
+/// Key of an isolate in the foreground task queues: its address, which is
+/// what V8 passes the platform when it posts a task.
+fn isolate_key(isolate: &v8::Isolate) -> usize {
+    // SAFETY: `UnsafeRawIsolatePtr` is a repr(transparent) wrapper of the
+    // isolate pointer; nothing is dereferenced.
+    unsafe {
+        std::mem::transmute::<v8::UnsafeRawIsolatePtr, *mut c_void>(isolate.as_raw_isolate_ptr())
+            as usize
     }
 }
 
@@ -2108,6 +2332,25 @@ fn build_into(
     if spec.immutable_proto {
         inst.set_immutable_proto();
     }
+    // HTMLAllCollection / document.all: callable + undetectable (IsHTMLDDA).
+    // MarkAsUndetectable is not wrapped by rusty_v8; call the C++ method.
+    if let Some(f) = spec.call_as_function {
+        let idx = st.push_callback(Callback::Fn(f));
+        let data = v8::Integer::new_from_unsigned(scope, idx);
+        inst.set_call_as_function_handler(host_trampoline, Some(data.into()));
+    }
+    if spec.undetectable {
+        // rusty_v8 does not wrap MarkAsUndetectable; call the C++ method.
+        // SAFETY: `inst` is a live ObjectTemplate owned by `ft`, not yet
+        // used to create instances (EnsureNotPublished still holds).
+        unsafe extern "C" {
+            #[link_name = "_ZN2v814ObjectTemplate18MarkAsUndetectableEv"]
+            fn mark_as_undetectable(this: *const v8::ObjectTemplate);
+        }
+        unsafe {
+            mark_as_undetectable(&*inst);
+        }
+    }
     if let Some(getter) = spec.named_getter {
         // The named callbacks sit at consecutive indexes (get, set,
         // delete, enum) so one integer of data reaches all four.
@@ -2130,10 +2373,14 @@ fn build_into(
                 .map_or(Callback::Empty, Callback::NamedEnum),
         );
         let data = v8::Integer::new_from_unsigned(scope, base);
+        let mut flags = v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS;
+        if spec.named_non_masking {
+            flags = flags | v8::PropertyHandlerFlags::NON_MASKING;
+        }
         let mut config = v8::NamedPropertyHandlerConfiguration::new()
             .getter(named_trampoline)
             .data(data.into())
-            .flags(v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS);
+            .flags(flags);
         if has.0 {
             config = config.setter(named_set_trampoline);
         }
@@ -2272,6 +2519,7 @@ fn new_realm_in(
                 modules: Vec::new(),
                 detached: false,
                 console,
+                partition: 0,
             },
         );
     }
@@ -2792,6 +3040,14 @@ impl<'s, 'i> CallCtx<'_, 's, 'i> {
     /// The realm the call happens in.
     pub fn realm(&self) -> RealmId {
         self.realm
+    }
+    /// Mark a host object as `[IsCodeLike]` so `eval` / `new Function`
+    /// compile `source` instead of returning the object unchanged.
+    pub fn mark_code_like(&mut self, host: HostRef, source: impl Into<String>) {
+        self.state
+            .borrow_mut()
+            .code_like
+            .insert((host.kind, host.id), source.into());
     }
     /// Called with `new`.
     pub fn is_construct_call(&self) -> bool {
@@ -3425,6 +3681,35 @@ fn shared_state(scope: &v8::PinScope<'_, '_>) -> SharedState {
         .get_slot::<SharedState>()
         .expect("lb-js state slot missing")
         .clone()
+}
+
+/// `[IsCodeLike]` for TrustedScript: when `eval` / `Function` get a host
+/// object marked via [`CallCtx::mark_code_like`], compile that source.
+/// Other non-strings keep ES behaviour (returned unchanged) by allowing
+/// codegen with no `modified_source`.
+fn modify_codegen_from_strings<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    source: v8::Local<'s, v8::Value>,
+    _is_code_like: bool,
+) -> v8::ModifyCodeGenerationFromStringsResult<'s> {
+    if let Some(host) = host_of_value(scope, source) {
+        let code = shared_state(scope)
+            .borrow()
+            .code_like
+            .get(&(host.kind, host.id))
+            .cloned();
+        if let Some(code) = code {
+            let modified = v8::String::new(scope, &code);
+            return v8::ModifyCodeGenerationFromStringsResult {
+                codegen_allowed: true,
+                modified_source: modified,
+            };
+        }
+    }
+    v8::ModifyCodeGenerationFromStringsResult {
+        codegen_allowed: true,
+        modified_source: None,
+    }
 }
 
 fn current_realm(scope: &v8::PinScope<'_, '_>) -> RealmId {
@@ -4603,20 +4888,26 @@ fn script_origin<'s>(
     )
 }
 
+/// Compile and run a classic script in the current context.
+///
+/// A script this engine compiled before in a realm of the same partition,
+/// from the same source, URL and position, is bound to the current context
+/// and run without compiling (ADR 0039): V8's own compilation cache would
+/// do the same, but the memory-reducing GC after each closed page clears
+/// it. Scripts are kept once compiled twice, up to [`KEPT_SCRIPTS`] and
+/// [`KEPT_SCRIPT_BYTES`] of source, least recently used out first. A
+/// snapshot creator keeps none (its scripts must not outlive the blob).
+///
+/// The URL is part of the key, and only CDP and the engine's own setup
+/// compile with an empty one (page scripts, timer strings and handlers carry
+/// their document's or resource's URL), so a page can never hit, or time,
+/// a script a client sent.
 fn run_script<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     source: &str,
     origin: ScriptOrigin<'_>,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    let code = v8::String::new(scope, source)?;
-    let url = origin.url;
-    let origin = script_origin(scope, origin, false);
-    if source.len() < CODE_CACHE_MIN {
-        let script = v8::Script::compile(scope, code, Some(&origin))?;
-        return script.run(scope);
-    }
-    // Large script: compile from this engine's code cache if it has one.
-    // A snapshot creator may not make code caches (V8 aborts).
+    let (url, line, column) = (origin.url, origin.line, origin.column);
     let state = scope
         .get_slot::<SharedState>()
         .filter(|st| {
@@ -4624,61 +4915,77 @@ fn run_script<'s>(
                 .is_ok_and(|st| !matches!(st.snap, SnapState::Creating(_)))
         })
         .cloned();
-    if state.is_none() {
-        let script = v8::Script::compile(scope, code, Some(&origin))?;
-        return script.run(scope);
+    let Some(state) = state else {
+        let code = v8::String::new(scope, source)?;
+        let origin = script_origin(scope, origin, false);
+        return v8::Script::compile(scope, code, Some(&origin))?.run(scope);
+    };
+    let realm = current_realm(scope);
+    let partition = state.borrow().realms.get(&realm).map_or(0, |r| r.partition);
+    let key = snapshot::hash_str(source)
+        ^ snapshot::hash_str(url).rotate_left(1)
+        ^ (u64::from(line) << 32 | u64::from(column)).rotate_left(7)
+        ^ partition.rotate_left(13);
+    let kept = {
+        let mut st = state.borrow_mut();
+        let i = st.scripts.iter().position(|k| {
+            k.key == key
+                && k.partition == partition
+                && k.line == line
+                && k.column == column
+                && *k.url == *url
+                && *k.source == *source
+        });
+        i.and_then(|i| st.scripts.remove(i)).map(|k| {
+            let script = k.script.clone();
+            st.scripts.push_back(k);
+            script
+        })
+    };
+    if let Some(script) = kept {
+        let unbound = v8::Local::new(scope, &script);
+        return unbound.bind_to_current_context(scope).run(scope);
     }
-    let key = snapshot::hash_str(source) ^ snapshot::hash_str(url).rotate_left(1);
-    // None: not seen; Some(None): compiled once before; Some(Some(_)): cached.
-    let seen: Option<Option<Rc<[u8]>>> = state.as_ref().and_then(|st| {
-        let st = st.try_borrow().ok()?;
-        st.code_cache
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, d)| d.clone())
-    });
-    let cached = seen.clone().flatten();
-    let script = match &cached {
-        Some(bytes) => {
-            let data = v8::script_compiler::CachedData::new(bytes);
-            let mut src =
-                v8::script_compiler::Source::new_with_cached_data(code, Some(&origin), data);
-            let script = v8::script_compiler::compile(
-                scope,
-                &mut src,
-                v8::script_compiler::CompileOptions::ConsumeCodeCache,
-                v8::script_compiler::NoCacheReason::NoReason,
-            )?;
-            if src.get_cached_data().is_some_and(|d| d.rejected())
-                && let Some(mut st) = state.as_ref().and_then(|s| s.try_borrow_mut().ok())
-            {
-                st.code_cache.retain(|(k, _)| *k != key);
+    let code = v8::String::new(scope, source)?;
+    let v8_origin = script_origin(scope, origin, false);
+    let script = v8::Script::compile(scope, code, Some(&v8_origin))?;
+    let second = {
+        let mut st = state.borrow_mut();
+        match st.scripts_seen.iter().position(|k| *k == key) {
+            Some(i) => {
+                st.scripts_seen.remove(i);
+                true
             }
-            script
-        }
-        None => {
-            let script = v8::Script::compile(scope, code, Some(&origin))?;
-            // A script seen once is only remembered; the second compile
-            // makes the cache. Before the run: only what V8 compiled
-            // eagerly goes in, so a consumer compiles the rest lazily as
-            // usual.
-            let data = match seen {
-                Some(None) => script
-                    .get_unbound_script(scope)
-                    .create_code_cache()
-                    .map(|d| Rc::<[u8]>::from(&d[..])),
-                _ => None,
-            };
-            if let Some(mut st) = state.as_ref().and_then(|s| s.try_borrow_mut().ok()) {
-                st.code_cache.retain(|(k, _)| *k != key);
-                if st.code_cache.len() >= CODE_CACHE_ENTRIES {
-                    st.code_cache.remove(0);
+            None => {
+                if st.scripts_seen.len() >= SEEN_SCRIPTS {
+                    st.scripts_seen.pop_front();
                 }
-                st.code_cache.push((key, data));
+                st.scripts_seen.push_back(key);
+                false
             }
-            script
         }
     };
+    if second && source.len() <= KEPT_SCRIPT_BYTES {
+        let unbound = script.get_unbound_script(scope);
+        let kept = KeptScript {
+            key,
+            partition,
+            source: Rc::from(source),
+            url: Rc::from(url),
+            line,
+            column,
+            script: v8::Global::new(scope, unbound),
+        };
+        let mut st = state.borrow_mut();
+        st.scripts.push_back(kept);
+        let mut bytes: usize = st.scripts.iter().map(|k| k.source.len()).sum();
+        while st.scripts.len() > KEPT_SCRIPTS || bytes > KEPT_SCRIPT_BYTES {
+            let Some(old) = st.scripts.pop_front() else {
+                break;
+            };
+            bytes -= old.source.len();
+        }
+    }
     script.run(scope)
 }
 
@@ -5016,7 +5323,14 @@ fn caught(
 ) -> JsError {
     if tc.has_terminated() || tc.is_execution_terminating() {
         tc.cancel_terminate_execution();
-        return if state.borrow().take_oom() {
+        let oom = state.borrow().take_oom();
+        if oom {
+            // The heap cap was hit: kept scripts go with the rest.
+            let mut st = state.borrow_mut();
+            st.scripts.clear();
+            st.scripts_seen.clear();
+        }
+        return if oom {
             JsError::new(JsErrorKind::OutOfMemory, "JS heap limit reached")
         } else {
             JsError::new(JsErrorKind::Terminated, "Execution terminated")

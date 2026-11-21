@@ -51,6 +51,48 @@ async fn idle_worker_releases_its_engine_and_makes_a_new_one() {
     assert_eq!(b.started_workers(), 1);
 }
 
+// A page's FinalizationRegistry callbacks run once the targets are
+// collected (ADR 0038): V8 posts the cleanup as a foreground task, which
+// the worker runs between its tasks. Chrome for Testing 1243 ran all 2000
+// within a second of a `gc()`; here the GC after a closed page collects
+// them (the page itself cannot call `gc`).
+#[tokio::test]
+async fn finalization_registry_callbacks_run_after_a_gc() {
+    let s = serve(vec![
+        (
+            "/",
+            Resource::html(
+                "<!DOCTYPE html><html><body><script>\
+                 window.n = 0; window.reg = new FinalizationRegistry(() => { n++; });\
+                 (() => { for (let i = 0; i < 2000; i++) reg.register({ i }, i); })();\
+                 </script></body></html>",
+            ),
+        ),
+        ("/other", Resource::html("<!DOCTYPE html><p>other</p>")),
+    ])
+    .await;
+    let b = lb_page::Browser::new(lb_page::BrowserOptions {
+        workers: 1,
+        ..Default::default()
+    })
+    .unwrap();
+    let ctx = context(false);
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    // A young-generation GC during the load may already have collected
+    // them. Same worker: closing this page runs the worker's full GC.
+    let other = open(&b, &ctx, &s.url("/other"), WaitUntil::Load).await;
+    other.close().await.unwrap();
+    let t0 = std::time::Instant::now();
+    let n = loop {
+        let n = page.evaluate("n").await.unwrap();
+        if n == JsValue::Number(2000.0) || t0.elapsed() > Duration::from_secs(5) {
+            break n;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(n, JsValue::Number(2000.0));
+}
+
 #[tokio::test]
 async fn inline_script_appends_nodes() {
     let s = serve(vec![(
@@ -274,6 +316,150 @@ async fn events_capture_bubble_and_handlers() {
             "capture:1 target:7 bubble:3:true doc capture:1 prop:true canceled:true:true dcl load:complete".into()
         )
     );
+}
+
+#[tokio::test]
+async fn resize_observer_delivers_on_observe() {
+    let s = serve(vec![(
+        "/",
+        Resource::html(
+            "<body><div id=t style='width:40px;height:20px'></div><script>\
+             var out = [];\
+             var el = document.getElementById('t');\
+             var ro = new ResizeObserver(function (entries, obs) {\
+               out.push(obs === ro);\
+               out.push(entries.length);\
+               out.push(entries[0].target === el);\
+               out.push(entries[0].contentRect.width);\
+               out.push(entries[0].contentBoxSize[0].inlineSize);\
+               out.push(entries[0].borderBoxSize.length);\
+               document.body.setAttribute('data-ro', out.join(','));\
+             });\
+             ro.observe(el);\
+             out.push('sync');\
+             </script></body>",
+        ),
+    )])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    // Delivery is a DOM task; wait until the attribute is set.
+    for _ in 0..50 {
+        let v = page
+            .evaluate("document.body.getAttribute('data-ro')")
+            .await
+            .unwrap();
+        if let JsValue::String(s) = &v
+            && !s.is_empty()
+        {
+            assert_eq!(s, "sync,true,1,true,40,40,1", "got {s}");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("ResizeObserver did not deliver");
+}
+
+#[tokio::test]
+async fn intersection_observer_delivers_on_observe() {
+    let s = serve(vec![(
+        "/",
+        Resource::html(
+            "<body><div id=t style='width:40px;height:20px'></div><script>\
+             var out = [];\
+             var el = document.getElementById('t');\
+             var io = new IntersectionObserver(function (entries, obs) {\
+               out.push(obs === io);\
+               out.push(entries.length);\
+               out.push(entries[0].target === el);\
+               out.push(entries[0].isIntersecting);\
+               out.push(entries[0].intersectionRatio > 0);\
+               document.body.setAttribute('data-io', out.join(','));\
+             });\
+             io.observe(el);\
+             out.push('sync');\
+             </script></body>",
+        ),
+    )])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    for _ in 0..50 {
+        let v = page
+            .evaluate("document.body.getAttribute('data-io')")
+            .await
+            .unwrap();
+        if let JsValue::String(s) = &v
+            && !s.is_empty()
+        {
+            assert_eq!(s, "sync,true,1,true,true,true", "got {s}");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("IntersectionObserver did not deliver");
+}
+
+#[tokio::test]
+async fn performance_observer_constructs_and_observes() {
+    let s = serve(vec![(
+        "/",
+        Resource::html(
+            "<body><script>\
+             var types = PerformanceObserver.supportedEntryTypes;\
+             var saw = false;\
+             var po = new PerformanceObserver(function () { saw = true; });\
+             po.observe({ type: 'mark', buffered: true });\
+             performance.mark('a');\
+             performance.measure('m');\
+             var rec = po.takeRecords();\
+             po.disconnect();\
+             document.body.dataset.po = [\
+               typeof PerformanceObserver,\
+               Array.isArray(types) && types.indexOf('mark') >= 0,\
+               po instanceof PerformanceObserver,\
+               typeof rec.getEntries === 'function' && rec.getEntries().length === 0,\
+               saw\
+             ].join(',');\
+             </script></body>",
+        ),
+    )])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    let v = page.evaluate("document.body.dataset.po").await.unwrap();
+    assert_eq!(v, JsValue::String("function,true,true,true,false".into()));
+}
+
+#[tokio::test]
+async fn broadcast_channel_same_window() {
+    let s = serve(vec![(
+        "/",
+        Resource::html(
+            "<body><script>\
+             var a = new BroadcastChannel('t');\
+             var b = new BroadcastChannel('t');\
+             var got = [];\
+             b.onmessage = function (e) { got.push(e.data); document.body.dataset.bc = got.join(','); };\
+             a.postMessage('hi');\
+             a.close();\
+             document.body.dataset.name = a.name;\
+             </script></body>",
+        ),
+    )])
+    .await;
+    let (b, ctx) = (browser(), context(false));
+    let page = open(&b, &ctx, &s.url("/"), WaitUntil::Load).await;
+    let name = page.evaluate("document.body.dataset.name").await.unwrap();
+    assert_eq!(name, JsValue::String("t".into()));
+    for _ in 0..50 {
+        let v = page.evaluate("document.body.dataset.bc").await.unwrap();
+        if v == JsValue::String("hi".into()) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("BroadcastChannel message not delivered");
 }
 
 #[tokio::test]

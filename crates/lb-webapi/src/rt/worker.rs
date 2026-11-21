@@ -407,6 +407,12 @@ pub(crate) struct WorkerObj {
     control: Arc<WorkerControl>,
 }
 
+/// Same-window `BroadcastChannel` state.
+pub(crate) struct BcData {
+    name: String,
+    closed: bool,
+}
+
 /// Host objects of this module.
 pub(crate) enum WorkerHostObj {
     Port(PortObj),
@@ -1125,6 +1131,109 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
             }),
         );
     }
+
+    // BroadcastChannel (same-window delivery; enough for Turnstile).
+    ctor(reg, rt, "BroadcastChannel", |cx, w| {
+        need_args(cx, 1, "construct", "BroadcastChannel").map_err(|_| {
+            HostError::type_error(format!(
+                "Failed to construct 'BroadcastChannel': 1 argument required, but only {} present.",
+                cx.len()
+            ))
+        })?;
+        let name = cx.arg_string(0)?;
+        let id = w.new_obj(Obj::BroadcastChannel(Box::new(BcData {
+            name: name.clone(),
+            closed: false,
+        })));
+        w.broadcast.borrow_mut().entry(name).or_default().push(id);
+        cx.init_this(HostRef::new(K_OBJ, id))
+    });
+    getter(reg, rt, "BroadcastChannel", "name", |cx, w| {
+        let id = this_obj(cx)?;
+        let name = w
+            .with_obj(id, |o| match o {
+                Obj::BroadcastChannel(b) => Some(b.name.clone()),
+                _ => None,
+            })
+            .flatten()
+            .ok_or_else(illegal)?;
+        cx.ret(name)
+    });
+    method(reg, rt, "BroadcastChannel", "close", |cx, w| {
+        let id = this_obj(cx)?;
+        let name = w
+            .with_obj(id, |o| match o {
+                Obj::BroadcastChannel(b) => {
+                    b.closed = true;
+                    Some(b.name.clone())
+                }
+                _ => None,
+            })
+            .flatten()
+            .ok_or_else(illegal)?;
+        if let Some(list) = w.broadcast.borrow_mut().get_mut(&name) {
+            list.retain(|&x| x != id);
+        }
+        Ok(())
+    });
+    method(reg, rt, "BroadcastChannel", "postMessage", |cx, w| {
+        need_args(cx, 1, "postMessage", "BroadcastChannel")?;
+        let id = this_obj(cx)?;
+        let (name, closed) = w
+            .with_obj(id, |o| match o {
+                Obj::BroadcastChannel(b) => Some((b.name.clone(), b.closed)),
+                _ => None,
+            })
+            .flatten()
+            .ok_or_else(illegal)?;
+        if closed {
+            return Err(w.rt.err(
+                "InvalidStateError",
+                "Failed to execute 'postMessage' on 'BroadcastChannel': Channel is closed.",
+            ));
+        }
+        let data = cx.arg_handle(0);
+        let origin = w.url().origin().ascii_serialization();
+        let peers: Vec<u32> = w
+            .broadcast
+            .borrow()
+            .get(&name)
+            .map(|v| v.iter().copied().filter(|&p| p != id).collect())
+            .unwrap_or_default();
+        for peer in peers {
+            let closed = w
+                .with_obj(peer, |o| match o {
+                    Obj::BroadcastChannel(b) => b.closed,
+                    _ => true,
+                })
+                .unwrap_or(true);
+            if closed {
+                continue;
+            }
+            let origin = origin.clone();
+            w.queue_task(
+                TaskSource::PostedMessage,
+                Box::new(move |js, w| {
+                    fire_event_with(
+                        js,
+                        w,
+                        HostRef::new(K_OBJ, peer),
+                        "MessageEvent",
+                        "message",
+                        false,
+                        false,
+                        EventExtra::Message {
+                            data: Some(data),
+                            origin,
+                            source: None,
+                            ports: None,
+                        },
+                    );
+                }),
+            );
+        }
+        Ok(())
+    });
 
     // Worker.
     ctor(reg, rt, "Worker", |cx, w| {

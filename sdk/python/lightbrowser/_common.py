@@ -42,6 +42,7 @@ def plan_launch(
     insecure: bool,
     profiles_dir: str | os.PathLike[str] | None,
     workers: int | None,
+    tcp_profile: str | None = None,
     extra_args: Sequence[str],
     validate: bool,
 ) -> LaunchPlan:
@@ -51,6 +52,9 @@ def plan_launch(
     `LaunchPlan.cleanup()` removes. With `validate=True` the persona goes
     through `lightbrowser validate` first, so a bad file fails here with
     the rule text instead of as a bare startup error.
+
+    `tcp_profile` is forwarded to `serve --tcp-profile` (T10). Pass
+    `"persona"` so CDP contexts send the persona's SYN.
     """
     p = as_persona(persona)
     family = p.family if p is not None else "chrome"
@@ -67,7 +71,7 @@ def plan_launch(
             path = p.write_to(tmpdir.name)
     cmd = build_serve_args(
         exe, persona_path=path, port=port, insecure=insecure, profiles_dir=profiles_dir,
-        workers=workers, extra_args=extra_args,
+        workers=workers, tcp_profile=tcp_profile, extra_args=extra_args,
     )
     return LaunchPlan(cmd=cmd, persona=p, tmpdir=tmpdir)
 

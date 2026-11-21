@@ -119,12 +119,13 @@ def test_build_serve_args_minimal():
 def test_build_serve_args_full(tmp_path):
     cmd = build_serve_args(
         "lb", persona_path=tmp_path / "p.json", port=9333, insecure=True,
-        profiles_dir=tmp_path / "tls", workers=3, extra_args=["--remote-allow-origins", "*"],
+        profiles_dir=tmp_path / "tls", workers=3, tcp_profile="persona",
+        extra_args=["--remote-allow-origins", "*"],
     )
     assert cmd == [
         "lb", "serve", "--port", "9333", "--persona", str(tmp_path / "p.json"),
         "--profiles-dir", str(tmp_path / "tls"), "--insecure", "--workers", "3",
-        "--remote-allow-origins", "*",
+        "--tcp-profile", "persona", "--remote-allow-origins", "*",
     ]
 
 

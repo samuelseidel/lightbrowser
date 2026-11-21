@@ -1437,3 +1437,101 @@ fn structured_clone_between_engines() {
         .unwrap_err();
     assert_eq!(err.message, "ArrayBuffer at index 0 is already detached.");
 }
+
+#[test]
+fn finalization_registry_callbacks_run_as_foreground_tasks() {
+    // V8 posts a registry's cleanup as a foreground task after the GC that
+    // collected its targets (ADR 0038). Chrome runs it; so must the
+    // engine's owner, woken through the task waker.
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    let mut e = engine();
+    let woken = Arc::new(AtomicUsize::new(0));
+    {
+        let w = woken.clone();
+        e.set_task_waker(Arc::new(move || {
+            w.fetch_add(1, SeqCst);
+        }));
+    }
+    let r = plain_realm(&mut e);
+    eval(
+        &mut e,
+        r,
+        "globalThis.n = 0; globalThis.reg = new FinalizationRegistry(() => { n++; });
+         (() => { for (let i = 0; i < 100; i++) reg.register({ i }, i); })(); 0",
+    );
+    e.low_memory_notification();
+    assert!(woken.load(SeqCst) > 0, "V8 posted no foreground task");
+    assert!(e.next_task_due().is_some());
+    let mut ran = false;
+    for _ in 0..10 {
+        ran |= e.run_foreground_tasks();
+    }
+    assert!(ran);
+    assert_eq!(eval(&mut e, r, "n"), JsValue::Number(100.0));
+    // Nothing left: the queue is empty, and an engine drops its tasks.
+    assert!(!e.run_foreground_tasks());
+}
+
+#[test]
+fn kept_scripts_run_in_each_realm_of_their_partition() {
+    use lb_js::RealmOps;
+    let mut e = engine();
+    // Its own globals and intrinsics in every realm; the stack names the
+    // line in the resource.
+    let src = "var c = (typeof c === 'number' ? c : 0) + 1;
+        [c, Object.getPrototypeOf([]) === Array.prototype, new Error('x').stack.split('\\n')[1].trim()].join(' ')";
+    let at = ScriptOrigin {
+        url: "https://a.test/s.js",
+        line: 10,
+        column: 0,
+    };
+    let want = JsValue::String("1 true at https://a.test/s.js:12:60".into());
+    let realms: Vec<_> = (0..4).map(|_| plain_realm(&mut e)).collect();
+    for &r in &realms {
+        RealmOps::set_script_partition(&mut e, r, 7);
+    }
+    for (i, &r) in realms.iter().enumerate() {
+        assert_eq!(e.evaluate(r, src, at).unwrap(), want, "realm {i}");
+        // Kept once compiled twice.
+        assert_eq!(e.kept_scripts(), usize::from(i >= 1), "realm {i}");
+        // The memory-reducing GC after a closed page does not drop it.
+        e.reduce_memory();
+    }
+    // Another position is another script: its own line numbers.
+    let r = plain_realm(&mut e);
+    RealmOps::set_script_partition(&mut e, r, 7);
+    let other = ScriptOrigin { line: 0, ..at };
+    let got = e.evaluate(r, src, other).unwrap();
+    assert_eq!(
+        got,
+        JsValue::String("1 true at https://a.test/s.js:2:60".into())
+    );
+    // Another partition does not share it.
+    let p = plain_realm(&mut e);
+    RealmOps::set_script_partition(&mut e, p, 8);
+    assert_eq!(e.evaluate(p, src, at).unwrap(), want);
+    assert_eq!(e.kept_scripts(), 1);
+    assert_eq!(
+        e.evaluate(p, src, at).unwrap(),
+        JsValue::String("2 true at https://a.test/s.js:12:60".into())
+    );
+    assert_eq!(e.kept_scripts(), 2);
+    // A syntax error is never kept.
+    for _ in 0..3 {
+        let err = e.evaluate(p, "let = ;", at).unwrap_err();
+        assert_eq!(err.kind, JsErrorKind::Exception);
+        assert!(err.message.contains("Unexpected"), "{}", err.message);
+    }
+    assert_eq!(e.kept_scripts(), 2);
+    // Bounded: many distinct scripts, each run twice.
+    for i in 0..100 {
+        let s = format!("{i} + 1");
+        e.evaluate(p, &s, at).unwrap();
+        e.evaluate(p, &s, at).unwrap();
+    }
+    assert_eq!(e.kept_scripts(), 32);
+    // The idle low-memory GC keeps them, as V8's memory reducer keeps
+    // Chrome's compilation cache.
+    e.low_memory_notification();
+    assert_eq!(e.kept_scripts(), 32);
+}

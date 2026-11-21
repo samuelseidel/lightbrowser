@@ -35,6 +35,29 @@ pub(crate) fn loader_id(page_id: u64, seq: u64) -> String {
     format!("{page_id:016X}{seq:016X}")
 }
 
+/// Match a child frame's layout viewport to its `<iframe>` content box so
+/// quads and hit-testing use the same coordinates as Chrome / Playwright.
+pub(crate) fn sync_frame_viewport(w: &Window) {
+    frames::sync_viewport(w);
+}
+
+/// Apply CDP media overrides to `w` and every descendant frame, then fire
+/// `MediaQueryList` `change` where `matches` flips.
+pub(crate) fn apply_media_tree(ws: &WorkerState, top: &Rc<Window>, media: &lb_css::MediaOverrides) {
+    let mut stack = vec![top.clone()];
+    while let Some(w) = stack.pop() {
+        w.with_layout_engine(|l, _| l.set_media_overrides(media));
+        let realm = w.realm();
+        ws.with_engine(|engine| {
+            let mut js = EngineJs { engine, realm };
+            lb_webapi::rt::notify_media_lists(&mut js, &w);
+        });
+        for c in frames::children(&w) {
+            stack.push(c.window);
+        }
+    }
+}
+
 /// What the host can read without asking the worker.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FrameInfo {
@@ -81,7 +104,7 @@ pub(crate) struct AgentState {
     /// Bodies of recent responses for `Network.getResponseBody`.
     pub bodies: VecDeque<(String, bytes::Bytes)>,
     pub viewport: Option<(u32, u32)>,
-    /// Navigation sequence of the current document (backend node ids).
+    /// Navigation sequence of the current top document (loader ids).
     pub seq: u64,
     pub loader: String,
     /// Loader ids of child frames' current documents, by frame id.
@@ -127,19 +150,29 @@ pub(crate) fn sync_frame_viewport(w: &Window) {
     });
 }
 
-/// Backend node IDs encode the document realm and the node slot.
+/// Backend node ids: the runtime document key (ADR 0017) in the high
+/// bits and the arena index in the low bits, so ids of any live document
+/// (top or child frame) resolve and ids of a replaced document do not.
 const NODE_BITS: u32 = 24;
 
-fn backend_id(realm: RealmId, n: NodeId) -> BackendNodeId {
-    (i64::from(realm.0) << NODE_BITS) | (i64::from(n.0) + 1)
+pub(crate) fn backend_id(doc_key: u32, n: NodeId) -> BackendNodeId {
+    (i64::from(doc_key) << NODE_BITS) | (i64::from(n.0) + 1)
 }
 
-fn node_of(realm: RealmId, id: BackendNodeId) -> Option<NodeId> {
-    if id <= 0 || (id >> NODE_BITS) != i64::from(realm.0) {
+/// `(document key, node)` of a backend id, or `None` when the id is empty.
+fn decode_backend(id: BackendNodeId) -> Option<(u32, NodeId)> {
+    if id <= 0 {
         return None;
     }
+    let key = u32::try_from(id >> NODE_BITS).ok()?;
     let n = (id & ((1 << NODE_BITS) - 1)) - 1;
-    u32::try_from(n).ok().map(NodeId)
+    let node = u32::try_from(n).ok().map(NodeId)?;
+    Some((key, node))
+}
+
+fn node_of(doc_key: u32, id: BackendNodeId) -> Option<NodeId> {
+    let (key, n) = decode_backend(id)?;
+    (key == doc_key).then_some(n)
 }
 
 fn now_ms() -> f64 {
@@ -644,6 +677,11 @@ impl Agent {
             }
         }
         self.emit(PageEvent::FrameNavigated { frame });
+        // Same media emulation as the top document (ADR 0009 revision 5).
+        let media = self.st.borrow().media.clone();
+        if media != lb_css::MediaOverrides::default() {
+            child.with_layout_engine(|l, _| l.set_media_overrides(&media));
+        }
         let main =
             self.register_world(Some(child.realm()), None, &frames::effective_url(child), id);
         self.emit(PageEvent::ExecutionContextCreated { context: main });
@@ -969,12 +1007,15 @@ pub(crate) fn exception_details(
 impl Agent {
     // ---- DOM ----
 
+    /// Backend-id encoder for the main document of `w`.
     pub(crate) fn ids(w: &Window) -> impl Fn(NodeId) -> BackendNodeId + use<> {
-        let realm = w.realm();
-        move |n| backend_id(realm, n)
+        let key = w.doc_key(0);
+        move |n| backend_id(key, n)
     }
 
-    /// The currently attached window and node behind a CDP reference.
+    /// The window and main-document node behind a `NodeRef`. Object ids and
+    /// backend ids from a child frame resolve to that frame's window
+    /// (Playwright `frameLocator`; `DOM.requestNode` / `resolveNode`).
     pub(crate) fn node(
         &self,
         ws: &WorkerState,
@@ -983,20 +1024,21 @@ impl Agent {
     ) -> HostResult<(Rc<Window>, NodeId)> {
         match node {
             NodeRef::Backend(id) => {
-                let missing = || HostError::new("No node with given id found");
-                let realm = u32::try_from(id >> NODE_BITS).map_err(|_| missing())?;
-                let realm = RealmId(realm);
-                let n = node_of(realm, *id).ok_or_else(missing)?;
-                let w = top.runtime().window(realm).ok_or_else(missing)?;
-                if w.realm() != realm
-                    || !frames::find(top, frames::frame_id(&w))
-                        .is_some_and(|frame| Rc::ptr_eq(&frame, &w))
-                    || n.0 as usize >= w.with_doc(|d| d.node_count())
-                {
-                    return Err(missing());
+                let (key, n) = decode_backend(*id)
+                    .ok_or_else(|| HostError::new("No node with given id found"))?;
+                let (owner, slot) = top
+                    .runtime()
+                    .doc_owner(key)
+                    .ok_or_else(|| HostError::new("No node with given id found"))?;
+                // CDP layout/geometry paths use the window's main document.
+                if slot != 0 {
+                    return Err(HostError::new("No node with given id found"));
                 }
-                sync_frame_viewport(&w);
-                Ok((w, n))
+                if n.0 as usize >= owner.with_doc(|d| d.node_count()) {
+                    return Err(HostError::new("No node with given id found"));
+                }
+                sync_frame_viewport(&owner);
+                Ok((owner, n))
             }
             NodeRef::Object(o) => {
                 let obj = self.object(o)?;
@@ -1402,8 +1444,9 @@ pub(crate) fn dom_node(agent: &Agent, w: &Window, n: NodeId, depth: i32, pierce:
 
 /// Set `frameId` on `<iframe>` owners whose frame exists.
 fn mark_frame_owners(agent: &Agent, w: &Window, node: &mut DomNode) {
+    let key = w.doc_key(0);
     if node.local_name == "iframe"
-        && let Some(n) = node_of(w.realm(), node.backend_node_id)
+        && let Some(n) = node_of(key, node.backend_node_id)
         && let Some(c) = frames::child_for(w, n)
     {
         node.frame_id = Some(agent.frame_str(c.id));

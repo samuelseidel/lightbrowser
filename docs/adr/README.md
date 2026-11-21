@@ -43,6 +43,10 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0035](0035-worker-threads-on-demand.md) | Page worker threads start on demand | Accepted (2026-11-07) |
 | [0036](0036-javascript-dialogs.md) | JavaScript dialogs wait on the page's worker for the CDP client | Accepted (2026-11-07) |
 | [0037](0037-playwright-uploads-permissions-dnd-pdf.md) | File uploads, permissions, geolocation, drag and drop and PDF for Playwright | Accepted (2026-11-07) |
+| [0038](0038-v8-foreground-tasks.md) | V8's foreground tasks run on the isolate's own thread | Accepted (2026-11-07) |
+| [0042](0042-human-input-dispatch-gaps.md) | Preserve human input gaps under load | Accepted (2026-11-20) |
+| [0041](0041-detection-test-acceptance.md) | Internal detection tests define acceptance; comparisons are informational | Accepted (2026-11-19) |
+| [0039](0039-kept-compiled-scripts.md) | Compiled classic scripts are kept per engine and partition | Accepted (2026-11-07) |
 
 ## Adding an ADR
 

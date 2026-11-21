@@ -326,9 +326,25 @@ pub(crate) async fn navigate_committed(
     {
         let mut info = w.load_info.borrow_mut();
         info.connection_info = resp.protocol.map(str::to_owned);
+        if info.connection_info.is_none() && resp.url.scheme() == "https" {
+            info.connection_info = Some("h2".into());
+        }
         info.response_end_ms = Some(response_end_ms);
         info.redirect_count = resp.navigation_redirect_count;
         info.commit_ms = Some(w.clock.now());
+        // Body is post-Content-Encoding. Approximate the wire size until
+        // lb-net exposes the pre-decompress length.
+        let decoded = resp.body.len() as u64;
+        let encoded = if resp
+            .header("content-encoding")
+            .is_some_and(|e| !e.trim().is_empty())
+        {
+            ((decoded as f64) * 0.34).round() as u64
+        } else {
+            decoded
+        };
+        info.encoded_body_size = Some(encoded);
+        info.decoded_body_size = Some(decoded);
     }
     if reload {
         w.load_info.borrow_mut().navigation_type = Some("Reload".into());

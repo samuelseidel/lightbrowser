@@ -16,8 +16,9 @@
 use std::rc::Rc;
 
 use lb_cdp::{HostError, HostResult, PageMetrics, Rgba};
+use lb_css::Visibility;
 use lb_dom::{Document, NodeFlags, NodeId, local_name};
-use lb_layout::Rect;
+use lb_layout::{DisplayKind, DisplayList, Rect, TextFont};
 use lb_paint::page::{Capture, ImageFormat, PaintError, ReplacedContent, output_size};
 use lb_paint::{FontSet, Pixmap};
 use lb_webapi::rt::{Window, frames, screenshot};
@@ -452,8 +453,9 @@ fn page_ranges(ranges: &str, count: usize) -> HostResult<Vec<usize>> {
 /// page sees no `resize` and runs nothing meanwhile. Media queries still
 /// answer `screen`. Content wider than the paper is scaled down to fit.
 /// The layout is cut into page-high slices, painted beyond the viewport
-/// and embedded as one JPEG per page, so the PDF looks like the page but
-/// its text is not selectable. Backgrounds are kept.
+/// and embedded as one JPEG per page (visual fidelity). An invisible
+/// Helvetica text layer (WinAnsi) sits on top so the text can be selected
+/// and searched; glyph metrics are approximate (ADR 0037).
 pub(crate) fn print_pdf(w: &Rc<Window>, req: &PrintRequest) -> HostResult<Vec<u8>> {
     const CSS_PER_IN: f64 = 96.0;
     let fonts = FontSet::new(w.profile.as_deref());
@@ -468,6 +470,16 @@ pub(crate) fn print_pdf(w: &Rc<Window>, req: &PrintRequest) -> HostResult<Vec<u8
     let result = print_laid_out(w, req, &fonts, content_in, (mt, ml));
     w.with_layout_engine(|l, _| l.set_viewport(saved.0, saved.1));
     result
+}
+
+/// One printed page: JPEG image plus PDF content operators for the text
+/// layer (`ops` includes the image draw and any `BT`…`ET` text).
+struct PdfPage {
+    jpeg: Vec<u8>,
+    width: u32,
+    height: u32,
+    /// Content stream body (image + invisible text).
+    ops: String,
 }
 
 fn print_laid_out(
@@ -493,7 +505,8 @@ fn print_laid_out(
     // One CSS px covers `fit * scale / 96` in of paper: device pixels per
     // CSS px for about 150 dpi.
     let px_scale = (150.0 * fit * req.scale / CSS_PER_IN) as f32;
-    let mut images = Vec::with_capacity(pages.len());
+    let css_to_pt = fit * req.scale / CSS_PER_IN * PT_PER_IN;
+    let mut out_pages = Vec::with_capacity(pages.len());
     for i in pages {
         let y = (i - 1) as f64 * slice_h;
         let h = slice_h.min(doc_h - y).max(1.0);
@@ -506,31 +519,176 @@ fn print_laid_out(
         let pixmap = paint(w, &list, &cap, fonts, 0).map_err(|e| HostError::new(e.to_string()))?;
         let jpeg = lb_paint::encode_screenshot(&pixmap, ImageFormat::Jpeg(90));
         // Placement of the slice on the page, in points from the bottom left.
-        let draw_w = doc_w * fit * req.scale / CSS_PER_IN * PT_PER_IN;
-        let draw_h = h * fit * req.scale / CSS_PER_IN * PT_PER_IN;
+        let draw_w = doc_w * css_to_pt;
+        let draw_h = h * css_to_pt;
         let x0 = ml * PT_PER_IN;
         let y0 = (req.paper.1 - mt) * PT_PER_IN - draw_h;
-        images.push((
+        let mut ops = format!("q {draw_w:.3} 0 0 {draw_h:.3} {x0:.3} {y0:.3} cm /Im0 Do Q\n");
+        ops.push_str(&text_ops(&list, y, h, css_to_pt, x0, y0 + draw_h));
+        out_pages.push(PdfPage {
             jpeg,
-            pixmap.width(),
-            pixmap.height(),
-            [x0, y0, draw_w, draw_h],
-        ));
+            width: pixmap.width(),
+            height: pixmap.height(),
+            ops,
+        });
     }
     Ok(pdf(
-        &images,
+        &out_pages,
         req.paper.0 * PT_PER_IN,
         req.paper.1 * PT_PER_IN,
     ))
 }
 
-/// A PDF with one page per JPEG, each drawn at `[x, y, w, h]` (points).
-fn pdf(images: &[(Vec<u8>, u32, u32, [f64; 4])], page_w: f64, page_h: f64) -> Vec<u8> {
+/// Helvetica family name for a layout font (standard 14 PDF fonts).
+fn pdf_font_name(font: &TextFont) -> &'static str {
+    let bold = font.weight >= 600.0;
+    match (bold, font.italic) {
+        (false, false) => "Helvetica",
+        (true, false) => "Helvetica-Bold",
+        (false, true) => "Helvetica-Oblique",
+        (true, true) => "Helvetica-BoldOblique",
+    }
+}
+
+/// Approximate Helvetica advance at size 1000 (PDF glyph space) for
+/// horizontal scaling against the layout width.
+fn helvetica_width_units(s: &str, bold: bool) -> f64 {
+    // Coarse average widths; enough to stretch toward `line.width`.
+    let avg = if bold { 600.0 } else { 556.0 };
+    s.chars().map(|c| if c == ' ' { 278.0 } else { avg }).sum()
+}
+
+/// WinAnsi byte for `c`, or `None` when outside the encoding.
+fn win_ansi(c: char) -> Option<u8> {
+    match c {
+        '\u{20}'..='\u{7e}' => Some(c as u8),
+        '\u{a0}'..='\u{ff}' => Some(c as u8),
+        // Common Windows-1252 / PDF DocEncoding extras used in Latin pages.
+        '\u{20ac}' => Some(0x80), // euro
+        '\u{201a}' => Some(0x82),
+        '\u{0192}' => Some(0x83),
+        '\u{201e}' => Some(0x84),
+        '\u{2026}' => Some(0x85),
+        '\u{2020}' => Some(0x86),
+        '\u{2021}' => Some(0x87),
+        '\u{02c6}' => Some(0x88),
+        '\u{2030}' => Some(0x89),
+        '\u{0160}' => Some(0x8a),
+        '\u{2039}' => Some(0x8b),
+        '\u{0152}' => Some(0x8c),
+        '\u{017d}' => Some(0x8e),
+        '\u{2018}' => Some(0x91),
+        '\u{2019}' => Some(0x92),
+        '\u{201c}' => Some(0x93),
+        '\u{201d}' => Some(0x94),
+        '\u{2022}' => Some(0x95),
+        '\u{2013}' => Some(0x96),
+        '\u{2014}' => Some(0x97),
+        '\u{02dc}' => Some(0x98),
+        '\u{2122}' => Some(0x99),
+        '\u{0161}' => Some(0x9a),
+        '\u{203a}' => Some(0x9b),
+        '\u{0153}' => Some(0x9c),
+        '\u{017e}' => Some(0x9e),
+        '\u{0178}' => Some(0x9f),
+        _ => None,
+    }
+}
+
+/// PDF literal string for `text` in WinAnsi; non-encodable chars become `?`.
+fn pdf_string(text: &str) -> String {
+    let mut out = String::from("(");
+    for c in text.chars() {
+        let b = win_ansi(c).unwrap_or(b'?');
+        match b {
+            b'\\' | b'(' | b')' => {
+                out.push('\\');
+                out.push(b as char);
+            }
+            b'\r' | b'\n' => out.push(' '),
+            0x20..=0x7e => out.push(b as char),
+            _ => out.push_str(&format!("\\{b:03o}")),
+        }
+    }
+    out.push(')');
+    out
+}
+
+/// Invisible Helvetica text operators for lines whose baseline falls in
+/// the CSS slice `[slice_y, slice_y + slice_h)`. `origin_x` / `top_y` are
+/// the top-left of the image in PDF points (y upward).
+fn text_ops(
+    list: &DisplayList,
+    slice_y: f64,
+    slice_h: f64,
+    css_to_pt: f64,
+    origin_x: f64,
+    top_y: f64,
+) -> String {
+    let mut out = String::new();
+    let mut open = false;
+    let mut last_font = "";
+    let mut last_size = 0.0f64;
+    for item in list.items() {
+        if item.style.visibility != Visibility::Visible {
+            continue;
+        }
+        let DisplayKind::Text { font, lines } = &item.kind else {
+            continue;
+        };
+        let name = pdf_font_name(font);
+        let size_pt = f64::from(font.size) * css_to_pt;
+        if size_pt < 0.5 {
+            continue;
+        }
+        for line in lines {
+            if line.text.trim().is_empty() {
+                continue;
+            }
+            let by = f64::from(line.baseline);
+            if by < slice_y || by >= slice_y + slice_h {
+                continue;
+            }
+            let x = origin_x + f64::from(line.x) * css_to_pt;
+            let y = top_y - (by - slice_y) * css_to_pt;
+            if !open {
+                out.push_str("BT\n3 Tr\n");
+                open = true;
+            }
+            if name != last_font || (size_pt - last_size).abs() > 0.01 {
+                out.push_str(&format!("/{name} {size_pt:.3} Tf\n"));
+                last_font = name;
+                last_size = size_pt;
+            }
+            let layout_w = f64::from(line.width) * css_to_pt;
+            let units = helvetica_width_units(&line.text, font.weight >= 600.0);
+            let nat = units * size_pt / 1000.0;
+            let hscale = if nat > 0.5 && layout_w > 0.5 {
+                (100.0 * layout_w / nat).clamp(50.0, 200.0)
+            } else {
+                100.0
+            };
+            out.push_str(&format!("{hscale:.2} Tz\n"));
+            out.push_str(&format!("1 0 0 1 {x:.3} {y:.3} Tm\n"));
+            out.push_str(&pdf_string(&line.text));
+            out.push_str(" Tj\n");
+        }
+    }
+    if open {
+        out.push_str("ET\n");
+    }
+    out
+}
+
+/// A PDF with one page per JPEG plus an optional invisible text layer.
+fn pdf(pages: &[PdfPage], page_w: f64, page_h: f64) -> Vec<u8> {
     let mut out: Vec<u8> = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n".to_vec();
     let mut offsets: Vec<usize> = Vec::new();
-    let n = images.len();
-    // Objects: 1 catalog, 2 pages, then per page: page, content, image.
-    let page_obj = |i: usize| 3 + i * 3;
+    let n = pages.len();
+    // Objects: 1 catalog, 2 pages tree, 3-6 the four Helvetica faces,
+    // then per page: page, content, image.
+    let font_base = 3;
+    let page_obj = |i: usize| 7 + i * 3;
     let obj = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]| {
         offsets.push(out.len());
         out.extend_from_slice(format!("{} 0 obj\n", offsets.len()).as_bytes());
@@ -544,30 +702,63 @@ fn pdf(images: &[(Vec<u8>, u32, u32, [f64; 4])], page_w: f64, page_h: f64) -> Ve
         &mut offsets,
         format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")).as_bytes(),
     );
-    for (i, (jpeg, pw, ph, [x, y, w, h])) in images.iter().enumerate() {
+    for (i, name) in [
+        "Helvetica",
+        "Helvetica-Bold",
+        "Helvetica-Oblique",
+        "Helvetica-BoldOblique",
+    ]
+    .iter()
+    .enumerate()
+    {
+        debug_assert_eq!(offsets.len() + 1, font_base + i);
+        obj(
+            &mut out,
+            &mut offsets,
+            format!(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /{name} /Encoding /WinAnsiEncoding >>"
+            )
+            .as_bytes(),
+        );
+    }
+    let font_res = format!(
+        "/Font << /Helvetica {font_base} 0 R /Helvetica-Bold {} 0 R \
+         /Helvetica-Oblique {} 0 R /Helvetica-BoldOblique {} 0 R >>",
+        font_base + 1,
+        font_base + 2,
+        font_base + 3
+    );
+    for (i, page) in pages.iter().enumerate() {
         let (content, image) = (page_obj(i) + 1, page_obj(i) + 2);
         obj(
             &mut out,
             &mut offsets,
             format!(
                 "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_w:.2} {page_h:.2}] \
-                 /Resources << /XObject << /Im0 {image} 0 R >> >> /Contents {content} 0 R >>"
+                 /Resources << /XObject << /Im0 {image} 0 R >> {font_res} >> \
+                 /Contents {content} 0 R >>"
             )
             .as_bytes(),
         );
-        let ops = format!("q {w:.3} 0 0 {h:.3} {x:.3} {y:.3} cm /Im0 Do Q");
         obj(
             &mut out,
             &mut offsets,
-            format!("<< /Length {} >>\nstream\n{ops}\nendstream", ops.len()).as_bytes(),
+            format!(
+                "<< /Length {} >>\nstream\n{}\nendstream",
+                page.ops.len(),
+                page.ops
+            )
+            .as_bytes(),
         );
         let mut body = format!(
-            "<< /Type /XObject /Subtype /Image /Width {pw} /Height {ph} /ColorSpace /DeviceRGB \
+            "<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace /DeviceRGB \
              /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
-            jpeg.len()
+            page.width,
+            page.height,
+            page.jpeg.len()
         )
         .into_bytes();
-        body.extend_from_slice(jpeg);
+        body.extend_from_slice(&page.jpeg);
         body.extend_from_slice(b"\nendstream");
         obj(&mut out, &mut offsets, &body);
     }
@@ -604,15 +795,21 @@ mod print_tests {
 
     #[test]
     fn pdf_structure() {
-        let doc = pdf(
-            &[(vec![0xff, 0xd8, 0xff, 0xd9], 1, 1, [10.0, 20.0, 30.0, 40.0])],
-            612.0,
-            792.0,
-        );
+        let page = PdfPage {
+            jpeg: vec![0xff, 0xd8, 0xff, 0xd9],
+            width: 1,
+            height: 1,
+            ops: "q 30.000 0 0 40.000 10.000 20.000 cm /Im0 Do Q\nBT\n3 Tr\n/Helvetica 12.000 Tf\n100.00 Tz\n1 0 0 1 10.000 50.000 Tm\n(Hello) Tj\nET\n"
+                .into(),
+        };
+        let doc = pdf(&[page], 612.0, 792.0);
         let s = String::from_utf8_lossy(&doc);
         assert!(s.starts_with("%PDF-1.4"));
         assert!(s.contains("/Count 1"));
         assert!(s.contains("/Filter /DCTDecode"));
+        assert!(s.contains("/BaseFont /Helvetica"));
+        assert!(s.contains("(Hello) Tj"));
+        assert!(s.contains("3 Tr"));
         assert!(s.ends_with("%%EOF\n"));
         // The xref offset points at "xref" (in bytes: the header and the
         // JPEG are not UTF-8).
@@ -625,5 +822,11 @@ mod print_tests {
             .parse()
             .unwrap();
         assert!(doc[start..].starts_with(b"xref"));
+    }
+
+    #[test]
+    fn pdf_string_escapes() {
+        assert_eq!(pdf_string("a(b)c"), r"(a\(b\)c)");
+        assert_eq!(pdf_string("café"), "(caf\\351)");
     }
 }

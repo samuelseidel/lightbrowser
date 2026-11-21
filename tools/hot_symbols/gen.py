@@ -259,7 +259,12 @@ def rank(tmp: Path, binary: str, out: Path) -> int:
         (n for n in cost.keys() | start.keys() if not n.startswith("0x") and "'" not in n),
         key=lambda n: (n not in start, -share(n), -cost[n], n),
     )
-    out.write_text("\n".join(names) + "\n")
+    # Rust names carry per-crate hashes of this rustc; build.rs warns when
+    # the release build uses another one (lld drops unknown names silently).
+    vv = subprocess.run(["rustc", "-vV"], capture_output=True, text=True).stdout.splitlines()
+    release = next((l.split(": ", 1)[1] for l in vv if l.startswith("release:")), "?")
+    commit = next((l.split(": ", 1)[1] for l in vv if l.startswith("commit-hash:")), "?")
+    out.write_text("\n".join([f"# rustc {release} {commit[:9]}", *names]) + "\n")
     print(f"{len(names)} functions -> {out}")
     return 0
 

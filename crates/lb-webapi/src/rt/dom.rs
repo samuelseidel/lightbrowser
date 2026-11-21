@@ -6,14 +6,97 @@ use std::rc::Rc;
 use lb_dom::{
     Document, DomError, LocalName, Namespace, NodeFlags, NodeId, NodeType, QualName, local_name, ns,
 };
-use lb_js::{Arg, CallCtx, HostError, HostRef, ValueKind};
+use lb_js::{Arg, CallCtx, Handle, HostError, HostRef, JsValue, ValueKind};
+
+use url::Url;
 
 use super::tags::{REFLECTED, Reflect};
 use super::{
-    K_OBJ, Obj, Runtime, Window, arg_node, ctor, getter, illegal, is_elem, method, need_args,
-    opt_string, setter, this_node,
+    Js, K_OBJ, Obj, Runtime, TaskSource, Window, arg_node, ctor, getter, illegal, is_elem,
+    is_secure_url, method, need_args, opt_string, setter, this_node, this_obj,
 };
 use crate::registry::Registry;
+
+/// `Document.hasPrivateToken` / `hasRedemptionRecord` (WICG trust-token-api).
+/// No token store: a valid issuer resolves `false` on a networking task.
+fn pst_query(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Rc<Window>,
+    method: &'static str,
+) -> Result<(), HostError> {
+    need_args(cx, 1, method, "Document")?;
+    this_node(cx, w)?;
+    let issuer = cx.arg_string(0)?;
+    let r = cx.ret_new_promise()?;
+    if super::frames::is_detached(w) {
+        return cx.reject_promise(
+            r,
+            w.rt.err(
+                "InvalidStateError",
+                format!(
+                    "Failed to execute '{method}' on 'Document': The document is not fully active."
+                ),
+            ),
+        );
+    }
+    if !is_secure_url(&w.url()) {
+        return cx.reject_promise(
+            r,
+            w.rt.err(
+                "NotAllowedError",
+                format!(
+                    "Failed to execute '{method}' on 'Document': Only secure contexts are allowed."
+                ),
+            ),
+        );
+    }
+    let Ok(issuer_url) = Url::parse(&issuer) else {
+        return cx.reject_promise(
+            r,
+            HostError::type_error(format!(
+                "Failed to execute '{method}' on 'Document': issuer is not a valid URL."
+            )),
+        );
+    };
+    // Spec: HTTP(S) scheme and a potentially trustworthy origin.
+    if !matches!(issuer_url.scheme(), "http" | "https") || !is_secure_url(&issuer_url) {
+        return cx.reject_promise(r, HostError::type_error(format!(
+            "Failed to execute '{method}' on 'Document': issuer must be a potentially trustworthy HTTP(S) origin."
+        )));
+    }
+    // Match Chrome: look up tokens off the call stack, then settle.
+    w.queue_task(
+        TaskSource::Networking,
+        Box::new(move |js: &mut dyn Js, _w: &Rc<Window>| {
+            js.resolve(r, Arg::Bool(false));
+        }),
+    );
+    Ok(())
+}
+
+/// Live state of a `NodeIterator` (DOM traversal).
+pub(crate) struct NodeIteratorData {
+    slot: u32,
+    root: NodeId,
+    reference: NodeId,
+    /// `pointerBeforeReferenceNode`.
+    before: bool,
+    what_to_show: u32,
+    filter: Option<Handle>,
+}
+
+/// Live state of a `TreeWalker` (DOM traversal).
+pub(crate) struct TreeWalkerData {
+    slot: u32,
+    root: NodeId,
+    current: NodeId,
+    what_to_show: u32,
+    filter: Option<Handle>,
+}
+
+const FILTER_ACCEPT: i32 = 1;
+const FILTER_REJECT: i32 = 2;
+const FILTER_SKIP: i32 = 3;
 
 type R = Result<(), HostError>;
 
@@ -299,9 +382,99 @@ pub(crate) fn register(reg: &mut Registry, rt: &Runtime) {
     register_parent_child(reg, rt);
     register_element(reg, rt);
     register_document(reg, rt);
+    register_node_iterator(reg, rt);
+    register_tree_walker(reg, rt);
     register_chardata(reg, rt);
     register_reflected(reg, rt);
     register_html(reg, rt);
+}
+
+/// `whatToShow` bit for a `nodeType` (`1 << (nodeType - 1)`).
+fn shows(what: u32, ty: NodeType) -> bool {
+    let bit = 1u32 << (u32::from(ty as u16).saturating_sub(1));
+    what & bit != 0
+}
+
+/// Next node after `node` in tree order under `root`, or `None`.
+fn following(d: &Document, root: NodeId, node: NodeId) -> Option<NodeId> {
+    if let Some(c) = d.first_child(node) {
+        return Some(c);
+    }
+    let mut n = node;
+    while n != root {
+        if let Some(s) = d.next_sibling(n) {
+            return Some(s);
+        }
+        n = d.parent(n)?;
+    }
+    None
+}
+
+/// Previous node before `node` in tree order under `root`, or `None`.
+fn preceding(d: &Document, root: NodeId, node: NodeId) -> Option<NodeId> {
+    if node == root {
+        return None;
+    }
+    if let Some(mut p) = d.prev_sibling(node) {
+        while let Some(c) = d.last_child(p) {
+            p = c;
+        }
+        return Some(p);
+    }
+    d.parent(node)
+}
+
+/// `NodeFilter` result for `whatToShow` + optional filter callback.
+fn filter_result(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    what: u32,
+    filter: Option<Handle>,
+    slot: u32,
+    node: NodeId,
+) -> Result<i32, HostError> {
+    let ty = w.doc_slot(slot, |d| d.node_type(node));
+    if !shows(what, ty) {
+        return Ok(FILTER_SKIP);
+    }
+    let Some(f) = filter else {
+        return Ok(FILTER_ACCEPT);
+    };
+    let node_arg = w.node_arg(slot, node);
+    let result = match cx.handle_kind(f) {
+        ValueKind::Function => cx
+            .try_call(f, Arg::Undefined, &[node_arg])
+            .map_err(|e| HostError::Error(e.message))?,
+        ValueKind::Object => {
+            let accept = cx.get_property(f, "acceptNode")?;
+            let r = cx
+                .try_call(accept, Arg::Handle(f), &[node_arg])
+                .map_err(|e| HostError::Error(e.message))?;
+            cx.release(accept);
+            r
+        }
+        _ => return Ok(FILTER_ACCEPT),
+    };
+    Ok(match result {
+        JsValue::Number(n) => match n as i32 {
+            FILTER_REJECT => FILTER_REJECT,
+            FILTER_SKIP => FILTER_SKIP,
+            _ => FILTER_ACCEPT,
+        },
+        _ => FILTER_ACCEPT,
+    })
+}
+
+/// `NodeFilter` result: accept the node (NodeIterator).
+fn filter_accepts(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    what: u32,
+    filter: Option<Handle>,
+    slot: u32,
+    node: NodeId,
+) -> Result<bool, HostError> {
+    Ok(filter_result(cx, w, what, filter, slot, node)? == FILTER_ACCEPT)
 }
 
 /// `this` as an Attr: `(slot, owner, qualified name, value)`.
@@ -1505,9 +1678,29 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
         this_node(cx, w)?;
         cx.ret(w.hidden.get())
     });
+    // Private State Tokens (Chrome / WICG trust-token-api): without a token
+    // store both resolve false. Issuer URL checks match Chrome (TypeError on
+    // parse failure or non-trustworthy HTTP(S) origin); the IDL stub's
+    // NotSupportedError was aborting Turnstile (error 300010).
+    method(reg, rt, "Document", "hasPrivateToken", |cx, w| {
+        pst_query(cx, w, "hasPrivateToken")
+    });
+    method(reg, rt, "Document", "hasRedemptionRecord", |cx, w| {
+        pst_query(cx, w, "hasRedemptionRecord")
+    });
     method(reg, rt, "Document", "hasFocus", |cx, w| {
         this_node(cx, w)?;
-        cx.ret(!super::frames::is_detached(w))
+        if super::frames::is_detached(w) {
+            return cx.ret(false);
+        }
+        // Chrome: only the focused browsing context is true. Nested iframes
+        // start unfocused; Turnstile's 1×1 challenge frames must report
+        // false (a blanket `!detached` made every iframe "focused" and
+        // soft-pass failed).
+        if super::frames::parent(w).is_none() {
+            return cx.ret(true);
+        }
+        cx.ret(w.focused.get().is_some())
     });
     getter(reg, rt, "Document", "activeElement", |cx, w| {
         let (slot, _) = this_node(cx, w)?;
@@ -1637,6 +1830,57 @@ fn register_document(reg: &mut Registry, rt: &Runtime) {
                 format!("Failed to execute 'createEvent' on 'Document': The provided event type ('{kind}') is invalid."),
             )),
         }
+    });
+    method(reg, rt, "Document", "createNodeIterator", |cx, w| {
+        need_args(cx, 1, "createNodeIterator", "Document")?;
+        let (slot, _) = this_node(cx, w)?;
+        let (s2, root) = arg_node(cx, w, 0, "createNodeIterator", "Document")?;
+        let root = bring(cx, w, s2, root, slot);
+        let what = if cx.len() > 1 {
+            cx.arg_u32(1)?
+        } else {
+            0xffff_ffff
+        };
+        let filter =
+            if cx.len() > 2 && !matches!(cx.arg_kind(2), ValueKind::Null | ValueKind::Undefined) {
+                Some(cx.arg_handle(2))
+            } else {
+                None
+            };
+        let id = w.new_obj(Obj::NodeIterator(Box::new(NodeIteratorData {
+            slot,
+            root,
+            reference: root,
+            before: true,
+            what_to_show: what,
+            filter,
+        })));
+        cx.ret(w.obj_arg(id))
+    });
+    method(reg, rt, "Document", "createTreeWalker", |cx, w| {
+        need_args(cx, 1, "createTreeWalker", "Document")?;
+        let (slot, _) = this_node(cx, w)?;
+        let (s2, root) = arg_node(cx, w, 0, "createTreeWalker", "Document")?;
+        let root = bring(cx, w, s2, root, slot);
+        let what = if cx.len() > 1 {
+            cx.arg_u32(1)?
+        } else {
+            0xffff_ffff
+        };
+        let filter =
+            if cx.len() > 2 && !matches!(cx.arg_kind(2), ValueKind::Null | ValueKind::Undefined) {
+                Some(cx.arg_handle(2))
+            } else {
+                None
+            };
+        let id = w.new_obj(Obj::TreeWalker(Box::new(TreeWalkerData {
+            slot,
+            root,
+            current: root,
+            what_to_show: what,
+            filter,
+        })));
+        cx.ret(w.obj_arg(id))
     });
     method(reg, rt, "Document", "getElementsByName", |cx, w| {
         let (slot, n) = this_node(cx, w)?;
@@ -1844,6 +2088,467 @@ fn this_obj_slot(cx: &mut CallCtx<'_, '_, '_>, w: &Window) -> Result<u32, HostEr
     })
     .flatten()
     .ok_or_else(illegal)
+}
+
+fn this_iterator(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+) -> Result<(u32, NodeIteratorData), HostError> {
+    let id = this_obj(cx)?;
+    w.with_obj(id, |o| match o {
+        Obj::NodeIterator(it) => Some((
+            id,
+            NodeIteratorData {
+                slot: it.slot,
+                root: it.root,
+                reference: it.reference,
+                before: it.before,
+                what_to_show: it.what_to_show,
+                filter: it.filter,
+            },
+        )),
+        _ => None,
+    })
+    .flatten()
+    .ok_or_else(illegal)
+}
+
+fn register_node_iterator(reg: &mut Registry, rt: &Runtime) {
+    getter(reg, rt, "NodeIterator", "root", |cx, w| {
+        let (_, it) = this_iterator(cx, w)?;
+        ret_node(cx, w, it.slot, Some(it.root))
+    });
+    getter(reg, rt, "NodeIterator", "referenceNode", |cx, w| {
+        let (_, it) = this_iterator(cx, w)?;
+        ret_node(cx, w, it.slot, Some(it.reference))
+    });
+    getter(
+        reg,
+        rt,
+        "NodeIterator",
+        "pointerBeforeReferenceNode",
+        |cx, w| {
+            let (_, it) = this_iterator(cx, w)?;
+            cx.ret(it.before)
+        },
+    );
+    getter(reg, rt, "NodeIterator", "whatToShow", |cx, w| {
+        let (_, it) = this_iterator(cx, w)?;
+        cx.ret(it.what_to_show)
+    });
+    getter(reg, rt, "NodeIterator", "filter", |cx, w| {
+        let (_, it) = this_iterator(cx, w)?;
+        match it.filter {
+            Some(h) => cx.ret(Arg::Handle(h)),
+            None => cx.ret(Arg::Null),
+        }
+    });
+    method(reg, rt, "NodeIterator", "detach", |_cx, _w| Ok(()));
+    method(reg, rt, "NodeIterator", "nextNode", |cx, w| {
+        let (id, mut it) = this_iterator(cx, w)?;
+        let result = (|| -> Result<Option<NodeId>, HostError> {
+            loop {
+                let candidate = if it.before {
+                    it.before = false;
+                    Some(it.reference)
+                } else {
+                    w.doc_slot(it.slot, |d| following(d, it.root, it.reference))
+                };
+                let Some(node) = candidate else {
+                    return Ok(None);
+                };
+                it.reference = node;
+                if !filter_accepts(cx, w, it.what_to_show, it.filter, it.slot, node)? {
+                    continue;
+                }
+                return Ok(Some(node));
+            }
+        })();
+        let node = result?;
+        w.with_obj(id, |o| {
+            if let Obj::NodeIterator(m) = o {
+                m.reference = it.reference;
+                m.before = it.before;
+            }
+        });
+        ret_node(cx, w, it.slot, node)
+    });
+    method(reg, rt, "NodeIterator", "previousNode", |cx, w| {
+        let (id, mut it) = this_iterator(cx, w)?;
+        let result = (|| -> Result<Option<NodeId>, HostError> {
+            loop {
+                let candidate = if !it.before {
+                    it.before = true;
+                    Some(it.reference)
+                } else {
+                    w.doc_slot(it.slot, |d| preceding(d, it.root, it.reference))
+                };
+                let Some(node) = candidate else {
+                    return Ok(None);
+                };
+                it.reference = node;
+                if !filter_accepts(cx, w, it.what_to_show, it.filter, it.slot, node)? {
+                    continue;
+                }
+                return Ok(Some(node));
+            }
+        })();
+        let node = result?;
+        w.with_obj(id, |o| {
+            if let Obj::NodeIterator(m) = o {
+                m.reference = it.reference;
+                m.before = it.before;
+            }
+        });
+        ret_node(cx, w, it.slot, node)
+    });
+}
+
+fn this_walker(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+) -> Result<(u32, TreeWalkerData), HostError> {
+    let id = this_obj(cx)?;
+    w.with_obj(id, |o| match o {
+        Obj::TreeWalker(it) => Some((
+            id,
+            TreeWalkerData {
+                slot: it.slot,
+                root: it.root,
+                current: it.current,
+                what_to_show: it.what_to_show,
+                filter: it.filter,
+            },
+        )),
+        _ => None,
+    })
+    .flatten()
+    .ok_or_else(illegal)
+}
+
+fn set_walker_current(w: &Window, id: u32, current: NodeId) {
+    w.with_obj(id, |o| {
+        if let Obj::TreeWalker(m) = o {
+            m.current = current;
+        }
+    });
+}
+
+/// DOM `TreeWalker` traversal (WHATWG), enough for Turnstile.
+fn register_tree_walker(reg: &mut Registry, rt: &Runtime) {
+    getter(reg, rt, "TreeWalker", "root", |cx, w| {
+        let (_, it) = this_walker(cx, w)?;
+        ret_node(cx, w, it.slot, Some(it.root))
+    });
+    getter(reg, rt, "TreeWalker", "whatToShow", |cx, w| {
+        let (_, it) = this_walker(cx, w)?;
+        cx.ret(it.what_to_show)
+    });
+    getter(reg, rt, "TreeWalker", "filter", |cx, w| {
+        let (_, it) = this_walker(cx, w)?;
+        match it.filter {
+            Some(h) => cx.ret(Arg::Handle(h)),
+            None => cx.ret(Arg::Null),
+        }
+    });
+    getter(reg, rt, "TreeWalker", "currentNode", |cx, w| {
+        let (_, it) = this_walker(cx, w)?;
+        ret_node(cx, w, it.slot, Some(it.current))
+    });
+    setter(reg, rt, "TreeWalker", "currentNode", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        if matches!(cx.arg_kind(0), ValueKind::Null | ValueKind::Undefined) {
+            return Err(HostError::type_error(
+                "Failed to set the 'currentNode' property on 'TreeWalker': Failed to convert value to 'Node'.",
+            ));
+        }
+        let (s2, n) = arg_node(cx, w, 0, "currentNode", "TreeWalker")?;
+        let n = bring(cx, w, s2, n, it.slot);
+        set_walker_current(w, id, n);
+        Ok(())
+    });
+
+    method(reg, rt, "TreeWalker", "parentNode", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        let mut node = it.current;
+        while node != it.root {
+            let Some(parent) = w.doc_slot(it.slot, |d| d.parent(node)) else {
+                break;
+            };
+            node = parent;
+            if filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)? == FILTER_ACCEPT {
+                set_walker_current(w, id, node);
+                return ret_node(cx, w, it.slot, Some(node));
+            }
+        }
+        ret_node(cx, w, it.slot, None)
+    });
+
+    method(reg, rt, "TreeWalker", "firstChild", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        walker_child(cx, w, id, &it, true)
+    });
+    method(reg, rt, "TreeWalker", "lastChild", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        walker_child(cx, w, id, &it, false)
+    });
+    method(reg, rt, "TreeWalker", "nextSibling", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        walker_sibling(cx, w, id, &it, true)
+    });
+    method(reg, rt, "TreeWalker", "previousSibling", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        walker_sibling(cx, w, id, &it, false)
+    });
+
+    method(reg, rt, "TreeWalker", "nextNode", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        let mut node = it.current;
+        let mut result = FILTER_ACCEPT;
+        loop {
+            while result != FILTER_REJECT {
+                let child = w.doc_slot(it.slot, |d| d.first_child(node));
+                let Some(child) = child else { break };
+                node = child;
+                result = filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)?;
+                if result == FILTER_ACCEPT {
+                    set_walker_current(w, id, node);
+                    return ret_node(cx, w, it.slot, Some(node));
+                }
+            }
+            loop {
+                if node == it.root {
+                    return ret_node(cx, w, it.slot, None);
+                }
+                if let Some(sib) = w.doc_slot(it.slot, |d| d.next_sibling(node)) {
+                    node = sib;
+                    result = filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)?;
+                    if result == FILTER_ACCEPT {
+                        set_walker_current(w, id, node);
+                        return ret_node(cx, w, it.slot, Some(node));
+                    }
+                    break;
+                }
+                let Some(parent) = w.doc_slot(it.slot, |d| d.parent(node)) else {
+                    return ret_node(cx, w, it.slot, None);
+                };
+                node = parent;
+            }
+        }
+    });
+
+    method(reg, rt, "TreeWalker", "previousNode", |cx, w| {
+        let (id, it) = this_walker(cx, w)?;
+        let mut node = it.current;
+        if node == it.root {
+            return ret_node(cx, w, it.slot, None);
+        }
+        loop {
+            if let Some(sib) = w.doc_slot(it.slot, |d| d.prev_sibling(node)) {
+                node = sib;
+                let mut result = filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)?;
+                while result != FILTER_REJECT {
+                    let last = w.doc_slot(it.slot, |d| d.last_child(node));
+                    let Some(last) = last else { break };
+                    node = last;
+                    result = filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)?;
+                }
+                if result == FILTER_ACCEPT {
+                    set_walker_current(w, id, node);
+                    return ret_node(cx, w, it.slot, Some(node));
+                }
+                continue;
+            }
+            let Some(parent) = w.doc_slot(it.slot, |d| d.parent(node)) else {
+                return ret_node(cx, w, it.slot, None);
+            };
+            if parent == it.root {
+                // Spec: if parent is root, return null without moving.
+                // But if filter accepts root? previousNode from first child
+                // of root with SHOW_ALL typically returns null when current
+                // is first accepted under root... Actually if current is
+                // root's child and we go to parent=root, filter root; if
+                // ACCEPT, set current to root and return it.
+                let result = filter_result(cx, w, it.what_to_show, it.filter, it.slot, parent)?;
+                if result == FILTER_ACCEPT {
+                    set_walker_current(w, id, parent);
+                    return ret_node(cx, w, it.slot, Some(parent));
+                }
+                return ret_node(cx, w, it.slot, None);
+            }
+            node = parent;
+            if filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)? == FILTER_ACCEPT {
+                set_walker_current(w, id, node);
+                return ret_node(cx, w, it.slot, Some(node));
+            }
+        }
+    });
+}
+
+fn walker_child(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    id: u32,
+    it: &TreeWalkerData,
+    first: bool,
+) -> R {
+    let mut node = match w.doc_slot(it.slot, |d| {
+        if first {
+            d.first_child(it.current)
+        } else {
+            d.last_child(it.current)
+        }
+    }) {
+        Some(n) => n,
+        None => return ret_node(cx, w, it.slot, None),
+    };
+    loop {
+        let result = filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)?;
+        match result {
+            FILTER_ACCEPT => {
+                set_walker_current(w, id, node);
+                return ret_node(cx, w, it.slot, Some(node));
+            }
+            FILTER_SKIP => {
+                if let Some(child) = w.doc_slot(it.slot, |d| {
+                    if first {
+                        d.first_child(node)
+                    } else {
+                        d.last_child(node)
+                    }
+                }) {
+                    node = child;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        loop {
+            if let Some(sib) = w.doc_slot(it.slot, |d| {
+                if first {
+                    d.next_sibling(node)
+                } else {
+                    d.prev_sibling(node)
+                }
+            }) {
+                node = sib;
+                break;
+            }
+            let Some(parent) = w.doc_slot(it.slot, |d| d.parent(node)) else {
+                return ret_node(cx, w, it.slot, None);
+            };
+            if parent == it.current || parent == it.root && it.current == it.root {
+                return ret_node(cx, w, it.slot, None);
+            }
+            // Ascend only while under current's subtree.
+            if parent == it.current {
+                return ret_node(cx, w, it.slot, None);
+            }
+            node = parent;
+            if node == it.current {
+                return ret_node(cx, w, it.slot, None);
+            }
+        }
+    }
+}
+
+fn walker_sibling(
+    cx: &mut CallCtx<'_, '_, '_>,
+    w: &Window,
+    id: u32,
+    it: &TreeWalkerData,
+    next: bool,
+) -> R {
+    if it.current == it.root {
+        return ret_node(cx, w, it.slot, None);
+    }
+    let mut node = it.current;
+    loop {
+        let sibling = w.doc_slot(it.slot, |d| {
+            if next {
+                d.next_sibling(node)
+            } else {
+                d.prev_sibling(node)
+            }
+        });
+        let Some(sib) = sibling else {
+            return ret_node(cx, w, it.slot, None);
+        };
+        node = sib;
+        let result = filter_result(cx, w, it.what_to_show, it.filter, it.slot, node)?;
+        match result {
+            FILTER_ACCEPT => {
+                set_walker_current(w, id, node);
+                return ret_node(cx, w, it.slot, Some(node));
+            }
+            FILTER_SKIP => {
+                if let Some(child) = w.doc_slot(it.slot, |d| {
+                    if next {
+                        d.first_child(node)
+                    } else {
+                        d.last_child(node)
+                    }
+                }) {
+                    // Descend into skipped sibling's children, then continue
+                    // as child walk under this sibling.
+                    let mut n = child;
+                    loop {
+                        let r = filter_result(cx, w, it.what_to_show, it.filter, it.slot, n)?;
+                        if r == FILTER_ACCEPT {
+                            set_walker_current(w, id, n);
+                            return ret_node(cx, w, it.slot, Some(n));
+                        }
+                        if r == FILTER_SKIP
+                            && let Some(c) = w.doc_slot(it.slot, |d| {
+                                if next {
+                                    d.first_child(n)
+                                } else {
+                                    d.last_child(n)
+                                }
+                            })
+                        {
+                            n = c;
+                            continue;
+                        }
+                        // next/prev within this skipped subtree
+                        if let Some(s) = w.doc_slot(it.slot, |d| {
+                            if next {
+                                d.next_sibling(n)
+                            } else {
+                                d.prev_sibling(n)
+                            }
+                        }) {
+                            n = s;
+                            continue;
+                        }
+                        // back out until sibling or original node
+                        while let Some(p) = w.doc_slot(it.slot, |d| d.parent(n)) {
+                            if p == node {
+                                break;
+                            }
+                            n = p;
+                            if let Some(s) = w.doc_slot(it.slot, |d| {
+                                if next {
+                                    d.next_sibling(n)
+                                } else {
+                                    d.prev_sibling(n)
+                                }
+                            }) {
+                                n = s;
+                                break;
+                            }
+                        }
+                        if w.doc_slot(it.slot, |d| d.parent(n)) == Some(node) || n == node {
+                            // finished this skipped sibling's descendants
+                            break;
+                        }
+                    }
+                }
+            }
+            FILTER_REJECT => {}
+            _ => {}
+        }
+    }
 }
 
 fn register_chardata(reg: &mut Registry, rt: &Runtime) {

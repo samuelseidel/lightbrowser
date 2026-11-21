@@ -43,3 +43,45 @@ test('emulateMedia: color scheme, reduced motion, print, across navigations, cle
   await dark.close();
   await context.close();
 });
+
+test('MediaQueryList change fires on emulateMedia and viewport resize', async () => {
+  const { base } = await env();
+  const { context, page } = await newPage();
+  await page.goto(`${base}/media`);
+  await page.evaluate(() => {
+    window.__mql = [];
+    const dark = matchMedia('(prefers-color-scheme: dark)');
+    const wide = matchMedia('(min-width: 500px)');
+    const listener = (mql, tag) => (e) =>
+        window.__mql.push([tag, e.matches, e.media, e.target === mql, e instanceof MediaQueryListEvent]);
+    const onDark = listener(dark, 'dark');
+    dark.addEventListener('change', onDark);
+    dark.addListener(onDark);
+    wide.addListener(listener(wide, 'wide'));
+    window.__dark = dark;
+    window.__wide = wide;
+  });
+  assert.deepEqual(await page.evaluate(() => [window.__dark.matches, window.__wide.matches]), [
+    false,
+    true,
+  ]);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  assert.deepEqual(
+    await page.evaluate(() => window.__mql),
+    [
+      ['dark', true, '(prefers-color-scheme: dark)', true, true],
+    ],
+  );
+  await page.evaluate(() => {
+    window.__mql = [];
+  });
+  await page.setViewportSize({ width: 400, height: 600 });
+  assert.deepEqual(
+    await page.evaluate(() => window.__mql),
+    [
+      ['wide', false, '(min-width: 500px)', true, true],
+    ],
+  );
+  assert.equal(await page.evaluate(() => window.__wide.matches), false);
+  await context.close();
+});

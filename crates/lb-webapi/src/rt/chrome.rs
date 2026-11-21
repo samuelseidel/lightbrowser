@@ -41,6 +41,11 @@ pub struct LoadInfo {
     pub response_end_ms: Option<f64>,
     pub commit_ms: Option<f64>,
     pub load_ms: Option<f64>,
+    /// Wire / decoded body sizes for `PerformanceNavigationTiming`
+    /// (`transferSize` ≈ encoded + header overhead). Turnstile's first FO
+    /// fingerprints these; leaving them at 0 forced `/eb/`.
+    pub encoded_body_size: Option<u64>,
+    pub decoded_body_size: Option<u64>,
 }
 
 /// Set up a new main-world realm: ICU defaults from the persona, then
