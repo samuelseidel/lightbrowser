@@ -105,8 +105,8 @@ Lightpanda comparisons do not gate acceptance (ADR 0041).
 | 0038 | V8's foreground tasks (GC steps, `FinalizationRegistry` cleanups) go to a custom platform that wakes the isolate's owner, which runs them between its tasks |
 | 0039 | Compiled classic scripts are kept per engine (bounded, kept on the second compile) and bound again to realms of the same partition (browser context and top-level origin); they survive the per-close memory-reducing GC that clears V8's compilation cache |
 | 0025 | Web Crypto on BoringSSL with Blink's normalization and Chromium's status texts (randomness from the OS CSPRNG); WebSocket through lb-net's own client with Chrome's handshake and an http/1.1-only ClientHello; dynamic `import()` through an engine hook sharing the module map; `blob:`/`data:` in `fetch()`/XHR; synchronous XHR blocking the calling thread |
-| 0041 | `lightbrowser mcp`: MCP server over stdio, driven through an in-process CDP connection; loopback-only by default (egress policy, `--allow-host`) |
-| 0042 | `fetch --dump markdown \| links \| json` from the post-script DOM and computed style |
+| 0051 | `lightbrowser mcp`: MCP server over stdio, driven through an in-process CDP connection; loopback-only by default (egress policy, `--allow-host`) |
+| 0052 | `fetch --dump markdown \| links \| json` from the post-script DOM and computed style |
 | 0043 | Detector rules wave 2: Referer/Fetch-Metadata consistency, declared agents (RFC 9421), fleet and path repetition, worker measurement, font over-claim, WebRTC info probe |
 | 0044 | Egress policy at the transport (`--egress loopback`, `--allow-host`): the internal-use rule in code, open by default |
 | 0045 | CDP coverage for stock clients: session history, `Page.navigate` referrer, Audits and other missing methods, raw CDP replay against Chrome |

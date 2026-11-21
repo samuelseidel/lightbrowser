@@ -238,7 +238,7 @@ impl<H: PageHost + 'static> Server<H> {
 /// A CDP browser connection inside this process: the same protocol state,
 /// sessions and commands as [`Server`], with channels instead of a
 /// listener. Nothing is bound and no socket exists, so a client in the same
-/// process (`lightbrowser mcp`, ADR 0041) can drive the browser like a
+/// process (`lightbrowser mcp`, ADR 0051) can drive the browser like a
 /// DevTools client without exposing it on the network.
 ///
 /// Create it inside a `LocalSet` ([`block_on_local`]); replies and events

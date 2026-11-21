@@ -1,6 +1,6 @@
-# ADR 0041: `lightbrowser mcp`, a Model Context Protocol server over stdio
+# ADR 0051: `lightbrowser mcp`, a Model Context Protocol server over stdio
 
-Status: Accepted (2026-11-07).
+Status: Accepted (2026-11-07). Renumbered from 0041 on 2026-11-21 so 0041 stays the detection-test acceptance decision.
 
 ## Context
 
@@ -53,7 +53,7 @@ it with exit code 0.
 | `browser_press_key` | `key` (`Enter`, `ArrowDown`, `Control+a`, ...) | confirmation |
 | `browser_evaluate` | `expression` | the JSON result (pretty-printed) |
 | `browser_screenshot` | none | MCP image content, base64 PNG |
-| `browser_extract` | `format`: `text`, `html` or `markdown` | page text (`innerText`), HTML after scripts, or Markdown (ADR 0042) |
+| `browser_extract` | `format`: `text`, `html` or `markdown` | page text (`innerText`), HTML after scripts, or Markdown (ADR 0052) |
 | `browser_close` | none | closes the page; the next call opens a fresh one |
 
 Output above 100 KB is cut on a character boundary with a note saying how
@@ -85,7 +85,7 @@ world: they see the DOM, never the page's own globals, and the page sees
 nothing of the server (nothing automation-related is visible to the page
 world, as for every CDP helper).
 `browser_extract` `markdown` is the converter of `lightbrowser fetch
---dump markdown` (ADR 0042) on the live document, with the page's computed
+--dump markdown` (ADR 0052) on the live document, with the page's computed
 style deciding what is hidden: the driver calls `CdpHost::extract` (which
 runs `lb_page::Page::extract`) directly, not through a CDP method, so no
 CDP surface is added.

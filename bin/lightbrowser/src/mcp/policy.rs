@@ -1,4 +1,4 @@
-//! Which hosts `lightbrowser mcp` may reach (internal-use rule, ADR 0041).
+//! Which hosts `lightbrowser mcp` may reach (internal-use rule, ADR 0051).
 //!
 //! Allowed by default: loopback addresses, `localhost`, `*.localhost` and
 //! `*.test`. `--allow-host <entry>` adds hosts; an entry is what

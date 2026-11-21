@@ -991,7 +991,7 @@ fn same_document_navigations_report_the_new_url() {
 }
 
 /// Requests the transport (egress policy, ADR 0044) refuses come back as a
-/// note on the tool result that caused them (ADR 0041). The page is on
+/// note on the tool result that caused them (ADR 0051). The page is on
 /// loopback; its image and script ask hosts no entry allows, which are
 /// refused before any lookup, so nothing leaves the machine.
 #[test]
@@ -1118,7 +1118,7 @@ impl Drop for GoldenServer {
 }
 
 /// `browser_extract` markdown is `lightbrowser fetch --dump markdown`'s
-/// output (ADR 0042): the same golden files, byte for byte.
+/// output (ADR 0052): the same golden files, byte for byte.
 #[test]
 fn extract_markdown_equals_the_fetch_golden_files() {
     let srv = GoldenServer::start();

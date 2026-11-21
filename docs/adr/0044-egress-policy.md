@@ -147,7 +147,7 @@ cannot confuse it with a real network failure.
 
 ### The mcp subcommand
 
-The `mcp` subcommand uses this policy for both of its checks (ADR 0041):
+The `mcp` subcommand uses this policy for both of its checks (ADR 0051):
 it builds one `EgressPolicy` (mode `loopback`, entries `*.test`, `test`
 and its `--allow-host` values), hands the same `Arc` to every context
 (`CdpHostOptions::egress`), and its up-front check in `browser_navigate` is

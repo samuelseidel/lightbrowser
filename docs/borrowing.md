@@ -1,7 +1,7 @@
 # Borrowing from other browsers and tools
 
 Date: 2026-11-07. Plain summary of a study of other projects and what we did
-with it. Details of each package are in ADRs 0041 to 0047.
+with it. Details of each package are in ADRs 0043 to 0047, 0051 (mcp) and 0052 (extract).
 
 ## Rules we followed
 

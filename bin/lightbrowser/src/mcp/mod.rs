@@ -1,5 +1,5 @@
 //! `lightbrowser mcp`: a Model Context Protocol server on stdio, so an AI
-//! agent can drive the browser (ADR 0041).
+//! agent can drive the browser (ADR 0051).
 //!
 //! Newline-delimited JSON-RPC 2.0 on stdin and stdout; stdout carries
 //! protocol messages only (logs go to stderr). The server listens on

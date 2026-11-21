@@ -1,5 +1,5 @@
 //! `lightbrowser fetch --dump markdown | links | json` end to end (ADR
-//! 0042): the built binary fetches pages from a loopback `python3 -m
+//! 0052): the built binary fetches pages from a loopback `python3 -m
 //! http.server` that serves the golden inputs in
 //! `crates/lb-page/tests/extract/`, and its output must equal the golden
 //! files there. Those files are hand-written expectations, not browser

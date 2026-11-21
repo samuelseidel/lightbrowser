@@ -3,7 +3,7 @@
 hand-written NAME.md / NAME.links files next to it.
 
 The metadata below (title, headings, `text`, `rel`) was written by hand
-from the extraction rules in docs/adr/0042-extract-dumps.md; `text` follows
+from the extraction rules in docs/adr/0052-extract-dumps.md; `text` follows
 the older `--dump text` rules (lb-webapi text.rs), which this change does
 not alter. Only the JSON layout comes from Python (json.dumps, indent 2,
 keys in insertion order), which is independent of the Rust writer.
@@ -99,7 +99,7 @@ CASES = {
         {},
         "Adjacent lists\na\nb\nc\nd\nx\no1\no2\no3\nEmpty items\nh1\nh2\nreal\nNested start\na\nb\nc\nd\ne\nouter\nx\nControl characters\nXp\x02qY r\x01s\npre\x01x\x02y\nCard title\ncard body\nFlanking\nNote:text\n\"q\"word\na(b)",
     ),
-    # Round 3 regressions (see ADR 0042 round 3): a link after `!`, `~` at
+    # Round 3 regressions (see ADR 0052 round 3): a link after `!`, `~` at
     # the start of a span, CR in `pre`, an hr as the first block of an item,
     # adjacent spans, a trailing `#` in a heading and the title, a 9-digit
     # list number, a heading in a table cell, a closed `details`,

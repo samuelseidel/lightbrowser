@@ -3641,8 +3641,8 @@ squash-merged on `integrate/borrow`:
 | Package | ADR | What |
 |---|---|---|
 | Egress policy | 0044 | `--egress loopback`, `--allow-host`: the internal-use rule enforced per connection, redirects and proxies included; open by default |
-| Extract | 0042 | `fetch --dump markdown`, `links`, `json` |
-| MCP server | 0041 | `lightbrowser mcp`: nine tools over stdio, loopback-only unless `--allow-host` |
+| Extract | 0052 | `fetch --dump markdown`, `links`, `json` |
+| MCP server | 0051 | `lightbrowser mcp`: nine tools over stdio, loopback-only unless `--allow-host` |
 | Detector wave 2 | 0043 | `referer_context_mismatch`, `declared_agent` (RFC 9421 headers), `fleet_fingerprint_reuse`, `beh_path_repeat`, `beh_click_offset_repeat`, `worker_measure_mismatch`, `fonts_overclaim`, `webrtc_candidates` (info) |
 | CDP coverage | 0045 | session history (`goBack`, `navigateToHistoryEntry`), `Page.navigate` referrer, `Audits.enable` and other missing methods, raw CDP replay against Chrome |
 | Performance Timeline | 0046 | navigation, resource, paint, user timing, `PerformanceObserver` |

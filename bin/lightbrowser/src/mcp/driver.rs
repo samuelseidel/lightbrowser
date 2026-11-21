@@ -109,7 +109,7 @@ struct Shared {
 pub struct Driver {
     cdp: Rc<InProcess<CdpHost>>,
     /// The same host, for what is not a CDP command (`browser_extract`
-    /// markdown, ADR 0042).
+    /// markdown, ADR 0052).
     host: Rc<CdpHost>,
     shared: Rc<Shared>,
     timeout: Duration,
@@ -733,7 +733,7 @@ impl Driver {
         if format == "markdown" {
             // `lightbrowser fetch --dump markdown`'s converter on the live
             // document, with the page's computed style deciding what is
-            // hidden (ADR 0042).
+            // hidden (ADR 0052).
             let target = self
                 .shared
                 .st

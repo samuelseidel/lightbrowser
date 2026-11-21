@@ -1,4 +1,4 @@
-//! Content extraction from a loaded document (ADR 0042): Markdown, links
+//! Content extraction from a loaded document (ADR 0052): Markdown, links
 //! and a JSON summary, behind `lightbrowser fetch --dump markdown | links
 //! | json`.
 //!

@@ -1,4 +1,4 @@
-//! `lightbrowser mcp` in the firefox build (ADR 0041): there is no JS
+//! `lightbrowser mcp` in the firefox build (ADR 0051): there is no JS
 //! engine to drive yet (M4b), so the command refuses with a message and
 //! exit code 1, before it reads stdin or writes to stdout.
 #![cfg(not(feature = "chrome"))]

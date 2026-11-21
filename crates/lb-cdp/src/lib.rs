@@ -7,7 +7,7 @@
 //!   every message), as Playwright uses after
 //!   `Target.setAutoAttach({flatten: true})`.
 //! - [`InProcess`]: the same protocol over channels inside this process, no
-//!   listener (`lightbrowser mcp`, ADR 0041).
+//!   listener (`lightbrowser mcp`, ADR 0051).
 //! - [`PageHost`]: the trait the browser implements (pages, realms, DOM,
 //!   input, network). The server keeps all protocol state: targets,
 //!   sessions, enabled domains, execution contexts, event routing.

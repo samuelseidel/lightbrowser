@@ -186,7 +186,7 @@ and media emulation applies as the client asks (revision 3); `beforeunload`.
 Idle workers drop their engine after 30 s (ADR 0035 revision 1); V8's
 background pool is 2 threads (`LB_V8_THREADS`). Builds and checks also run
 on the `rtx-dev` Linux box (ROADMAP "Linux checks on rtx-dev").
-Borrowed-ideas work (2026-11-07, ADRs 0041-0047, `docs/borrowing.md`):
+Borrowed-ideas work (2026-11-07, ADRs 0043-0047, 0051 and 0052, `docs/borrowing.md`):
 `lightbrowser mcp`, `fetch --dump markdown|links|json`, `--egress loopback`
 / `--allow-host`, detector rules wave 2, CDP session history and Audits,
 Performance Timeline, history rate limit, pointer-event provenance,

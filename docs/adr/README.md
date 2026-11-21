@@ -44,11 +44,9 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0036](0036-javascript-dialogs.md) | JavaScript dialogs wait on the page's worker for the CDP client | Accepted (2026-11-07) |
 | [0037](0037-playwright-uploads-permissions-dnd-pdf.md) | File uploads, permissions, geolocation, drag and drop and PDF for Playwright | Accepted (2026-11-07) |
 | [0038](0038-v8-foreground-tasks.md) | V8's foreground tasks run on the isolate's own thread | Accepted (2026-11-07) |
-| [0042](0042-human-input-dispatch-gaps.md) | Preserve human input gaps under load | Accepted (2026-11-20) |
-| [0041](0041-detection-test-acceptance.md) | Internal detection tests define acceptance; comparisons are informational | Accepted (2026-11-19) |
 | [0039](0039-kept-compiled-scripts.md) | Compiled classic scripts are kept per engine and partition | Accepted (2026-11-07) |
-| [0041](0041-mcp-server.md) | `lightbrowser mcp`: MCP server over stdio, driven through an in-process CDP connection; loopback-only by default (egress policy, `--allow-host`) | Accepted (2026-11-07) |
-| [0042](0042-extract-dumps.md) | `fetch --dump markdown \| links \| json` from the post-script DOM and computed style | Accepted (2026-11-07) |
+| [0041](0041-detection-test-acceptance.md) | Internal detection tests define acceptance; comparisons are informational | Accepted (2026-11-19) |
+| [0042](0042-human-input-dispatch-gaps.md) | Preserve human input gaps under load | Accepted (2026-11-20) |
 | [0043](0043-detector-rules-wave-2.md) | Detector rules wave 2: Referer/Fetch-Metadata consistency, declared agents (RFC 9421), fleet and path repetition, worker measurement, font over-claim, WebRTC info probe | Accepted (2026-11-07) |
 | [0044](0044-egress-policy.md) | Egress policy at the transport (`--egress loopback`, `--allow-host`): the internal-use rule in code, open by default | Accepted (2026-11-07) |
 | [0045](0045-cdp-coverage.md) | CDP coverage for stock clients: session history, `Page.navigate` referrer, Audits and other missing methods, raw CDP replay against Chrome | Accepted (2026-11-07) |
@@ -57,6 +55,8 @@ Status, Context, Decision, Alternatives considered and Consequences.
 | [0048](0048-serve-limits-and-shutdown.md) | `serve` and `mcp` as long-lived services: connection, page and queue limits, `/json/new` needs PUT, signals with a hard deadline, `--log`, panic hook | Accepted (2026-11-16) |
 | [0049](0049-network-input-limits.md) | Network input limits: decoder caps, WebSocket message cap, timeouts | Accepted (2026-11-16) |
 | [0050](0050-depth-limits.md) | Depth limits: layout, CDP trees, the shader compiler and page stacks | Accepted (2026-11-16) |
+| [0051](0051-mcp-server.md) | `lightbrowser mcp`: MCP server over stdio, driven through an in-process CDP connection; loopback-only by default (egress policy, `--allow-host`) | Accepted (2026-11-07). Renumbered from 0041 on 2026-11-21 |
+| [0052](0052-extract-dumps.md) | `fetch --dump markdown \| links \| json` from the post-script DOM and computed style | Accepted (2026-11-07). Renumbered from 0042 on 2026-11-21 |
 
 ## Adding an ADR
 

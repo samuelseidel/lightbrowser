@@ -1,6 +1,6 @@
-# ADR 0042: Content extraction as `fetch --dump markdown | links | json`
+# ADR 0052: Content extraction as `fetch --dump markdown | links | json`
 
-Status: Accepted (2026-11-07).
+Status: Accepted (2026-11-07). Renumbered from 0042 on 2026-11-21 so 0042 stays the human-input dispatch decision.
 
 ## Context
 

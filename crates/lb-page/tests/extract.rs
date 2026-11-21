@@ -1,4 +1,4 @@
-//! `lb_page::extract` (ADR 0042): Markdown, links and JSON of loaded pages
+//! `lb_page::extract` (ADR 0052): Markdown, links and JSON of loaded pages
 //! against golden files in `tests/extract/`.
 //!
 //! The expectations are NOT browser recordings. They were written by hand

@@ -270,9 +270,9 @@ impl CdpHost {
     }
 
     /// Markdown, links and metadata of a page target's current document
-    /// (ADR 0042), exactly as `lightbrowser fetch --dump markdown` makes
+    /// (ADR 0052), exactly as `lightbrowser fetch --dump markdown` makes
     /// them ([`Page::extract`]). Not a CDP method: the in-process MCP
-    /// server (`browser_extract`, ADR 0041) calls it directly.
+    /// server (`browser_extract`, ADR 0051) calls it directly.
     #[cfg(feature = "chrome")]
     pub async fn extract(&self, target: &str) -> Result<crate::extract::Extracted, String> {
         let page = self.page(target).map_err(|e| e.to_string())?;

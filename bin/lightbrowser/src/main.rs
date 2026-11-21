@@ -47,7 +47,7 @@ USAGE:
                                             are visited unless --allow-host adds
                                             hosts (repeatable; the same entries
                                             as `serve`, see --allow-host below).
-                                            See ADR 0041.
+                                            See ADR 0051.
   lightbrowser fetch <url> [OPTIONS]
   lightbrowser tcp-shim [--queue N] [--tcp-dir DIR] [--no-rules]   (Linux, root)
   lightbrowser validate <persona.json>...   check v1/v2 personas against the
